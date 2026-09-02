@@ -1,8 +1,5 @@
-import type { LatticeRun, RunStatus, StructuredDecision } from "./domain.js";
-import {
-  assertTruthSnapshotTransition,
-  type TruthSnapshot,
-} from "./truth/snapshot.js";
+import type { LatticeRun, RunDecision, RunStatus } from "./domain.js";
+import { assertTruthSnapshotTransition, type TruthSnapshot } from "./truth/snapshot.js";
 import type { TruthBundle } from "./truth/types.js";
 
 const allowedTransitions: Readonly<Record<RunStatus, readonly RunStatus[]>> = {
@@ -47,7 +44,7 @@ export type RunTransitionResult =
 export interface RunDecisionPersistence {
   runId: string;
   expectedVersion: number;
-  decision: StructuredDecision;
+  decision: RunDecision;
 }
 
 export interface RunCompletion {
@@ -73,22 +70,16 @@ export class MemoryRunStore implements RunStore {
   private readonly runs = new Map<string, LatticeRun>();
   private readonly truthSnapshots = new Map<string, TruthSnapshot>();
 
-  async create(run: LatticeRun): Promise<void> {
-    this.runs.set(run.id, structuredClone(run));
-  }
+  async create(run: LatticeRun): Promise<void> { this.runs.set(run.id, structuredClone(run)); }
 
   async transition(input: RunTransition): Promise<RunTransitionResult> {
     assertAllowedTransition(input.expectedStatus, input.nextStatus);
     if (input.truthSnapshot) {
-      if (input.truthSnapshot.runId !== input.runId) {
-        throw new Error("Truth snapshot Run scope does not match transition Run.");
-      }
+      if (input.truthSnapshot.runId !== input.runId) throw new Error("Truth snapshot Run scope does not match transition Run.");
       assertTruthSnapshotTransition(input.expectedStatus, input.nextStatus, input.truthSnapshot);
     }
     const run = this.runs.get(input.runId);
-    if (!run || run.status !== input.expectedStatus || run.version !== input.expectedVersion) {
-      return { outcome: "stale" };
-    }
+    if (!run || run.status !== input.expectedStatus || run.version !== input.expectedVersion) return { outcome: "stale" };
     run.status = input.nextStatus;
     run.version += 1;
     run.events.push({ sequence: run.events.length + 1, type: input.nextStatus });
@@ -101,9 +92,7 @@ export class MemoryRunStore implements RunStore {
 
   async persistDecision(input: RunDecisionPersistence): Promise<RunTransitionResult> {
     const run = this.runs.get(input.runId);
-    if (!run || run.status !== "DECIDING" || run.version !== input.expectedVersion || run.decision !== null) {
-      return { outcome: "stale" };
-    }
+    if (!run || run.status !== "DECIDING" || run.version !== input.expectedVersion || run.decision !== null) return { outcome: "stale" };
     run.decision = structuredClone(input.decision);
     run.truthAssessmentIds = [...input.decision.truthAssessmentIds];
     run.version += 1;
@@ -112,9 +101,7 @@ export class MemoryRunStore implements RunStore {
 
   async complete(input: RunCompletion): Promise<RunTransitionResult> {
     const run = this.runs.get(input.runId);
-    if (!run || run.status !== "DECIDING" || run.version !== input.expectedVersion || !run.decision) {
-      return { outcome: "stale" };
-    }
+    if (!run || run.status !== "DECIDING" || run.version !== input.expectedVersion || !run.decision) return { outcome: "stale" };
     assertAllowedTransition("DECIDING", "COMPLETED");
     run.status = "COMPLETED";
     run.version += 1;
