@@ -160,9 +160,9 @@ test("canonical runtime does not register bounded decision or historical default
   try {
     for (const url of [
       "/api/v1/prototype/consultations/default",
-      "/api/v1/conversations/example/intent-scopes/example/clear-user-messages",
-      "/api/v1/conversations/example/intent-scopes/example/messages",
-      "/api/v1/conversations/example/intent-scopes/example/corrections",
+      "/api/v1/conversations/00000000-0000-0000-0000-000000000001/intent-scopes/example/clear-user-messages",
+      "/api/v1/conversations/00000000-0000-0000-0000-000000000001/intent-scopes/example/messages",
+      "/api/v1/conversations/00000000-0000-0000-0000-000000000001/intent-scopes/example/corrections",
     ]) {
       const response = await app.inject({ method: "POST", url, payload: {} });
       assert.equal(response.statusCode, 404, `${url} must not be canonical`);
