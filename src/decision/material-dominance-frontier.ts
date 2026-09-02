@@ -100,6 +100,13 @@ export interface PairwiseFrontierDecision {
 }
 
 export interface MaterialDominanceFrontier {
+  readonly outcome:
+    | "RECOMMENDATION"
+    | "FRONTIER"
+    | "TIE"
+    | "INSUFFICIENT_EVIDENCE"
+    | "UNRESOLVED"
+    | "NO_ELIGIBLE_CANDIDATE";
   readonly frontierAlternativeIds: readonly string[];
   readonly excludedAlternatives: readonly FrontierExclusion[];
   readonly pairwiseDecisions: readonly PairwiseFrontierDecision[];
@@ -277,7 +284,20 @@ export function constructMaterialDominanceFrontier(
     }
   }
 
+  const outcome = eligible.length === 0
+    ? "NO_ELIGIBLE_CANDIDATE"
+    : pairwiseDecisions.some((decision) => decision.reason === "UNRESOLVED_HIGHER_TIER")
+      ? "UNRESOLVED"
+      : pairwiseDecisions.some((decision) => decision.reason === "COMPARISON_MISSING")
+        ? "INSUFFICIENT_EVIDENCE"
+        : dominated.size === eligible.length - 1
+          ? "RECOMMENDATION"
+          : pairwiseDecisions.every((decision) => decision.reason === "NO_MATERIAL_DIFFERENCE")
+            ? "TIE"
+            : "FRONTIER";
+
   return Object.freeze({
+    outcome,
     frontierAlternativeIds: Object.freeze(eligible.filter((id) => !dominated.has(id))),
     excludedAlternatives: Object.freeze(excludedAlternatives),
     pairwiseDecisions: Object.freeze(pairwiseDecisions),

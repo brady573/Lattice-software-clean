@@ -61,7 +61,24 @@ export function createGeneralizedDecisionFromAdmittedEvidence(
     };
   });
   const eligible = evaluations.filter((evaluation) => evaluation.eligible);
-  if (eligible.length === 0) throw new Error("No candidate satisfies all hard requirements with admitted evidence.");
+  if (eligible.length === 0) {
+    const unresolved = evaluations.flatMap((evaluation) =>
+      evaluation.constraints.filter((constraint) => constraint.passed === null)
+        .map((constraint) => `${evaluation.candidateId}:${constraint.criterion}`));
+    return {
+      goal: input.objective,
+      outcome: unresolved.length > 0 ? "UNRESOLVED" : "NO_ELIGIBLE_CANDIDATE",
+      frontierCandidateIds: [],
+      tiedCandidateIds: [],
+      materialUnknowns: unresolved,
+      evaluations,
+      rationale: [unresolved.length > 0
+        ? "The available evidence does not resolve eligibility for a safe recommendation."
+        : "No candidate satisfies every hard requirement with admitted evidence."],
+      evidenceIds: [],
+      truthAssessmentIds: [...truthAssessmentIds],
+    };
+  }
   const max = Math.max(...eligible.map((evaluation) => evaluation.rawScore));
   const min = Math.min(...eligible.map((evaluation) => evaluation.rawScore));
   const normalized = evaluations.map((evaluation) => ({
@@ -72,8 +89,26 @@ export function createGeneralizedDecisionFromAdmittedEvidence(
   }));
   const winner = normalized.find((evaluation) => evaluation.eligible && evaluation.rawScore === max)!;
   const label = candidates.find((candidate) => candidate.id === winner.candidateId)?.label ?? winner.candidateId;
+  const tied = normalized.filter((evaluation) => evaluation.eligible && evaluation.rawScore === max);
+  if (tied.length > 1) {
+    return {
+      goal: input.objective,
+      outcome: "TIE",
+      frontierCandidateIds: tied.map((evaluation) => evaluation.candidateId),
+      tiedCandidateIds: tied.map((evaluation) => evaluation.candidateId),
+      materialUnknowns: [],
+      evaluations: normalized,
+      rationale: ["Eligible candidates have equal qualified preference scores; no single recommendation is supported."],
+      evidenceIds: [],
+      truthAssessmentIds: [...truthAssessmentIds],
+    };
+  }
   return {
     goal: input.objective,
+    outcome: "RECOMMENDATION",
+    frontierCandidateIds: [winner.candidateId],
+    tiedCandidateIds: [],
+    materialUnknowns: [],
     winnerCandidateId: winner.candidateId,
     evaluations: normalized,
     rationale: [`${label} satisfies every hard requirement and has the highest qualified preference score among eligible candidates.`],

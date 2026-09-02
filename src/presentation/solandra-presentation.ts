@@ -43,7 +43,11 @@ export interface SupportingKnowledge {
 }
 
 export interface ActionRecommendation {
-  winnerCandidateId: string;
+  outcome: NonNullable<import("../domain.js").StructuredDecision["outcome"]>;
+  winnerCandidateId?: string;
+  frontierCandidateIds: string[];
+  tiedCandidateIds: string[];
+  materialUnknowns: string[];
   rationale: string[];
   provenance: ProvenanceRef[];
 }
@@ -185,7 +189,14 @@ export function composeSolandraPresentation(input: {
     : [];
   const nextAction = run?.status === "COMPLETED" && run.decision !== null
     ? {
-        winnerCandidateId: run.decision.winnerCandidateId,
+        outcome: run.decision.outcome
+          ?? (run.decision.winnerCandidateId ? "RECOMMENDATION" : "UNRESOLVED"),
+        ...(run.decision.winnerCandidateId
+          ? { winnerCandidateId: run.decision.winnerCandidateId }
+          : {}),
+        frontierCandidateIds: [...(run.decision.frontierCandidateIds ?? [])],
+        tiedCandidateIds: [...(run.decision.tiedCandidateIds ?? [])],
+        materialUnknowns: [...(run.decision.materialUnknowns ?? [])],
         rationale: [...run.decision.rationale],
         provenance: [
           { authority: "structured_decision" as const, ref: run.id },
@@ -236,7 +247,7 @@ export function hydrateSolandraResource(input: {
       payload: { kind: "text", text: criteriaText(input.decisionPlan) },
     };
   }
-  if (descriptor.id.startsWith("decision-rationale:") && input.run?.decision) {
+  if (descriptor.id.startsWith("decision-rationale:") && input.run?.decision?.winnerCandidateId) {
     const text = [
       `Winner: ${input.run.decision.winnerCandidateId}`,
       ...input.run.decision.rationale.map((line) => `- ${line}`),

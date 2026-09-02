@@ -98,13 +98,48 @@ export function createDecisionFromAdmittedEvidence(
   const normalized = normalizeScores(evaluations);
   const eligible = normalized.filter((evaluation) => evaluation.eligible).sort((left, right) => right.rawScore - left.rawScore);
   const winner = eligible[0];
-  if (!winner) throw new Error("No candidate satisfies all hard constraints with admitted evidence.");
+  if (!winner) {
+    const unresolved = normalized.flatMap((evaluation) =>
+      evaluation.constraints.filter((constraint) => constraint.passed === null)
+        .map((constraint) => `${evaluation.candidateId}:${constraint.criterion}`));
+    return {
+      goal: request.goal,
+      outcome: unresolved.length > 0 ? "UNRESOLVED" : "NO_ELIGIBLE_CANDIDATE",
+      frontierCandidateIds: [],
+      tiedCandidateIds: [],
+      materialUnknowns: unresolved,
+      evaluations: normalized,
+      rationale: [unresolved.length > 0
+        ? "The available evidence does not resolve eligibility for a safe recommendation."
+        : "No candidate satisfies every hard constraint with admitted evidence."],
+      evidenceIds: [],
+      truthAssessmentIds,
+    };
+  }
   const candidateLabel = candidates.find((candidate) => candidate.id === winner.candidateId)?.label ?? winner.candidateId;
+  const tied = eligible.filter((evaluation) => evaluation.rawScore === winner.rawScore);
+  if (tied.length > 1) {
+    return {
+      goal: request.goal,
+      outcome: "TIE",
+      frontierCandidateIds: tied.map((evaluation) => evaluation.candidateId),
+      tiedCandidateIds: tied.map((evaluation) => evaluation.candidateId),
+      materialUnknowns: [],
+      evaluations: normalized,
+      rationale: ["Eligible candidates have equal weighted preference scores; no single recommendation is supported."],
+      evidenceIds: [],
+      truthAssessmentIds,
+    };
+  }
   const disqualifiedHigherScorers = normalized.filter((evaluation) => !evaluation.eligible && evaluation.rawScore > winner.rawScore);
   const rationale = [`${candidateLabel} satisfies every hard constraint and has the highest weighted score among eligible candidates.`];
   if (disqualifiedHigherScorers.length > 0) rationale.push(`${disqualifiedHigherScorers.length} candidate(s) scored higher on preferences but were excluded by hard constraints.`);
   return {
     goal: request.goal,
+    outcome: "RECOMMENDATION",
+    frontierCandidateIds: [winner.candidateId],
+    tiedCandidateIds: [],
+    materialUnknowns: [],
     winnerCandidateId: winner.candidateId,
     evaluations: normalized,
     rationale,

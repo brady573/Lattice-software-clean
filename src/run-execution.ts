@@ -271,19 +271,30 @@ export async function executePersistedRunTick(
         return await refresh();
       }
 
-      const explanationPlan = createSolandraExplanationPlan(
-        decisionState.decision,
-        decisionInputs.candidates,
-        persistedTruth,
-      );
-      const explanation = renderCanonicalExplanation(explanationPlan);
-      assertSolandraExplanationFidelity(
-        explanation,
-        explanationPlan,
-        decisionState.decision,
-        decisionInputs.candidates,
-        persistedTruth,
-      );
+      let explanation: string;
+      if (!decisionState.decision.winnerCandidateId) {
+        const outcome = decisionState.decision.outcome ?? "UNRESOLVED";
+        const frontier = decisionState.decision.frontierCandidateIds ?? [];
+        explanation = [
+          `Solandra reports ${outcome.toLowerCase().replaceAll("_", " ")}.`,
+          frontier.length > 0 ? `Authoritative frontier: ${frontier.join(", ")}.` : "",
+          ...decisionState.decision.materialUnknowns?.map((item) => `Unresolved: ${item}.`) ?? [],
+        ].filter(Boolean).join(" ");
+      } else {
+        const explanationPlan = createSolandraExplanationPlan(
+          decisionState.decision,
+          decisionInputs.candidates,
+          persistedTruth,
+        );
+        explanation = renderCanonicalExplanation(explanationPlan);
+        assertSolandraExplanationFidelity(
+          explanation,
+          explanationPlan,
+          decisionState.decision,
+          decisionInputs.candidates,
+          persistedTruth,
+        );
+      }
       const completed = await runStore.complete({ runId, expectedVersion: version, explanation });
       if (completed.outcome !== "advanced") {
         throw new LostRunOwnershipError(`Run completion lost epoch ownership at DECIDING@v${version}.`);

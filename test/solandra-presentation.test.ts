@@ -84,6 +84,28 @@ test("only StructuredDecision supplies winner authority for actionable presentat
     run: completed,
     decisionPlan: plan,
   });
+
+  test("Solandra preserves a non-winner decision outcome and frontier", () => {
+    const completed = run("COMPLETED");
+    completed.decision = {
+      ...completed.decision!,
+      outcome: "FRONTIER",
+      winnerCandidateId: undefined,
+      frontierCandidateIds: ["candidate-a", "candidate-b"],
+      tiedCandidateIds: [],
+      materialUnknowns: ["battery@1"],
+    };
+    const snapshot = composeSolandraPresentation({
+      conversationId: "conversation-1",
+      run: completed,
+      decisionPlan: plan,
+    });
+    assert.equal(snapshot.phase, "actionable");
+    assert.equal(snapshot.nextAction?.outcome, "FRONTIER");
+    assert.equal(snapshot.nextAction?.winnerCandidateId, undefined);
+    assert.deepEqual(snapshot.nextAction?.frontierCandidateIds, ["candidate-a", "candidate-b"]);
+    assert.deepEqual(snapshot.nextAction?.materialUnknowns, ["battery@1"]);
+  });
   assert.equal(snapshot.phase, "actionable");
   assert.equal(snapshot.nextAction?.winnerCandidateId, completed.decision?.winnerCandidateId);
   assert.deepEqual(snapshot.nextAction?.provenance[0], {

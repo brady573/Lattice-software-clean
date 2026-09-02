@@ -27,6 +27,9 @@ export function renderCanonicalExplanation(
   decision: StructuredDecision,
   candidates: Candidate[],
 ): string {
+  if (!decision.winnerCandidateId) {
+    throw new Error("Canonical winner explanation cannot render a non-selection decision outcome.");
+  }
   const winner = candidates.find((candidate) => candidate.id === decision.winnerCandidateId);
   if (!winner) throw new Error("Structured decision references an unknown winning candidate.");
   const winnerEvaluation = decision.evaluations.find((evaluation) => evaluation.candidateId === winner.id);

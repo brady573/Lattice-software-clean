@@ -93,12 +93,28 @@ export interface CandidateEvaluation {
 
 export interface StructuredDecision {
   goal: string;
-  winnerCandidateId: string;
+  /**
+   * A decision may deliberately preserve a frontier or non-selection outcome.
+   * `winnerCandidateId` remains optional for compatibility with older decisions.
+   */
+  outcome?: DecisionOutcome;
+  winnerCandidateId?: string;
+  frontierCandidateIds?: string[];
+  tiedCandidateIds?: string[];
+  materialUnknowns?: string[];
   evaluations: CandidateEvaluation[];
   rationale: string[];
   evidenceIds: string[];
   truthAssessmentIds: string[];
 }
+
+export type DecisionOutcome =
+  | "RECOMMENDATION"
+  | "FRONTIER"
+  | "TIE"
+  | "INSUFFICIENT_EVIDENCE"
+  | "UNRESOLVED"
+  | "NO_ELIGIBLE_CANDIDATE";
 
 export type RunStatus =
   | "CREATED"

@@ -13,6 +13,9 @@ export function createSolandraExplanationPlan(
   bundle: TruthBundle,
 ): SolandraExplanationPlan {
   assertDecisionTruthFidelity(decision, bundle);
+  if (!decision.winnerCandidateId) {
+    throw new Error("Solandra explanation plan requires a selected winner; preserve the authoritative outcome instead.");
+  }
 
   const candidateById = new Map(candidates.map((candidate) => [candidate.id, candidate]));
   const winner = candidateById.get(decision.winnerCandidateId);
