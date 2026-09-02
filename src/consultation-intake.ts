@@ -69,7 +69,7 @@ function stableUuid(...parts: string[]): `${string}-${string}-${string}-${string
 }
 
 function isConfirmation(message: string): boolean {
-  return /^(?:yes|yes please|confirmed|confirm|that's right|that'?s correct|correct|apply it|use that)\.?$/iu
+  return /^(?:yes|yes please|yes,? (?:that'?s|that is) (?:right|correct)|confirmed|confirm|that'?s right|that'?s correct|correct|apply it|use that)\.?$/iu
     .test(message.trim().replace(/\s+/g, " "));
 }
 

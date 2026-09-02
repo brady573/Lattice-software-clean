@@ -313,19 +313,28 @@ test("Example Firewall rejects canonical imports, calls, and dependencies on leg
   }
 });
 
-test("legacy bounded and historical default routes are absent from the canonical Fastify route table", async () => {
+test("legacy bounded and historical default routes are absent from the canonical Fastify registry", async () => {
   const app = await createRuntimeApp(config, { memoryDispatchDelayMs: 1 });
   try {
     await app.ready();
-    const routes = app.printRoutes({ commonPrefix: false });
-    assert.doesNotMatch(routes, /prototype\/consultations\/default/u);
-    assert.doesNotMatch(
-      routes,
-      /intent-scopes\/:intentScopeId\/(?:user-messages|clear-user-messages|clarifications\/:proposalId\/confirm)/u,
-    );
-    assert.doesNotMatch(routes, /intent-scopes\/:intentScopeId\/runs\/:runId\/corrections/u);
-    assert.match(routes, /conversations\/:conversationId\/turns/u);
-    assert.match(routes, /clarifications\/:proposalId\/confirm/u);
+    const hasPostRoute = (url: string): boolean => app.hasRoute({ method: "POST", url });
+    assert.equal(hasPostRoute("/api/v1/prototype/consultations/default"), false);
+    assert.equal(hasPostRoute(
+      "/api/v1/conversations/:conversationId/intent-scopes/:intentScopeId/user-messages",
+    ), false);
+    assert.equal(hasPostRoute(
+      "/api/v1/conversations/:conversationId/intent-scopes/:intentScopeId/clear-user-messages",
+    ), false);
+    assert.equal(hasPostRoute(
+      "/api/v1/conversations/:conversationId/intent-scopes/:intentScopeId/clarifications/:proposalId/confirm",
+    ), false);
+    assert.equal(hasPostRoute(
+      "/api/v1/conversations/:conversationId/intent-scopes/:intentScopeId/runs/:runId/corrections",
+    ), false);
+    assert.equal(hasPostRoute("/api/v1/conversations/:conversationId/turns"), true);
+    assert.equal(hasPostRoute(
+      "/api/v1/conversations/:conversationId/clarifications/:proposalId/confirm",
+    ), true);
   } finally {
     await app.close();
   }
