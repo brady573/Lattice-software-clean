@@ -128,12 +128,11 @@ test("M8-C isolates Conversation-derived messages, intent writes, Runs, plans, p
 
     const crossIntentWrite = await app.inject({
       method: "POST",
-      url: `/api/v1/conversations/${conversationId}/intent-scopes/scope-m8-c/clear-user-messages`,
+      url: `/api/v1/conversations/${conversationId}/turns`,
       headers: otherHeaders,
       payload: {
         turnId: "turn-m8-c-cross",
-        messageId: "message-m8-c-cross",
-        content: clearContent,
+        message: clearContent,
       },
     });
     assert.equal(crossIntentWrite.statusCode, 404);
