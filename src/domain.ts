@@ -30,6 +30,8 @@ export const consultationRunRequestSchema = z.object({
   sourceMessageId: z.string().min(1).max(200),
   sourceMessageDigest: z.string().regex(/^[a-f0-9]{64}$/u),
   intentVersion: z.number().int().positive(),
+  intentScopeId: z.string().min(1).max(200).optional(),
+  intentVersionId: z.string().min(1).max(200).optional(),
 });
 
 export type RunRequest = z.infer<typeof runRequestSchema>;

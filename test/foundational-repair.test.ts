@@ -127,6 +127,8 @@ test("three unrelated knowledge scenarios use the same primary API and V36 archi
 
 test("primary consultation sources reject the legacy example vocabulary", async () => {
   const primaryFiles = [
+    "src/runtime-app.ts",
+    "src/http-app.ts",
     "src/domain.ts",
     "src/consultation-intake.ts",
     "src/outcome.ts",
@@ -150,6 +152,23 @@ test("primary consultation sources reject the legacy example vocabulary", async 
     for (const token of forbidden) {
       assert.equal(source.includes(token), false, `${path} must not contain legacy example token ${token}`);
     }
+  }
+});
+
+test("canonical runtime does not register bounded decision or historical default routes", async () => {
+  const app = await createRuntimeApp(config, { memoryDispatchDelayMs: 1 });
+  try {
+    for (const url of [
+      "/api/v1/prototype/consultations/default",
+      "/api/v1/conversations/example/intent-scopes/example/clear-user-messages",
+      "/api/v1/conversations/example/intent-scopes/example/messages",
+      "/api/v1/conversations/example/intent-scopes/example/corrections",
+    ]) {
+      const response = await app.inject({ method: "POST", url, payload: {} });
+      assert.equal(response.statusCode, 404, `${url} must not be canonical`);
+    }
+  } finally {
+    await app.close();
   }
 });
 

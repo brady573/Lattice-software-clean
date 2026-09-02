@@ -1,36 +1,28 @@
 # Lattice Software
 
-Fast, zero-cost Lattice prototype proving the V36 truth-centered decision architecture with deterministic offline evidence, a Product-owned provider-neutral model boundary, durable asynchronous control components, and a fidelity-bound Solandra presentation layer.
+Fast, zero-cost Lattice prototype proving the V36 truth-centered consultation architecture with deterministic offline evidence, a Product-owned provider-neutral model boundary, durable asynchronous control components, and a fidelity-bound Solandra presentation layer.
 
 For a concise current implementation map before opening source, read `docs/design/Lattice-System-Architecture.md`.
 
-## Prototype slice
+## Canonical Product slice
 
-The current slice accepts a normal-language goal plus explicit priorities and hard constraints, evaluates deterministic evidence through the V36 truth layer, persists authoritative truth and decision state when PostgreSQL is configured, creates an authoritative `StructuredDecision`, and has Solandra explain that decision without changing it.
+The canonical slice accepts a free-form conversation turn, records USER provenance through Intent Authority, evaluates trustworthy knowledge through V36, and presents a `KnowledgeOutcome` in Solandra. When consultation establishes a qualified decision need, the generalized Decision Engine may provide decision support; when explicitly requested, Lattice may prepare (but never execute) a checklist or message.
 
 The included demonstration intentionally contains a candidate with the highest raw preference score that loses because it violates a hard constraint.
 
 No paid provider, queue service, or cloud service is required for the offline prototype.
 
-## Solandra offline consultation UI
+## Solandra conversation UI
 
 The Owner-approved offline-prototype Solandra design is installed under `docs/design/solandra/`.
 
-The deployed UI slice is deliberately bounded to the default deterministic decision fixture. Start the application and open:
+Start the application and open:
 
 ```text
 http://127.0.0.1:3000/
 ```
 
-The browser does **not** interpret arbitrary natural-language intent, choose a winner, infer eligibility, or adjudicate evidence. It calls the prototype-only server endpoint:
-
-```text
-POST /api/v1/prototype/consultations/default
-```
-
-The server executes the existing structured default decision request through persisted V36 → StructuredDecision → Solandra state and returns a typed consultation projection. The client renders only that licensed projection.
-
-General conversational submission remains visibly disabled until the Product has a qualified natural-language intent/version contract. This UI slice does not activate live research or a live model provider.
+Free-form turns use `POST /api/v1/conversations/:conversationId/turns`. The server records the USER message, creates an exact IntentVersion, runs V36, and returns the licensed outcome at `/api/v1/runs/:runId/outcome`. Solandra renders only authoritative knowledge, decision-support, uncertainty, provenance, and prepared-resource state.
 
 ## Requirements
 

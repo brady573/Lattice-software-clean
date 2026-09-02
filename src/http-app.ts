@@ -7,7 +7,6 @@ import {
 } from "./api-control-store.js";
 import { runRequestSchema } from "./domain.js";
 import type { ModelRuntime } from "./model/index.js";
-import { executeDefaultPrototypeConsultation } from "./prototype/default-consultation.js";
 import { MemoryRunStore, type RunStore } from "./run-store.js";
 import {
   createPendingRun,
@@ -106,16 +105,6 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     truth: "v36-offline",
     lifecycle: apiControlStore ? "async-dispatch" : "persisted-transitions",
   }));
-
-  app.post("/api/v1/prototype/consultations/default", async (_request, reply) => {
-    try {
-      const projection = await executeDefaultPrototypeConsultation(runStore, truthPipeline);
-      return reply.status(201).send(projection);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Unknown prototype consultation error";
-      return reply.status(422).send({ error: "PROTOTYPE_CONSULTATION_FAILED", message });
-    }
-  });
 
   app.post<{ Params: { conversationId: string } }>(
     "/api/v1/prototype/model-conversations/:conversationId/messages",

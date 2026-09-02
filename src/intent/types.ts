@@ -190,7 +190,7 @@ export interface IntentTransitionResult {
 
 export interface IntentScope {
   intentScopeId: string;
-  kind: "decision";
+  kind: "decision" | "consultation";
   lifecycle: "active";
   currentIntentVersionId: string;
   nextVersionNumber: number;
@@ -211,6 +211,7 @@ export interface IntentVersion {
 
 export interface CreateIntentScopeInput {
   intentScopeId: string;
+  kind?: IntentScope["kind"];
   initialTransition: IntentTransitionCommand;
 }
 

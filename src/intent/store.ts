@@ -363,7 +363,7 @@ export class MemoryIntentAuthorityStore implements IntentAuthorityStore {
     };
     const scope: IntentScope = {
       intentScopeId: input.intentScopeId,
-      kind: "decision",
+      kind: input.kind ?? "decision",
       lifecycle: "active",
       currentIntentVersionId: versionId,
       nextVersionNumber: 2,

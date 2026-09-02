@@ -4,6 +4,8 @@ import { z } from "zod";
 import { createApiRequestHash, type ApiRunControlStore } from "./api-control-store.js";
 import { consultationRunRequestSchema } from "./domain.js";
 import type { IntentUserMessageStore } from "./intent/source-message-store.js";
+import type { IntentAuthorityStore } from "./intent/store.js";
+import type { IntentTransitionCommand } from "./intent/types.js";
 import { buildRunOutcome } from "./outcome.js";
 import { createPendingRun } from "./run-execution.js";
 import type { RunStore } from "./run-store.js";
@@ -20,6 +22,7 @@ const consultationTurnSchema = z.object({
 }).strict();
 
 export interface ConsultationIntakeOptions {
+  intentStore: IntentAuthorityStore;
   userMessageStore: IntentUserMessageStore;
   apiControlStore: ApiRunControlStore;
   runStore: RunStore;
@@ -106,6 +109,36 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
       }
 
       const interpretation = interpretExplicitConsultationTurn(sourceMessage.content, parsed.data.prepare);
+      const transition: IntentTransitionCommand = {
+        transitionId: stableUuid("consultation-transition", conversationId, sourceMessage.messageId),
+        intentScopeId,
+        baseIntentVersionId: (await options.intentStore.getScope(intentScopeId))?.currentIntentVersionId ?? null,
+        logicalUserTurnId: sourceMessage.logicalUserTurnId,
+        observedMessageHorizon: sourceMessage.messageHorizon,
+        sourceMessageId: sourceMessage.messageId,
+        sourceDigest: sourceMessage.contentDigest,
+        operations: [{
+          op: "SET",
+          path: { kind: "OBJECTIVE" },
+          value: { state: "VALUE", value: interpretation.objective },
+        }],
+      };
+      let intentVersionId: string;
+      const existingScope = await options.intentStore.getScope(intentScopeId);
+      if (!existingScope) {
+        const scope = await options.intentStore.createScope({
+          intentScopeId,
+          kind: "consultation",
+          initialTransition: transition,
+        });
+        intentVersionId = scope.currentIntentVersionId;
+      } else {
+        const applied = await options.intentStore.applyTransition(transition);
+        if (!applied.resultingIntentVersionId) {
+          return reply.status(409).send({ error: "INTENT_AUTHORITY_REJECTED" });
+        }
+        intentVersionId = applied.resultingIntentVersionId;
+      }
       const requestBody = consultationRunRequestSchema.parse({
         kind: "consultation",
         objective: interpretation.objective,
@@ -115,6 +148,8 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
         sourceMessageId: sourceMessage.messageId,
         sourceMessageDigest: sourceMessage.contentDigest,
         intentVersion: sourceMessage.messageHorizon,
+        intentScopeId,
+        intentVersionId,
       });
       const runId = stableUuid(
         "consultation-run",
@@ -126,6 +161,7 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
       const canonicalRoute = `/api/v1/conversations/${encodeURIComponent(conversationId)}/turns`;
       const submission = await options.apiControlStore.submitRun({
         run,
+        intentBinding: { intentScopeId, intentVersionId },
         dispatch: {
           logicalKey: `run:${run.id}:execute`,
           queueName: "lattice.run",
@@ -159,6 +195,8 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
           intentVersion: requestBody.intentVersion,
           interpretationAuthority: interpretation.authority,
         },
+        intentScopeId,
+        intentVersionId,
       });
     },
   );

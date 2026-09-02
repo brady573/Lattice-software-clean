@@ -41,9 +41,6 @@ import {
   type IntentUserMessageStore,
   type UserPreferenceStore,
 } from "./intent/index.js";
-import { registerBoundedClearDecisionIntentIntake } from "./intent/bounded-clear-decision-intake.js";
-import { registerBoundedDecisionCorrection } from "./intent/bounded-decision-correction.js";
-import { registerBoundedDecisionIntentIntake } from "./intent/bounded-decision-intake.js";
 import { registerDecisionPlanApi } from "./intent/decision-plan-api.js";
 import { DecisionPlanRecordingApiRunControlStore } from "./intent/decision-plan-run-control.js";
 import {
@@ -345,6 +342,7 @@ export async function createRuntimeApp(
   registerConversationApi(app, { conversationStore, runStore });
   registerDurableUserMessageHistory(app, { userMessageStore });
   registerConsultationIntake(app, {
+    intentStore,
     userMessageStore,
     apiControlStore,
     runStore,
@@ -363,24 +361,6 @@ export async function createRuntimeApp(
     preferenceStore: userPreferenceStore,
     intentStore,
     userMessageStore,
-  });
-  registerBoundedDecisionIntentIntake(app, {
-    intentStore,
-    userMessageStore,
-    apiControlStore,
-    apiSubject: authenticatedApiSubject,
-  });
-  registerBoundedClearDecisionIntentIntake(app, {
-    intentStore,
-    userMessageStore,
-    apiControlStore,
-    apiSubject: authenticatedApiSubject,
-  });
-  registerBoundedDecisionCorrection(app, {
-    intentStore,
-    userMessageStore,
-    apiControlStore,
-    runStore,
   });
 
   app.addHook("onClose", async () => {
