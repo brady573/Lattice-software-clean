@@ -1,4 +1,10 @@
-import type { Candidate, EvidenceValue, LatticeRun } from "../../domain.js";
+import {
+  isConsultationRunRequest,
+  type Candidate,
+  type EvidenceValue,
+  type LatticeRun,
+  type RunRequest,
+} from "../../domain.js";
 import type { TruthBundle } from "../../truth/types.js";
 import { createSolandraExplanationPlan } from "./plan.js";
 
@@ -81,14 +87,22 @@ function requirementStatus(passed: boolean | null): ConsultationRequirementStatu
   return "unknown";
 }
 
+function legacyRequest(run: LatticeRun): RunRequest {
+  if (isConsultationRunRequest(run.request)) {
+    throw new Error("Legacy candidate projection cannot render a general consultation request.");
+  }
+  return run.request;
+}
+
 function requirementsForCandidate(
   run: LatticeRun,
   candidateId: string,
 ): ConsultationRequirement[] {
   const evaluation = run.decision?.evaluations.find((item) => item.candidateId === candidateId);
   if (!evaluation) throw new Error(`Decision is missing candidate evaluation: ${candidateId}`);
+  const request = legacyRequest(run);
 
-  return run.request.hardConstraints.map((constraint) => {
+  return request.hardConstraints.map((constraint) => {
     const result = evaluation.constraints.find((item) => item.criterion === constraint.criterion);
     return {
       criterion: constraint.criterion,
@@ -112,9 +126,10 @@ export function createSolandraConsultationProjection(
   if (bundle.runId !== run.id) {
     throw new Error("Consultation projection truth bundle belongs to a different Run.");
   }
+  const request = legacyRequest(run);
 
   const plan = createSolandraExplanationPlan(run.decision, candidates, bundle);
-  const priorities = [...run.request.priorities]
+  const priorities = [...request.priorities]
     .sort((a, b) => b.weight - a.weight || a.criterion.localeCompare(b.criterion))
     .map((priority, index) => ({
       criterion: priority.criterion,
@@ -180,7 +195,7 @@ export function createSolandraConsultationProjection(
     runId: run.id,
     status: "COMPLETED",
     conversation: {
-      goal: run.request.goal,
+      goal: request.goal,
       requirements: requirementsForCandidate(run, plan.winnerCandidateId),
       priorities,
     },
