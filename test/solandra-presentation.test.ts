@@ -90,7 +90,6 @@ test("only StructuredDecision supplies winner authority for actionable presentat
     completed.decision = {
       ...completed.decision!,
       outcome: "FRONTIER",
-      winnerCandidateId: undefined,
       frontierCandidateIds: ["candidate-a", "candidate-b"],
       tiedCandidateIds: [],
       materialUnknowns: ["battery@1"],
