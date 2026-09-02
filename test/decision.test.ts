@@ -65,7 +65,7 @@ test("unknown hard-constraint evidence cannot be treated as passing", () => {
     ),
   };
   assert.equal(dataset.evidence.find((item) => item.id === "e-nova-battery")?.admitted, true);
-  assert.throws(() => createDecision(request, dataset), /No candidate satisfies all hard constraints/);
+  assert.equal(createDecision(request, dataset).outcome, "UNRESOLVED");
 });
 
 test("legacy admitted=true cannot override a failed V36 claim proof obligation", () => {
@@ -81,7 +81,7 @@ test("legacy admitted=true cannot override a failed V36 claim proof obligation",
     ),
   };
   assert.equal(dataset.evidence.find((item) => item.id === "e-nova-battery")?.admitted, true);
-  assert.throws(() => createDecision(request, dataset), /No candidate satisfies all hard constraints/);
+  assert.equal(createDecision(request, dataset).outcome, "UNRESOLVED");
 });
 
 test("Solandra explanation remains faithful to the structured decision", () => {

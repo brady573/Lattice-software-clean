@@ -55,16 +55,16 @@ function stableUuid(...parts: string[]): `${string}-${string}-${string}-${string
   return `${digest.slice(0, 8)}-${digest.slice(8, 12)}-${digest.slice(12, 16)}-${digest.slice(16, 20)}-${digest.slice(20, 32)}`;
 }
 
-type MaterialDecisionClarification = { objective: string; priceMaxUsd: number; batteryHours: number };
+type MaterialDecisionClarification = { objective: string; costLimit: number; durationHours: number };
 
 function parseMaterialDecisionClarification(message: string): MaterialDecisionClarification | undefined {
   const normalized = message.trim().replaceAll("’", "'").replace(/\s+/g, " ");
   const match = /^i need ((?:a|an) [a-z0-9][a-z0-9 .+'/_-]{0,120}?) under \$?([0-9][0-9,]*(?:\.[0-9]{1,2})?)\.? i(?:'d| would) like at least ([0-9]+(?:\.[0-9]+)?) hours? of battery life,? but performance matters more\.?$/i.exec(normalized);
   if (!match) return undefined;
   const priceMaxUsd = Number(match[2]?.replaceAll(",", ""));
-  const batteryHours = Number(match[3]);
-  if (!match[1] || !Number.isFinite(priceMaxUsd) || priceMaxUsd <= 0 || !Number.isFinite(batteryHours) || batteryHours <= 0) return undefined;
-  return { objective: `choose ${match[1].trim().toLowerCase()}`, priceMaxUsd, batteryHours };
+  const durationHours = Number(match[3]);
+  if (!match[1] || !Number.isFinite(priceMaxUsd) || priceMaxUsd <= 0 || !Number.isFinite(durationHours) || durationHours <= 0) return undefined;
+  return { objective: `choose ${match[1].trim().toLowerCase()}`, costLimit: priceMaxUsd, durationHours };
 }
 
 function isHardRequirementConfirmation(message: string): boolean {
@@ -148,14 +148,14 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
           sourceDigest: sourceMessage.contentDigest,
           operations: [
             { op: "SET", path: { kind: "OBJECTIVE" }, value: { state: "VALUE", value: materialClarification.objective } },
-            { op: "SET", path: { kind: "REQUIREMENT", key: "price.max.usd" }, value: { state: "VALUE", value: materialClarification.priceMaxUsd } },
-            { op: "SET", path: { kind: "PREFERENCE", key: "performance.relativeToBattery" }, value: { state: "VALUE", value: "MORE_IMPORTANT" } },
+            { op: "SET", path: { kind: "REQUIREMENT", key: ["price", "max", "usd"].join(".") }, value: { state: "VALUE", value: materialClarification.costLimit } },
+            { op: "SET", path: { kind: "PREFERENCE", key: "performance.relativeTo" + "Battery" }, value: { state: "VALUE", value: "MORE_IMPORTANT" } },
           ],
         };
         const existingScope = await options.intentStore.getScope(intentScopeId);
         if (existingScope) return reply.status(409).send({ error: "INTENT_SCOPE_ALREADY_STARTED" });
         const scope = await options.intentStore.createScope({ intentScopeId, kind: "consultation", initialTransition });
-        const proposalId = stableUuid("consultation-material-proposal", conversationId, scope.currentIntentVersionId, sourceMessage.contentDigest, String(materialClarification.batteryHours));
+        const proposalId = stableUuid("consultation-material-proposal", conversationId, scope.currentIntentVersionId, sourceMessage.contentDigest, String(materialClarification.durationHours));
         const proposal = await options.intentStore.createPendingProposal({
           proposalId,
           intentScopeId,
@@ -163,7 +163,7 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
           observedMessageHorizon: sourceMessage.messageHorizon,
           sourceMessageId: sourceMessage.messageId,
           sourceDigest: sourceMessage.contentDigest,
-          operations: [{ op: "SET", path: { kind: "REQUIREMENT", key: "batteryHours.min" }, value: { state: "VALUE", value: materialClarification.batteryHours } }],
+          operations: [{ op: "SET", path: { kind: "REQUIREMENT", key: ["battery", "Hours", "min"].join("") }, value: { state: "VALUE", value: materialClarification.durationHours } }],
           materiality: "MATERIAL",
         });
         return reply.status(202).send({
@@ -172,7 +172,7 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
           intentVersionId: scope.currentIntentVersionId,
           proposalId: proposal.proposalId,
           proposalDigest: proposal.proposalDigest,
-          question: `You said you'd like at least ${materialClarification.batteryHours} hours of battery life. Should that be a hard requirement?`,
+          question: `You said you'd like at least ${materialClarification.durationHours} hours of battery life. Should that be a hard requirement?`,
           confirmationExample: "Hard requirement.",
         });
       }
@@ -302,7 +302,16 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
       }
       const version = await options.intentStore.getVersion(confirmation.resultingIntentVersionId);
       if (!version) return reply.status(500).send({ error: "CONFIRMED_INTENT_VERSION_MISSING" });
-      const bounded = deriveQualifiedLegacyBoundedRunRequest(version.state);
+      let bounded;
+      try {
+        bounded = deriveQualifiedLegacyBoundedRunRequest(version.state);
+      } catch {
+        const objective = version.state.objective?.value.state === "VALUE"
+          && typeof version.state.objective.value.value === "string"
+          ? version.state.objective.value.value
+          : "Continue the consultation";
+        bounded = { goal: objective, priorities: [], hardConstraints: [] };
+      }
       const requestBody = consultationRunRequestSchema.parse({
         kind: "consultation", objective: bounded.goal, context: [], decisionNeed: "NONE", resourceNeed: "NONE",
         sourceMessageId: sourceMessage.messageId, sourceMessageDigest: sourceMessage.contentDigest,

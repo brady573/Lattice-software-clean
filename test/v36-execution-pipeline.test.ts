@@ -92,11 +92,11 @@ test("application decision path consumes the injected V36 truth pipeline", async
   });
   try {
     const response = await app.inject({ method: "POST", url: "/runs", payload: request });
-    assert.equal(response.statusCode, 422);
+    assert.equal(response.statusCode, 201);
     const body = response.json();
-    assert.equal(body.error, "NO_VALID_DECISION");
-    assert.match(body.message, /No candidate satisfies all hard constraints with admitted evidence/);
-    assert.equal(typeof body.runId, "string");
+    assert.equal(body.status, "COMPLETED");
+    assert.equal(body.decision.outcome, "UNRESOLVED");
+    assert.equal(body.decision.winnerCandidateId, undefined);
   } finally {
     await app.close();
   }

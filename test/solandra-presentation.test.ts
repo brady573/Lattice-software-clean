@@ -87,8 +87,9 @@ test("only StructuredDecision supplies winner authority for actionable presentat
 
   test("Solandra preserves a non-winner decision outcome and frontier", () => {
     const completed = run("COMPLETED");
+    const { winnerCandidateId: _winnerCandidateId, ...withoutWinner } = completed.decision!;
     completed.decision = {
-      ...completed.decision!,
+      ...withoutWinner,
       outcome: "FRONTIER",
       frontierCandidateIds: ["candidate-a", "candidate-b"],
       tiedCandidateIds: [],
