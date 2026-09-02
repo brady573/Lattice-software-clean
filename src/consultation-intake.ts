@@ -10,6 +10,8 @@ import type { RunStore } from "./run-store.js";
 
 const IDEMPOTENCY_RETENTION_MS = 24 * 60 * 60 * 1_000;
 
+type ResourceNeed = "NONE" | "CHECKLIST" | "PREPARED_MESSAGE";
+
 const consultationTurnSchema = z.object({
   turnId: z.string().min(1).max(200),
   message: z.string().min(1).max(8_000).refine((value) => value.trim().length > 0, "message must not be blank"),
@@ -24,6 +26,12 @@ export interface ConsultationIntakeOptions {
   apiSubject?: string | ((request: FastifyRequest) => string);
 }
 
+export interface ExplicitConsultationInterpretation {
+  objective: string;
+  resourceNeed: ResourceNeed;
+  authority: "EXPLICIT_USER";
+}
+
 function digestHex(...parts: string[]): string {
   return createHash("sha256").update(parts.join("\u001f")).digest("hex");
 }
@@ -31,6 +39,30 @@ function digestHex(...parts: string[]): string {
 function stableUuid(...parts: string[]): `${string}-${string}-${string}-${string}-${string}` {
   const digest = digestHex(...parts).slice(0, 32);
   return `${digest.slice(0, 8)}-${digest.slice(8, 12)}-${digest.slice(12, 16)}-${digest.slice(16, 20)}-${digest.slice(20, 32)}`;
+}
+
+/**
+ * Interpret only explicit user-authored material. This boundary deliberately
+ * avoids manufacturing constraints, preferences, candidates, or decisions.
+ * A future model interpreter can propose inferred material behind confirmation
+ * without changing the primary consultation endpoint or Run contract.
+ */
+export function interpretExplicitConsultationTurn(
+  message: string,
+  explicitPrepare?: Exclude<ResourceNeed, "NONE">,
+): ExplicitConsultationInterpretation {
+  if (explicitPrepare) {
+    return { objective: message, resourceNeed: explicitPrepare, authority: "EXPLICIT_USER" };
+  }
+  const normalized = message.trim().toLowerCase();
+  const asksToPrepare = /\b(?:prepare|create|make|build|draft|write|compose)\b/u.test(normalized);
+  if (asksToPrepare && /\b(?:checklist|check list)\b/u.test(normalized)) {
+    return { objective: message, resourceNeed: "CHECKLIST", authority: "EXPLICIT_USER" };
+  }
+  if (asksToPrepare && /\b(?:message|email|note|reply|response)\b/u.test(normalized)) {
+    return { objective: message, resourceNeed: "PREPARED_MESSAGE", authority: "EXPLICIT_USER" };
+  }
+  return { objective: message, resourceNeed: "NONE", authority: "EXPLICIT_USER" };
 }
 
 export function registerConsultationIntake(app: FastifyInstance, options: ConsultationIntakeOptions): void {
@@ -73,12 +105,13 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
         return reply.status(409).send({ error: "USER_MESSAGE_PROVENANCE_CONFLICT", message });
       }
 
+      const interpretation = interpretExplicitConsultationTurn(sourceMessage.content, parsed.data.prepare);
       const requestBody = consultationRunRequestSchema.parse({
         kind: "consultation",
-        objective: sourceMessage.content,
+        objective: interpretation.objective,
         context: parsed.data.context ?? [],
         decisionNeed: "NONE",
-        resourceNeed: parsed.data.prepare ?? "NONE",
+        resourceNeed: interpretation.resourceNeed,
         sourceMessageId: sourceMessage.messageId,
         sourceMessageDigest: sourceMessage.contentDigest,
         intentVersion: sourceMessage.messageHorizon,
@@ -124,6 +157,7 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
           messageId: sourceMessage.messageId,
           contentDigest: sourceMessage.contentDigest,
           intentVersion: requestBody.intentVersion,
+          interpretationAuthority: interpretation.authority,
         },
       });
     },
