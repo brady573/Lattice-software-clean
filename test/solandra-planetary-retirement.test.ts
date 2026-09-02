@@ -7,9 +7,18 @@ import { renderSolandraPrototypePage } from "../src/ui/solandra-prototype-page.j
 
 const retiredPresentationPattern = /Knowledge Orbit|\bSun\b|\bPlanet(?:s)?\b|\bMoon(?:s)?\b|class=["'][^"']*\borbit\b|class=["'][^"']*\bplanet\b|class=["'][^"']*\bmoon\b/i;
 
+test("authoritative Solandra renderer contains no retired planetary or prototype-only presentation", () => {
+  const html = renderSolandraAuthoritativeConversationPage();
+  assert.doesNotMatch(html, retiredPresentationPattern);
+  assert.match(html, /What do you need to figure out\?/);
+  assert.match(html, /id="conversation"/);
+  assert.match(html, /id="conversationInput"/);
+  assert.match(html, /id="composer"/);
+  assert.doesNotMatch(html, /id="resourceFocus"|id="newUpdate"|support-node/);
+});
+
 for (const [name, render] of [
-  ["canonical", renderSolandraPrototypePage],
-  ["authoritative", renderSolandraAuthoritativeConversationPage],
+  ["historical-prototype", renderSolandraPrototypePage],
   ["conversation-prototype", renderSolandraConversationPrototypePage],
   ["local-model-prototype", renderSolandraLocalModelPrototypePage],
 ] as const) {
