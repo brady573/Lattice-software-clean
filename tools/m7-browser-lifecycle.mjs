@@ -376,7 +376,7 @@ async function main() {
       const resources=document.querySelectorAll('#resourceList .resource').length;
       const update=document.getElementById('newUpdate');
       const timeline=document.getElementById('timeline');
-      return resources>0?{title,detail,resources,newUpdateHidden:update.hidden,scrollLeft:timeline.scrollLeft}:null;
+      return resources>0&&!update.hidden?{title,detail,resources,newUpdateHidden:update.hidden,scrollLeft:timeline.scrollLeft}:null;
     })()`));
     assert.ok(visibleActionable.resources > 0);
     assert.equal(visibleActionable.newUpdateHidden, false);
