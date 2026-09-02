@@ -17,7 +17,8 @@ import {
 import { PostgresApiRunControlStore } from "../src/postgres-api-control-store.js";
 import { PostgresRunStore } from "../src/postgres-run-store.js";
 import { MemoryRunStore } from "../src/run-store.js";
-import { migrateRuntimeDatabase } from "../src/runtime-app.js";
+import { createRuntimeApp, migrateRuntimeDatabase } from "../src/runtime-app.js";
+import { resolveRuntimeConfig } from "../src/runtime-config.js";
 
 const databaseUrl = process.env.DATABASE_URL;
 const initialContent = "I need a tablet under $1,300. I'd like at least 12 hours of battery life, but performance matters more.";
@@ -37,6 +38,41 @@ function confirmationPayload() {
     content: "Hard requirement.",
   };
 }
+
+test("runtime canonical conversation API exposes material clarification intake", async () => {
+  const app = await createRuntimeApp(
+    resolveRuntimeConfig({
+      PORT: "3000",
+      HOST: "127.0.0.1",
+      LATTICE_DEPLOYMENT_MODE: "development",
+      LATTICE_AUTO_MIGRATE: "false",
+      LATTICE_AUTHENTICATION_MODE: "development-fixture",
+    }),
+  );
+
+  try {
+    const created = await app.inject({ method: "POST", url: "/api/v1/conversations" });
+    assert.equal(created.statusCode, 201);
+    const conversationId = (created.json() as { conversation: { id: string } }).conversation.id;
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/v1/conversations/${conversationId}/intent-scopes/scope-canonical/user-messages`,
+      payload: initialPayload(),
+    });
+    assert.equal(response.statusCode, 202);
+    const pending = response.json() as { status: string; proposalId: string };
+    assert.equal(pending.status, "NEEDS_CLARIFICATION");
+    const confirmation = await app.inject({
+      method: "POST",
+      url: `/api/v1/conversations/${conversationId}/intent-scopes/scope-canonical/clarifications/${pending.proposalId}/confirm`,
+      payload: confirmationPayload(),
+    });
+    assert.equal(confirmation.statusCode, 202);
+    assert.equal(confirmation.json().status, "RUN_ACCEPTED");
+  } finally {
+    await app.close();
+  }
+});
 
 test("bounded USER message becomes exact clarified IntentVersion before memory Run intake", async () => {
   const conversationId = "conversation-m5i-memory";
