@@ -12,7 +12,7 @@ export interface ClaimCompilationInput {
   sourceClaimId: string;
   text: string;
   claimType: ClaimType;
-  scope?: string | null;
+  scope?: string | null | undefined;
   effectiveAt?: string | null;
   jurisdiction?: string | null;
   unit?: string | null;
