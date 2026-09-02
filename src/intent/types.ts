@@ -60,25 +60,11 @@ export const intentPathSchema = z.discriminatedUnion("kind", [
 ]);
 export type IntentPath = z.infer<typeof intentPathSchema>;
 
-const setOperationSchema = z.object({
-  op: z.literal("SET"),
-  path: intentPathSchema,
-  value: intentSetValueSchema,
-}).strict();
-const removeOperationSchema = z.object({
-  op: z.literal("REMOVE"),
-  path: intentPathSchema,
-}).strict();
-const noChangeOperationSchema = z.object({
-  op: z.literal("NO_CHANGE"),
-  path: intentPathSchema,
-}).strict();
+const setOperationSchema = z.object({ op: z.literal("SET"), path: intentPathSchema, value: intentSetValueSchema }).strict();
+const removeOperationSchema = z.object({ op: z.literal("REMOVE"), path: intentPathSchema }).strict();
+const noChangeOperationSchema = z.object({ op: z.literal("NO_CHANGE"), path: intentPathSchema }).strict();
 
-export const intentOperationSchema = z.discriminatedUnion("op", [
-  setOperationSchema,
-  removeOperationSchema,
-  noChangeOperationSchema,
-]);
+export const intentOperationSchema = z.discriminatedUnion("op", [setOperationSchema, removeOperationSchema, noChangeOperationSchema]);
 export type IntentOperation = z.infer<typeof intentOperationSchema>;
 
 const transitionIdentityShape = {
@@ -91,10 +77,7 @@ const transitionIdentityShape = {
   sourceDigest: z.string().min(1),
 };
 
-export const intentTransitionCommandSchema = z.object({
-  ...transitionIdentityShape,
-  operations: z.array(intentOperationSchema).min(1),
-}).strict();
+export const intentTransitionCommandSchema = z.object({ ...transitionIdentityShape, operations: z.array(intentOperationSchema).min(1) }).strict();
 export type IntentTransitionCommand = z.infer<typeof intentTransitionCommandSchema>;
 
 export const intentCorrectionCommandSchema = z.object({
@@ -105,26 +88,13 @@ export const intentCorrectionCommandSchema = z.object({
 }).strict();
 export type IntentCorrectionCommand = z.infer<typeof intentCorrectionCommandSchema>;
 
-export const intentRevertCommandSchema = z.object({
-  ...transitionIdentityShape,
-  baseIntentVersionId: z.string().min(1),
-  revertsIntentVersionId: z.string().min(1),
-}).strict();
+export const intentRevertCommandSchema = z.object({ ...transitionIdentityShape, baseIntentVersionId: z.string().min(1), revertsIntentVersionId: z.string().min(1) }).strict();
 export type IntentRevertCommand = z.infer<typeof intentRevertCommandSchema>;
 
-export const intentResetCommandSchema = z.object({
-  ...transitionIdentityShape,
-  baseIntentVersionId: z.string().min(1),
-}).strict();
+export const intentResetCommandSchema = z.object({ ...transitionIdentityShape, baseIntentVersionId: z.string().min(1) }).strict();
 export type IntentResetCommand = z.infer<typeof intentResetCommandSchema>;
 
-export const intentVersionLineageKindSchema = z.enum([
-  "INITIAL",
-  "UPDATE",
-  "CORRECTION",
-  "REVERT",
-  "RESET_SUPERSEDES",
-]);
+export const intentVersionLineageKindSchema = z.enum(["INITIAL", "UPDATE", "CORRECTION", "REVERT", "RESET_SUPERSEDES"]);
 export type IntentVersionLineageKind = z.infer<typeof intentVersionLineageKindSchema>;
 
 export const createPendingIntentProposalSchema = z.object({
@@ -174,12 +144,7 @@ export interface PendingIntentProposal {
   resolvedAt: string | null;
 }
 
-export type IntentTransitionDisposition =
-  | "COMMITTED"
-  | "SEMANTIC_NOOP"
-  | "REPLAYED"
-  | "REJECTED_STALE"
-  | "REJECTED_INVALID";
+export type IntentTransitionDisposition = "COMMITTED" | "SEMANTIC_NOOP" | "REPLAYED" | "REJECTED_STALE" | "REJECTED_INVALID";
 
 export interface IntentTransitionResult {
   disposition: IntentTransitionDisposition;
@@ -188,9 +153,11 @@ export interface IntentTransitionResult {
   replayedDisposition?: Exclude<IntentTransitionDisposition, "REPLAYED">;
 }
 
+export type IntentScopeKind = "decision" | "consultation";
+
 export interface IntentScope {
   intentScopeId: string;
-  kind: "decision";
+  kind: IntentScopeKind;
   lifecycle: "active";
   currentIntentVersionId: string;
   nextVersionNumber: number;
@@ -211,18 +178,15 @@ export interface IntentVersion {
 
 export interface CreateIntentScopeInput {
   intentScopeId: string;
+  kind?: IntentScopeKind;
   initialTransition: IntentTransitionCommand;
 }
 
-export function emptyIntentState(): IntentState {
-  return { objective: null, requirements: {}, preferences: {} };
-}
+export function emptyIntentState(): IntentState { return { objective: null, requirements: {}, preferences: {} }; }
 
 export function readIntentValue(state: IntentState, path: IntentPath): IntentValue {
   if (path.kind === "OBJECTIVE") return state.objective?.value ?? UNSPECIFIED_INTENT_VALUE;
-  const field = path.kind === "REQUIREMENT"
-    ? state.requirements[path.key]
-    : state.preferences[path.key];
+  const field = path.kind === "REQUIREMENT" ? state.requirements[path.key] : state.preferences[path.key];
   return field?.value ?? UNSPECIFIED_INTENT_VALUE;
 }
 
