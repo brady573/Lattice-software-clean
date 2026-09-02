@@ -1,0 +1,5 @@
+{
+  "simulation_reference_gates": {"macro_f1_median_min":0.8,"dangerous_true_median_max":0.01,"dangerous_true_worst_max":0.02,"false_false_median_max":0.015,"misleading_accuracy_median_min":0.75,"outdated_accuracy_median_min":0.8,"opinion_accuracy_median_min":0.9,"mixed_accuracy_median_min":0.75,"type_accuracy_median_min":0.9,"proof_resolution_median_min":0.85,"unverified_rate_median_max":0.3,"mean_serial_rounds_median_max":2.2,"true_accuracy_median_min":0.75,"deterministic_replay":true},
+  "implementation_gates": ["TypeScript build passes on exact candidate revision.","Targeted truth-domain unit tests pass.","PostgreSQL migrations and rollback/transaction tests pass on development DB.","Existing decision tests remain green.","Adversarial offline acceptance corpus passes fixed gates.","Explanation fidelity tests pass.","No known Product acceptance criterion is failing.","Exact candidate revision receives npm run check."],
+  "production_readiness":"NOT_CLAIMED"
+}

@@ -1,0 +1,63 @@
+{
+  "activationScope": [
+    "general budgeting education",
+    "personal spending-plan setup",
+    "income and expense organization",
+    "cash-flow budgeting",
+    "budget review and revision"
+  ],
+  "authorityBoundary": [
+    "Does not create canonical user intent.",
+    "Does not establish V36 external truth.",
+    "Does not admit evidence.",
+    "Does not set eligibility, ranking, or winner.",
+    "Does not create a StructuredDecision.",
+    "Does not authorize transactions or production actions."
+  ],
+  "clarificationGuidance": [
+    "Ask only when missing information materially affects the requested budgeting help.",
+    "Prefer one small useful clarification over a long intake questionnaire.",
+    "Do not require sensitive account credentials or unnecessary financial identifiers."
+  ],
+  "domain": "personal_budgeting",
+  "evaluationCorpusId": "specialist-guidance-budgeting-v1",
+  "excludedScopes": [
+    "personalized investment recommendations",
+    "tax advice",
+    "legal advice",
+    "securities or product recommendations",
+    "regulated-professional representation",
+    "credit underwriting",
+    "account access",
+    "financial transactions"
+  ],
+  "presentationGuidance": [
+    "Use plain language.",
+    "Do not claim professional licensure or human financial-advisor status.",
+    "Make assumptions and missing information visible.",
+    "Distinguish user-provided context from verified external facts.",
+    "Prefer simple actionable structure over jargon.",
+    "Do not imply one budgeting heuristic is universally correct."
+  ],
+  "procedure": [
+    "Establish what the user wants the budget to accomplish.",
+    "Determine whether the user wants general education or personalization.",
+    "Establish the relevant income period or cadence when personalization is requested.",
+    "Collect material fixed obligations.",
+    "Collect material variable or discretionary spending.",
+    "Identify irregular or periodic obligations when material.",
+    "Identify savings or debt allocation goals when relevant.",
+    "Compare planned spending with available income or cash flow.",
+    "Surface gaps, trade-offs, assumptions, and unresolved inputs.",
+    "Give the smallest useful next action and revise when the user corrects information."
+  ],
+  "profileId": "budgeting-guidance",
+  "purpose": "Help a user understand, start, or refine a personal budget using clear procedural guidance.",
+  "securityBoundary": [
+    "Profile policy is Product-owned trusted content.",
+    "Arbitrary USER, assistant, retrieved, or provider text must not be interpolated into privileged profile policy.",
+    "Profile cannot grant tools, permissions, or capabilities beyond the surrounding Product invocation."
+  ],
+  "userFacingLabel": "Budgeting Guidance",
+  "version": 1
+}

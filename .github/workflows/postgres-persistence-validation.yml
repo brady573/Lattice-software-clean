@@ -1,0 +1,168 @@
+name: CI — PostgreSQL Integration
+
+on:
+  pull_request:
+    paths:
+      - "src/**"
+      - "test/**"
+      - "migrations/**"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/postgres-persistence-validation.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "src/**"
+      - "test/**"
+      - "migrations/**"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/postgres-persistence-validation.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Fork pull requests are routed to a one-job ephemeral/JIT runner label. Trusted
+# same-repository PRs and push/manual events retain the existing zero-cost runner.
+concurrency:
+  group: postgres-integration-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: cmd
+
+jobs:
+  postgres-integration:
+    name: PostgreSQL integration validation
+    runs-on:
+      - self-hosted
+      - Windows
+      - X64
+      - ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'lattice-windows-pr-ephemeral' || 'lattice-windows' }}
+    timeout-minutes: 20
+    env:
+      DATABASE_URL: postgresql://lattice@127.0.0.1:55433/lattice_test
+
+    steps:
+      - name: Checkout exact subject source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Provision Node 24
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+
+      - name: Validate source, runner, runtime, and patched PostgreSQL 18 contract
+        shell: powershell
+        env:
+          SUBJECT_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $actualSourceSha = (git rev-parse HEAD).Trim()
+          if ($actualSourceSha -ne $env:SUBJECT_SOURCE_SHA) {
+            throw 'SOURCE_PROVENANCE_FAILURE: checkout does not match subject source'
+          }
+          if ($env:RUNNER_OS -ne 'Windows') {
+            throw "EXECUTION_SURFACE_FAILURE: expected RUNNER_OS=Windows, got '$env:RUNNER_OS'"
+          }
+          if ($env:RUNNER_ARCH -ne 'X64') {
+            throw "EXECUTION_SURFACE_FAILURE: expected RUNNER_ARCH=X64, got '$env:RUNNER_ARCH'"
+          }
+
+          $nodeMajor = (node -p "process.versions.node.split('.')[0]").Trim()
+          if ($nodeMajor -ne '24') {
+            throw "EXECUTION_SURFACE_FAILURE: expected Node 24, got $(node --version)"
+          }
+          $npmMajor = ((npm --version).Trim().Split('.')[0])
+          if ($npmMajor -ne '11') {
+            throw "EXECUTION_SURFACE_FAILURE: expected npm 11, got $(npm --version)"
+          }
+          if (-not (Get-Command psql -ErrorAction SilentlyContinue)) {
+            throw 'POSTGRES_EXECUTION_SURFACE_FAILURE: psql is not available on PATH'
+          }
+
+          $currentUser = (psql $env:DATABASE_URL -Atc 'select current_user').Trim()
+          if ($LASTEXITCODE -ne 0 -or $currentUser -ne 'lattice') {
+            throw "POSTGRES_EXECUTION_SURFACE_FAILURE: expected current_user=lattice, got '$currentUser'"
+          }
+          $currentDatabase = (psql $env:DATABASE_URL -Atc 'select current_database()').Trim()
+          if ($LASTEXITCODE -ne 0 -or $currentDatabase -ne 'lattice_test') {
+            throw "POSTGRES_EXECUTION_SURFACE_FAILURE: expected current_database=lattice_test, got '$currentDatabase'"
+          }
+          $serverVersionNum = (psql $env:DATABASE_URL -Atc 'show server_version_num').Trim()
+          $minimumPostgresVersionNum = 180006
+          $serverVersionNumber = 0
+          if ($LASTEXITCODE -ne 0 -or
+              -not [int]::TryParse($serverVersionNum, [ref]$serverVersionNumber) -or
+              $serverVersionNumber -lt $minimumPostgresVersionNum -or
+              $serverVersionNumber -ge 190000) {
+            throw "POSTGRES_EXECUTION_SURFACE_FAILURE: expected patched PostgreSQL 18 >= 18.6, got server_version_num='$serverVersionNum'"
+          }
+          Write-Host "POSTGRES_EXECUTION_SURFACE_PASS url=127.0.0.1:55433 database=lattice_test version=$serverVersionNum"
+
+      - name: Reset dedicated PostgreSQL test schema
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $currentDatabase = (psql $env:DATABASE_URL -Atc 'select current_database()').Trim()
+          if ($LASTEXITCODE -ne 0 -or $currentDatabase -ne 'lattice_test') {
+            throw "POSTGRES_TEST_SCHEMA_RESET_FAILURE: expected lattice_test, got '$currentDatabase'"
+          }
+          psql $env:DATABASE_URL -v ON_ERROR_STOP=1 -c 'DROP SCHEMA public CASCADE; CREATE SCHEMA public;'
+          if ($LASTEXITCODE -ne 0) {
+            throw 'POSTGRES_TEST_SCHEMA_RESET_FAILURE: schema reset command failed'
+          }
+          $publicTableCount = (psql $env:DATABASE_URL -Atc "select count(*) from pg_tables where schemaname='public'").Trim()
+          if ($LASTEXITCODE -ne 0 -or $publicTableCount -ne '0') {
+            throw "POSTGRES_TEST_SCHEMA_RESET_FAILURE: expected zero public tables, got '$publicTableCount'"
+          }
+          Write-Host 'POSTGRES_TEST_SCHEMA_RESET=PASS database=lattice_test'
+
+      - name: Install locked dependencies
+        run: npm ci --no-audit --no-fund
+
+      # Some database integration probes spawn compiled helper processes from dist/.
+      - name: Compile database integration subject
+        run: npm run build
+
+      - name: Select and execute PostgreSQL-dependent tests
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $databaseTests = @(
+            Get-ChildItem test -File -Filter '*.test.ts' |
+              Where-Object {
+                $_.Name -like '*postgres*.test.ts' -or
+                (Select-String -Path $_.FullName -Pattern 'process\.env\.DATABASE_URL' -Quiet)
+              } |
+              Sort-Object Name |
+              ForEach-Object { "test/$($_.Name)" }
+          )
+
+          if ($databaseTests.Count -eq 0) {
+            throw 'POSTGRES_TEST_SELECTION_FAILURE: no PostgreSQL-dependent test files were discovered'
+          }
+
+          Write-Host "POSTGRES_TEST_SELECTION_COUNT=$($databaseTests.Count)"
+          $databaseTests | ForEach-Object { Write-Host "POSTGRES_TEST_FILE=$_" }
+
+          & node --import tsx --test --test-concurrency=1 @databaseTests
+          if ($LASTEXITCODE -ne 0) {
+            throw "POSTGRES_INTEGRATION_FAILURE: node test runner exited $LASTEXITCODE"
+          }
+
+      - name: Record bounded PostgreSQL integration validation
+        shell: powershell
+        run: |
+          $validatedSha = (git rev-parse HEAD).Trim()
+          Write-Host "POSTGRES_INTEGRATION=PASS sha=$validatedSha"
+          Write-Host 'POSTGRES_VALIDATION_SURFACE=native-windows-postgresql-18.6-or-newer'
+          Write-Host 'SELECTION_POLICY=postgres-filename-or-DATABASE_URL-opt-in'
+          Write-Host 'MILESTONE_ACCEPTANCE=NOT_CLAIMED_BY_POSTGRES_LANE'
+          Write-Host 'PRODUCTION_DATABASE=NOT_CLAIMED_BY_THIS_LANE'

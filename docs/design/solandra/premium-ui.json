@@ -1,0 +1,29 @@
+{
+  "profile": "product-admin",
+  "status": "owner-approved-offline-prototype-implementation",
+  "repositoryBaseline": "5efab8a115a6fda722116dfd7161a607e0171554",
+  "sourceRoots": ["src"],
+  "locale": "en",
+  "canonicalMap": "docs/design/solandra/UX-CONTRACT.md",
+  "designContext": "docs/design/solandra/DESIGN.md",
+  "requiredCapabilities": ["Form", "Scrollbar", "Toast"],
+  "ownership": {
+    "meaning": "Lattice Product/V36/StructuredDecision",
+    "presentation": "Solandra",
+    "rendering": "browser client"
+  },
+  "requiredCommands": ["build", "unit"],
+  "commands": {
+    "build": "npm run build",
+    "unit": "npm test"
+  },
+  "remainingValidationGaps": [
+    "Add repository-owned browser E2E command before full UI acceptance.",
+    "Add repository-owned accessibility automation when a supported browser harness exists.",
+    "Run official designmd lint when the tool is available in the execution environment.",
+    "Run Frontend Design Premium strict project audit against the installed repository design context."
+  ],
+  "approvedPackageArchiveSha256": "36a343029d2f455af1767b853bbd527710b63331efc805b02a672bbb2bbbfcd8",
+  "approvalDate": "2026-08-26",
+  "note": "Owner-approved for offline-prototype implementation. Repository/CI validation does not by itself establish browser usability, accessibility, or production readiness."
+}

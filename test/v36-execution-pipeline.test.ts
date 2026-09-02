@@ -1,0 +1,137 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { buildApp } from "../src/app.js";
+import type { RunRequest } from "../src/domain.js";
+import { laptopFixture, type FixtureDataset } from "../src/fixtures.js";
+import { MemoryRunStore } from "../src/run-store.js";
+import {
+  OfflineFixtureTruthPipeline,
+  type TruthExecutionPipeline,
+} from "../src/truth/execution-pipeline.js";
+
+const runId = "00000000-0000-4000-8000-000000001036";
+const request: RunRequest = {
+  goal: "Choose a laptop under $1300 with at least 12 hours of battery life, prioritizing performance.",
+  hardConstraints: [
+    { criterion: "price", operator: "lte", value: 1300 },
+    { criterion: "batteryHours", operator: "gte", value: 12 },
+  ],
+  priorities: [{ criterion: "performance", weight: 1 }],
+};
+
+function datasetWithUnverifiedNovaBattery(): FixtureDataset {
+  return {
+    ...structuredClone(laptopFixture),
+    truthEvidence: laptopFixture.truthEvidence.map((profile) =>
+      profile.evidenceId === "e-nova-battery"
+        ? { ...profile, verification: "UNVERIFIED" as const }
+        : structuredClone(profile),
+    ),
+  };
+}
+
+test("offline truth execution pipeline owns deterministic fixture evaluation", async () => {
+  const pipeline = new OfflineFixtureTruthPipeline(laptopFixture);
+  assert.equal(pipeline.mode, "v36-offline-fixture");
+  const first = await pipeline.execute(runId);
+  const second = await pipeline.execute(runId);
+
+  assert.deepEqual(second, first);
+  assert.equal(first.snapshot.phase, "VALIDATED");
+  assert.equal(first.bundle.runId, runId);
+  assert.equal(first.bundle.claims.length, 9);
+  assert.equal(first.candidates.length, 3);
+  assert.equal(first.evidence.length, 9);
+  assert.equal(first.bundle.assessments.every((assessment) => assessment.verdict === "TRUE"), true);
+});
+
+test("V36 validates the exact investigation snapshot without reconstructing it", async () => {
+  const pipeline = new OfflineFixtureTruthPipeline(laptopFixture);
+  const investigation = await pipeline.investigate(runId);
+  assert.equal(investigation.snapshot.phase, "INVESTIGATED");
+
+  const validated = await pipeline.validate(structuredClone(investigation.snapshot));
+  assert.equal(validated.snapshot.phase, "VALIDATED");
+  assert.equal(validated.snapshot.executionContractId, investigation.snapshot.executionContractId);
+  assert.deepEqual(await pipeline.decisionInputs(validated.snapshot), {
+    candidates: laptopFixture.candidates,
+    evidence: laptopFixture.evidence,
+  });
+
+  const tampered = structuredClone(investigation.snapshot);
+  const claim = tampered.bundle.claims[0];
+  assert.ok(claim);
+  claim.text = "tampered after snapshot creation";
+  await assert.rejects(
+    pipeline.validate(tampered),
+    /bundle hash does not match/,
+  );
+
+  const wrongContract = structuredClone(investigation.snapshot);
+  wrongContract.executionContractId = "different-v36-execution-contract";
+  await assert.rejects(
+    pipeline.validate(wrongContract),
+    /different V36 execution contract/,
+  );
+});
+
+test("offline truth execution pipeline snapshots fixture input against caller mutation", async () => {
+  const dataset = structuredClone(laptopFixture);
+  const pipeline = new OfflineFixtureTruthPipeline(dataset);
+  const novaPrice = dataset.evidence.find((item) => item.id === "e-nova-price");
+  assert.ok(novaPrice);
+  novaPrice.value = 9999;
+
+  const result = await pipeline.execute(runId);
+  assert.equal(result.evidence.find((item) => item.id === "e-nova-price")?.value, 1150);
+});
+
+test("application decision path consumes the injected V36 truth pipeline", async () => {
+  const app = buildApp({
+    truthPipeline: new OfflineFixtureTruthPipeline(datasetWithUnverifiedNovaBattery()),
+  });
+  try {
+    const response = await app.inject({ method: "POST", url: "/runs", payload: request });
+    assert.equal(response.statusCode, 422);
+    const body = response.json();
+    assert.equal(body.error, "NO_VALID_DECISION");
+    assert.match(body.message, /No candidate satisfies all hard constraints with admitted evidence/);
+    assert.equal(typeof body.runId, "string");
+  } finally {
+    await app.close();
+  }
+});
+
+test("validation failure leaves the durable investigation snapshot intact", async () => {
+  const store = new MemoryRunStore();
+  const base = new OfflineFixtureTruthPipeline(laptopFixture);
+  const failing: TruthExecutionPipeline = {
+    mode: "v36-offline-fixture",
+    investigate: (subjectRunId) => base.investigate(subjectRunId),
+    validate: async () => { throw new Error("Injected validation failure"); },
+    decisionInputs: (snapshot) => base.decisionInputs(snapshot),
+    execute: async (subjectRunId) => base.execute(subjectRunId),
+  };
+  const app = buildApp({ runStore: store, truthPipeline: failing });
+  try {
+    const response = await app.inject({ method: "POST", url: "/runs", payload: request });
+    assert.equal(response.statusCode, 422);
+    const body = response.json();
+    assert.match(body.message, /Injected validation failure/);
+    assert.equal(typeof body.runId, "string");
+
+    const run = await store.get(body.runId);
+    assert.equal(run?.status, "FAILED");
+    const snapshot = await store.getTruthSnapshot(body.runId);
+    assert.ok(snapshot);
+    assert.equal(snapshot.phase, "INVESTIGATED");
+    assert.equal(snapshot.runId, body.runId);
+  } finally {
+    await app.close();
+  }
+});
+
+test("truth execution pipeline rejects blank Run identity", async () => {
+  const pipeline = new OfflineFixtureTruthPipeline(laptopFixture);
+  await assert.rejects(() => pipeline.execute(" "), /runId must not be blank/);
+});

@@ -1,0 +1,109 @@
+name: CI — Core Validation
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: core-validation-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: cmd
+
+jobs:
+  core-validation:
+    # Fork pull requests must use a one-job ephemeral/JIT runner on the same
+    # Windows validation surface. Same-repository PRs and trusted events retain
+    # the existing zero-cost development runner.
+    name: Core PR validation
+    runs-on:
+      - self-hosted
+      - Windows
+      - X64
+      - ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'lattice-windows-pr-ephemeral' || 'lattice-windows' }}
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout exact subject source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Provision Node 24
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+
+      - name: Validate source and runtime contract
+        env:
+          SUBJECT_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          @echo off
+          setlocal EnableExtensions
+
+          for /f %%I in ('git rev-parse HEAD') do set "ACTUAL_SOURCE_SHA=%%I"
+          echo SUBJECT_SOURCE_SHA=%SUBJECT_SOURCE_SHA%
+          echo ACTUAL_SOURCE_SHA=%ACTUAL_SOURCE_SHA%
+
+          if /I not "%ACTUAL_SOURCE_SHA%"=="%SUBJECT_SOURCE_SHA%" (
+            echo SOURCE_PROVENANCE_FAILURE: checkout does not match subject source 1>&2
+            exit /b 1
+          )
+
+          if /I not "%RUNNER_OS%"=="Windows" (
+            echo EXECUTION_SURFACE_FAILURE: expected RUNNER_OS=Windows, got "%RUNNER_OS%" 1>&2
+            exit /b 1
+          )
+
+          if /I not "%RUNNER_ARCH%"=="X64" (
+            echo EXECUTION_SURFACE_FAILURE: expected RUNNER_ARCH=X64, got "%RUNNER_ARCH%" 1>&2
+            exit /b 1
+          )
+
+          for /f %%I in ('node -p "process.versions.node.split('.')[0]"') do set "NODE_MAJOR=%%I"
+          if not "%NODE_MAJOR%"=="24" (
+            echo EXECUTION_SURFACE_FAILURE: expected Node 24 1>&2
+            node --version
+            exit /b 1
+          )
+
+          for /f "tokens=1 delims=." %%I in ('npm --version') do set "NPM_MAJOR=%%I"
+          if not "%NPM_MAJOR%"=="11" (
+            echo EXECUTION_SURFACE_FAILURE: expected npm 11 1>&2
+            npm --version
+            exit /b 1
+          )
+
+          if not exist package-lock.json (
+            echo DEPENDENCY_PROVENANCE_FAILURE: committed package-lock.json is required 1>&2
+            exit /b 1
+          )
+
+          for /f %%I in ('node --version') do set "NODE_VERSION=%%I"
+          for /f %%I in ('npm --version') do set "NPM_VERSION=%%I"
+          echo CORE_RUNTIME_PASS os=%RUNNER_OS% arch=%RUNNER_ARCH% node=%NODE_VERSION% npm=%NPM_VERSION%
+
+      - name: Install locked dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Run exact repository check gate once
+        run: npm run check
+
+      - name: Record bounded core validation
+        run: |
+          @echo off
+          for /f %%I in ('git rev-parse HEAD') do set "VALIDATED_SHA=%%I"
+          echo CORE_PR_VALIDATION=PASS sha=%VALIDATED_SHA%
+          echo REPOSITORY_CHECK=PASS command=npm run check
+          echo FULL_BUILD_TEST_PASSES_IN_THIS_JOB=1
+          echo POSTGRES_INTEGRATION=NOT_CLAIMED_BY_CORE_LANE
+          echo BROWSER_E2E=NOT_CLAIMED_BY_CORE_LANE

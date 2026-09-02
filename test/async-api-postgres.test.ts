@@ -1,0 +1,297 @@
+import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
+import test from "node:test";
+import type { FastifyInstance } from "fastify";
+import { Pool } from "pg";
+import { createApiRequestHash } from "../src/api-control-store.js";
+import { buildApp } from "../src/app.js";
+import type { RunRequest } from "../src/domain.js";
+import { PostgresApiRunControlStore } from "../src/postgres-api-control-store.js";
+import { PostgresOrchestrationStore } from "../src/postgres-orchestration-store.js";
+import { PostgresRunStore } from "../src/postgres-run-store.js";
+import {
+  createStandaloneResearchWorker,
+  type StandaloneResearchWorker,
+} from "../src/research-worker-process.js";
+import { createPendingRun } from "../src/run-execution.js";
+import { createRuntimeApp } from "../src/runtime-app.js";
+import { resolveRuntimeConfig } from "../src/runtime-config.js";
+import {
+  createStandaloneRunWorker,
+  type StandaloneRunWorker,
+} from "../src/run-worker-process.js";
+import { processRunDispatches } from "../src/run-worker.js";
+import { createDefaultOfflineTruthPipeline } from "../src/truth/execution-pipeline.js";
+
+const databaseUrl = process.env.DATABASE_URL;
+const durableTestSubjectResolver = () => ({ subjectId: "durable-async-regression-subject" });
+const request: RunRequest = {
+  goal: "Choose a laptop under $1300 with at least 12 hours of battery life, prioritizing performance.",
+  hardConstraints: [
+    { criterion: "price", operator: "lte", value: 1300 },
+    { criterion: "batteryHours", operator: "gte", value: 12 },
+  ],
+  priorities: [{ criterion: "performance", weight: 1 }],
+};
+
+function durableRuntimeConfig(connectionString: string, autoMigrate: boolean) {
+  return resolveRuntimeConfig({
+    DATABASE_URL: connectionString,
+    LATTICE_DEPLOYMENT_MODE: "durable",
+    LATTICE_TRUTH_MODE: "v36-offline",
+    LATTICE_AUTO_MIGRATE: autoMigrate ? "true" : "false",
+  } as NodeJS.ProcessEnv);
+}
+
+async function waitForCompletedRun(
+  app: FastifyInstance,
+  runId: string,
+  timeoutMs = 5_000,
+): Promise<Record<string, unknown>> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const response = await app.inject({ method: "GET", url: `/api/v1/runs/${runId}` });
+    assert.equal(response.statusCode, 200);
+    const run = response.json<Record<string, unknown>>();
+    if (run.status === "COMPLETED") return run;
+    if (run.status === "FAILED" || run.status === "CANCELLED") {
+      throw new Error(`Run ${runId} reached unexpected terminal status ${String(run.status)}.`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(`Run ${runId} did not complete within ${timeoutMs}ms.`);
+}
+
+test(
+  "PostgreSQL API acceptance rolls back Run and idempotency when initial dispatch cannot commit",
+  { skip: !databaseUrl },
+  async () => {
+    assert.ok(databaseUrl);
+    const runStore = await PostgresRunStore.connect(databaseUrl);
+    const control = await PostgresApiRunControlStore.connect(databaseUrl);
+    const pool = new Pool({ connectionString: databaseUrl });
+    const ownerRun = createPendingRun("collision-owner", request, randomUUID());
+    const rejectedRun = createPendingRun("collision-rejected", request, randomUUID());
+    const logicalKey = `m6-collision:${randomUUID()}`;
+    try {
+      await runStore.create(ownerRun);
+      const ownerDispatch = await runStore.transition({
+        runId: ownerRun.id,
+        expectedStatus: "CREATED",
+        expectedVersion: 1,
+        nextStatus: "UNDERSTANDING",
+        dispatch: {
+          logicalKey,
+          queueName: "lattice.run",
+          payload: { runId: ownerRun.id },
+        },
+      });
+      assert.deepEqual(ownerDispatch, { outcome: "advanced", version: 2 });
+
+      await assert.rejects(
+        control.submitRun({
+          run: rejectedRun,
+          dispatch: {
+            logicalKey,
+            queueName: "lattice.run",
+            payload: { runId: rejectedRun.id },
+          },
+          idempotency: {
+            scopeKey: "fixture-user",
+            httpMethod: "POST",
+            canonicalRoute: "/api/v1/conversations/collision-rejected/messages",
+            idempotencyKey: "collision-key",
+            requestHash: createApiRequestHash(request),
+            expiresAt: new Date(Date.now() + 60_000),
+          },
+        }),
+        /duplicate key|unique/i,
+      );
+
+      const rejected = await pool.query("SELECT id FROM runs WHERE id=$1", [rejectedRun.id]);
+      assert.equal(rejected.rowCount, 0);
+      const idempotency = await pool.query("SELECT run_id FROM api_idempotency_keys WHERE run_id=$1", [rejectedRun.id]);
+      assert.equal(idempotency.rowCount, 0);
+      const events = await pool.query("SELECT sequence FROM run_events WHERE run_id=$1", [rejectedRun.id]);
+      assert.equal(events.rowCount, 0);
+    } finally {
+      await pool.query("DELETE FROM runs WHERE id IN ($1,$2)", [ownerRun.id, rejectedRun.id]);
+      await pool.end();
+      await control.close();
+      await runStore.close();
+    }
+  },
+);
+
+test(
+  "PostgreSQL durable default composes API with separated Run and Research workers after restart",
+  { skip: !databaseUrl },
+  async () => {
+    assert.ok(databaseUrl);
+    const pool = new Pool({ connectionString: databaseUrl });
+    let firstApp: FastifyInstance | undefined;
+    let secondApp: FastifyInstance | undefined;
+    let runWorker: StandaloneRunWorker | undefined;
+    let researchWorker: StandaloneResearchWorker | undefined;
+    let runId: string | undefined;
+    let conversationId: string | undefined;
+    try {
+      firstApp = await createRuntimeApp(durableRuntimeConfig(databaseUrl, true), {
+        authenticatedSubjectResolver: durableTestSubjectResolver,
+      });
+
+      const migrations = await pool.query<{ name: string }>(
+        "SELECT name FROM schema_migrations WHERE name IN ('017_durable_research_tasks.sql','018_dispatch_outbox_leases.sql','019_api_idempotency.sql') ORDER BY name",
+      );
+      assert.deepEqual(
+        migrations.rows.map((row) => row.name),
+        ["017_durable_research_tasks.sql", "018_dispatch_outbox_leases.sql", "019_api_idempotency.sql"],
+      );
+
+      const health = await firstApp.inject({ method: "GET", url: "/health" });
+      assert.equal(health.statusCode, 200);
+      assert.equal(health.json().mode, "postgres");
+      assert.equal(health.json().lifecycle, "async-dispatch");
+
+      const createdConversation = await firstApp.inject({ method: "POST", url: "/api/v1/conversations" });
+      assert.equal(createdConversation.statusCode, 201);
+      conversationId = createdConversation.json<{ conversation: { id: string } }>().conversation.id;
+
+      const submit = await firstApp.inject({
+        method: "POST",
+        url: `/api/v1/conversations/${conversationId}/messages`,
+        headers: { "idempotency-key": `runtime-${randomUUID()}` },
+        payload: request,
+      });
+      assert.equal(submit.statusCode, 202);
+      assert.equal(submit.json().status, "CREATED");
+      runId = submit.json().runId as string;
+
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      const beforeRestart = await firstApp.inject({ method: "GET", url: `/api/v1/runs/${runId}` });
+      assert.equal(beforeRestart.statusCode, 200);
+      assert.equal(beforeRestart.json().status, "CREATED");
+
+      await firstApp.close();
+      firstApp = undefined;
+
+      const persisted = await pool.query<{ status: string }>("SELECT status FROM runs WHERE id=$1", [runId]);
+      assert.equal(persisted.rows[0]?.status, "CREATED");
+      const queued = await pool.query<{ dispatched_at: Date | null }>(
+        "SELECT dispatched_at FROM dispatch_outbox WHERE run_id=$1 AND queue_name='lattice.run'",
+        [runId],
+      );
+      assert.equal(queued.rowCount, 1);
+      assert.equal(queued.rows[0]?.dispatched_at, null);
+
+      secondApp = await createRuntimeApp(durableRuntimeConfig(databaseUrl, false), {
+        authenticatedSubjectResolver: durableTestSubjectResolver,
+      });
+      researchWorker = await createStandaloneResearchWorker({
+        databaseUrl,
+        workerId: `m3-e-research:${randomUUID()}`,
+        pollMs: 5,
+        leaseMs: 30_000,
+        retryDelayMs: 1_000,
+        batchSize: 10,
+      });
+      runWorker = await createStandaloneRunWorker({
+        databaseUrl,
+        workerId: `m3-e-run:${randomUUID()}`,
+        pollMs: 5,
+        leaseMs: 30_000,
+        retryDelayMs: 1_000,
+        batchSize: 10,
+      });
+      researchWorker.start();
+      runWorker.start();
+
+      const completed = await waitForCompletedRun(secondApp, runId);
+      assert.equal(completed.status, "COMPLETED");
+
+      const events = await secondApp.inject({ method: "GET", url: `/api/v1/runs/${runId}/events` });
+      assert.equal(events.statusCode, 200);
+      assert.deepEqual(
+        events.json().events.map((event: { type: string }) => event.type),
+        ["CREATED", "UNDERSTANDING", "PLANNING", "INVESTIGATING", "VALIDATING", "DECIDING", "EXPLAINING", "COMPLETED"],
+      );
+
+      const result = await secondApp.inject({ method: "GET", url: `/api/v1/runs/${runId}/result` });
+      assert.equal(result.statusCode, 200);
+      assert.equal(result.json().status, "COMPLETED");
+      assert.equal(result.json().decision.winnerCandidateId, "nova-air");
+      assert.match(result.json().explanation, /Nova Air/);
+
+      const dispatched = await pool.query<{ dispatched_at: Date | null }>(
+        "SELECT dispatched_at FROM dispatch_outbox WHERE run_id=$1 AND queue_name='lattice.run'",
+        [runId],
+      );
+      assert.ok(dispatched.rows[0]?.dispatched_at);
+    } finally {
+      if (runWorker) await runWorker.close();
+      if (researchWorker) await researchWorker.close();
+      if (firstApp) await firstApp.close();
+      if (secondApp) await secondApp.close();
+      if (runId) await pool.query("DELETE FROM runs WHERE id=$1", [runId]);
+      if (conversationId) await pool.query("DELETE FROM conversations WHERE id=$1", [conversationId]);
+      await pool.end();
+    }
+  },
+);
+
+test(
+  "PostgreSQL cancellation survives restart and makes queued worker execution inert",
+  { skip: !databaseUrl },
+  async () => {
+    assert.ok(databaseUrl);
+    const firstRunStore = await PostgresRunStore.connect(databaseUrl);
+    const firstControl = await PostgresApiRunControlStore.connect(databaseUrl);
+    const app = buildApp({ runStore: firstRunStore, apiControlStore: firstControl });
+    const submit = await app.inject({
+      method: "POST",
+      url: "/api/v1/conversations/cancel-pg/messages",
+      headers: { "idempotency-key": `cancel-${randomUUID()}` },
+      payload: request,
+    });
+    assert.equal(submit.statusCode, 202);
+    const runId = submit.json().runId as string;
+    const cancel = await app.inject({ method: "POST", url: `/api/v1/runs/${runId}/cancel` });
+    assert.equal(cancel.statusCode, 202);
+    assert.equal(cancel.json().status, "CANCELLED");
+    await app.close();
+
+    const secondRunStore = await PostgresRunStore.connect(databaseUrl);
+    const orchestration = await PostgresOrchestrationStore.connect(databaseUrl);
+    const pool = new Pool({ connectionString: databaseUrl });
+    try {
+      const outcomes = await processRunDispatches({
+        runStore: secondRunStore,
+        orchestrationStore: orchestration,
+        truthPipeline: createDefaultOfflineTruthPipeline(),
+        workerId: "cancel-worker",
+        now: new Date(Date.now() + 1_000),
+      });
+      const outcome = outcomes.find((item) => item.runId === runId);
+      assert.ok(outcome);
+      assert.equal(outcome.outcome, "terminal");
+
+      const run = await secondRunStore.get(runId);
+      assert.equal(run?.status, "CANCELLED");
+      assert.equal(run?.version, 2);
+      assert.deepEqual(run?.events.map((event) => event.type), ["CREATED", "CANCELLED"]);
+      assert.equal(await secondRunStore.getTruthSnapshot(runId), undefined);
+
+      const dispatch = await pool.query<{ dispatched_at: Date | null }>(
+        "SELECT dispatched_at FROM dispatch_outbox WHERE run_id=$1 AND queue_name='lattice.run'",
+        [runId],
+      );
+      assert.equal(dispatch.rowCount, 1);
+      assert.ok(dispatch.rows[0]?.dispatched_at);
+    } finally {
+      await pool.query("DELETE FROM runs WHERE id=$1", [runId]);
+      await pool.end();
+      await orchestration.close();
+      await secondRunStore.close();
+    }
+  },
+);

@@ -1,0 +1,336 @@
+Lattice — Product Concept Document
+Product Vision and Concept Definition
+
+Document Purpose
+This document translates the current chat-derived Lattice product vision into a conventional
+product concept format. It defines the product opportunity, intended users, value proposition,
+experience principles, conceptual capabilities, differentiation, assumptions, success criteria,
+risks, and validation questions. It deliberately excludes development-team structure and
+implementation architecture.
+
+1. Executive Summary
+Lattice is a system designed to break down the barriers between ordinary people and
+expert-quality knowledge.
+
+A user should be able to describe what they are trying to accomplish in normal language. Lattice
+should determine what matters to that person, use appropriate expertise and research to work
+through the problem, challenge unreliable or incomplete information, and return an accurate,
+verifiable, understandable answer the person can act on.
+
+Solandra is the user-facing layer around the underlying intelligence. The user should experience
+one coherent system rather than needing to understand AI providers, agents, workflows,
+research methods, or internal validation machinery.
+
+Core thesis: The complexity belongs inside Lattice. The knowledge belongs to the user.
+
+2. Problem Statement
+People increasingly have access to large volumes of information and AI-generated answers, but
+access to information is not the same as access to trustworthy expertise.
+
+A person trying to make a meaningful decision may face several barriers at once:
+• They may not know what questions to ask.
+• They may not know which criteria actually matter.
+• Relevant information may be fragmented, contradictory, stale, or unreliable.
+• They may lack the specialist knowledge needed to judge the evidence.
+• Raw AI output may be fluent without being sufficiently accurate or verifiable.
+• Expert-quality research may require time, terminology, tools, and domain knowledge the user
+does not possess.
+• The internal complexity of an intelligent system can itself become another barrier.
+
+Lattice is intended to absorb those barriers rather than transfer them to the user.
+
+3. Product Opportunity
+The product opportunity is to make expert-quality knowledge easier to reach, understand, and
+use.
+
+Instead of asking users to become better researchers, prompt engineers, system operators, or
+domain specialists, Lattice should provide an experience closer to consulting a capable expert
+who:
+• understands the user's goal;
+• identifies what matters;
+• performs the necessary research;
+• evaluates conflicting or uncertain information;
+• focuses the answer on the user's priorities; and
+• explains the result in language the user can use to make a decision.
+
+The product is not intended merely to produce more AI output. It is intended to improve the
+quality and usability of the knowledge delivered to the user.
+
+4. Target Users
+Primary target user
+A person who needs expert-quality help but does not have the time, training, confidence, or
+specialist knowledge to independently research and evaluate the problem.
+
+Representative use cases
+• Choosing a product or service.
+• Understanding a complex personal decision.
+• Comparing competing options.
+• Researching an unfamiliar topic.
+• Evaluating claims or recommendations.
+• Translating specialist knowledge into an actionable choice.
+• Getting help determining which factors should matter before making a decision.
+
+The concept should remain broad enough to support multiple domains while preserving
+domain-appropriate expertise and evidence quality.
+
+5. User Need
+The central user need is not simply “give me information.”
+
+It is:
+“Help me understand what matters, do the expert work I should not have to reproduce myself,
+and give me a trustworthy answer I can actually use.”
+
+This need has two distinct parts.
+
+Expert trust need
+The user seeks an expert because they expect the expert to have relevant knowledge, perform
+the necessary research, and provide a trustworthy conclusion.
+
+Personal decision need
+The correct recommendation depends on what the user values. Price, quality, size, risk,
+convenience, performance, durability, or other criteria may materially change the answer.
+
+Lattice must address both.
+
+6. Value Proposition
+For people who need to make informed decisions without becoming specialists themselves,
+Lattice provides expert-quality, research-backed, understandable guidance focused on the
+user's actual priorities.
+
+Unlike raw AI interaction, Lattice is intended to mediate the intelligence: determine what
+matters, direct appropriate expertise, challenge unreliable information, reconcile the result, and
+explain it in a form suitable for human action.
+
+Value proposition in one line:
+Trustworthy expertise without requiring the user to operate the machinery behind it.
+
+7. Product Experience
+The intended experience is conversational, low-friction, and outcome-oriented.
+
+Basic interaction
+1. The user states a goal in ordinary language.
+2. Lattice determines whether the user's priorities are sufficiently clear.
+3. If needed, Lattice helps the user identify the relevant decision criteria.
+4. Appropriate expert reasoning and research are applied.
+5. Information is checked, compared, challenged, and reconciled as needed.
+6. Solandra communicates the result in understandable terms.
+7. The user receives a conclusion, recommendation, options, uncertainty, and supporting
+evidence appropriate to the decision.
+
+Example
+User: “I’m looking for a new TV.”
+Lattice: “What are your priorities?”
+User: “Large size, OLED, cost.”
+Lattice then researches and evaluates options using those priorities.
+
+If the user does not know their priorities, Lattice should help them discover the relevant
+dimensions rather than forcing them to guess.
+
+Clear requests should not be burdened with unnecessary questioning.
+
+8. Core Product Principles
+Break down knowledge barriers
+Every major product capability should make trustworthy knowledge or expertise easier for the
+user to access.
+
+Understand before optimizing
+Expertise is not sufficient if it is focused on the wrong objective. Material user priorities should
+shape the work.
+
+Do the hard research for the user
+The user should receive the benefit of expert research without having to reproduce the expert's
+process.
+
+Improve on raw intelligence
+Expert processing, research, comparison, or validation should earn its place by making the
+result more accurate, trustworthy, useful, or decision-ready than unprocessed model output.
+
+Keep expertise conceptual before procedural
+The Triad is primarily a focusing mechanism: a small set of meaningful dimensions that define
+what excellent expert judgment should optimize for. It should not become process for process's
+sake.
+
+Make human understanding part of product quality
+A technically rigorous conclusion that the user cannot understand or use is incomplete as a
+product outcome.
+
+Hide unnecessary machinery
+Users should not need to choose agents, providers, workflows, queues, research methods, or
+validation mechanisms unless those details materially affect their decision.
+
+Preserve continuity
+Important knowledge, decisions, concepts, and state should not be lost simply because the
+system evolved or the user cannot remember where something occurred.
+
+9. Solandra's Product Role
+Solandra is the coherent user-facing layer of Lattice.
+
+Conceptually:
+User ↔ Solandra/Lattice ↔ intelligence, knowledge, and appropriate expertise
+
+Solandra's product role is to:
+• preserve the user's goal and priorities;
+• determine what needs to be understood before work begins;
+• direct the use of underlying intelligence and expertise;
+• reconcile results and inconsistencies;
+• surface uncertainty where it matters;
+• translate complex work into understandable conclusions; and
+• keep the experience coherent even when the underlying system is complex.
+
+The underlying AI provider should contribute intelligence without becoming the user's effective
+product interface or uncontrolled decision layer.
+
+10. Conceptual Capabilities
+The product concept implies the following user-facing capabilities.
+
+Intent and priority discovery
+Understand the user's objective and identify missing decision criteria only when they materially
+affect the answer.
+
+Expert focus
+Apply the right kind of expertise to the user's problem rather than treating all questions as
+generic AI prompts.
+
+Research and evidence synthesis
+Find, compare, evaluate, and reconcile relevant information.
+
+Reliability improvement
+Challenge incomplete, conflicting, stale, unsupported, or otherwise questionable information
+before presenting it as a conclusion.
+
+Decision support
+Translate knowledge into choices, recommendations, trade-offs, and consequences appropriate
+to the user's priorities.
+
+Human communication
+Explain complex conclusions at the conceptual level the user needs while preserving important
+caveats, evidence, and uncertainty.
+
+Continuity and recoverability
+Retain important context and enable the product to recover from changed conclusions, lost
+context, or product evolution without placing the burden of recordkeeping on the user.
+
+11. Product Differentiation
+The intended differentiation is conceptual rather than model-specific.
+
+Lattice is not differentiated by having more agents, more workflows, or more visible system
+complexity.
+
+It is differentiated by attempting to produce a better human outcome:
+• better alignment with what the user actually cares about;
+• stronger expert focus;
+• more dependable knowledge than raw model output;
+• research and validation performed on the user's behalf;
+• understandable communication;
+• coherent interaction through Solandra; and
+• reduced need for the user to understand or manage the underlying AI system.
+
+Any internal mechanism that does not materially improve those outcomes should not be
+considered product differentiation.
+
+12. Non-Goals
+The concept is not:
+• a system whose purpose is to expose internal AI architecture to users;
+• a product that requires users to manually select agents or workflows;
+• a generic prompt-engineering interface;
+• a collection of expert personas whose existence alone is treated as proof of expertise;
+• a process-heavy system where checklists substitute for judgment;
+• a product that equates fluent AI output with trustworthy knowledge;
+• a development-team organizational model.
+
+13. Key Assumptions
+The following assumptions are implied by the current concept and require validation.
+
+• Users value expert-quality synthesis enough to prefer it over faster raw AI output in material
+decisions.
+• Users can benefit from lightweight priority discovery without perceiving it as excessive friction.
+• Expert-focused processing can measurably improve answer quality over raw model
+responses.
+• Evidence and validation can be surfaced without overwhelming ordinary users.
+• A single coherent Solandra experience can hide internal complexity without hiding material
+uncertainty or trade-offs.
+• The concept can generalize across multiple domains without reducing expert quality to generic
+behavior.
+• Users will trust the system more when conclusions are understandable and verifiable, not
+merely confident.
+
+14. Success Criteria
+The concept should ultimately be judged by user outcomes rather than internal sophistication.
+
+Potential product-level success criteria include:
+• Users can state goals naturally without learning system mechanics.
+• Lattice identifies material priorities when they are missing.
+• Recommendations reflect the user's stated priorities.
+• Users can understand why a conclusion was reached.
+• Material claims can be supported or verified when needed.
+• Expert-treated outputs outperform raw model outputs on defined quality measures.
+• Users report greater confidence in making informed decisions.
+• The system reduces the amount of research and specialist interpretation the user must
+personally perform.
+• Additional internal complexity produces measurable user benefit.
+
+These are concept-level criteria, not yet a finalized measurement framework.
+
+15. Risks and Tensions
+Accuracy versus speed
+More research and validation may improve reliability while increasing latency or friction.
+
+Guidance versus user control
+Lattice should help users discover what matters without deciding their values for them.
+
+Simplicity versus transparency
+The product should hide unnecessary machinery while still exposing evidence, uncertainty, and
+meaningful trade-offs.
+
+Breadth versus expertise
+Supporting many domains could weaken specialist quality if expertise becomes too generic.
+
+Trust versus overconfidence
+A polished expert experience could increase trust even when evidence is weak. The product
+must avoid making confidence itself feel like proof.
+
+Personalization versus distortion
+User priorities should shape recommendations without overriding reality, evidence, or relevant
+constraints.
+
+Process versus intelligence
+Additional procedures may create the appearance of rigor without improving the result.
+
+16. Validation Questions
+The next product-validation work should answer questions such as:
+
+• In which user decisions does Lattice create the clearest improvement over direct AI
+interaction?
+• Can users reliably identify their own priorities, and when should Lattice help?
+• Does expert-focused processing measurably outperform raw model output?
+• Which forms of verification most improve user trust and decision quality?
+• How much explanation is enough for users to understand a recommendation without feeling
+overloaded?
+• Can Solandra maintain a coherent experience across materially different domains?
+• What information should be visible by default versus available on demand?
+• Which product capabilities genuinely reduce knowledge barriers, and which merely add
+internal complexity?
+• How should success be measured from the user's perspective?
+• What is the smallest product experience that proves the central thesis?
+
+17. Product Thesis
+Lattice is a system for breaking down the barriers between ordinary people and expert-quality
+knowledge.
+
+A person should be able to state what they are trying to accomplish in normal language. Lattice
+should determine what they actually care about, use appropriate expertise and research to work
+through the problem, challenge unreliable or incomplete information, and return an accurate,
+verifiable, understandable answer they can act on.
+
+The user should not have to understand AI providers, agents, workflows, research methods, or
+the machinery underneath. Solandra sits between the person and the intelligence, preserving
+the person's intent and turning that intelligence into useful expert knowledge.
+
+The complexity belongs inside Lattice. The knowledge belongs to the user.
+
+Source Basis
+This concept document is derived from “Lattice — User Product Vision (Chat-Derived,
+Non-Development).” That source records user-originated product intent from project chat
+history, with newer chats controlling when they revise older ideas. This document organizes that
+intent into an industry-standard product concept structure without adding development
+architecture or unsupported market claims.

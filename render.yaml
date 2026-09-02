@@ -1,0 +1,25 @@
+databases:
+  - name: lattice-v36-postgres
+    plan: free
+
+services:
+  - type: web
+    name: lattice-v36
+    runtime: node
+    plan: free
+    buildCommand: npm ci --no-audit --no-fund && npm run build
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: HOST
+        value: 0.0.0.0
+      - key: LATTICE_DEPLOYMENT_MODE
+        value: durable
+      - key: LATTICE_TRUTH_MODE
+        value: v36-offline
+      - key: LATTICE_AUTO_MIGRATE
+        value: "false"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: lattice-v36-postgres
+          property: connectionString

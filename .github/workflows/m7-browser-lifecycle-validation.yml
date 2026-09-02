@@ -1,0 +1,218 @@
+name: CI — M7 Browser Lifecycle
+
+on:
+  pull_request:
+    paths:
+      - "src/**"
+      - "migrations/**"
+      - "test/**"
+      - "tools/m7-browser-lifecycle.mjs"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/m7-browser-lifecycle-validation.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "src/**"
+      - "migrations/**"
+      - "test/**"
+      - "tools/m7-browser-lifecycle.mjs"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/m7-browser-lifecycle-validation.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: m7-browser-lifecycle-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: cmd
+
+jobs:
+  m7-browser-lifecycle:
+    name: M7 durable browser lifecycle acceptance
+    runs-on:
+      - self-hosted
+      - Windows
+      - X64
+      - ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'lattice-windows-pr-ephemeral' || 'lattice-windows' }}
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout exact subject source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Provision Node 24
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+
+      - name: Validate exact source, runtime, patched PostgreSQL 18, and installed browser
+        shell: powershell
+        env:
+          SUBJECT_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          DATABASE_URL: postgresql://lattice@127.0.0.1:55433/lattice_test
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $actualSourceSha = (git rev-parse HEAD).Trim()
+          Write-Host "SUBJECT_SOURCE_SHA=$env:SUBJECT_SOURCE_SHA"
+          Write-Host "ACTUAL_SOURCE_SHA=$actualSourceSha"
+          if ($actualSourceSha -ne $env:SUBJECT_SOURCE_SHA) {
+            throw 'SOURCE_PROVENANCE_FAILURE: checkout does not match subject source'
+          }
+          if ($env:RUNNER_OS -ne 'Windows' -or $env:RUNNER_ARCH -ne 'X64') {
+            throw "EXECUTION_SURFACE_FAILURE: expected Windows X64, got $env:RUNNER_OS $env:RUNNER_ARCH"
+          }
+          $nodeMajor = (node -p "process.versions.node.split('.')[0]").Trim()
+          if ($nodeMajor -ne '24') {
+            throw "EXECUTION_SURFACE_FAILURE: expected Node 24, got $(node --version)"
+          }
+          $npmMajor = ((npm --version).Trim().Split('.')[0])
+          if ($npmMajor -ne '11') {
+            throw "EXECUTION_SURFACE_FAILURE: expected npm 11, got $(npm --version)"
+          }
+          if (-not (Get-Command psql -ErrorAction SilentlyContinue)) {
+            throw 'POSTGRES_EXECUTION_SURFACE_FAILURE: psql is not available on PATH'
+          }
+          $currentUser = (psql $env:DATABASE_URL -Atc 'select current_user').Trim()
+          $currentDatabase = (psql $env:DATABASE_URL -Atc 'select current_database()').Trim()
+          $serverVersionNum = (psql $env:DATABASE_URL -Atc 'show server_version_num').Trim()
+          $minimumPostgresVersionNum = 180006
+          $serverVersionNumber = 0
+          if ($LASTEXITCODE -ne 0 -or
+              $currentUser -ne 'lattice' -or
+              $currentDatabase -ne 'lattice_test' -or
+              -not [int]::TryParse($serverVersionNum, [ref]$serverVersionNumber) -or
+              $serverVersionNumber -lt $minimumPostgresVersionNum -or
+              $serverVersionNumber -ge 190000) {
+            throw "POSTGRES_EXECUTION_SURFACE_FAILURE: user=$currentUser database=$currentDatabase version=$serverVersionNum expected=18.6-or-newer"
+          }
+
+          $roots = @(
+            $env:ProgramFiles,
+            [Environment]::GetEnvironmentVariable('ProgramFiles(x86)'),
+            $env:LOCALAPPDATA
+          ) | Where-Object { $_ }
+          $candidates = foreach ($root in $roots) {
+            Join-Path $root 'Microsoft\Edge\Application\msedge.exe'
+            Join-Path $root 'Google\Chrome\Application\chrome.exe'
+          }
+          $browser = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $browser) {
+            throw "BROWSER_EXECUTION_SURFACE_FAILURE: no installed Edge/Chrome found. Checked: $($candidates -join '; ')"
+          }
+          "M7_BROWSER_EXECUTABLE=$browser" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "M7_BROWSER_EXECUTION_SURFACE_PASS executable=$browser"
+          Write-Host "M7_POSTGRES_EXECUTION_SURFACE_PASS database=$currentDatabase version=$serverVersionNum"
+
+      - name: Install locked dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Syntax-check browser lifecycle harness
+        run: node --check tools/m7-browser-lifecycle.mjs
+
+      - name: Run exact repository check gate
+        run: npm run check
+
+      - name: Reset dedicated PostgreSQL test schema
+        shell: powershell
+        env:
+          DATABASE_URL: postgresql://lattice@127.0.0.1:55433/lattice_test
+        run: |
+          $ErrorActionPreference = 'Stop'
+          psql $env:DATABASE_URL -v ON_ERROR_STOP=1 -c 'DROP SCHEMA public CASCADE; CREATE SCHEMA public;'
+          if ($LASTEXITCODE -ne 0) {
+            throw 'POSTGRES_TEST_SCHEMA_RESET_FAILURE: schema reset command failed'
+          }
+          Write-Host 'M7_BROWSER_POSTGRES_RESET=PASS phase=before-durable-regression'
+
+      - name: Run durable PostgreSQL regression surface
+        env:
+          DATABASE_URL: postgresql://lattice@127.0.0.1:55433/lattice_test
+        run: node --import tsx --test --test-concurrency=1 test/postgres.test.ts test/postgres-orchestration.test.ts test/async-api-postgres.test.ts test/run-worker-process.test.ts test/research-worker-process.test.ts test/run-coordinator-postgres.test.ts test/runtime-schema-readiness-postgres.test.ts test/v36-postgres-integrity.test.ts test/v36-research-bridge-postgres.test.ts test/intent-postgres.test.ts test/intent-clarification.test.ts test/intent-lineage-postgres.test.ts test/run-intent-binding-postgres.test.ts test/intent-bound-api.test.ts test/intent-conversation-intake.test.ts test/intent-clear-intake-acceptance.test.ts test/m6-decision-engine-acceptance.test.ts test/intent-material-correction-supersession.test.ts test/run-supersession.test.ts test/api-run-supersession.test.ts test/m7-conversation-continuity.test.ts test/m7-run-event-stream.test.ts test/m7-durable-reconnect-acceptance.test.ts
+
+      - name: Reset and migrate dedicated browser schema
+        shell: powershell
+        env:
+          DATABASE_URL: postgresql://lattice@127.0.0.1:55433/lattice_test
+        run: |
+          $ErrorActionPreference = 'Stop'
+          psql $env:DATABASE_URL -v ON_ERROR_STOP=1 -c 'DROP SCHEMA public CASCADE; CREATE SCHEMA public;'
+          if ($LASTEXITCODE -ne 0) {
+            throw 'POSTGRES_TEST_SCHEMA_RESET_FAILURE: browser schema reset command failed'
+          }
+          node dist/src/migrate.js
+          if ($LASTEXITCODE -ne 0) {
+            throw 'M7_BROWSER_MIGRATION_FAILURE: migration command failed'
+          }
+          Write-Host 'M7_BROWSER_POSTGRES_RESET=PASS phase=browser-runtime'
+          Write-Host 'M7_BROWSER_POSTGRES_MIGRATION=PASS'
+
+      - name: Execute exact real-browser lifecycle acceptance
+        shell: powershell
+        env:
+          SUBJECT_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          DATABASE_URL: postgresql://lattice@127.0.0.1:55433/lattice_test
+          LATTICE_DEPLOYMENT_MODE: development
+          LATTICE_TRUTH_MODE: v36-offline
+          LATTICE_AUTHENTICATION_MODE: development-fixture
+          LATTICE_DEVELOPMENT_FIXTURE_SUBJECT_ID: m7-browser-validation-subject
+          LATTICE_AUTO_MIGRATE: 'false'
+          LATTICE_RUN_WORKER_LEASE_MS: '5000'
+          LATTICE_RUN_WORKER_RETRY_DELAY_MS: '5'
+          LATTICE_RUN_WORKER_BATCH_SIZE: '4'
+          LATTICE_RESEARCH_WORKER_LEASE_MS: '5000'
+          LATTICE_RESEARCH_WORKER_RETRY_DELAY_MS: '5'
+          LATTICE_RESEARCH_WORKER_BATCH_SIZE: '8'
+          PORT: '3107'
+          HOST: 127.0.0.1
+          M7_BASE_URL: http://127.0.0.1:3107
+          M7_BROWSER_ARTIFACT_DIR: artifacts/m7-browser
+        run: |
+          $ErrorActionPreference = 'Stop'
+          node tools/m7-browser-lifecycle.mjs
+          if ($LASTEXITCODE -ne 0) {
+            throw 'M7_BROWSER_ACCEPTANCE_FAILURE: browser harness failed'
+          }
+          $actualSourceSha = (git rev-parse HEAD).Trim()
+          if ($actualSourceSha -ne $env:SUBJECT_SOURCE_SHA) {
+            throw 'SOURCE_PROVENANCE_FAILURE: source moved during browser acceptance'
+          }
+          Write-Host "M7_BROWSER_EXACT_SHA=PASS sha=$actualSourceSha"
+          Write-Host 'M8_A_BROWSER_AUTH_MODE=DEVELOPMENT_FIXTURE'
+
+      - name: Record bounded M7 G2C validation
+        shell: powershell
+        env:
+          SUBJECT_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          $actualSourceSha = (git rev-parse HEAD).Trim()
+          if ($actualSourceSha -ne $env:SUBJECT_SOURCE_SHA) {
+            throw 'SOURCE_PROVENANCE_FAILURE: final checkout does not match subject source'
+          }
+          Write-Host "M7_G2C_BROWSER_LIFECYCLE=PASS sha=$actualSourceSha"
+          Write-Host "M7_G2C_REPOSITORY_CHECK=PASS sha=$actualSourceSha"
+          Write-Host "M7_G2C_POSTGRES_DURABILITY_REGRESSION=PASS sha=$actualSourceSha"
+          Write-Host "M7_G2C_REAL_BROWSER=PASS sha=$actualSourceSha"
+          Write-Host 'M8_A_BROWSER_AUTH_MODE=DEVELOPMENT_FIXTURE'
+          Write-Host 'PRODUCTION_DEPLOYMENT=NOT_PERFORMED'
+          Write-Host 'PRODUCTION_DATABASE=NOT_TOUCHED'
+          Write-Host 'LIVE_PROVIDER=NOT_ENABLED'
+
+      - name: Upload browser evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: m7-browser-lifecycle-${{ github.event.pull_request.head.sha || github.sha }}
+          path: artifacts/m7-browser/
+          if-no-files-found: warn
+          retention-days: 14

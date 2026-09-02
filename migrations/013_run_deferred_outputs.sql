@@ -1,0 +1,3 @@
+ALTER TABLE runs
+  ALTER COLUMN decision_json DROP NOT NULL,
+  ALTER COLUMN explanation DROP NOT NULL;

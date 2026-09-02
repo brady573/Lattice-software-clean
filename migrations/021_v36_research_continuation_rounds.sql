@@ -1,0 +1,2 @@
+ALTER TABLE v36_research_continuations
+  DROP CONSTRAINT IF EXISTS v36_research_continuations_run_id_run_epoch_key;

@@ -1,0 +1,33 @@
+export const v36SeedCalibration = {
+  type_effort: 0.7679688175037671,
+  source_effort: 0.5068978119593314,
+  proof_effort: 0.8888917491339886,
+  counter_effort: 0.8736067605803266,
+  factcheckability_effort: 0.8288017359163056,
+  prov_gate: 0.3748246114064627,
+  ind_gate: 0.3241169939565931,
+  core_gate: 0.22162491350584554,
+  proof_conf_gate: 0.726139635279899,
+  max_followup: 2,
+  followup_effort: 0.9613008816927262,
+  cost_penalty: 0.004178108623605169,
+  direct_release_bonus: 0.3831683914800609,
+  safety_margin: 0.1596646890607773,
+  positive_effort: 0.9598843160861958,
+  primary_gate: 0.3639647170749473,
+  dual_chain_gate: 0.40526648834491985,
+  positive_conf_gate: 0.3983104479497036,
+  single_path_gate: 0.7081025021842212,
+  high_risk_threshold: 0.6430209366629013,
+  authoritative_primary_gate: 0.8405452363987423,
+  authoritative_qualifier_discount: 0.17635637231344636,
+  falsification_effort: 0.8375915923078052,
+  falsification_sensitivity: 0.796471678291496,
+  falsification_route_threshold: 0.5698330771310816,
+  independent_chain_recovery_effort: 0.7945323337580119,
+  max_chain_probes: 2,
+  contradiction_verification_effort: 0.7964038805581402,
+} as const;
+
+/** Simulation-derived implementation seeds only; they are not production truth thresholds. */
+export type V36SeedCalibration = typeof v36SeedCalibration;
