@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { getAuthenticatedSubject } from "../auth/authenticated-subject.js";
+import { isConsultationRunRequest } from "../domain.js";
 import type { DecisionPlanStore, DurableDecisionPlan } from "../intent/decision-plan-store.js";
 import type { IntentUserMessageStore } from "../intent/source-message-store.js";
 import {
@@ -77,12 +78,26 @@ export function registerConversationContinuityApi(
           status: run.status,
           version: run.version,
           eventCount: run.events.length,
-          resultAvailable: run.status === "COMPLETED" && run.decision !== null && run.explanation !== null,
-          exactBinding: decisionPlan === undefined ? null : {
-            decisionPlanId: decisionPlan.decisionPlanId,
-            intentScopeId: decisionPlan.intentScopeId,
-            intentVersionId: decisionPlan.intentVersionId,
-          },
+          resultAvailable: run.status === "COMPLETED" && (
+            isConsultationRunRequest(run.request)
+              ? true
+              : run.decision !== null && run.explanation !== null
+          ),
+          exactBinding: decisionPlan !== undefined
+            ? {
+              decisionPlanId: decisionPlan.decisionPlanId,
+              intentScopeId: decisionPlan.intentScopeId,
+              intentVersionId: decisionPlan.intentVersionId,
+            }
+            : isConsultationRunRequest(run.request)
+              && run.request.intentScopeId
+              && run.request.intentVersionId
+              ? {
+                decisionPlanId: null,
+                intentScopeId: run.request.intentScopeId,
+                intentVersionId: run.request.intentVersionId,
+              }
+              : null,
           links: {
             run: `/api/v1/runs/${encodeURIComponent(run.id)}`,
             events: `/api/v1/runs/${encodeURIComponent(run.id)}/events`,

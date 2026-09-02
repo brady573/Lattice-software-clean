@@ -43,8 +43,6 @@ import {
 } from "./intent/index.js";
 import { registerDecisionPlanApi } from "./intent/decision-plan-api.js";
 import { DecisionPlanRecordingApiRunControlStore } from "./intent/decision-plan-run-control.js";
-import { registerBoundedDecisionCorrection } from "./intent/bounded-decision-correction.js";
-import { registerBoundedDecisionIntentIntake } from "./intent/bounded-decision-intake.js";
 import {
   MemoryDecisionPlanStore,
   PostgresDecisionPlanStore,
@@ -349,18 +347,6 @@ export async function createRuntimeApp(
     apiControlStore,
     runStore,
     apiSubject: authenticatedApiSubject,
-  });
-  registerBoundedDecisionIntentIntake(app, {
-    intentStore,
-    userMessageStore,
-    apiControlStore,
-    apiSubject: authenticatedApiSubject,
-  });
-  registerBoundedDecisionCorrection(app, {
-    intentStore,
-    userMessageStore,
-    apiControlStore,
-    runStore,
   });
   registerRunEventStream(app, { runStore });
   registerDecisionPlanApi(app, { decisionPlanStore });

@@ -232,12 +232,18 @@ export async function executePersistedRunTick(
           persistedTruth.claimEvidence,
           persistedTruth.assessments,
         );
-        const decision = isConsultationRunRequest(decisionState.request)
+        const consultationRequest = isConsultationRunRequest(decisionState.request)
+          ? decisionState.request
+          : undefined;
+        const legacyRequest = !consultationRequest
+          ? decisionState.request as Extract<LatticeRunRequest, { goal: string }>
+          : undefined;
+        const decision = consultationRequest
           ? await (async () => {
-            if (decisionState.request.decisionNeed !== "QUALIFIED" || !generalizedDecisionAdapter) {
+            if (consultationRequest.decisionNeed !== "QUALIFIED" || !generalizedDecisionAdapter) {
               throw new Error("Qualified consultation decisions require the generalized Decision Engine adapter.");
             }
-            const intent = await generalizedDecisionAdapter.loadIntent(decisionState.request);
+            const intent = await generalizedDecisionAdapter.loadIntent(consultationRequest);
             const input = buildDecisionInputFromGeneralizedIntent(intent, generalizedDecisionAdapter.catalog);
             return createGeneralizedDecisionFromAdmittedEvidence(
               input,
@@ -248,7 +254,7 @@ export async function executePersistedRunTick(
             );
           })()
           : createDecisionFromAdmittedEvidence(
-            decisionState.request,
+            legacyRequest!,
             decisionInputs.candidates,
             decisionEvidence,
             persistedTruth.assessments.map((assessment) => assessment.id),

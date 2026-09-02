@@ -4,9 +4,7 @@ import test from "node:test";
 import { Pool } from "pg";
 import { MemoryApiRunControlStore } from "../src/api-control-store.js";
 import { buildApp } from "../src/app.js";
-import {
-  registerBoundedDecisionIntentIntake,
-} from "../src/intent/bounded-decision-intake.js";
+import { registerBoundedDecisionIntentIntake } from "../src/intent/bounded-decision-intake.js";
 import {
   MemoryIntentAuthorityStore,
   MemoryIntentBoundRunStore,
@@ -39,7 +37,7 @@ function confirmationPayload() {
   };
 }
 
-test("runtime canonical conversation API exposes material clarification intake", async () => {
+test("runtime canonical conversation API creates an exact IntentVersion", async () => {
   const app = await createRuntimeApp(
     resolveRuntimeConfig({
       PORT: "3000",
@@ -56,19 +54,14 @@ test("runtime canonical conversation API exposes material clarification intake",
     const conversationId = (created.json() as { conversation: { id: string } }).conversation.id;
     const response = await app.inject({
       method: "POST",
-      url: `/api/v1/conversations/${conversationId}/intent-scopes/scope-canonical/user-messages`,
-      payload: initialPayload(),
+      url: `/api/v1/conversations/${conversationId}/turns`,
+      payload: { turnId: "turn-1", message: initialContent },
     });
     assert.equal(response.statusCode, 202);
-    const pending = response.json() as { status: string; proposalId: string };
-    assert.equal(pending.status, "NEEDS_CLARIFICATION");
-    const confirmation = await app.inject({
-      method: "POST",
-      url: `/api/v1/conversations/${conversationId}/intent-scopes/scope-canonical/clarifications/${pending.proposalId}/confirm`,
-      payload: confirmationPayload(),
-    });
-    assert.equal(confirmation.statusCode, 202);
-    assert.equal(confirmation.json().status, "RUN_ACCEPTED");
+    const accepted = response.json() as { status: string; intentScopeId: string; intentVersionId: string };
+    assert.equal(accepted.status, "RUN_ACCEPTED");
+    assert.equal(accepted.intentScopeId, `consultation:${conversationId}`);
+    assert.match(accepted.intentVersionId, /^[0-9a-f-]{36}$/u);
   } finally {
     await app.close();
   }

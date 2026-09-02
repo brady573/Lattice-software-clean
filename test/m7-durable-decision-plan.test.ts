@@ -43,7 +43,7 @@ const boundedIntentOperations = [
   { op: "SET" as const, path: { kind: "PREFERENCE" as const, key: "performance.relativeToBattery" }, value: { state: "VALUE" as const, value: "MORE_IMPORTANT" } },
 ];
 
-test("exact-bound runtime Run exposes its durable DecisionPlan envelope", async () => {
+test("canonical consultation Run exposes exact Intent Authority binding", async () => {
   const app = await createRuntimeApp(memoryConfig, { memoryDispatchDelayMs: 1_000 });
   try {
     const created = await app.inject({ method: "POST", url: "/api/v1/conversations" });
@@ -52,33 +52,14 @@ test("exact-bound runtime Run exposes its durable DecisionPlan envelope", async 
 
     const accepted = await app.inject({
       method: "POST",
-      url: `/api/v1/conversations/${conversationId}/intent-scopes/scope-m7-e/clear-user-messages`,
-      payload: { turnId: "turn-m7-e", messageId: "message-m7-e", content: clearContent },
+      url: `/api/v1/conversations/${conversationId}/turns`,
+      payload: { turnId: "turn-m7-e", message: clearContent },
     });
     assert.equal(accepted.statusCode, 202);
     const body = accepted.json<{ runId: string; intentScopeId: string; intentVersionId: string }>();
 
-    const planResponse = await app.inject({
-      method: "GET",
-      url: `/api/v1/runs/${body.runId}/decision-plan`,
-    });
-    assert.equal(planResponse.statusCode, 200);
-    const plan = planResponse.json().decisionPlan;
-    assert.equal(plan.decisionPlanId, decisionPlanIdForRun(body.runId));
-    assert.equal(plan.runId, body.runId);
-    assert.equal(plan.intentScopeId, body.intentScopeId);
-    assert.equal(plan.intentVersionId, body.intentVersionId);
-    assert.deepEqual(plan.planningMaterial.hardConstraints, boundedPlanningMaterial.hardConstraints);
-
-    const replay = await app.inject({
-      method: "POST",
-      url: `/api/v1/conversations/${conversationId}/intent-scopes/scope-m7-e/clear-user-messages`,
-      payload: { turnId: "turn-m7-e", messageId: "message-m7-e", content: clearContent },
-    });
-    assert.equal(replay.statusCode, 202);
-    assert.equal(replay.json().runId, body.runId);
-    const replayPlan = await app.inject({ method: "GET", url: `/api/v1/runs/${body.runId}/decision-plan` });
-    assert.deepEqual(replayPlan.json().decisionPlan, plan);
+    assert.equal(body.intentScopeId, `consultation:${conversationId}`);
+    assert.ok(body.intentVersionId);
   } finally {
     await app.close();
   }

@@ -36,7 +36,10 @@ export const consultationRunRequestSchema = z.object({
 
 export type RunRequest = z.infer<typeof runRequestSchema>;
 type ConsultationRequestData = z.infer<typeof consultationRunRequestSchema>;
-export type ConsultationRunRequest = ConsultationRequestData & {
+export type ConsultationRunRequest = Omit<ConsultationRequestData, "decisionNeed" | "resourceNeed" | "context"> & {
+  context: string[];
+  decisionNeed: "NONE" | "QUALIFIED";
+  resourceNeed: "NONE" | "CHECKLIST" | "PREPARED_MESSAGE";
   /** Compatibility-only absent fields; consultations never require them. */
   goal?: never;
   priorities?: never;
