@@ -80,6 +80,7 @@ export function renderSolandraConversationPage(): string {
       let conversationId = null;
       let pending = false;
       let composing = false;
+      let pendingClarification = null;
 
       const escapeHtml = (value) => String(value)
         .replaceAll("&", "&amp;")
@@ -163,13 +164,22 @@ export function renderSolandraConversationPage(): string {
         composer.innerHTML = '<h1>' + escapeHtml(message) + '</h1><p class="muted">Accepted understanding</p><p>Working with the available knowledge and provenance…</p>';
         try {
           const id = await ensureConversation();
-          const response = await fetch("/api/v1/conversations/" + encodeURIComponent(id) + "/turns", {
+          const clarification = pendingClarification;
+          const response = await fetch(clarification
+            ? "/api/v1/conversations/" + encodeURIComponent(id) + "/clarifications/" + encodeURIComponent(clarification.proposalId) + "/confirm"
+            : "/api/v1/conversations/" + encodeURIComponent(id) + "/turns", {
             method: "POST",
             headers: { "content-type": "application/json" },
             body: JSON.stringify({ turnId: crypto.randomUUID(), message }),
           });
           const body = await response.json();
           if (!response.ok) throw new Error(body.message || body.error || "Consultation intake failed.");
+          if (body.status === "NEEDS_CLARIFICATION") {
+            pendingClarification = { proposalId: body.proposalId };
+            composer.innerHTML = '<h1>One clarification</h1><p>' + escapeHtml(body.question) + '</p><p class="muted">Reply with “' + escapeHtml(body.confirmationExample) + '” or provide a different clarification.</p>';
+            return;
+          }
+          pendingClarification = null;
           await pollOutcome(body.runId);
         } catch (error) {
           input.value = draft;

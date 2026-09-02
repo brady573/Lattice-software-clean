@@ -37,7 +37,7 @@ function confirmationPayload() {
   };
 }
 
-test("runtime canonical conversation API creates an exact IntentVersion", async () => {
+test("runtime canonical conversation API routes material clarification through Intent Authority", async () => {
   const app = await createRuntimeApp(
     resolveRuntimeConfig({
       PORT: "3000",
@@ -58,10 +58,22 @@ test("runtime canonical conversation API creates an exact IntentVersion", async 
       payload: { turnId: "turn-1", message: initialContent },
     });
     assert.equal(response.statusCode, 202);
-    const accepted = response.json() as { status: string; intentScopeId: string; intentVersionId: string };
+    const pending = response.json() as { status: string; proposalId: string; intentScopeId: string; intentVersionId: string };
+    assert.equal(pending.status, "NEEDS_CLARIFICATION");
+    assert.equal(pending.intentScopeId, `consultation:${conversationId}`);
+    assert.match(pending.intentVersionId, /^[0-9a-f-]{36}$/u);
+    assert.match(pending.proposalId, /^[0-9a-f-]{36}$/u);
+
+    const confirmation = await app.inject({
+      method: "POST",
+      url: `/api/v1/conversations/${conversationId}/clarifications/${pending.proposalId}/confirm`,
+      payload: { turnId: "turn-2", message: "Hard requirement." },
+    });
+    assert.equal(confirmation.statusCode, 202);
+    const accepted = confirmation.json() as { status: string; intentScopeId: string; intentVersionId: string };
     assert.equal(accepted.status, "RUN_ACCEPTED");
     assert.equal(accepted.intentScopeId, `consultation:${conversationId}`);
-    assert.match(accepted.intentVersionId, /^[0-9a-f-]{36}$/u);
+    assert.notEqual(accepted.intentVersionId, pending.intentVersionId);
   } finally {
     await app.close();
   }

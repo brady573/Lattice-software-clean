@@ -9,6 +9,7 @@ import type { IntentTransitionCommand } from "./intent/types.js";
 import { buildRunOutcome } from "./outcome.js";
 import { createPendingRun } from "./run-execution.js";
 import type { RunStore } from "./run-store.js";
+import { deriveQualifiedLegacyBoundedRunRequest } from "./intent/exact-planning-fidelity.js";
 
 const IDEMPOTENCY_RETENTION_MS = 24 * 60 * 60 * 1_000;
 
@@ -42,6 +43,22 @@ function digestHex(...parts: string[]): string {
 function stableUuid(...parts: string[]): `${string}-${string}-${string}-${string}-${string}` {
   const digest = digestHex(...parts).slice(0, 32);
   return `${digest.slice(0, 8)}-${digest.slice(8, 12)}-${digest.slice(12, 16)}-${digest.slice(16, 20)}-${digest.slice(20, 32)}`;
+}
+
+type MaterialDecisionClarification = { objective: string; priceMaxUsd: number; batteryHours: number };
+
+function parseMaterialDecisionClarification(message: string): MaterialDecisionClarification | undefined {
+  const normalized = message.trim().replaceAll("’", "'").replace(/\s+/g, " ");
+  const match = /^i need ((?:a|an) [a-z0-9][a-z0-9 .+'/_-]{0,120}?) under \$?([0-9][0-9,]*(?:\.[0-9]{1,2})?)\.? i(?:'d| would) like at least ([0-9]+(?:\.[0-9]+)?) hours? of battery life,? but performance matters more\.?$/i.exec(normalized);
+  if (!match) return undefined;
+  const priceMaxUsd = Number(match[2]?.replaceAll(",", ""));
+  const batteryHours = Number(match[3]);
+  if (!match[1] || !Number.isFinite(priceMaxUsd) || priceMaxUsd <= 0 || !Number.isFinite(batteryHours) || batteryHours <= 0) return undefined;
+  return { objective: `choose ${match[1].trim().toLowerCase()}`, priceMaxUsd, batteryHours };
+}
+
+function isHardRequirementConfirmation(message: string): boolean {
+  return /^hard requirement\.?$/i.test(message.trim().replace(/\s+/g, " "));
 }
 
 /**
@@ -109,6 +126,46 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
       }
 
       const interpretation = interpretExplicitConsultationTurn(sourceMessage.content, parsed.data.prepare);
+      const materialClarification = parseMaterialDecisionClarification(sourceMessage.content);
+      if (materialClarification) {
+        const initialTransition: IntentTransitionCommand = {
+          transitionId: stableUuid("consultation-material-initial", conversationId, sourceMessage.messageId),
+          intentScopeId,
+          baseIntentVersionId: null,
+          logicalUserTurnId: sourceMessage.logicalUserTurnId,
+          observedMessageHorizon: sourceMessage.messageHorizon,
+          sourceMessageId: sourceMessage.messageId,
+          sourceDigest: sourceMessage.contentDigest,
+          operations: [
+            { op: "SET", path: { kind: "OBJECTIVE" }, value: { state: "VALUE", value: materialClarification.objective } },
+            { op: "SET", path: { kind: "REQUIREMENT", key: "price.max.usd" }, value: { state: "VALUE", value: materialClarification.priceMaxUsd } },
+            { op: "SET", path: { kind: "PREFERENCE", key: "performance.relativeToBattery" }, value: { state: "VALUE", value: "MORE_IMPORTANT" } },
+          ],
+        };
+        const existingScope = await options.intentStore.getScope(intentScopeId);
+        if (existingScope) return reply.status(409).send({ error: "INTENT_SCOPE_ALREADY_STARTED" });
+        const scope = await options.intentStore.createScope({ intentScopeId, kind: "consultation", initialTransition });
+        const proposalId = stableUuid("consultation-material-proposal", conversationId, scope.currentIntentVersionId, sourceMessage.contentDigest, String(materialClarification.batteryHours));
+        const proposal = await options.intentStore.createPendingProposal({
+          proposalId,
+          intentScopeId,
+          baseIntentVersionId: scope.currentIntentVersionId,
+          observedMessageHorizon: sourceMessage.messageHorizon,
+          sourceMessageId: sourceMessage.messageId,
+          sourceDigest: sourceMessage.contentDigest,
+          operations: [{ op: "SET", path: { kind: "REQUIREMENT", key: "batteryHours.min" }, value: { state: "VALUE", value: materialClarification.batteryHours } }],
+          materiality: "MATERIAL",
+        });
+        return reply.status(202).send({
+          status: "NEEDS_CLARIFICATION",
+          intentScopeId,
+          intentVersionId: scope.currentIntentVersionId,
+          proposalId: proposal.proposalId,
+          proposalDigest: proposal.proposalDigest,
+          question: `You said you'd like at least ${materialClarification.batteryHours} hours of battery life. Should that be a hard requirement?`,
+          confirmationExample: "Hard requirement.",
+        });
+      }
       const transition: IntentTransitionCommand = {
         transitionId: stableUuid("consultation-transition", conversationId, sourceMessage.messageId),
         intentScopeId,
@@ -157,6 +214,7 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
         sourceMessage.messageId,
         sourceMessage.contentDigest,
       );
+
       const run = createPendingRun(conversationId, requestBody, runId);
       const canonicalRoute = `/api/v1/conversations/${encodeURIComponent(conversationId)}/turns`;
       const submission = await options.apiControlStore.submitRun({
@@ -198,6 +256,50 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
         intentScopeId,
         intentVersionId,
       });
+    },
+  );
+
+  app.post<{ Params: { conversationId: string; proposalId: string } }>(
+    "/api/v1/conversations/:conversationId/clarifications/:proposalId/confirm",
+    async (request, reply) => {
+      const parsed = consultationTurnSchema.pick({ turnId: true, message: true }).safeParse(request.body);
+      if (!parsed.success) return reply.status(400).send({ error: "INVALID_CONSULTATION_CLARIFICATION", details: parsed.error.flatten() });
+      const conversationId = request.params.conversationId.trim();
+      const proposal = await options.intentStore.getPendingProposal(request.params.proposalId.trim());
+      if (!proposal || proposal.intentScopeId !== `consultation:${conversationId}`) return reply.status(404).send({ error: "CLARIFICATION_NOT_FOUND" });
+      if (proposal.status === "STALE") return reply.status(409).send({ error: "CLARIFICATION_STALE" });
+      if (!isHardRequirementConfirmation(parsed.data.message)) return reply.status(422).send({ error: "CLARIFICATION_NOT_REPRESENTABLE" });
+      const messageId = stableUuid("consultation-message", conversationId, parsed.data.turnId);
+      const sourceMessage = await options.userMessageStore.append({
+        conversationId, intentScopeId: proposal.intentScopeId, logicalUserTurnId: parsed.data.turnId,
+        messageId, messageHorizon: proposal.observedMessageHorizon + 1, content: parsed.data.message,
+      });
+      const confirmation = await options.intentStore.confirmPendingProposal({
+        transitionId: stableUuid("consultation-material-confirm", conversationId, proposal.proposalId, sourceMessage.messageId),
+        proposalId: proposal.proposalId, expectedProposalDigest: proposal.proposalDigest,
+        intentScopeId: proposal.intentScopeId, baseIntentVersionId: proposal.baseIntentVersionId,
+        logicalUserTurnId: sourceMessage.logicalUserTurnId, observedMessageHorizon: sourceMessage.messageHorizon,
+        sourceMessageId: sourceMessage.messageId, sourceDigest: sourceMessage.contentDigest,
+      });
+      if (!confirmation.resultingIntentVersionId || (confirmation.disposition !== "COMMITTED" && confirmation.disposition !== "REPLAYED")) {
+        return reply.status(409).send({ error: "CLARIFICATION_CONFIRMATION_REJECTED", disposition: confirmation.disposition });
+      }
+      const version = await options.intentStore.getVersion(confirmation.resultingIntentVersionId);
+      if (!version) return reply.status(500).send({ error: "CONFIRMED_INTENT_VERSION_MISSING" });
+      const bounded = deriveQualifiedLegacyBoundedRunRequest(version.state);
+      const requestBody = consultationRunRequestSchema.parse({
+        kind: "consultation", objective: bounded.goal, context: [], decisionNeed: "NONE", resourceNeed: "NONE",
+        sourceMessageId: sourceMessage.messageId, sourceMessageDigest: sourceMessage.contentDigest,
+        intentVersion: sourceMessage.messageHorizon, intentScopeId: proposal.intentScopeId, intentVersionId: version.intentVersionId,
+      });
+      const run = createPendingRun(conversationId, requestBody, stableUuid("consultation-material-run", conversationId, proposal.proposalId, version.intentVersionId));
+      const submission = await options.apiControlStore.submitRun({
+        run, intentBinding: { intentScopeId: proposal.intentScopeId, intentVersionId: version.intentVersionId },
+        dispatch: { logicalKey: `run:${run.id}:execute`, queueName: "lattice.run", payload: { runId: run.id, submittedVersion: run.version } },
+        idempotency: { scopeKey: apiSubjectForRequest(request), httpMethod: "POST", canonicalRoute: `/api/v1/conversations/${encodeURIComponent(conversationId)}/clarifications/${encodeURIComponent(proposal.proposalId)}/confirm`, idempotencyKey: `consultation-clarification:${parsed.data.turnId}`, requestHash: createApiRequestHash({ proposalDigest: proposal.proposalDigest, messageId: sourceMessage.messageId, contentDigest: sourceMessage.contentDigest }), expiresAt: new Date(Date.now() + IDEMPOTENCY_RETENTION_MS) },
+      });
+      if (submission.outcome === "conflict") return reply.status(409).send({ error: "CONSULTATION_CLARIFICATION_IDEMPOTENCY_CONFLICT" });
+      return reply.status(202).send({ status: "RUN_ACCEPTED", runId: submission.response.runId, intentScopeId: proposal.intentScopeId, intentVersionId: version.intentVersionId, proposalId: proposal.proposalId });
     },
   );
 
