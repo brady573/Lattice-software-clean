@@ -16,6 +16,7 @@ import {
 import { registerConsultationIntake } from "./consultation-intake.js";
 import { buildApp } from "./http-app.js";
 import { registerConversationApi } from "./conversation/conversation-api.js";
+import { registerConversationMembershipGuard } from "./conversation/conversation-membership-guard.js";
 import { registerConversationContinuityApi } from "./conversation/continuity-api.js";
 import {
   MemoryConversationStore,
@@ -44,10 +45,12 @@ import {
 import { registerDecisionPlanApi } from "./intent/decision-plan-api.js";
 import { DecisionPlanRecordingApiRunControlStore } from "./intent/decision-plan-run-control.js";
 import { createIntentAuthorityGeneralizedDecisionAdapter } from "./intent/generalized-decision-adapter.js";
-import { defaultCriterionCatalog } from "./decision/default-criterion-catalog.js";
+import type { ConsultationInterpreter } from "./intent/consultation-interpreter.js";
+import type { QualifiedCriterionCatalog } from "./decision/criterion-catalog.js";
 import {
   MemoryDecisionPlanStore,
   PostgresDecisionPlanStore,
+  type DecisionPlanFidelityPolicy,
   type DecisionPlanStore,
 } from "./intent/decision-plan-store.js";
 import { migrateRunIntentBindings } from "./intent/postgres-run-binding-store.js";
@@ -79,6 +82,8 @@ export interface RuntimeAppOptions {
   truthPipeline?: TruthExecutionPipeline;
   memoryDispatchDelayMs?: number;
   authenticatedSubjectResolver?: AuthenticatedSubjectResolver;
+  consultationInterpreter?: ConsultationInterpreter;
+  criterionCatalog?: QualifiedCriterionCatalog;
 }
 
 function nonNegativeDelay(value: number | undefined, fallback: number, name: string): number {
@@ -183,15 +188,14 @@ export async function migrateRuntimeDatabase(databaseUrl: string): Promise<void>
 }
 
 /**
- * Connect the canonical set of PostgreSQL-backed stores (with production
- * wrapping, e.g. DecisionPlan/ConversationRunIndex recording) used by
- * createRuntimeApp. Exported so tests can compose an explicitly legacy/
- * test-only bounded-decision route against store instances identical to
- * production, without canonical runtime registering that route itself.
+ * Connect the canonical PostgreSQL-backed stores and recording adapters used
+ * by createRuntimeApp. An optional planning-fidelity policy is accepted only
+ * by explicit non-canonical compositions; canonical runtime supplies none.
  */
 export async function connectPostgresRuntimeStores(
   databaseUrl: string,
   autoMigrate: boolean,
+  decisionPlanFidelityPolicy?: DecisionPlanFidelityPolicy,
 ): Promise<{
   runStore: RunStore;
   apiControlStore: ApiRunControlStore;
@@ -216,7 +220,10 @@ export async function connectPostgresRuntimeStores(
           try {
             const baseApiControlStore = await PostgresApiRunControlStore.connect(databaseUrl, { migrate: false });
             try {
-              const decisionPlanStore = await PostgresDecisionPlanStore.connect(databaseUrl, { migrate: false });
+              const decisionPlanStore = await PostgresDecisionPlanStore.connect(databaseUrl, {
+                migrate: false,
+                ...(decisionPlanFidelityPolicy ? { fidelityPolicy: decisionPlanFidelityPolicy } : {}),
+              });
               try {
                 const runIndexStore = await PostgresConversationRunIndexStore.connect(databaseUrl);
                 const decisionPlanControl = new DecisionPlanRecordingApiRunControlStore(baseApiControlStore, decisionPlanStore);
@@ -314,7 +321,9 @@ export async function createRuntimeApp(
         memoryRunStore,
         truthPipeline,
         memoryDispatchDelayMs,
-        createIntentAuthorityGeneralizedDecisionAdapter(memoryIntentStore, defaultCriterionCatalog),
+        options.criterionCatalog
+          ? createIntentAuthorityGeneralizedDecisionAdapter(memoryIntentStore, options.criterionCatalog)
+          : undefined,
       ),
       memoryDecisionPlanStore,
     );
@@ -335,7 +344,8 @@ export async function createRuntimeApp(
     getAuthenticatedSubject(request).subjectId;
 
   const app = buildApp({
-    runStore,    truthPipeline,
+    runStore,
+    truthPipeline,
     apiControlStore,
     apiSubject: authenticatedApiSubject,
     authoritativeConversationUi: true,
@@ -350,13 +360,17 @@ export async function createRuntimeApp(
       options.authenticatedSubjectResolver,
     ),
   });
+  registerConversationMembershipGuard(app, { conversationStore, runStore });
   registerConversationApi(app, { conversationStore, runStore });
   registerDurableUserMessageHistory(app, { userMessageStore });
   registerConsultationIntake(app, {
     intentStore,
+    conversationStore,
     userMessageStore,
     apiControlStore,
     runStore,
+    ...(options.consultationInterpreter ? { interpreter: options.consultationInterpreter } : {}),
+    ...(options.criterionCatalog ? { criterionCatalog: options.criterionCatalog } : {}),
     apiSubject: authenticatedApiSubject,
   });
   registerRunEventStream(app, { runStore });

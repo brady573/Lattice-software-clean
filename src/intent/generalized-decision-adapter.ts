@@ -24,6 +24,9 @@ export function createIntentAuthorityGeneralizedDecisionAdapter(
           `Qualified consultation decision requires a confirmed IntentVersion: ${request.intentVersionId}.`,
         );
       }
+      if (version.intentScopeId !== request.intentScopeId) {
+        throw new Error("Qualified consultation decision IntentVersion belongs to a different Intent scope.");
+      }
       return deriveGeneralizedDecisionIntentFromState(request.intentScopeId, version.intentVersionId, version.state);
     },
   };

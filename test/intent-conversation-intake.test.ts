@@ -18,10 +18,15 @@ import { PostgresRunStore } from "../src/postgres-run-store.js";
 import { MemoryRunStore } from "../src/run-store.js";
 import { createRuntimeApp, migrateRuntimeDatabase } from "../src/runtime-app.js";
 import { resolveRuntimeConfig } from "../src/runtime-config.js";
+import {
+  DECISION_MESSAGE,
+  FoundationalConsultationInterpreter,
+  FoundationalTruthPipeline,
+  foundationalCriterionCatalog,
+} from "./fixtures/foundational-consultation-fixture.js";
 
 const databaseUrl = process.env.DATABASE_URL;
 const initialContent = "I need a tablet under $1,300. I'd like at least 12 hours of battery life, but performance matters more.";
-const materialClarificationContent = "I need a tablet with price at most $1,300. I'd like batteryHours to be at least 12, but performance matters more.";
 
 async function waitForCompletedRun(app: FastifyInstance, runId: string): Promise<void> {
   for (let attempt = 0; attempt < 200; attempt += 1) {
@@ -62,6 +67,12 @@ test("runtime canonical conversation API routes material clarification through I
       LATTICE_AUTO_MIGRATE: "false",
       LATTICE_AUTHENTICATION_MODE: "development-fixture",
     }),
+    {
+      memoryDispatchDelayMs: 1,
+      truthPipeline: new FoundationalTruthPipeline(),
+      consultationInterpreter: new FoundationalConsultationInterpreter(),
+      criterionCatalog: foundationalCriterionCatalog,
+    },
   );
 
   try {
@@ -71,7 +82,7 @@ test("runtime canonical conversation API routes material clarification through I
     const response = await app.inject({
       method: "POST",
       url: `/api/v1/conversations/${conversationId}/turns`,
-      payload: { turnId: "turn-1", message: materialClarificationContent },
+      payload: { turnId: "turn-1", message: DECISION_MESSAGE },
     });
     assert.equal(response.statusCode, 202);
     const pending = response.json() as { status: string; proposalId: string; intentScopeId: string; intentVersionId: string };
@@ -83,11 +94,12 @@ test("runtime canonical conversation API routes material clarification through I
     const confirmation = await app.inject({
       method: "POST",
       url: `/api/v1/conversations/${conversationId}/clarifications/${pending.proposalId}/confirm`,
-      payload: { turnId: "turn-2", message: "Hard requirement." },
+      payload: { turnId: "turn-2", message: "Yes, that's correct." },
     });
     assert.equal(confirmation.statusCode, 202);
     const accepted = confirmation.json() as { status: string; runId: string; intentScopeId: string; intentVersionId: string };
     assert.equal(accepted.status, "RUN_ACCEPTED");
+    assert.equal((confirmation.json() as { decisionNeed: string }).decisionNeed, "QUALIFIED");
     assert.equal(accepted.intentScopeId, `consultation:${conversationId}`);
     assert.notEqual(accepted.intentVersionId, pending.intentVersionId);
 
@@ -97,7 +109,7 @@ test("runtime canonical conversation API routes material clarification through I
     const outcome = outcomeResponse.json<{ outcome: { kind: string; decision: { outcome: string; winnerCandidateId?: string }; explanation: string | null } }>().outcome;
     assert.equal(outcome.kind, "DECISION_SUPPORT");
     assert.equal(outcome.decision.outcome, "RECOMMENDATION");
-    assert.ok(outcome.decision.winnerCandidateId);
+    assert.equal(outcome.decision.winnerCandidateId, "cedar");
     assert.match(outcome.explanation ?? "", /Solandra recommends/);
   } finally {
     await app.close();

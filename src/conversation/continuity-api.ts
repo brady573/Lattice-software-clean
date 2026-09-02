@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { getAuthenticatedSubject } from "../auth/authenticated-subject.js";
-import { isConsultationRunRequest } from "../domain.js";
+import { isConsultationRunRequest, type LatticeRunRequest } from "../domain.js";
 import type { DecisionPlanStore, DurableDecisionPlan } from "../intent/decision-plan-store.js";
 import type { IntentUserMessageStore } from "../intent/source-message-store.js";
 import {
@@ -34,7 +34,7 @@ async function readLatestPresentationBasis(
   options: ConversationContinuityApiOptions,
 ): Promise<{
   run: Awaited<ReturnType<RunStore["get"]>>;
-  decisionPlan: DurableDecisionPlan | undefined;
+  decisionPlan: DurableDecisionPlan<LatticeRunRequest> | undefined;
 }> {
   const runIds = await options.runIndexStore.listRunIds(conversationId);
   for (let index = runIds.length - 1; index >= 0; index -= 1) {

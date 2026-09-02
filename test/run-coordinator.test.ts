@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
 import type { RunRequest } from "../src/domain.js";
+import { laptopFixture } from "../src/fixtures.js";
 import {
   createPendingRun,
   executePersistedRun,
@@ -13,7 +14,7 @@ import {
   type RunTransition,
   type RunTransitionResult,
 } from "../src/run-store.js";
-import { createDefaultOfflineTruthPipeline } from "../src/truth/execution-pipeline.js";
+import { OfflineFixtureTruthPipeline } from "../src/truth/execution-pipeline.js";
 
 const request: RunRequest = {
   goal: "Choose a laptop under $1300 with at least 12 hours of battery life, prioritizing performance.",
@@ -26,7 +27,7 @@ const request: RunRequest = {
 
 test("Run coordinator tick advances at most one durable epoch and remains resumable", async () => {
   const store = new MemoryRunStore();
-  const pipeline = createDefaultOfflineTruthPipeline();
+  const pipeline = new OfflineFixtureTruthPipeline(laptopFixture);
   const run = createPendingRun("coordinator-tick", request, randomUUID());
   await store.create(run);
 
@@ -80,7 +81,7 @@ class StaleTransitionRunStore extends MemoryRunStore {
 
 test("Run coordinator tick reports lost epoch ownership as retryable without overwriting state", async () => {
   const store = new StaleTransitionRunStore();
-  const pipeline = createDefaultOfflineTruthPipeline();
+  const pipeline = new OfflineFixtureTruthPipeline(laptopFixture);
   const run = createPendingRun("coordinator-stale", request, randomUUID());
   await store.create(run);
 

@@ -6,7 +6,7 @@ import { createDecision, explainDecision } from "../src/engine.js";
 import { laptopFixture } from "../src/fixtures.js";
 import { MemoryRunStore } from "../src/run-store.js";
 import { executePersistedRun } from "../src/run-execution.js";
-import { createDefaultOfflineTruthPipeline, OfflineFixtureTruthPipeline } from "../src/truth/execution-pipeline.js";
+import { OfflineFixtureTruthPipeline } from "../src/truth/execution-pipeline.js";
 
 const request: RunRequest = {
   goal: "Choose a laptop under $1300 with at least 12 hours of battery life, prioritizing performance.",
@@ -84,6 +84,21 @@ test("legacy admitted=true cannot override a failed V36 claim proof obligation",
   assert.equal(createDecision(request, dataset).outcome, "UNRESOLVED");
 });
 
+test("an eligible candidate does not force a winner while another candidate's eligibility is unresolved", () => {
+  const dataset = {
+    ...laptopFixture,
+    truthEvidence: laptopFixture.truthEvidence.map((profile) =>
+      profile.evidenceId === "e-forge-battery"
+        ? { ...profile, verification: "UNVERIFIED" as const }
+        : profile),
+  };
+  const decision = createDecision(request, dataset);
+  assert.equal(decision.outcome, "UNRESOLVED");
+  assert.equal(decision.winnerCandidateId, undefined);
+  assert.deepEqual(decision.frontierCandidateIds, ["nova-air"]);
+  assert.deepEqual(decision.materialUnknowns, ["forge-15:batteryHours"]);
+});
+
 test("Solandra explanation remains faithful to the structured decision", () => {
   const decision = createDecision(request, laptopFixture);
   const explanation = explainDecision(decision, laptopFixture);
@@ -92,7 +107,7 @@ test("Solandra explanation remains faithful to the structured decision", () => {
 });
 
 test("API creates a persisted-truth, persisted-decision V36 run", async () => {
-  const app = buildApp();
+  const app = buildApp({ truthPipeline: new OfflineFixtureTruthPipeline(laptopFixture) });
   const create = await app.inject({ method: "POST", url: "/runs", payload: request });
   assert.equal(create.statusCode, 201);
   const run = create.json();
@@ -137,7 +152,7 @@ test("API persists a non-winner UNRESOLVED decision as authoritative Run storage
 
 test("versioned API accepts a durable Run before worker execution and exposes polling lifecycle", async () => {
   const store = new MemoryRunStore();
-  const pipeline = createDefaultOfflineTruthPipeline();
+  const pipeline = new OfflineFixtureTruthPipeline(laptopFixture);
   const app = buildApp({ runStore: store, truthPipeline: pipeline });
   const submit = await app.inject({
     method: "POST",

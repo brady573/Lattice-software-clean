@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
 import { MemoryIntentAuthorityStore, PostgresIntentAuthorityStore } from "../src/intent/index.js";
+import { assertPlanningMaterialFaithfulToExactIntent } from "../src/intent/exact-planning-fidelity.js";
 import {
   MemoryDecisionPlanStore,
   PostgresDecisionPlanStore,
@@ -81,7 +82,7 @@ test("DecisionPlan rejects planning material that contradicts its exact IntentVe
       operations: boundedIntentOperations,
     },
   });
-  const planStore = new MemoryDecisionPlanStore(intentStore);
+  const planStore = new MemoryDecisionPlanStore(intentStore, assertPlanningMaterialFaithfulToExactIntent);
   try {
     await assert.rejects(
       planStore.bind({
@@ -129,7 +130,10 @@ test("PostgreSQL DecisionPlan survives store restart with exact IntentVersion bi
     });
     versionId = scope.currentIntentVersionId;
 
-    const first = await PostgresDecisionPlanStore.connect(databaseUrl, { migrate: false });
+    const first = await PostgresDecisionPlanStore.connect(databaseUrl, {
+      migrate: false,
+      fidelityPolicy: assertPlanningMaterialFaithfulToExactIntent,
+    });
     const created = await first.bind({
       decisionPlanId: decisionPlanIdForRun(runId),
       runId,
@@ -139,7 +143,10 @@ test("PostgreSQL DecisionPlan survives store restart with exact IntentVersion bi
     });
     await first.close();
 
-    const reopened = await PostgresDecisionPlanStore.connect(databaseUrl, { migrate: false });
+    const reopened = await PostgresDecisionPlanStore.connect(databaseUrl, {
+      migrate: false,
+      fidelityPolicy: assertPlanningMaterialFaithfulToExactIntent,
+    });
     const restored = await reopened.getByRunId(runId);
     assert.deepEqual(restored, created);
     await reopened.close();

@@ -80,22 +80,18 @@ A successful local-model benchmark is development evidence for the exact model/r
 
 M8-A establishes a provider-neutral request security context whose Product-facing contract is only `AuthenticatedSubject { subjectId }`. Development defaults to the explicit local fixture mode `LATTICE_AUTHENTICATION_MODE=development-fixture` with `LATTICE_DEVELOPMENT_FIXTURE_SUBJECT_ID=fixture-user`; the fixture subject can be changed for local/test execution. `LATTICE_AUTHENTICATION_MODE=required` removes that fallback and authoritative `/api/v1/*` requests fail closed with `401 AUTHENTICATION_REQUIRED` until runtime composition injects an authenticated-subject resolver. Provider tokens, cookies, JWT claims, OAuth schemas, and other provider-specific identity mechanisms are intentionally outside this Product contract.
 
-Create a legacy synchronous fixture run:
+Create a canonical free-form consultation turn after creating a conversation:
 
 ```bash
-curl -sS -X POST http://127.0.0.1:3000/runs \
+curl -sS -X POST http://127.0.0.1:3000/api/v1/conversations/CONVERSATION_ID/turns \
   -H 'content-type: application/json' \
   -d '{
-    "goal":"Choose an option under $1300 with at least 12 hours of battery life, prioritizing performance.",
-    "hardConstraints":[
-      {"criterion":"price","operator":"lte","value":1300},
-      {"criterion":"batteryHours","operator":"gte","value":12}
-    ],
-    "priorities":[{"criterion":"performance","weight":1}]
+    "turnId":"turn-1",
+    "message":"What should I know about preserving a sourdough starter during a short trip?"
   }'
 ```
 
-Expected decision: `nova-air`. `atlas-pro` has a higher raw performance score but is ineligible because its price exceeds the hard limit.
+Canonical runtime composition contains no built-in domain grammar, candidate fixture, or criterion catalog. A qualified interpreter, criterion catalog, and evidence composition must be supplied before a decision need can move from `UNRESOLVED` to `QUALIFIED`; material interpreted meaning remains pending until USER confirmation.
 
 The versioned message API has an atomic asynchronous Run-acceptance boundary, durable idempotency, polling/result surfaces, durable cancellation, and an at-least-once Run-worker execution boundary. Durable Execution Runtime composition, the V36 continuation handshake, conversation/progress continuity, and M8 subject/privacy boundaries have all been implemented in their accepted milestone scopes; exact validation provenance remains revision-bound. See `docs/ROADMAP.md` for the current execution view.
 

@@ -1,5 +1,5 @@
 import { isDeepStrictEqual } from "node:util";
-import type { FixtureDataset } from "../fixtures.js";
+import type { FixtureDataset } from "./fixture-dataset.js";
 import { adjudicateClaim } from "./adjudication.js";
 import { assertTruthBundleIntegrity } from "./invariants.js";
 import type { TruthResearchProvider } from "./pipeline.js";

@@ -8,7 +8,7 @@ import type {
   RunRequest,
   StructuredDecision,
 } from "./domain.js";
-import type { FixtureDataset } from "./fixtures.js";
+import type { FixtureDataset } from "./truth/fixture-dataset.js";
 import {
   createSolandraExplanationPlan,
   renderCanonicalExplanation,
@@ -96,22 +96,34 @@ export function createDecisionFromAdmittedEvidence(
     };
   });
   const normalized = normalizeScores(evaluations);
-  const eligible = normalized.filter((evaluation) => evaluation.eligible).sort((left, right) => right.rawScore - left.rawScore);
-  const winner = eligible[0];
-  if (!winner) {
-    const unresolved = normalized.flatMap((evaluation) =>
-      evaluation.constraints.filter((constraint) => constraint.passed === null)
-        .map((constraint) => `${evaluation.candidateId}:${constraint.criterion}`));
+  const unresolved = normalized.flatMap((evaluation) =>
+    evaluation.constraints.filter((constraint) => constraint.passed === null)
+      .map((constraint) => `${evaluation.candidateId}:${constraint.criterion}`));
+  if (unresolved.length > 0) {
     return {
       goal: request.goal,
-      outcome: unresolved.length > 0 ? "UNRESOLVED" : "NO_ELIGIBLE_CANDIDATE",
-      frontierCandidateIds: [],
+      outcome: "UNRESOLVED",
+      frontierCandidateIds: normalized.filter((evaluation) => evaluation.eligible)
+        .map((evaluation) => evaluation.candidateId),
       tiedCandidateIds: [],
       materialUnknowns: unresolved,
       evaluations: normalized,
-      rationale: [unresolved.length > 0
-        ? "The available evidence does not resolve eligibility for a safe recommendation."
-        : "No candidate satisfies every hard constraint with admitted evidence."],
+      rationale: ["The available evidence leaves at least one candidate's eligibility unresolved, so no winner is forced."],
+      evidenceIds: [],
+      truthAssessmentIds,
+    };
+  }
+  const eligible = normalized.filter((evaluation) => evaluation.eligible).sort((left, right) => right.rawScore - left.rawScore);
+  const winner = eligible[0];
+  if (!winner) {
+    return {
+      goal: request.goal,
+      outcome: "NO_ELIGIBLE_CANDIDATE",
+      frontierCandidateIds: [],
+      tiedCandidateIds: [],
+      materialUnknowns: [],
+      evaluations: normalized,
+      rationale: ["No candidate satisfies every hard constraint with admitted evidence."],
       evidenceIds: [],
       truthAssessmentIds,
     };

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { defaultCriterionCatalog } from "./decision/default-criterion-catalog.js";
+import type { QualifiedCriterionCatalog } from "./decision/criterion-catalog.js";
 import { createIntentAuthorityGeneralizedDecisionAdapter } from "./intent/generalized-decision-adapter.js";
 import { PostgresIntentAuthorityStore } from "./intent/index.js";
 import { PostgresOrchestrationStore } from "./postgres-orchestration-store.js";
@@ -141,6 +141,7 @@ export class PollingRunWorkerLoop {
 
 export interface StandaloneRunWorkerOptions {
   truthPipeline?: TruthExecutionPipeline;
+  criterionCatalog?: QualifiedCriterionCatalog;
   onPollError?: (error: unknown) => void;
 }
 
@@ -176,21 +177,24 @@ export async function createStandaloneRunWorker(
     await runStore.close();
     throw error;
   }
+  if (!orchestrationStore || !continuationBridge || !intentStore) {
+    await runStore.close();
+    throw new Error("Standalone Run worker failed to initialize its required durable stores.");
+  }
 
-  const generalizedDecisionAdapter = createIntentAuthorityGeneralizedDecisionAdapter(
-    intentStore,
-    defaultCriterionCatalog,
-  );
+  const generalizedDecisionAdapter = options.criterionCatalog
+    ? createIntentAuthorityGeneralizedDecisionAdapter(intentStore, options.criterionCatalog)
+    : undefined;
   const truthPipeline = options.truthPipeline ?? createDefaultOfflineTruthPipeline();
   const loop = new PollingRunWorkerLoop({
     pollMs: config.pollMs,
     poll: async () => {
       await processRunDispatches({
         runStore,
-        orchestrationStore: orchestrationStore!,
-        continuationBridge: continuationBridge!,
+        orchestrationStore,
+        continuationBridge,
         truthPipeline,
-        generalizedDecisionAdapter,
+        ...(generalizedDecisionAdapter ? { generalizedDecisionAdapter } : {}),
         workerId: config.workerId,
         now: new Date(),
         leaseMs: config.leaseMs,
@@ -213,13 +217,13 @@ export async function createStandaloneRunWorker(
       closed = true;
       await loop.close();
       try {
-        await continuationBridge!.close();
+        await continuationBridge.close();
       } finally {
         try {
-          await orchestrationStore!.close();
+          await orchestrationStore.close();
         } finally {
           try {
-            await intentStore!.close();
+            await intentStore.close();
           } finally {
             await runStore.close();
           }

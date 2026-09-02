@@ -100,7 +100,9 @@ test("M8-C isolates Conversation-derived messages, intent writes, Runs, plans, p
       url: `/api/v1/runs/${binding.runId}/decision-plan`,
       headers: ownerHeaders,
     });
-    assert.equal(ownerPlan.statusCode, 404);
+    assert.equal(ownerPlan.statusCode, 200);
+    assert.equal(ownerPlan.json().decisionPlan.intentScopeId, binding.intentScopeId);
+    assert.equal(ownerPlan.json().decisionPlan.intentVersionId, binding.intentVersionId);
 
     const ownerResult = await app.inject({
       method: "GET",

@@ -2,34 +2,73 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { Pool } from "pg";
-import type { RunRequest } from "../domain.js";
-import { assertPlanningMaterialFaithfulToExactIntent } from "./exact-planning-fidelity.js";
+import {
+  isConsultationRunRequest,
+  type LatticeRunRequest,
+  type RunRequest,
+} from "../domain.js";
 import type { IntentAuthorityStore } from "./store.js";
 import type { IntentState } from "./types.js";
 
 const migration = "029_run_decision_plan_binding.sql" as const;
 
-export interface DurableDecisionPlan {
+export interface DurableDecisionPlan<PlanningMaterial extends LatticeRunRequest = RunRequest> {
   decisionPlanId: string;
   runId: string;
   intentScopeId: string;
   intentVersionId: string;
-  planningMaterial: RunRequest;
+  planningMaterial: PlanningMaterial;
   boundAt: string;
 }
 
 export interface DecisionPlanStore {
   readonly kind: "memory" | "postgres";
-  bind(input: Omit<DurableDecisionPlan, "boundAt">): Promise<DurableDecisionPlan>;
-  getByRunId(runId: string): Promise<DurableDecisionPlan | undefined>;
+  bind(
+    input: Omit<DurableDecisionPlan<LatticeRunRequest>, "boundAt">,
+  ): Promise<DurableDecisionPlan<LatticeRunRequest>>;
+  getByRunId(runId: string): Promise<DurableDecisionPlan<LatticeRunRequest> | undefined>;
   close(): Promise<void>;
+}
+
+export type DecisionPlanFidelityPolicy = (
+  state: IntentState,
+  planningMaterial: LatticeRunRequest,
+) => void;
+
+function assertCanonicalConsultationPlanningFidelity(
+  state: IntentState,
+  planningMaterial: LatticeRunRequest,
+): void {
+  if (!isConsultationRunRequest(planningMaterial)) {
+    throw new Error("Legacy decision planning requires an explicitly injected qualified fidelity policy.");
+  }
+  const objective = state.objective?.value;
+  if (
+    objective?.state !== "VALUE"
+    || typeof objective.value !== "string"
+    || objective.value !== planningMaterial.objective
+  ) {
+    throw new Error("Consultation DecisionPlan objective is not faithful to its exact IntentVersion.");
+  }
+  if (
+    planningMaterial.decisionNeed === "QUALIFIED"
+    && (
+      Object.keys(state.requirements).length === 0
+      || Object.keys(state.preferences).length === 0
+    )
+  ) {
+    throw new Error("A qualified consultation DecisionPlan requires authoritative decision semantics.");
+  }
 }
 
 export function decisionPlanIdForRun(runId: string): string {
   return `decision-plan:${runId}`;
 }
 
-function samePlan(left: DurableDecisionPlan, right: Omit<DurableDecisionPlan, "boundAt">): boolean {
+function samePlan(
+  left: DurableDecisionPlan<LatticeRunRequest>,
+  right: Omit<DurableDecisionPlan<LatticeRunRequest>, "boundAt">,
+): boolean {
   return left.decisionPlanId === right.decisionPlanId
     && left.runId === right.runId
     && left.intentScopeId === right.intentScopeId
@@ -39,24 +78,38 @@ function samePlan(left: DurableDecisionPlan, right: Omit<DurableDecisionPlan, "b
 
 export class MemoryDecisionPlanStore implements DecisionPlanStore {
   readonly kind = "memory" as const;
-  private readonly plansByRunId = new Map<string, DurableDecisionPlan>();
+  private readonly plansByRunId = new Map<string, DurableDecisionPlan<LatticeRunRequest>>();
 
-  constructor(private readonly intentStore: IntentAuthorityStore) {
+  constructor(
+    private readonly intentStore: IntentAuthorityStore,
+    private readonly fidelityPolicy: DecisionPlanFidelityPolicy = assertCanonicalConsultationPlanningFidelity,
+  ) {
     if (intentStore.kind !== "memory") throw new Error("Memory DecisionPlan store requires memory Intent Authority.");
   }
 
-  async bind(input: Omit<DurableDecisionPlan, "boundAt">): Promise<DurableDecisionPlan> {
+  async bind(
+    input: Omit<DurableDecisionPlan<LatticeRunRequest>, "boundAt">,
+  ): Promise<DurableDecisionPlan<LatticeRunRequest>> {
     const exactVersion = await this.intentStore.getVersion(input.intentVersionId);
     if (!exactVersion || exactVersion.intentScopeId !== input.intentScopeId) {
       throw new Error("DecisionPlan must bind an existing exact IntentVersion in the requested IntentScope.");
     }
-    assertPlanningMaterialFaithfulToExactIntent(exactVersion.state, input.planningMaterial);
+    if (
+      isConsultationRunRequest(input.planningMaterial)
+      && (
+        input.planningMaterial.intentScopeId !== input.intentScopeId
+        || input.planningMaterial.intentVersionId !== input.intentVersionId
+      )
+    ) {
+      throw new Error("Consultation DecisionPlan request identity does not match its exact IntentVersion binding.");
+    }
+    this.fidelityPolicy(exactVersion.state, input.planningMaterial);
     const existing = this.plansByRunId.get(input.runId);
     if (existing) {
       if (!samePlan(existing, input)) throw new Error("Run DecisionPlan identity was reused with different planning material.");
       return structuredClone(existing);
     }
-    const plan: DurableDecisionPlan = {
+    const plan: DurableDecisionPlan<LatticeRunRequest> = {
       ...structuredClone(input),
       boundAt: new Date().toISOString(),
     };
@@ -64,7 +117,7 @@ export class MemoryDecisionPlanStore implements DecisionPlanStore {
     return structuredClone(plan);
   }
 
-  async getByRunId(runId: string): Promise<DurableDecisionPlan | undefined> {
+  async getByRunId(runId: string): Promise<DurableDecisionPlan<LatticeRunRequest> | undefined> {
     const plan = this.plansByRunId.get(runId);
     return plan ? structuredClone(plan) : undefined;
   }
@@ -102,7 +155,10 @@ async function assertReady(pool: Pool): Promise<void> {
 
 export class PostgresDecisionPlanStore implements DecisionPlanStore {
   readonly kind = "postgres" as const;
-  private constructor(private readonly pool: Pool) {}
+  private constructor(
+    private readonly pool: Pool,
+    private readonly fidelityPolicy: DecisionPlanFidelityPolicy,
+  ) {}
 
   static async migrate(connectionString: string): Promise<void> {
     const pool = new Pool({ connectionString });
@@ -115,34 +171,51 @@ export class PostgresDecisionPlanStore implements DecisionPlanStore {
     }
   }
 
-  static async connect(connectionString: string, options: { migrate?: boolean } = {}): Promise<PostgresDecisionPlanStore> {
+  static async connect(
+    connectionString: string,
+    options: { migrate?: boolean; fidelityPolicy?: DecisionPlanFidelityPolicy } = {},
+  ): Promise<PostgresDecisionPlanStore> {
     const pool = new Pool({ connectionString });
     try {
       await pool.query("SELECT 1");
       if (options.migrate ?? false) await applyMigration(pool);
       await assertReady(pool);
-      return new PostgresDecisionPlanStore(pool);
+      return new PostgresDecisionPlanStore(
+        pool,
+        options.fidelityPolicy ?? assertCanonicalConsultationPlanningFidelity,
+      );
     } catch (error) {
       await pool.end();
       throw error;
     }
   }
 
-  async bind(input: Omit<DurableDecisionPlan, "boundAt">): Promise<DurableDecisionPlan> {
+  async bind(
+    input: Omit<DurableDecisionPlan<LatticeRunRequest>, "boundAt">,
+  ): Promise<DurableDecisionPlan<LatticeRunRequest>> {
     const exact = await this.pool.query<{ intent_version_id: string; state_json: IntentState }>(
       "SELECT intent_version_id,state_json FROM intent_versions WHERE intent_scope_id=$1 AND intent_version_id=$2",
       [input.intentScopeId, input.intentVersionId],
     );
     const exactRow = exact.rows[0];
     if (!exactRow) throw new Error("DecisionPlan must bind an existing exact IntentVersion in the requested IntentScope.");
-    assertPlanningMaterialFaithfulToExactIntent(exactRow.state_json, input.planningMaterial);
+    if (
+      isConsultationRunRequest(input.planningMaterial)
+      && (
+        input.planningMaterial.intentScopeId !== input.intentScopeId
+        || input.planningMaterial.intentVersionId !== input.intentVersionId
+      )
+    ) {
+      throw new Error("Consultation DecisionPlan request identity does not match its exact IntentVersion binding.");
+    }
+    this.fidelityPolicy(exactRow.state_json, input.planningMaterial);
 
     const inserted = await this.pool.query<{
       decision_plan_id: string;
       run_id: string;
       intent_scope_id: string;
       intent_version_id: string;
-      planning_material_json: RunRequest;
+      planning_material_json: LatticeRunRequest;
       bound_at: Date | string;
     }>(
       `INSERT INTO decision_plans(decision_plan_id,run_id,intent_scope_id,intent_version_id,planning_material_json)
@@ -169,13 +242,13 @@ export class PostgresDecisionPlanStore implements DecisionPlanStore {
     return existing;
   }
 
-  async getByRunId(runId: string): Promise<DurableDecisionPlan | undefined> {
+  async getByRunId(runId: string): Promise<DurableDecisionPlan<LatticeRunRequest> | undefined> {
     const result = await this.pool.query<{
       decision_plan_id: string;
       run_id: string;
       intent_scope_id: string;
       intent_version_id: string;
-      planning_material_json: RunRequest;
+      planning_material_json: LatticeRunRequest;
       bound_at: Date | string;
     }>(
       "SELECT decision_plan_id,run_id,intent_scope_id,intent_version_id,planning_material_json,bound_at FROM decision_plans WHERE run_id=$1",

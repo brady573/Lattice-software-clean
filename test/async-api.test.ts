@@ -75,7 +75,10 @@ test("runtime completes an accepted in-memory asynchronous Run and exposes its l
     LATTICE_DEPLOYMENT_MODE: "development",
     LATTICE_TRUTH_MODE: "v36-offline",
   } as NodeJS.ProcessEnv);
-  const app = await createRuntimeApp(config, { memoryDispatchDelayMs: 5 });
+  const app = await createRuntimeApp(config, {
+    memoryDispatchDelayMs: 5,
+    truthPipeline: new OfflineFixtureTruthPipeline(laptopFixture),
+  });
   try {
     const createdConversation = await app.inject({ method: "POST", url: "/api/v1/conversations" });
     assert.equal(createdConversation.statusCode, 201);

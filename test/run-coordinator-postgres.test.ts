@@ -3,13 +3,14 @@ import { randomUUID } from "node:crypto";
 import test from "node:test";
 import { Pool } from "pg";
 import type { RunRequest } from "../src/domain.js";
+import { laptopFixture } from "../src/fixtures.js";
 import { PostgresRunStore } from "../src/postgres-run-store.js";
 import {
   createPendingRun,
   executePersistedRun,
   executePersistedRunTick,
 } from "../src/run-execution.js";
-import { createDefaultOfflineTruthPipeline } from "../src/truth/execution-pipeline.js";
+import { OfflineFixtureTruthPipeline } from "../src/truth/execution-pipeline.js";
 
 const databaseUrl = process.env.DATABASE_URL;
 
@@ -28,7 +29,7 @@ test(
   async () => {
     assert.ok(databaseUrl);
     const runId = randomUUID();
-    const pipeline = createDefaultOfflineTruthPipeline();
+    const pipeline = new OfflineFixtureTruthPipeline(laptopFixture);
     const pool = new Pool({ connectionString: databaseUrl });
     let firstStore: PostgresRunStore | undefined;
     let secondStore: PostgresRunStore | undefined;

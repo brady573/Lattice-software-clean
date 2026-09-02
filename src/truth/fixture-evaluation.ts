@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { Evidence } from "../domain.js";
-import type { FixtureDataset } from "../fixtures.js";
+import type { FixtureDataset } from "./fixture-dataset.js";
 import { adjudicateClaim } from "./adjudication.js";
 import { materializeDecisionEvidence, type AdmittedDecisionEvidence } from "./admission.js";
 import { compileClaim } from "./claim-compiler.js";

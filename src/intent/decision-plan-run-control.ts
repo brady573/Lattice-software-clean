@@ -5,7 +5,6 @@ import type {
   ApiRunSupersessionInput,
   ApiRunSupersessionResult,
 } from "../api-control-store.js";
-import { isConsultationRunRequest } from "../domain.js";
 import {
   decisionPlanIdForRun,
   type DecisionPlanStore,
@@ -18,7 +17,7 @@ export class DecisionPlanRecordingApiRunControlStore implements ApiRunControlSto
   ) {}
 
   private async bindPlan(input: ApiRunSubmissionInput): Promise<void> {
-    if (!input.intentBinding || isConsultationRunRequest(input.run.request)) return;
+    if (!input.intentBinding) return;
     await this.decisionPlanStore.bind({
       decisionPlanId: decisionPlanIdForRun(input.run.id),
       runId: input.run.id,
@@ -34,15 +33,13 @@ export class DecisionPlanRecordingApiRunControlStore implements ApiRunControlSto
   }
 
   async supersedeRun(input: ApiRunSupersessionInput): Promise<ApiRunSupersessionResult> {
-    if (!isConsultationRunRequest(input.supersession.successorRun.request)) {
-      await this.decisionPlanStore.bind({
-        decisionPlanId: decisionPlanIdForRun(input.supersession.successorRun.id),
-        runId: input.supersession.successorRun.id,
-        intentScopeId: input.supersession.successorBinding.intentScopeId,
-        intentVersionId: input.supersession.successorBinding.intentVersionId,
-        planningMaterial: structuredClone(input.supersession.successorRun.request),
-      });
-    }
+    await this.decisionPlanStore.bind({
+      decisionPlanId: decisionPlanIdForRun(input.supersession.successorRun.id),
+      runId: input.supersession.successorRun.id,
+      intentScopeId: input.supersession.successorBinding.intentScopeId,
+      intentVersionId: input.supersession.successorBinding.intentVersionId,
+      planningMaterial: structuredClone(input.supersession.successorRun.request),
+    });
     return this.base.supersedeRun(input);
   }
 

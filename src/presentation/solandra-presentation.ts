@@ -1,5 +1,10 @@
 import { createHash } from "node:crypto";
-import type { LatticeRun, RunRequest } from "../domain.js";
+import {
+  isConsultationRunRequest,
+  type LatticeRun,
+  type LatticeRunRequest,
+  type RunRequest,
+} from "../domain.js";
 import type { DurableDecisionPlan } from "../intent/decision-plan-store.js";
 
 export type SolandraSemanticPhase = "listening" | "understanding" | "knowledge_gap" | "actionable";
@@ -88,8 +93,13 @@ function formatConstraintValue(operator: "lte" | "gte" | "eq", value: string | n
   return `${prefix} ${String(value)}`;
 }
 
-function understandingFromPlan(plan: DurableDecisionPlan | undefined): DurableUnderstanding | undefined {
+type AnyDecisionPlan = DurableDecisionPlan<LatticeRunRequest>;
+
+function understandingFromPlan(plan: AnyDecisionPlan | undefined): DurableUnderstanding | undefined {
   if (!plan) return undefined;
+  if (isConsultationRunRequest(plan.planningMaterial)) {
+    return { goal: plan.planningMaterial.objective, requirements: [], preferences: [] };
+  }
   return {
     goal: plan.planningMaterial.goal,
     requirements: plan.planningMaterial.hardConstraints.map((item) => ({ ...item })),
@@ -97,12 +107,13 @@ function understandingFromPlan(plan: DurableDecisionPlan | undefined): DurableUn
   };
 }
 
-function supportingFromPlan(plan: DurableDecisionPlan | undefined): SupportingKnowledge[] {
+function supportingFromPlan(plan: AnyDecisionPlan | undefined): SupportingKnowledge[] {
   if (!plan) return [];
   const provenance: ProvenanceRef[] = [
     { authority: "intent_authority", ref: plan.intentVersionId },
     { authority: "decision_plan", ref: plan.decisionPlanId },
   ];
+  if (isConsultationRunRequest(plan.planningMaterial)) return [];
   return [
     ...plan.planningMaterial.hardConstraints.map((item, index) => ({
       id: `requirement:${index}:${item.criterion}`,
@@ -121,14 +132,14 @@ function supportingFromPlan(plan: DurableDecisionPlan | undefined): SupportingKn
   ];
 }
 
-function phaseFromRun(run: LatticeRun | undefined, plan: DurableDecisionPlan | undefined): SolandraSemanticPhase {
+function phaseFromRun(run: LatticeRun | undefined, plan: AnyDecisionPlan | undefined): SolandraSemanticPhase {
   if (!run) return plan ? "understanding" : "listening";
   if (run.status === "AWAITING_CLARIFICATION") return "knowledge_gap";
   if (run.status === "COMPLETED" && run.decision !== null) return "actionable";
   return plan ? "understanding" : "listening";
 }
 
-function resourcesFor(run: LatticeRun | undefined, plan: DurableDecisionPlan | undefined): ResourceDescriptor[] {
+function resourcesFor(run: LatticeRun | undefined, plan: AnyDecisionPlan | undefined): ResourceDescriptor[] {
   if (!run || run.status !== "COMPLETED" || run.decision === null || !plan) return [];
   return [
     {
@@ -165,7 +176,7 @@ function revisionFor(snapshot: Omit<SolandraPresentationSnapshot, "presentationR
 export function composeSolandraPresentation(input: {
   conversationId: string;
   run?: LatticeRun;
-  decisionPlan?: DurableDecisionPlan;
+  decisionPlan?: AnyDecisionPlan;
   knownRevision?: string;
 }): SolandraPresentationSnapshot {
   const { conversationId, run, decisionPlan, knownRevision } = input;
@@ -224,7 +235,8 @@ export function composeSolandraPresentation(input: {
   return { ...revisionInput, presentationRevision, transition };
 }
 
-function criteriaText(plan: DurableDecisionPlan): string {
+function criteriaText(plan: AnyDecisionPlan): string {
+  if (isConsultationRunRequest(plan.planningMaterial)) return plan.planningMaterial.objective;
   const requirements = plan.planningMaterial.hardConstraints
     .map((item) => `Requirement — ${item.criterion}: ${formatConstraintValue(item.operator, item.value)}`);
   const preferences = plan.planningMaterial.priorities
@@ -236,7 +248,7 @@ export function hydrateSolandraResource(input: {
   snapshot: SolandraPresentationSnapshot;
   resourceId: string;
   run?: LatticeRun;
-  decisionPlan?: DurableDecisionPlan;
+  decisionPlan?: AnyDecisionPlan;
 }): HydratedResource | undefined {
   const descriptor = input.snapshot.resources.find((item) => item.id === input.resourceId);
   if (!descriptor) return undefined;

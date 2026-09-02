@@ -3,9 +3,11 @@ import { randomUUID } from "node:crypto";
 import test from "node:test";
 import type { FastifyInstance } from "fastify";
 import { Pool } from "pg";
+import { laptopFixture } from "../src/fixtures.js";
 import { createRuntimeApp, connectPostgresRuntimeStores } from "../src/runtime-app.js";
 import { resolveRuntimeConfig } from "../src/runtime-config.js";
 import { registerBoundedClearDecisionIntentIntake } from "../src/intent/bounded-clear-decision-intake.js";
+import { assertPlanningMaterialFaithfulToExactIntent } from "../src/intent/exact-planning-fidelity.js";
 import {
   createStandaloneResearchWorker,
   type StandaloneResearchWorker,
@@ -14,6 +16,7 @@ import {
   createStandaloneRunWorker,
   type StandaloneRunWorker,
 } from "../src/run-worker-process.js";
+import { OfflineFixtureTruthPipeline } from "../src/truth/execution-pipeline.js";
 
 const databaseUrl = process.env.DATABASE_URL;
 const durableTestSubjectResolver = () => ({ subjectId: "m7-durable-reconnect-subject" });
@@ -40,7 +43,11 @@ async function attachLegacyBoundedClearRoute(
   app: FastifyInstance,
   connectionString: string,
 ): Promise<() => Promise<void>> {
-  const stores = await connectPostgresRuntimeStores(connectionString, false);
+  const stores = await connectPostgresRuntimeStores(
+    connectionString,
+    false,
+    assertPlanningMaterialFaithfulToExactIntent,
+  );
   registerBoundedClearDecisionIntentIntake(app, {
     intentStore: stores.intentStore,
     userMessageStore: stores.userMessageStore,
@@ -48,6 +55,8 @@ async function attachLegacyBoundedClearRoute(
     apiSubject: () => durableTestSubjectResolver().subjectId,
   });
   return async () => {
+    await stores.apiControlStore.close();
+    await stores.runStore.close();
     await stores.conversationStore.close();
     await stores.userMessageStore.close();
     await stores.userPreferenceStore.close();
@@ -165,6 +174,8 @@ test(
         leaseMs: 30_000,
         retryDelayMs: 1_000,
         batchSize: 10,
+      }, {
+        truthPipeline: new OfflineFixtureTruthPipeline(laptopFixture),
       });
       researchWorker.start();
       runWorker.start();

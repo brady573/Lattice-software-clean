@@ -60,21 +60,33 @@ export function createGeneralizedDecisionFromAdmittedEvidence(
       supportingEvidenceIds: evidence.filter((item) => item.candidateId === candidate.id).map((item) => item.id),
     };
   });
-  const eligible = evaluations.filter((evaluation) => evaluation.eligible);
-  if (eligible.length === 0) {
-    const unresolved = evaluations.flatMap((evaluation) =>
-      evaluation.constraints.filter((constraint) => constraint.passed === null)
-        .map((constraint) => `${evaluation.candidateId}:${constraint.criterion}`));
+  const unresolved = evaluations.flatMap((evaluation) =>
+    evaluation.constraints.filter((constraint) => constraint.passed === null)
+      .map((constraint) => `${evaluation.candidateId}:${constraint.criterion}`));
+  if (unresolved.length > 0) {
     return {
       goal: input.objective,
-      outcome: unresolved.length > 0 ? "UNRESOLVED" : "NO_ELIGIBLE_CANDIDATE",
-      frontierCandidateIds: [],
+      outcome: "UNRESOLVED",
+      frontierCandidateIds: evaluations.filter((evaluation) => evaluation.eligible)
+        .map((evaluation) => evaluation.candidateId),
       tiedCandidateIds: [],
       materialUnknowns: unresolved,
       evaluations,
-      rationale: [unresolved.length > 0
-        ? "The available evidence does not resolve eligibility for a safe recommendation."
-        : "No candidate satisfies every hard requirement with admitted evidence."],
+      rationale: ["The available evidence leaves at least one candidate's eligibility unresolved, so no winner is forced."],
+      evidenceIds: [],
+      truthAssessmentIds: [...truthAssessmentIds],
+    };
+  }
+  const eligible = evaluations.filter((evaluation) => evaluation.eligible);
+  if (eligible.length === 0) {
+    return {
+      goal: input.objective,
+      outcome: "NO_ELIGIBLE_CANDIDATE",
+      frontierCandidateIds: [],
+      tiedCandidateIds: [],
+      materialUnknowns: [],
+      evaluations,
+      rationale: ["No candidate satisfies every hard requirement with admitted evidence."],
       evidenceIds: [],
       truthAssessmentIds: [...truthAssessmentIds],
     };

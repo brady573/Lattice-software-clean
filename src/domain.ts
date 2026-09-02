@@ -25,7 +25,7 @@ export const consultationRunRequestSchema = z.object({
   kind: z.literal("consultation"),
   objective: z.string().min(1).max(8_000),
   context: z.array(z.string().min(1).max(4_000)).max(32).default([]),
-  decisionNeed: z.enum(["NONE", "QUALIFIED"]).default("NONE"),
+  decisionNeed: z.enum(["NONE", "UNRESOLVED", "QUALIFIED"]).default("NONE"),
   resourceNeed: z.enum(["NONE", "CHECKLIST", "PREPARED_MESSAGE"]).default("NONE"),
   sourceMessageId: z.string().min(1).max(200),
   sourceMessageDigest: z.string().regex(/^[a-f0-9]{64}$/u),
@@ -38,7 +38,7 @@ export type RunRequest = z.infer<typeof runRequestSchema>;
 type ConsultationRequestData = z.infer<typeof consultationRunRequestSchema>;
 export type ConsultationRunRequest = Omit<ConsultationRequestData, "decisionNeed" | "resourceNeed" | "context"> & {
   context: string[];
-  decisionNeed: "NONE" | "QUALIFIED";
+  decisionNeed: "NONE" | "UNRESOLVED" | "QUALIFIED";
   resourceNeed: "NONE" | "CHECKLIST" | "PREPARED_MESSAGE";
   /** Compatibility-only absent fields; consultations never require them. */
   goal?: never;

@@ -1,29 +1,12 @@
-import type { Candidate, Evidence } from "./domain.js";
 import { requiredProofObligations } from "./truth/contracts.js";
+import type { FixtureDataset } from "./truth/fixture-dataset.js";
 import type {
   ProofCheckStatus,
-  SourceEdgeType,
   TruthClaimProfile,
   TruthEvidenceProfile,
-  TruthResearchProfile,
 } from "./truth/types.js";
 
-export interface FixtureSourceEdge {
-  fromSourceId: string;
-  toSourceId: string;
-  edgeType: SourceEdgeType;
-  confidence: number;
-  contentSimilarity?: number | null;
-}
-
-export interface FixtureDataset {
-  candidates: Candidate[];
-  evidence: Evidence[];
-  truthClaims: TruthClaimProfile[];
-  truthEvidence: TruthEvidenceProfile[];
-  truthSourceEdges?: FixtureSourceEdge[];
-  truthResearch?: TruthResearchProfile[];
-}
+export type { FixtureDataset, FixtureSourceEdge } from "./truth/fixture-dataset.js";
 
 function passedChecks(claimType: TruthClaimProfile["claimType"]): Readonly<Record<string, ProofCheckStatus>> {
   return Object.fromEntries(
@@ -114,6 +97,6 @@ export const defaultDecisionFixture: FixtureDataset = {
 
 /**
  * Backward-compatible fixture alias for historical tests and validation assets.
- * Product runtime composition uses defaultDecisionFixture directly.
+ * Canonical Product runtime composition does not import this scenario fixture.
  */
 export const laptopFixture: FixtureDataset = structuredClone(defaultDecisionFixture);
