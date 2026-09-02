@@ -22,6 +22,16 @@ const consultationTurnSchema = z.object({
   prepare: z.enum(["CHECKLIST", "PREPARED_MESSAGE"]).optional(),
 }).strict();
 
+const clarificationTurnSchema = z.object({
+  turnId: z.string().min(1).max(200),
+  message: z.string().min(1).max(8_000).optional(),
+  messageId: z.string().min(1).max(200).optional(),
+  content: z.string().min(1).max(8_000).optional(),
+}).strict().refine(
+  (value) => (value.message ?? value.content ?? "").trim().length > 0,
+  "message or content must contain non-whitespace text",
+);
+
 export interface ConsultationIntakeOptions {
   intentStore: IntentAuthorityStore;
   userMessageStore: IntentUserMessageStore;
@@ -58,7 +68,7 @@ function parseMaterialDecisionClarification(message: string): MaterialDecisionCl
 }
 
 function isHardRequirementConfirmation(message: string): boolean {
-  return /^hard requirement\.?$/i.test(message.trim().replace(/\s+/g, " "));
+  return /^(?:hard requirement|yes|yes please|that's right|that'?s correct|correct|make it hard)\.?$/i.test(message.trim().replace(/\s+/g, " "));
 }
 
 /**
@@ -262,17 +272,23 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
   app.post<{ Params: { conversationId: string; proposalId: string } }>(
     "/api/v1/conversations/:conversationId/clarifications/:proposalId/confirm",
     async (request, reply) => {
-      const parsed = consultationTurnSchema.pick({ turnId: true, message: true }).safeParse(request.body);
+      const parsed = clarificationTurnSchema.safeParse(request.body);
       if (!parsed.success) return reply.status(400).send({ error: "INVALID_CONSULTATION_CLARIFICATION", details: parsed.error.flatten() });
       const conversationId = request.params.conversationId.trim();
+      const clarificationText = parsed.data.message ?? parsed.data.content ?? "";
       const proposal = await options.intentStore.getPendingProposal(request.params.proposalId.trim());
       if (!proposal || proposal.intentScopeId !== `consultation:${conversationId}`) return reply.status(404).send({ error: "CLARIFICATION_NOT_FOUND" });
       if (proposal.status === "STALE") return reply.status(409).send({ error: "CLARIFICATION_STALE" });
-      if (!isHardRequirementConfirmation(parsed.data.message)) return reply.status(422).send({ error: "CLARIFICATION_NOT_REPRESENTABLE" });
-      const messageId = stableUuid("consultation-message", conversationId, parsed.data.turnId);
+      if (!isHardRequirementConfirmation(clarificationText)) {
+        return reply.status(422).send({
+          error: "CLARIFICATION_NOT_REPRESENTABLE",
+          message: "Confirm with yes/that's correct/hard requirement, or submit a separately supported correction; the pending proposal remains non-authoritative.",
+        });
+      }
+      const messageId = parsed.data.messageId ?? stableUuid("consultation-message", conversationId, parsed.data.turnId);
       const sourceMessage = await options.userMessageStore.append({
         conversationId, intentScopeId: proposal.intentScopeId, logicalUserTurnId: parsed.data.turnId,
-        messageId, messageHorizon: proposal.observedMessageHorizon + 1, content: parsed.data.message,
+        messageId, messageHorizon: proposal.observedMessageHorizon + 1, content: clarificationText,
       });
       const confirmation = await options.intentStore.confirmPendingProposal({
         transitionId: stableUuid("consultation-material-confirm", conversationId, proposal.proposalId, sourceMessage.messageId),
