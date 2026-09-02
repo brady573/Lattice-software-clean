@@ -4,21 +4,17 @@ on:
   pull_request:
     paths:
       - "render.yaml"
-      - ".github/workflows/render-blueprint-validation.yml"
       - "src/runtime-config.ts"
       - "src/migrate.ts"
-      - "package.json"
-      - "package-lock.json"
+      - ".github/workflows/render-blueprint-validation.yml"
   push:
     branches:
       - main
     paths:
       - "render.yaml"
-      - ".github/workflows/render-blueprint-validation.yml"
       - "src/runtime-config.ts"
       - "src/migrate.ts"
-      - "package.json"
-      - "package-lock.json"
+      - ".github/workflows/render-blueprint-validation.yml"
   workflow_dispatch:
 
 permissions:
@@ -28,19 +24,11 @@ concurrency:
   group: render-blueprint-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: true
 
-defaults:
-  run:
-    shell: cmd
-
 jobs:
   validate-render-blueprint:
     name: Render blueprint validation
-    runs-on:
-      - self-hosted
-      - Windows
-      - X64
-      - ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'lattice-windows-pr-ephemeral' || 'lattice-windows' }}
-    timeout-minutes: 15
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     steps:
       - name: Checkout exact subject source
@@ -54,25 +42,16 @@ jobs:
         with:
           node-version: '24'
 
-      - name: Validate source, runner, and V36 zero-cost blueprint contract
-        shell: powershell
+      - name: Validate zero-cost Render blueprint contract
         env:
           SUBJECT_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
-          $ErrorActionPreference = 'Stop'
-          $actualSourceSha = (git rev-parse HEAD).Trim()
-          if ($actualSourceSha -ne $env:SUBJECT_SOURCE_SHA) {
-            throw 'SOURCE_PROVENANCE_FAILURE: checkout does not match subject source'
-          }
-          if ($env:RUNNER_OS -ne 'Windows') {
-            throw "EXECUTION_SURFACE_FAILURE: expected RUNNER_OS=Windows, got '$env:RUNNER_OS'"
-          }
-          if ($env:RUNNER_ARCH -ne 'X64') {
-            throw "EXECUTION_SURFACE_FAILURE: expected RUNNER_ARCH=X64, got '$env:RUNNER_ARCH'"
-          }
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SUBJECT_SOURCE_SHA"
+          node --input-type=module <<'NODE'
+          import { readFileSync } from 'node:fs';
 
-          $expected = @'
-          databases:
+          const expected = `databases:
             - name: lattice-v36-postgres
               plan: free
 
@@ -96,99 +75,20 @@ jobs:
                 - key: DATABASE_URL
                   fromDatabase:
                     name: lattice-v36-postgres
-                    property: connectionString
-          '@
-          $expected = $expected -replace "`r`n", "`n"
-          $actual = (Get-Content -Raw render.yaml) -replace "`r`n", "`n"
-          if ($actual.TrimEnd("`n") -ne $expected.TrimEnd("`n")) {
-            $expectedPath = Join-Path $env:RUNNER_TEMP 'render.expected.yaml'
-            [System.IO.File]::WriteAllText($expectedPath, $expected + "`n", [System.Text.UTF8Encoding]::new($false))
-            git diff --no-index -- $expectedPath render.yaml
-            throw 'RENDER_BLUEPRINT_CONTRACT_FAILURE: render.yaml differs from the approved V36 zero-cost blueprint'
+                    property: connectionString`;
+
+          const normalize = (value) => value.replace(/\r\n/gu, '\n').trimEnd();
+          const actual = normalize(readFileSync('render.yaml', 'utf8'));
+          if (actual !== normalize(expected)) {
+            throw new Error('RENDER_BLUEPRINT_CONTRACT_FAILURE: render.yaml differs from the approved zero-cost blueprint');
           }
-
-          if ($actual -match 'plan:\s*(starter|standard|pro|enterprise|basic)') {
-            throw 'RENDER_BLUEPRINT_CONTRACT_FAILURE: paid plan token present'
+          if (/plan:\s*(starter|standard|pro|enterprise|basic)/u.test(actual)) {
+            throw new Error('RENDER_BLUEPRINT_CONTRACT_FAILURE: paid plan token present');
           }
-          if ($actual -match 'preDeployCommand|LATTICE_AUTO_MIGRATE:\s*true') {
-            throw 'RENDER_BLUEPRINT_CONTRACT_FAILURE: migration automation is outside the approved zero-cost contract'
+          if (/preDeployCommand|LATTICE_AUTO_MIGRATE:\s*true/u.test(actual)) {
+            throw new Error('RENDER_BLUEPRINT_CONTRACT_FAILURE: unapproved migration automation present');
           }
-          Write-Host "RENDER_V36_ZERO_COST_CONTRACT_PASS sha=$actualSourceSha"
-
-      - name: Install locked repository dependencies
-        run: npm ci --no-audit --no-fund
-
-      - name: Validate render.yaml against Render's official JSON Schema
-        shell: powershell
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $schemaUrl = 'https://render.com/schema/render.yaml.json'
-          $schemaPath = Join-Path $env:RUNNER_TEMP 'render.schema.json'
-          $instancePath = Join-Path $env:RUNNER_TEMP 'render.instance.json'
-          $validatorPath = Join-Path (Get-Location) '.render-schema-validator.cjs'
-
-          $ajvVersion = (node -p "require('ajv/package.json').version").Trim()
-          $ajvFormatsVersion = (node -p "require('ajv-formats/package.json').version").Trim()
-          if ($ajvVersion -ne '8.20.0' -or $ajvFormatsVersion -ne '3.0.1') {
-            throw "RENDER_SCHEMA_VALIDATOR_VERSION_FAILURE: ajv=$ajvVersion ajv-formats=$ajvFormatsVersion"
-          }
-
-          Invoke-WebRequest -UseBasicParsing -Uri $schemaUrl -OutFile $schemaPath
-          $schemaSha256 = (Get-FileHash $schemaPath -Algorithm SHA256).Hash.ToLowerInvariant()
-
-          $yamlText = Get-Content -Raw render.yaml
-          $jsonOutput = $yamlText | npx --yes yaml@2.9.0 --single --json
-          if ($LASTEXITCODE -ne 0) {
-            throw "RENDER_BLUEPRINT_YAML_PARSE_FAILURE: yaml@2.9.0 exited $LASTEXITCODE"
-          }
-          [System.IO.File]::WriteAllText(
-            $instancePath,
-            (($jsonOutput -join [Environment]::NewLine) + [Environment]::NewLine),
-            [System.Text.UTF8Encoding]::new($false)
-          )
-
-          $validator = @'
-          const fs = require('node:fs');
-          const Ajv2020 = require('ajv/dist/2020').default;
-          const addFormats = require('ajv-formats');
-
-          const [schemaPath, instancePath] = process.argv.slice(2);
-          if (!schemaPath || !instancePath) {
-            throw new Error('schema and instance paths are required');
-          }
-
-          const schema = JSON.parse(fs.readFileSync(schemaPath, 'utf8'));
-          const instance = JSON.parse(fs.readFileSync(instancePath, 'utf8'));
-          if (schema.$id !== 'https://render.com/schema/render.yaml.json') {
-            throw new Error(`unexpected Render schema $id: ${schema.$id ?? '<missing>'}`);
-          }
-          if (schema.$schema !== 'https://json-schema.org/draft/2020-12/schema') {
-            throw new Error(`unexpected Render schema dialect: ${schema.$schema ?? '<missing>'}`);
-          }
-
-          const ajv = new Ajv2020({ allErrors: true, strict: false });
-          addFormats(ajv);
-          const validate = ajv.compile(schema);
-          if (!validate(instance)) {
-            console.error(JSON.stringify(validate.errors, null, 2));
-            process.exit(1);
-          }
-          '@
-          [System.IO.File]::WriteAllText($validatorPath, $validator, [System.Text.UTF8Encoding]::new($false))
-
-          node $validatorPath $schemaPath $instancePath
-          if ($LASTEXITCODE -ne 0) {
-            throw "RENDER_BLUEPRINT_SCHEMA_VALIDATION_FAILURE: AJV exited $LASTEXITCODE"
-          }
-          Write-Host "RENDER_BLUEPRINT_SCHEMA_VALIDATION=PASS schema=$schemaUrl schemaSha256=$schemaSha256 yamlParser=2.9.0 ajv=$ajvVersion"
-
-      - name: Record bounded validation
-        shell: powershell
-        run: |
-          $validatedSha = (git rev-parse HEAD).Trim()
-          Write-Host "RENDER_BLUEPRINT_CONTRACT_VALIDATION=PASS sha=$validatedSha"
-          Write-Host 'RENDER_BLUEPRINT_SCHEMA_VALIDATION=PASS mechanism=render-official-json-schema'
-          Write-Host 'RENDER_ACCOUNT_VALIDATION=NOT_CLAIMED_BY_THIS_LANE'
-          Write-Host 'RENDER_CLI_SEMANTIC_VALIDATION=NOT_CLAIMED_BY_THIS_LANE'
-          Write-Host 'DATABASE_MIGRATION_EXECUTION=NOT_CLAIMED_BY_THIS_LANE'
-          Write-Host 'DEPLOYMENT_RUNTIME=NOT_CLAIMED_BY_THIS_LANE'
+          console.log('RENDER_BLUEPRINT_CONTRACT_VALIDATION=PASS');
+          console.log('RENDER_ACCOUNT_VALIDATION=NOT_CLAIMED_BY_THIS_LANE');
+          console.log('DEPLOYMENT_RUNTIME=NOT_CLAIMED_BY_THIS_LANE');
+          NODE

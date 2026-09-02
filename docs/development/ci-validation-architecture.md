@@ -1,82 +1,59 @@
 # CI Validation Architecture
 
-Status: Owner-approved repository-local Product/development contract for the 2026-09-01 CI scope-drift prevention Work Item.
+## Purpose
 
-This document governs repository validation-lane responsibility. It does not replace installed Team governance, Product requirement qualification, exact-revision validation rules, production/cost/security boundaries, or GitHub control-plane configuration.
+Lattice is a single-owner hobby project. CI exists to catch meaningful regressions without turning the repository into an operations project of its own.
 
-## Objective
+This repository is public, so ordinary automated validation uses standard GitHub-hosted runners. The Owner's PC and Android device are development machines, not public pull-request runners.
 
-Keep validation evidence understandable, bounded, and inexpensive as Lattice grows. A workflow exists because it owns a durable validation responsibility, not because a milestone, platform, temporary prototype, runner incident, provider experiment, or one-off acceptance campaign once needed a workflow.
+## Current validation lanes
 
-## Core invariants
-
-1. **One ordinary repository gate.** `Core PR validation` is the only ordinary workflow job that owns the complete `npm run check` gate. It executes that gate once per Core job.
-2. **Specialist lanes stay specialist.** PostgreSQL, browser/E2E, deployment-configuration, and research/benchmark lanes execute only the checks materially required by their own responsibility. They do not become alternate full-repository gates merely because their execution surface can run those checks.
-3. **Workflow success is not Product acceptance.** Specialist workflows must not emit `MILESTONE_ACCEPTANCE=PASS`, `PRODUCT_ACCEPTANCE=PASS`, `PRODUCTION_READINESS=PASS`, or equivalent claims. A workflow may report only the bounded surface it actually exercised.
-4. **Required checks use durable responsibility names.** A milestone, operating system, runner, prototype, provider, or temporary campaign name must not become a new permanent required-status identity unless that property itself is the enduring validation responsibility.
-5. **Compatibility checks are temporary control-plane migration aids only.** If a compatibility status is ever temporarily required during a future ruleset migration, it must execute no validation work and must be removed immediately after the external dependency is gone.
-6. **Historical evidence remains historical.** Old acceptance records keep the exact workflow/run names that actually produced their evidence. Historical names do not define the current CI architecture.
-7. **Exceptions are explicit and bounded.** A temporary legacy exception must be named in the executable guard and pinned tightly enough that additional scope cannot accumulate silently.
-8. **Zero recurring cost remains the default.** Prefer existing authorized development execution surfaces and avoid adding paid runners/services solely to implement CI structure.
-
-## Durable lane ownership
-
-| Responsibility | Current workflow | Owns | Must not own |
+| Responsibility | Workflow | Hosted surface | Owns |
 |---|---|---|---|
-| Core PR validation | `.github/workflows/windows-validation.yml` | exact source/runtime preflight, locked install, one `npm run check` | PostgreSQL-specific, browser-specific, milestone acceptance |
-| PostgreSQL integration | `.github/workflows/postgres-persistence-validation.yml` | PostgreSQL 18 preflight, schema reset, database-dependent integration tests | full repository gate, browser acceptance, milestone acceptance |
-| Browser / E2E | currently `.github/workflows/m7-browser-lifecycle-validation.yml` | target state: browser/client-observable behavior and browser-specific prerequisites | general repository gate, general PostgreSQL regression catalog, milestone identity |
-| Deployment configuration | `.github/workflows/render-blueprint-validation.yml` | bounded Render blueprint/schema/zero-cost configuration checks | live deployment, production readiness, unrelated Product acceptance |
-| Research / benchmark | `.github/workflows/local-model-ab-benchmark.yml` | benchmark harness, pinned research environment, comparison evidence | ordinary full repository gate, required Product acceptance |
+| Core validation | `.github/workflows/core-validation.yml` | `windows-latest` | Node/runtime preflight, locked dependency install, one `npm run check` |
+| PostgreSQL integration | `.github/workflows/postgres-integration-validation.yml` | `ubuntu-latest` + isolated `postgres:18.6` service | database-dependent integration behavior |
+| Browser lifecycle | `.github/workflows/browser-lifecycle-validation.yml` | `ubuntu-latest` + isolated `postgres:18.6` service + hosted Chrome/Chromium | real-browser lifecycle behavior |
+| Render blueprint | `.github/workflows/render-blueprint-validation.yml` | `ubuntu-latest` | static zero-cost `render.yaml` contract |
 
-The filenames `windows-validation.yml` and `postgres-persistence-validation.yml` contain historical naming. Filename cleanup is secondary to responsibility correctness and must not be performed in a way that breaks required contexts or active concurrent work.
+The local-model A/B benchmark remains available through the repository tooling, but it is intentionally not a GitHub Actions workflow. GPU/model experiments run manually on hardware the Owner chooses rather than on public pull-request infrastructure.
 
-## Current browser exception
+## Invariants
 
-`m7-browser-lifecycle-validation.yml` predates this contract and currently combines the repository gate, a broad PostgreSQL regression surface, and real-browser lifecycle acceptance. A separate browser effort is already responsible for that surface, so this Work Item does not rewrite it.
+1. `Core PR validation` is the only ordinary workflow job that runs the complete `npm run check` gate.
+2. Specialist lanes execute only the checks required for their distinct surface; they do not duplicate the full repository gate.
+3. Public pull-request workflows must not use `self-hosted` runners or Owner-machine labels.
+4. Database CI uses an isolated PostgreSQL service container rather than a persistent development database.
+5. Workflow success is bounded evidence for the exact revision and exercised surface. It is not Product acceptance, production readiness, or deployment evidence.
+6. External GitHub Actions remain pinned to qualified full commit SHAs, and checkout does not persist repository credentials.
+7. Standard GitHub-hosted runners are used only while they remain zero-cost for this public repository. Paid runner capacity or billable CI services require explicit Owner authorization.
+8. Add another workflow only when it protects a genuinely distinct execution surface that cannot reasonably live in an existing lane.
 
-Until that dedicated cleanup occurs:
+## Retired workflow structure
 
-- the file is the only permitted specialist exception to the no-full-repository-gate rule;
-- `test/ci-workflow-scope.test.ts` pins its exact current Git blob SHA;
-- any M7 workflow change therefore requires an explicit guard update rather than silently expanding the exception;
-- the future cleanup should replace the milestone-specific identity with a durable Browser/E2E responsibility and then remove the exception.
+The clean repository does not carry forward the prior self-hosted/team-era workflow structure. These workflow files remain retired:
 
-The pinned exception is a concurrency/drift control, not approval of the current catch-all architecture.
+- `windows-validation.yml`
+- `postgres-persistence-validation.yml`
+- `m7-browser-lifecycle-validation.yml`
+- `local-model-ab-benchmark.yml`
+- `android-prototype-validation.yml`
 
-## Required-status state
+Implementation identifiers inside existing test or browser tooling may retain historical names until changing them has Product or maintenance value. They do not define CI architecture.
 
-The Main ruleset now requires exactly one durable GitHub Actions context:
+## Branch protection and required checks
 
-- `Core PR validation`
+Workflow files describe validation behavior; they do not prove that Actions are enabled or that a check is required by GitHub branch protection.
 
-The historical contexts `Windows platform-neutral validation` and `Windows bounded prototype validation` were used only during migration and are retired. Their zero-run compatibility jobs/files have been removed from the repository. Reintroducing either historical required identity is CI-architecture regression unless a new, explicit control-plane migration establishes a bounded temporary need.
+The fresh clean repository starts without an inherited ruleset. If branch protection is added after the hosted workflows have demonstrated stable behavior, prefer the smallest useful rule: require the durable `Core PR validation` context. PostgreSQL, browser, and Render lanes should remain conditional specialist evidence unless a concrete reliability problem justifies making one required.
 
-Required-status configuration remains external repository control-plane state. Repository tests can enforce the absence of retired compatibility shims and the presence of the durable Core job, but they cannot prove the live ruleset configuration by themselves. Any readiness claim that depends on the required-status set must therefore re-read the live ruleset.
+## Changing CI
 
-## Executable anti-drift guard
+Before expanding CI, answer:
 
-`test/ci-workflow-scope.test.ts` is part of the ordinary `npm test` / `npm run check` path. It must fail when the repository regresses on the invariants it can observe directly, including:
+1. What user- or Product-relevant regression would this catch?
+2. Which existing lane owns the closest responsibility?
+3. Does the execution surface itself matter to the claim?
+4. Can a focused repository test replace another workflow?
+5. Does the proposed automation remain zero-cost and safe for a public repository?
 
-- loss of the durable `Core PR validation` context;
-- more than one executable full repository gate outside the frozen M7 exception;
-- a specialized workflow acquiring Product/milestone/readiness PASS claims;
-- reintroduction of the retired historical required-context compatibility shims;
-- a new milestone-named CI workflow identity outside the explicit M7 exception;
-- any unacknowledged change to the frozen M7 workflow.
-
-Changing the guard is allowed when the architecture intentionally changes. Such a change must be reviewed as an architecture-contract change, not used merely to make a newly drifting workflow pass.
-
-## Adding or changing a workflow
-
-Before adding a workflow or expanding an existing one, answer:
-
-1. Which durable responsibility owns the evidence?
-2. Why can the evidence not live in an existing lane?
-3. Is the execution surface itself material to the claim, or merely where a test happened to run?
-4. Is the workflow required for every PR, conditionally relevant integration evidence, deep regression, or manual/research evidence?
-5. Does the change duplicate `npm run check` or another lane's responsibility?
-6. Does any output wording imply Product or milestone acceptance beyond the exercised surface?
-7. Does the required-status name remain meaningful after the current milestone/platform/provider is gone?
-
-If those questions do not justify a distinct durable responsibility, do not create another permanent lane.
+If the answers do not justify another durable lane, keep the check local or fold it into an existing lane.

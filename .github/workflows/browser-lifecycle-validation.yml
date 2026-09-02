@@ -1,0 +1,143 @@
+name: CI — Browser Lifecycle
+
+on:
+  pull_request:
+    paths:
+      - "src/**"
+      - "migrations/**"
+      - "tools/m7-browser-lifecycle.mjs"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/browser-lifecycle-validation.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "src/**"
+      - "migrations/**"
+      - "tools/m7-browser-lifecycle.mjs"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/browser-lifecycle-validation.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: browser-lifecycle-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  browser-lifecycle:
+    name: Browser lifecycle validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      DATABASE_URL: postgresql://lattice:lattice@127.0.0.1:55433/lattice_test
+
+    services:
+      postgres:
+        image: postgres:18.6
+        env:
+          POSTGRES_USER: lattice
+          POSTGRES_PASSWORD: lattice
+          POSTGRES_DB: lattice_test
+        ports:
+          - 55433:5432
+        options: >-
+          --health-cmd "pg_isready -U lattice -d lattice_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - name: Checkout exact subject source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Provision Node 24
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+
+      - name: Validate source and hosted browser surface
+        env:
+          SUBJECT_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SUBJECT_SOURCE_SHA"
+          test "$RUNNER_OS" = "Linux"
+          test "$RUNNER_ARCH" = "X64"
+          test "$(node -p "process.versions.node.split('.')[0]")" = "24"
+          test "$(npm --version | cut -d. -f1)" = "11"
+          browser="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
+          if [ -z "$browser" ]; then
+            echo 'BROWSER_EXECUTION_SURFACE_FAILURE: Chrome/Chromium not found on hosted runner' >&2
+            exit 1
+          fi
+          echo "M7_BROWSER_EXECUTABLE=$browser" >> "$GITHUB_ENV"
+          echo "BROWSER_EXECUTION_SURFACE_PASS executable=$browser"
+
+      - name: Install locked dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Syntax-check browser lifecycle harness
+        run: node --check tools/m7-browser-lifecycle.mjs
+
+      - name: Build browser validation subject
+        run: npm run build
+
+      - name: Reset and migrate dedicated browser database
+        run: |
+          node --input-type=module <<'NODE'
+          import pg from 'pg';
+          const { Client } = pg;
+          const client = new Client({ connectionString: process.env.DATABASE_URL });
+          await client.connect();
+          const version = await client.query('show server_version_num');
+          const versionNumber = Number(version.rows[0].server_version_num);
+          if (!Number.isInteger(versionNumber) || versionNumber < 180006 || versionNumber >= 190000) {
+            throw new Error(`expected PostgreSQL 18.6+, got server_version_num=${versionNumber}`);
+          }
+          await client.query('DROP SCHEMA public CASCADE; CREATE SCHEMA public;');
+          await client.end();
+          NODE
+          node dist/src/migrate.js
+
+      - name: Execute real-browser lifecycle validation
+        env:
+          SUBJECT_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          LATTICE_DEPLOYMENT_MODE: development
+          LATTICE_TRUTH_MODE: v36-offline
+          LATTICE_AUTHENTICATION_MODE: development-fixture
+          LATTICE_DEVELOPMENT_FIXTURE_SUBJECT_ID: browser-validation-subject
+          LATTICE_AUTO_MIGRATE: 'false'
+          LATTICE_RUN_WORKER_LEASE_MS: '5000'
+          LATTICE_RUN_WORKER_RETRY_DELAY_MS: '5'
+          LATTICE_RUN_WORKER_BATCH_SIZE: '4'
+          LATTICE_RESEARCH_WORKER_LEASE_MS: '5000'
+          LATTICE_RESEARCH_WORKER_RETRY_DELAY_MS: '5'
+          LATTICE_RESEARCH_WORKER_BATCH_SIZE: '8'
+          PORT: '3107'
+          HOST: 127.0.0.1
+          M7_BASE_URL: http://127.0.0.1:3107
+          M7_BROWSER_ARTIFACT_DIR: artifacts/browser-lifecycle
+        run: |
+          set -euo pipefail
+          node tools/m7-browser-lifecycle.mjs
+          test "$(git rev-parse HEAD)" = "$SUBJECT_SOURCE_SHA"
+          echo "BROWSER_LIFECYCLE=PASS sha=$SUBJECT_SOURCE_SHA"
+          echo 'PRODUCTION_DEPLOYMENT=NOT_PERFORMED'
+          echo 'PRODUCTION_DATABASE=NOT_TOUCHED'
+
+      - name: Upload browser evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: browser-lifecycle-${{ github.event.pull_request.head.sha || github.sha }}
+          path: artifacts/browser-lifecycle/
+          if-no-files-found: warn
+          retention-days: 7

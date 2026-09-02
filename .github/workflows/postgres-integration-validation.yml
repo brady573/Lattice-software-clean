@@ -1,0 +1,145 @@
+name: CI — PostgreSQL Integration
+
+on:
+  pull_request:
+    paths:
+      - "src/**"
+      - "test/**"
+      - "migrations/**"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/postgres-integration-validation.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "src/**"
+      - "test/**"
+      - "migrations/**"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/postgres-integration-validation.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: postgres-integration-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  postgres-integration:
+    name: PostgreSQL integration validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      DATABASE_URL: postgresql://lattice:lattice@127.0.0.1:55433/lattice_test
+
+    services:
+      postgres:
+        image: postgres:18.6
+        env:
+          POSTGRES_USER: lattice
+          POSTGRES_PASSWORD: lattice
+          POSTGRES_DB: lattice_test
+        ports:
+          - 55433:5432
+        options: >-
+          --health-cmd "pg_isready -U lattice -d lattice_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - name: Checkout exact subject source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Provision Node 24
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+
+      - name: Validate source and runtime contract
+        env:
+          SUBJECT_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SUBJECT_SOURCE_SHA"
+          test "$RUNNER_OS" = "Linux"
+          test "$RUNNER_ARCH" = "X64"
+          test "$(node -p "process.versions.node.split('.')[0]")" = "24"
+          test "$(npm --version | cut -d. -f1)" = "11"
+          test -f package-lock.json
+
+      - name: Install locked dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Validate PostgreSQL 18.6 service
+        run: |
+          node --input-type=module <<'NODE'
+          import pg from 'pg';
+          const { Client } = pg;
+          const client = new Client({ connectionString: process.env.DATABASE_URL });
+          await client.connect();
+          const identity = await client.query('select current_user, current_database()');
+          const version = await client.query('show server_version_num');
+          await client.end();
+          const row = identity.rows[0];
+          const versionNumber = Number(version.rows[0].server_version_num);
+          if (row.current_user !== 'lattice' || row.current_database !== 'lattice_test') {
+            throw new Error(`unexpected PostgreSQL identity: ${JSON.stringify(row)}`);
+          }
+          if (!Number.isInteger(versionNumber) || versionNumber < 180006 || versionNumber >= 190000) {
+            throw new Error(`expected PostgreSQL 18.6+, got server_version_num=${versionNumber}`);
+          }
+          console.log(`POSTGRES_EXECUTION_SURFACE_PASS database=${row.current_database} version=${versionNumber}`);
+          NODE
+
+      - name: Reset dedicated PostgreSQL test schema
+        run: |
+          node --input-type=module <<'NODE'
+          import pg from 'pg';
+          const { Client } = pg;
+          const client = new Client({ connectionString: process.env.DATABASE_URL });
+          await client.connect();
+          await client.query('DROP SCHEMA public CASCADE; CREATE SCHEMA public;');
+          const result = await client.query("select count(*)::int as count from pg_tables where schemaname='public'");
+          await client.end();
+          if (result.rows[0].count !== 0) throw new Error(`expected zero public tables, got ${result.rows[0].count}`);
+          console.log('POSTGRES_TEST_SCHEMA_RESET=PASS database=lattice_test');
+          NODE
+
+      - name: Compile database integration subject
+        run: npm run build
+
+      - name: Select and execute PostgreSQL-dependent tests
+        run: |
+          set -euo pipefail
+          mapfile -t DATABASE_TESTS < <(node --input-type=module <<'NODE'
+          import { readdirSync, readFileSync } from 'node:fs';
+          const files = readdirSync('test')
+            .filter((name) => name.endsWith('.test.ts'))
+            .filter((name) => name.includes('postgres') || readFileSync(`test/${name}`, 'utf8').includes('process.env.DATABASE_URL'))
+            .sort()
+            .map((name) => `test/${name}`);
+          for (const file of files) console.log(file);
+          NODE
+          )
+          if [ "${#DATABASE_TESTS[@]}" -eq 0 ]; then
+            echo 'POSTGRES_TEST_SELECTION_FAILURE: no PostgreSQL-dependent tests discovered' >&2
+            exit 1
+          fi
+          printf 'POSTGRES_TEST_FILE=%s\n' "${DATABASE_TESTS[@]}"
+          node --import tsx --test --test-concurrency=1 "${DATABASE_TESTS[@]}"
+
+      - name: Record bounded PostgreSQL integration validation
+        run: |
+          echo "POSTGRES_INTEGRATION=PASS sha=$(git rev-parse HEAD)"
+          echo 'POSTGRES_VALIDATION_SURFACE=github-hosted-postgresql-18.6-service'
+          echo 'SELECTION_POLICY=postgres-filename-or-DATABASE_URL-opt-in'
+          echo 'MILESTONE_ACCEPTANCE=NOT_CLAIMED_BY_POSTGRES_LANE'
+          echo 'PRODUCTION_DATABASE=NOT_CLAIMED_BY_THIS_LANE'
