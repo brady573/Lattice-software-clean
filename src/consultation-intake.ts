@@ -20,6 +20,7 @@ import type { IntentUserMessage, IntentUserMessageStore } from "./intent/source-
 import type { IntentAuthorityStore } from "./intent/store.js";
 import type {
   IntentOperation,
+  CreatePendingIntentProposalInput,
   IntentTransitionCommand,
   IntentVersion,
   PendingIntentProposal,
@@ -72,16 +73,19 @@ function isConfirmation(message: string): boolean {
     .test(message.trim().replace(/\s+/g, " "));
 }
 
-function validateProposedOperations(operations: readonly IntentOperation[]): IntentOperation[] {
+function validateProposedOperations(
+  operations: readonly IntentOperation[],
+): CreatePendingIntentProposalInput["operations"] {
   if (operations.length === 0) {
     throw new Error("Material clarification must propose at least one semantic operation.");
   }
-  return operations.map((operation) => {
+  const validated = operations.map((operation) => {
     if (operation.op === "NO_CHANGE" || operation.path.kind === "OBJECTIVE") {
       throw new Error("Interpretation proposals may only contain material requirement or preference changes.");
     }
     return structuredClone(operation);
   });
+  return validated as CreatePendingIntentProposalInput["operations"];
 }
 
 function qualifiedDecisionNeed(

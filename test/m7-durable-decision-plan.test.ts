@@ -93,8 +93,8 @@ test("DecisionPlan rejects planning material that contradicts its exact IntentVe
         planningMaterial: {
           ...boundedPlanningMaterial,
           hardConstraints: [
-            { criterion: "price", operator: "lte", value: 900 },
-            { criterion: "batteryHours", operator: "gte", value: 12 },
+            { criterion: "price", operator: "lte" as const, value: 900 },
+            { criterion: "batteryHours", operator: "gte" as const, value: 12 },
           ],
         },
       }),
