@@ -21,6 +21,7 @@ import { resolveRuntimeConfig } from "../src/runtime-config.js";
 
 const databaseUrl = process.env.DATABASE_URL;
 const initialContent = "I need a tablet under $1,300. I'd like at least 12 hours of battery life, but performance matters more.";
+const materialClarificationContent = "I need a tablet with price at most $1,300. I'd like batteryHours to be at least 12, but performance matters more.";
 
 async function waitForCompletedRun(app: FastifyInstance, runId: string): Promise<void> {
   for (let attempt = 0; attempt < 200; attempt += 1) {
@@ -70,7 +71,7 @@ test("runtime canonical conversation API routes material clarification through I
     const response = await app.inject({
       method: "POST",
       url: `/api/v1/conversations/${conversationId}/turns`,
-      payload: { turnId: "turn-1", message: initialContent },
+      payload: { turnId: "turn-1", message: materialClarificationContent },
     });
     assert.equal(response.statusCode, 202);
     const pending = response.json() as { status: string; proposalId: string; intentScopeId: string; intentVersionId: string };

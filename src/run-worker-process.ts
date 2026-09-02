@@ -1,4 +1,7 @@
 import { randomUUID } from "node:crypto";
+import { defaultCriterionCatalog } from "./decision/default-criterion-catalog.js";
+import { createIntentAuthorityGeneralizedDecisionAdapter } from "./intent/generalized-decision-adapter.js";
+import { PostgresIntentAuthorityStore } from "./intent/index.js";
 import { PostgresOrchestrationStore } from "./postgres-orchestration-store.js";
 import { PostgresRunStore } from "./postgres-run-store.js";
 import { processRunDispatches } from "./run-worker.js";
@@ -161,15 +164,23 @@ export async function createStandaloneRunWorker(
   const runStore = await PostgresRunStore.connect(config.databaseUrl, { migrate: false });
   let orchestrationStore: PostgresOrchestrationStore | undefined;
   let continuationBridge: PostgresV36ResearchBridge | undefined;
+  let intentStore: PostgresIntentAuthorityStore | undefined;
   try {
     orchestrationStore = await PostgresOrchestrationStore.connect(config.databaseUrl, { migrate: false });
     continuationBridge = await PostgresV36ResearchBridge.connect(config.databaseUrl, { migrate: false });
+    intentStore = await PostgresIntentAuthorityStore.connect(config.databaseUrl, { migrate: false });
   } catch (error) {
+    if (intentStore) await intentStore.close();
+    if (continuationBridge) await continuationBridge.close();
     if (orchestrationStore) await orchestrationStore.close();
     await runStore.close();
     throw error;
   }
 
+  const generalizedDecisionAdapter = createIntentAuthorityGeneralizedDecisionAdapter(
+    intentStore,
+    defaultCriterionCatalog,
+  );
   const truthPipeline = options.truthPipeline ?? createDefaultOfflineTruthPipeline();
   const loop = new PollingRunWorkerLoop({
     pollMs: config.pollMs,
@@ -179,6 +190,7 @@ export async function createStandaloneRunWorker(
         orchestrationStore: orchestrationStore!,
         continuationBridge: continuationBridge!,
         truthPipeline,
+        generalizedDecisionAdapter,
         workerId: config.workerId,
         now: new Date(),
         leaseMs: config.leaseMs,
@@ -206,7 +218,11 @@ export async function createStandaloneRunWorker(
         try {
           await orchestrationStore!.close();
         } finally {
-          await runStore.close();
+          try {
+            await intentStore!.close();
+          } finally {
+            await runStore.close();
+          }
         }
       }
     },

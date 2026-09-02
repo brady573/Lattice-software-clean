@@ -43,9 +43,8 @@ import {
 } from "./intent/index.js";
 import { registerDecisionPlanApi } from "./intent/decision-plan-api.js";
 import { DecisionPlanRecordingApiRunControlStore } from "./intent/decision-plan-run-control.js";
-import { registerBoundedClearDecisionIntentIntake } from "./intent/bounded-clear-decision-intake.js";
-import { registerBoundedDecisionCorrection } from "./intent/bounded-decision-correction.js";
-import { registerBoundedDecisionIntentIntake } from "./intent/bounded-decision-intake.js";
+import { createIntentAuthorityGeneralizedDecisionAdapter } from "./intent/generalized-decision-adapter.js";
+import { defaultCriterionCatalog } from "./decision/default-criterion-catalog.js";
 import {
   MemoryDecisionPlanStore,
   PostgresDecisionPlanStore,
@@ -64,7 +63,7 @@ import { PostgresOrchestrationStore } from "./postgres-orchestration-store.js";
 import { PostgresRunStore } from "./postgres-run-store.js";
 import { registerRunEventStream } from "./progress/run-event-stream.js";
 import { registerAndroidModelPrototype } from "./prototype/android-model-prototype.js";
-import { executePersistedRun } from "./run-execution.js";
+import { executePersistedRun, type GeneralizedDecisionAdapter } from "./run-execution.js";
 import { MemoryRunStore, type RunStore } from "./run-store.js";
 import type { RuntimeConfig } from "./runtime-config.js";
 import {
@@ -118,6 +117,7 @@ class DeferredMemoryApiRunControlStore implements ApiRunControlStore {
     private readonly runStore: RunStore,
     private readonly truthPipeline: TruthExecutionPipeline,
     private readonly dispatchDelayMs: number,
+    private readonly generalizedDecisionAdapter?: GeneralizedDecisionAdapter,
   ) {}
 
   async submitRun(input: ApiRunSubmissionInput): Promise<ApiRunSubmissionResult> {
@@ -142,7 +142,7 @@ class DeferredMemoryApiRunControlStore implements ApiRunControlStore {
           resolve();
           return;
         }
-        void executePersistedRun(this.runStore, this.truthPipeline, runId)
+        void executePersistedRun(this.runStore, this.truthPipeline, runId, undefined, this.generalizedDecisionAdapter)
           .then(() => resolve(), () => resolve());
       }, this.dispatchDelayMs);
     });
@@ -151,6 +151,7 @@ class DeferredMemoryApiRunControlStore implements ApiRunControlStore {
   }
 
   async close(): Promise<void> {
+
     this.closed = true;
     await Promise.allSettled([...this.executions]);
     await this.base.close();
@@ -181,7 +182,14 @@ export async function migrateRuntimeDatabase(databaseUrl: string): Promise<void>
   await apiControlStore.close();
 }
 
-async function createPostgresRuntime(
+/**
+ * Connect the canonical set of PostgreSQL-backed stores (with production
+ * wrapping, e.g. DecisionPlan/ConversationRunIndex recording) used by
+ * createRuntimeApp. Exported so tests can compose an explicitly legacy/
+ * test-only bounded-decision route against store instances identical to
+ * production, without canonical runtime registering that route itself.
+ */
+export async function connectPostgresRuntimeStores(
   databaseUrl: string,
   autoMigrate: boolean,
 ): Promise<{
@@ -283,7 +291,7 @@ export async function createRuntimeApp(
       conversationStore,
       decisionPlanStore,
       runIndexStore,
-    } = await createPostgresRuntime(config.databaseUrl, config.autoMigrate));
+    } = await connectPostgresRuntimeStores(config.databaseUrl, config.autoMigrate));
   } else {
     const memoryRunStore = new MemoryRunStore();
     const memoryIntentStore = new MemoryIntentAuthorityStore();
@@ -306,6 +314,7 @@ export async function createRuntimeApp(
         memoryRunStore,
         truthPipeline,
         memoryDispatchDelayMs,
+        createIntentAuthorityGeneralizedDecisionAdapter(memoryIntentStore, defaultCriterionCatalog),
       ),
       memoryDecisionPlanStore,
     );
@@ -326,8 +335,7 @@ export async function createRuntimeApp(
     getAuthenticatedSubject(request).subjectId;
 
   const app = buildApp({
-    runStore,
-    truthPipeline,
+    runStore,    truthPipeline,
     apiControlStore,
     apiSubject: authenticatedApiSubject,
     authoritativeConversationUi: true,
@@ -365,25 +373,6 @@ export async function createRuntimeApp(
     intentStore,
     userMessageStore,
   });
-  registerBoundedDecisionIntentIntake(app, {
-    intentStore,
-    userMessageStore,
-    apiControlStore,
-    apiSubject: authenticatedApiSubject,
-  });
-  registerBoundedClearDecisionIntentIntake(app, {
-    intentStore,
-    userMessageStore,
-    apiControlStore,
-    apiSubject: authenticatedApiSubject,
-  });
-  registerBoundedDecisionCorrection(app, {
-    intentStore,
-    userMessageStore,
-    apiControlStore,
-    runStore,
-  });
-
   app.addHook("onClose", async () => {
     await conversationStore.close();
     await userMessageStore.close();

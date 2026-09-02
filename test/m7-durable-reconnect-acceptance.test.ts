@@ -3,8 +3,9 @@ import { randomUUID } from "node:crypto";
 import test from "node:test";
 import type { FastifyInstance } from "fastify";
 import { Pool } from "pg";
-import { createRuntimeApp } from "../src/runtime-app.js";
+import { createRuntimeApp, connectPostgresRuntimeStores } from "../src/runtime-app.js";
 import { resolveRuntimeConfig } from "../src/runtime-config.js";
+import { registerBoundedClearDecisionIntentIntake } from "../src/intent/bounded-clear-decision-intake.js";
 import {
   createStandaloneResearchWorker,
   type StandaloneResearchWorker,
@@ -27,6 +28,33 @@ function durableRuntimeConfig(connectionString: string, autoMigrate: boolean) {
     LATTICE_AUTO_MIGRATE: autoMigrate ? "true" : "false",
   } as NodeJS.ProcessEnv);
 }
+
+/**
+ * Canonical runtime (createRuntimeApp) no longer registers the legacy bounded
+ * "clear" decision-intent route. This M7 durability/exact-binding acceptance
+ * test deliberately still exercises that legacy route's DecisionPlan/exact-
+ * binding behavior, so it composes the route explicitly and only for this
+ * test, against store instances connected identically to production.
+ */
+async function attachLegacyBoundedClearRoute(
+  app: FastifyInstance,
+  connectionString: string,
+): Promise<() => Promise<void>> {
+  const stores = await connectPostgresRuntimeStores(connectionString, false);
+  registerBoundedClearDecisionIntentIntake(app, {
+    intentStore: stores.intentStore,
+    userMessageStore: stores.userMessageStore,
+    apiControlStore: stores.apiControlStore,
+    apiSubject: () => durableTestSubjectResolver().subjectId,
+  });
+  return async () => {
+    await stores.conversationStore.close();
+    await stores.userMessageStore.close();
+    await stores.userPreferenceStore.close();
+    await stores.intentStore.close();
+  };
+}
+
 
 async function waitForCompletedRun(app: FastifyInstance, runId: string, timeoutMs = 8_000) {
   const deadline = Date.now() + timeoutMs;
@@ -60,6 +88,8 @@ test(
     let firstApp: FastifyInstance | undefined;
     let executionApp: FastifyInstance | undefined;
     let reopenedApp: FastifyInstance | undefined;
+    let closeFirstLegacyRoute: (() => Promise<void>) | undefined;
+    let closeReopenedLegacyRoute: (() => Promise<void>) | undefined;
     let runWorker: StandaloneRunWorker | undefined;
     let researchWorker: StandaloneResearchWorker | undefined;
     let firstRunId = "";
@@ -71,6 +101,7 @@ test(
       firstApp = await createRuntimeApp(durableRuntimeConfig(databaseUrl, true), {
         authenticatedSubjectResolver: durableTestSubjectResolver,
       });
+      closeFirstLegacyRoute = await attachLegacyBoundedClearRoute(firstApp, databaseUrl);
 
       const created = await firstApp.inject({ method: "POST", url: "/api/v1/conversations" });
       assert.equal(created.statusCode, 201);
@@ -113,6 +144,8 @@ test(
 
       await firstApp.close();
       firstApp = undefined;
+      await closeFirstLegacyRoute();
+      closeFirstLegacyRoute = undefined;
 
       executionApp = await createRuntimeApp(durableRuntimeConfig(databaseUrl, false), {
         authenticatedSubjectResolver: durableTestSubjectResolver,
@@ -147,6 +180,7 @@ test(
       reopenedApp = await createRuntimeApp(durableRuntimeConfig(databaseUrl, false), {
         authenticatedSubjectResolver: durableTestSubjectResolver,
       });
+      closeReopenedLegacyRoute = await attachLegacyBoundedClearRoute(reopenedApp, databaseUrl);
       const address = await reopenedApp.listen({ host: "127.0.0.1", port: 0 });
 
       const replayedTurn = await reopenedApp.inject({
@@ -226,6 +260,8 @@ test(
       if (firstApp) await firstApp.close();
       if (executionApp) await executionApp.close();
       if (reopenedApp) await reopenedApp.close();
+      if (closeFirstLegacyRoute) await closeFirstLegacyRoute();
+      if (closeReopenedLegacyRoute) await closeReopenedLegacyRoute();
 
       const runIds = [firstRunId, secondRunId].filter(Boolean);
       if (runIds.length > 0) {

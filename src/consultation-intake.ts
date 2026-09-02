@@ -2,14 +2,15 @@ import { createHash } from "node:crypto";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { createApiRequestHash, type ApiRunControlStore } from "./api-control-store.js";
-import { consultationRunRequestSchema, runRequestSchema, type LatticeRunRequest } from "./domain.js";
+import type { PriorityTier } from "./decision/priority-and-requirements.js";
+import { consultationRunRequestSchema, type LatticeRunRequest } from "./domain.js";
 import type { IntentUserMessageStore } from "./intent/source-message-store.js";
 import type { IntentAuthorityStore } from "./intent/store.js";
 import type { IntentTransitionCommand } from "./intent/types.js";
 import { buildRunOutcome } from "./outcome.js";
 import { createPendingRun } from "./run-execution.js";
 import type { RunStore } from "./run-store.js";
-import { deriveQualifiedLegacyBoundedRunRequest } from "./intent/exact-planning-fidelity.js";
+import { deriveGeneralizedDecisionIntentFromState } from "./intent/generalized-decision-projection.js";
 
 const IDEMPOTENCY_RETENTION_MS = 24 * 60 * 60 * 1_000;
 
@@ -55,17 +56,55 @@ function stableUuid(...parts: string[]): `${string}-${string}-${string}-${string
   return `${digest.slice(0, 8)}-${digest.slice(8, 12)}-${digest.slice(12, 16)}-${digest.slice(16, 20)}-${digest.slice(20, 32)}`;
 }
 
-type MaterialDecisionClarification = { objective: string; costLimit: number; durationHours: number };
+type MaterialDecisionClarification = {
+  objective: string;
+  hardRequirementCriterionId: string;
+  hardRequirementValue: number;
+  pendingCriterionId: string;
+  pendingValue: number;
+  priorityCriterionId: string;
+};
 
+const CRITERION_TOKEN = "[a-z][a-z0-9]{0,63}";
+
+/**
+ * Recognize one generic, domain-neutral material-clarification sentence
+ * shape: an objective, one immediate numeric "at most" hard requirement, one
+ * pending numeric "at least" hard requirement awaiting confirmation, and one
+ * named priority criterion. The criterion ids are USER-authored tokens read
+ * structurally from sentence position; this function does not recognize or
+ * special-case any specific criterion name, product, or domain.
+ */
 function parseMaterialDecisionClarification(message: string): MaterialDecisionClarification | undefined {
   const normalized = message.trim().replaceAll("’", "'").replace(/\s+/g, " ");
-  const match = /^i need ((?:a|an) [a-z0-9][a-z0-9 .+'/_-]{0,120}?) under \$?([0-9][0-9,]*(?:\.[0-9]{1,2})?)\.? i(?:'d| would) like at least ([0-9]+(?:\.[0-9]+)?) hours? of battery life,? but performance matters more\.?$/i.exec(normalized);
+  const pattern = new RegExp(
+    `^i need ((?:a|an) [a-z0-9][a-z0-9 .+'/_-]{0,120}?) with (${CRITERION_TOKEN}) at most \\$?([0-9][0-9,]*(?:\\.[0-9]{1,2})?)\\.? `
+    + `i(?:'d| would) like (${CRITERION_TOKEN}) to be at least ([0-9]+(?:\\.[0-9]+)?),? `
+    + `but (${CRITERION_TOKEN}) matters more\\.?$`,
+    "i",
+  );
+  const match = pattern.exec(normalized);
   if (!match) return undefined;
-  const priceMaxUsd = Number(match[2]?.replaceAll(",", ""));
-  const durationHours = Number(match[3]);
-  if (!match[1] || !Number.isFinite(priceMaxUsd) || priceMaxUsd <= 0 || !Number.isFinite(durationHours) || durationHours <= 0) return undefined;
-  return { objective: `choose ${match[1].trim().toLowerCase()}`, costLimit: priceMaxUsd, durationHours };
+  const [, objectivePhrase, hardCriterion, hardValueRaw, pendingCriterion, pendingValueRaw, priorityCriterion] = match;
+  const hardRequirementValue = Number(hardValueRaw?.replaceAll(",", ""));
+  const pendingValue = Number(pendingValueRaw);
+  if (
+    !objectivePhrase || !hardCriterion || !pendingCriterion || !priorityCriterion
+    || !Number.isFinite(hardRequirementValue) || hardRequirementValue <= 0
+    || !Number.isFinite(pendingValue) || pendingValue <= 0
+  ) {
+    return undefined;
+  }
+  return {
+    objective: `choose ${objectivePhrase.trim().toLowerCase()}`,
+    hardRequirementCriterionId: hardCriterion,
+    hardRequirementValue,
+    pendingCriterionId: pendingCriterion,
+    pendingValue,
+    priorityCriterionId: priorityCriterion,
+  };
 }
+
 
 function isHardRequirementConfirmation(message: string): boolean {
   return /^(?:hard requirement|yes|yes please|that's right|that'?s correct|correct|make it hard)\.?$/i.test(message.trim().replace(/\s+/g, " "));
@@ -148,14 +187,22 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
           sourceDigest: sourceMessage.contentDigest,
           operations: [
             { op: "SET", path: { kind: "OBJECTIVE" }, value: { state: "VALUE", value: materialClarification.objective } },
-            { op: "SET", path: { kind: "REQUIREMENT", key: ["price", "max", "usd"].join(".") }, value: { state: "VALUE", value: materialClarification.costLimit } },
-            { op: "SET", path: { kind: "PREFERENCE", key: "performance.relativeTo" + "Battery" }, value: { state: "VALUE", value: "MORE_IMPORTANT" } },
+            {
+              op: "SET",
+              path: { kind: "REQUIREMENT", key: `${materialClarification.hardRequirementCriterionId}::max` },
+              value: { state: "VALUE", value: materialClarification.hardRequirementValue },
+            },
+            {
+              op: "SET",
+              path: { kind: "PREFERENCE", key: materialClarification.priorityCriterionId },
+              value: { state: "VALUE", value: "MATTERS_MOST" satisfies PriorityTier },
+            },
           ],
         };
         const existingScope = await options.intentStore.getScope(intentScopeId);
         if (existingScope) return reply.status(409).send({ error: "INTENT_SCOPE_ALREADY_STARTED" });
         const scope = await options.intentStore.createScope({ intentScopeId, kind: "consultation", initialTransition });
-        const proposalId = stableUuid("consultation-material-proposal", conversationId, scope.currentIntentVersionId, sourceMessage.contentDigest, String(materialClarification.durationHours));
+        const proposalId = stableUuid("consultation-material-proposal", conversationId, scope.currentIntentVersionId, sourceMessage.contentDigest, String(materialClarification.pendingValue));
         const proposal = await options.intentStore.createPendingProposal({
           proposalId,
           intentScopeId,
@@ -163,7 +210,11 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
           observedMessageHorizon: sourceMessage.messageHorizon,
           sourceMessageId: sourceMessage.messageId,
           sourceDigest: sourceMessage.contentDigest,
-          operations: [{ op: "SET", path: { kind: "REQUIREMENT", key: ["battery", "Hours"].join("") + ".min" }, value: { state: "VALUE", value: materialClarification.durationHours } }],
+          operations: [{
+            op: "SET",
+            path: { kind: "REQUIREMENT", key: `${materialClarification.pendingCriterionId}::min` },
+            value: { state: "VALUE", value: materialClarification.pendingValue },
+          }],
           materiality: "MATERIAL",
         });
         return reply.status(202).send({
@@ -172,7 +223,7 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
           intentVersionId: scope.currentIntentVersionId,
           proposalId: proposal.proposalId,
           proposalDigest: proposal.proposalDigest,
-          question: `You said you'd like at least ${materialClarification.durationHours} hours of battery life. Should that be a hard requirement?`,
+          question: `You said you'd like ${materialClarification.pendingCriterionId} to be at least ${materialClarification.pendingValue}. Should that be a hard requirement?`,
           confirmationExample: "Hard requirement.",
         });
       }
@@ -302,26 +353,40 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
       }
       const version = await options.intentStore.getVersion(confirmation.resultingIntentVersionId);
       if (!version) return reply.status(500).send({ error: "CONFIRMED_INTENT_VERSION_MISSING" });
-      // A confirmed material clarification fully bounds the qualified legacy
-      // decision material (objective, price ceiling, battery floor, and the
-      // accepted preference). Route it through as an authoritative decision
-      // request so the Run actually adjudicates candidates instead of only
-      // producing knowledge-only output. Unsupported IntentVersions fall back
-      // to a knowledge-only consultation rather than fabricating a decision.
+      // A confirmed material clarification fully bounds the qualified,
+      // domain-neutral decision material (objective, hard requirements, and
+      // priorities). Route it through the generalized Decision Engine as an
+      // authoritative QUALIFIED consultation request so the Run actually
+      // adjudicates candidates instead of only producing knowledge-only
+      // output. IntentVersions with no confirmed hard requirement remain
+      // knowledge-only rather than fabricating a decision.
       let requestBody: LatticeRunRequest;
-      try {
-        requestBody = runRequestSchema.parse(deriveQualifiedLegacyBoundedRunRequest(version.state));
-      } catch {
-        const objective = version.state.objective?.value.state === "VALUE"
-          && typeof version.state.objective.value.value === "string"
-          ? version.state.objective.value.value
-          : "Continue the consultation";
+      const generalizedIntent = deriveGeneralizedDecisionIntentFromState(
+        proposal.intentScopeId,
+        version.intentVersionId,
+        version.state,
+      );
+      if (Object.keys(generalizedIntent.decisionSemantics.hardRequirements).length > 0) {
         requestBody = consultationRunRequestSchema.parse({
-          kind: "consultation", objective, context: [], decisionNeed: "NONE", resourceNeed: "NONE",
+          kind: "consultation",
+          objective: generalizedIntent.objective.value,
+          context: [],
+          decisionNeed: "QUALIFIED",
+          resourceNeed: "NONE",
+          sourceMessageId: sourceMessage.messageId,
+          sourceMessageDigest: sourceMessage.contentDigest,
+          intentVersion: sourceMessage.messageHorizon,
+          intentScopeId: proposal.intentScopeId,
+          intentVersionId: version.intentVersionId,
+        });
+      } else {
+        requestBody = consultationRunRequestSchema.parse({
+          kind: "consultation", objective: generalizedIntent.objective.value, context: [], decisionNeed: "NONE", resourceNeed: "NONE",
           sourceMessageId: sourceMessage.messageId, sourceMessageDigest: sourceMessage.contentDigest,
           intentVersion: sourceMessage.messageHorizon, intentScopeId: proposal.intentScopeId, intentVersionId: version.intentVersionId,
         });
       }
+
       const run = createPendingRun(conversationId, requestBody, stableUuid("consultation-material-run", conversationId, proposal.proposalId, version.intentVersionId));
       const submission = await options.apiControlStore.submitRun({
         run, intentBinding: { intentScopeId: proposal.intentScopeId, intentVersionId: version.intentVersionId },
