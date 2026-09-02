@@ -6,6 +6,10 @@ import {
   type RunStatus,
 } from "./domain.js";
 import { createDecisionFromAdmittedEvidence } from "./engine.js";
+import { createGeneralizedDecisionFromAdmittedEvidence } from "./decision/generalized-engine.js";
+import type { QualifiedCriterionCatalog } from "./decision/criterion-catalog.js";
+import { buildDecisionInputFromGeneralizedIntent } from "./intent/generalized-decision-planning.js";
+import type { GeneralizedDecisionIntentVersion } from "./intent/generalized-decision-semantics.js";
 import {
   assertSolandraExplanationFidelity,
   createSolandraExplanationPlan,
@@ -32,6 +36,10 @@ function requiresDecision(request: LatticeRunRequest): boolean {
 }
 
 export type DurableV36ContinuationBridge = Pick<PostgresV36ResearchBridge, "load" | "schedule">;
+export interface GeneralizedDecisionAdapter {
+  readonly catalog: QualifiedCriterionCatalog;
+  loadIntent(request: Extract<LatticeRunRequest, { kind: "consultation" }>): Promise<GeneralizedDecisionIntentVersion>;
+}
 type DurableTruthExecutionPipeline = TruthExecutionPipeline & Required<Pick<
   TruthExecutionPipeline,
   "beginDurableValidation" | "resumeDurableValidation"
@@ -130,6 +138,7 @@ export async function executePersistedRunTick(
   truthPipeline: TruthExecutionPipeline,
   runId: string,
   continuationBridge?: DurableV36ContinuationBridge,
+  generalizedDecisionAdapter?: GeneralizedDecisionAdapter,
 ): Promise<LatticeRun> {
   let run = await runStore.get(runId);
   if (!run) throw new RunExecutionError("Durable Run could not be loaded for execution.", runId);
@@ -217,22 +226,33 @@ export async function executePersistedRunTick(
       const persistedTruth = persistedSnapshot.bundle;
       const decisionInputs = await truthPipeline.decisionInputs(persistedSnapshot);
       const decisionState = await refresh();
-      if (isConsultationRunRequest(decisionState.request)) {
-        throw new Error("Qualified consultation decisions require the generalized Decision Engine adapter.");
-      }
-
       if (!decisionState.decision) {
         const decisionEvidence = materializeDecisionEvidence(
           decisionInputs.evidence,
           persistedTruth.claimEvidence,
           persistedTruth.assessments,
         );
-        const decision = createDecisionFromAdmittedEvidence(
-          decisionState.request,
-          decisionInputs.candidates,
-          decisionEvidence,
-          persistedTruth.assessments.map((assessment) => assessment.id),
-        );
+        const decision = isConsultationRunRequest(decisionState.request)
+          ? await (async () => {
+            if (decisionState.request.decisionNeed !== "QUALIFIED" || !generalizedDecisionAdapter) {
+              throw new Error("Qualified consultation decisions require the generalized Decision Engine adapter.");
+            }
+            const intent = await generalizedDecisionAdapter.loadIntent(decisionState.request);
+            const input = buildDecisionInputFromGeneralizedIntent(intent, generalizedDecisionAdapter.catalog);
+            return createGeneralizedDecisionFromAdmittedEvidence(
+              input,
+              generalizedDecisionAdapter.catalog,
+              decisionInputs.candidates,
+              decisionEvidence,
+              persistedTruth.assessments.map((assessment) => assessment.id),
+            );
+          })()
+          : createDecisionFromAdmittedEvidence(
+            decisionState.request,
+            decisionInputs.candidates,
+            decisionEvidence,
+            persistedTruth.assessments.map((assessment) => assessment.id),
+          );
         assertDecisionTruthFidelity(decision, persistedTruth);
         const persistedDecision = await runStore.persistDecision({
           runId,
@@ -298,11 +318,12 @@ export async function executePersistedRun(
   truthPipeline: TruthExecutionPipeline,
   runId: string,
   continuationBridge?: DurableV36ContinuationBridge,
+  generalizedDecisionAdapter?: GeneralizedDecisionAdapter,
 ): Promise<LatticeRun> {
   while (true) {
     const before = await runStore.get(runId);
     if (!before) throw new RunExecutionError("Durable Run could not be loaded for execution.", runId);
-    const run = await executePersistedRunTick(runStore, truthPipeline, runId, continuationBridge);
+    const run = await executePersistedRunTick(runStore, truthPipeline, runId, continuationBridge, generalizedDecisionAdapter);
     if (isSettledStatus(run.status)) return run;
     if (run.status === before.status && run.version === before.version) return run;
   }

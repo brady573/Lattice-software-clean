@@ -3,6 +3,7 @@ import type { RunStore } from "./run-store.js";
 import {
   executePersistedRun,
   type DurableV36ContinuationBridge,
+  type GeneralizedDecisionAdapter,
 } from "./run-execution.js";
 import type { TruthExecutionPipeline } from "./truth/execution-pipeline.js";
 
@@ -11,6 +12,7 @@ export interface ProcessRunDispatchesInput {
   orchestrationStore: DurableOrchestrationStore;
   truthPipeline: TruthExecutionPipeline;
   continuationBridge?: DurableV36ContinuationBridge;
+  generalizedDecisionAdapter?: GeneralizedDecisionAdapter;
   workerId: string;
   now: Date;
   leaseMs?: number;
@@ -76,6 +78,7 @@ export async function processRunDispatches(input: ProcessRunDispatchesInput): Pr
         input.truthPipeline,
         dispatch.runId,
         input.continuationBridge,
+        input.generalizedDecisionAdapter,
       );
       if (!isTerminal(completed.status)) {
         const released = await input.orchestrationStore.releaseDispatch({

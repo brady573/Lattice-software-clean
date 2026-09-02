@@ -204,9 +204,9 @@ const emptyKnowledgeFixture: FixtureDataset = Object.freeze({
 
 /**
  * Product-default router. Ordinary consultations validate through a neutral
- * V36 dataset with no candidate/criterion assumptions. The historical fixture
- * is selected only for legacy qualified-decision requests so old evidence can
- * remain a compatibility test surface while the primary intake moves forward.
+ * V36 dataset with no candidate/criterion assumptions. Qualified consultations
+ * use the bounded decision fixture until a domain-specific research composition
+ * is supplied.
  */
 class DefaultOfflineTruthPipeline implements TruthExecutionPipeline {
   readonly mode = "v36-offline-fixture" as const;
@@ -220,7 +220,9 @@ class DefaultOfflineTruthPipeline implements TruthExecutionPipeline {
   }
 
   async investigate(runId: string, request?: LatticeRunRequest): Promise<TruthPipelineInvestigation> {
-    const pipeline = request && isConsultationRunRequest(request) ? this.knowledge : this.legacyDecision;
+    const pipeline = request && isConsultationRunRequest(request) && request.decisionNeed !== "QUALIFIED"
+      ? this.knowledge
+      : this.legacyDecision;
     return pipeline.investigate(runId);
   }
 
