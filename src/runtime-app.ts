@@ -13,6 +13,7 @@ import {
   registerAuthenticatedSubjectBoundary,
   type AuthenticatedSubjectResolver,
 } from "./auth/authenticated-subject.js";
+import { registerConsultationIntake } from "./consultation-intake.js";
 import { buildApp } from "./http-app.js";
 import { registerConversationApi } from "./conversation/conversation-api.js";
 import { registerConversationContinuityApi } from "./conversation/continuity-api.js";
@@ -343,6 +344,12 @@ export async function createRuntimeApp(
   });
   registerConversationApi(app, { conversationStore, runStore });
   registerDurableUserMessageHistory(app, { userMessageStore });
+  registerConsultationIntake(app, {
+    userMessageStore,
+    apiControlStore,
+    runStore,
+    apiSubject: authenticatedApiSubject,
+  });
   registerRunEventStream(app, { runStore });
   registerDecisionPlanApi(app, { decisionPlanStore });
   registerConversationContinuityApi(app, {
