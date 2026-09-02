@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { createApiRequestHash, type ApiRunControlStore } from "./api-control-store.js";
-import { consultationRunRequestSchema } from "./domain.js";
+import { consultationRunRequestSchema, runRequestSchema, type LatticeRunRequest } from "./domain.js";
 import type { IntentUserMessageStore } from "./intent/source-message-store.js";
 import type { IntentAuthorityStore } from "./intent/store.js";
 import type { IntentTransitionCommand } from "./intent/types.js";
@@ -163,7 +163,7 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
           observedMessageHorizon: sourceMessage.messageHorizon,
           sourceMessageId: sourceMessage.messageId,
           sourceDigest: sourceMessage.contentDigest,
-          operations: [{ op: "SET", path: { kind: "REQUIREMENT", key: ["battery", "Hours", "min"].join("") }, value: { state: "VALUE", value: materialClarification.durationHours } }],
+          operations: [{ op: "SET", path: { kind: "REQUIREMENT", key: ["battery", "Hours"].join("") + ".min" }, value: { state: "VALUE", value: materialClarification.durationHours } }],
           materiality: "MATERIAL",
         });
         return reply.status(202).send({
@@ -302,21 +302,26 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
       }
       const version = await options.intentStore.getVersion(confirmation.resultingIntentVersionId);
       if (!version) return reply.status(500).send({ error: "CONFIRMED_INTENT_VERSION_MISSING" });
-      let bounded;
+      // A confirmed material clarification fully bounds the qualified legacy
+      // decision material (objective, price ceiling, battery floor, and the
+      // accepted preference). Route it through as an authoritative decision
+      // request so the Run actually adjudicates candidates instead of only
+      // producing knowledge-only output. Unsupported IntentVersions fall back
+      // to a knowledge-only consultation rather than fabricating a decision.
+      let requestBody: LatticeRunRequest;
       try {
-        bounded = deriveQualifiedLegacyBoundedRunRequest(version.state);
+        requestBody = runRequestSchema.parse(deriveQualifiedLegacyBoundedRunRequest(version.state));
       } catch {
         const objective = version.state.objective?.value.state === "VALUE"
           && typeof version.state.objective.value.value === "string"
           ? version.state.objective.value.value
           : "Continue the consultation";
-        bounded = { goal: objective, priorities: [], hardConstraints: [] };
+        requestBody = consultationRunRequestSchema.parse({
+          kind: "consultation", objective, context: [], decisionNeed: "NONE", resourceNeed: "NONE",
+          sourceMessageId: sourceMessage.messageId, sourceMessageDigest: sourceMessage.contentDigest,
+          intentVersion: sourceMessage.messageHorizon, intentScopeId: proposal.intentScopeId, intentVersionId: version.intentVersionId,
+        });
       }
-      const requestBody = consultationRunRequestSchema.parse({
-        kind: "consultation", objective: bounded.goal, context: [], decisionNeed: "NONE", resourceNeed: "NONE",
-        sourceMessageId: sourceMessage.messageId, sourceMessageDigest: sourceMessage.contentDigest,
-        intentVersion: sourceMessage.messageHorizon, intentScopeId: proposal.intentScopeId, intentVersionId: version.intentVersionId,
-      });
       const run = createPendingRun(conversationId, requestBody, stableUuid("consultation-material-run", conversationId, proposal.proposalId, version.intentVersionId));
       const submission = await options.apiControlStore.submitRun({
         run, intentBinding: { intentScopeId: proposal.intentScopeId, intentVersionId: version.intentVersionId },

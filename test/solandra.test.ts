@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { RunRequest } from "../src/domain.js";
+import type { DecisionOutcome, RunRequest, StructuredDecision } from "../src/domain.js";
 import { createDecision } from "../src/engine.js";
 import { laptopFixture } from "../src/fixtures.js";
 import {
@@ -119,4 +119,61 @@ test("unsupported material prose fails explanation fidelity", () => {
     ),
     /introduces unsupported material content/,
   );
+});
+
+test("Solandra explanation plan preserves non-winner authoritative decision outcomes", () => {
+  const { truth } = authoritativeState();
+  const scenarios: Array<{
+    outcome: DecisionOutcome;
+    frontierCandidateIds: string[];
+    tiedCandidateIds: string[];
+    materialUnknowns: string[];
+  }> = [
+    { outcome: "FRONTIER", frontierCandidateIds: ["nova-air", "atlas-pro"], tiedCandidateIds: [], materialUnknowns: [] },
+    { outcome: "TIE", frontierCandidateIds: ["nova-air", "forge-15"], tiedCandidateIds: ["nova-air", "forge-15"], materialUnknowns: [] },
+    { outcome: "INSUFFICIENT_EVIDENCE", frontierCandidateIds: [], tiedCandidateIds: [], materialUnknowns: [] },
+    { outcome: "UNRESOLVED", frontierCandidateIds: [], tiedCandidateIds: [], materialUnknowns: ["nova-air:batteryHours"] },
+    { outcome: "NO_ELIGIBLE_CANDIDATE", frontierCandidateIds: [], tiedCandidateIds: [], materialUnknowns: [] },
+  ];
+
+  for (const scenario of scenarios) {
+    const decision: StructuredDecision = {
+      goal: request.goal,
+      outcome: scenario.outcome,
+      frontierCandidateIds: scenario.frontierCandidateIds,
+      tiedCandidateIds: scenario.tiedCandidateIds,
+      materialUnknowns: scenario.materialUnknowns,
+      evaluations: laptopFixture.candidates.map((candidate) => ({
+        candidateId: candidate.id,
+        eligible: false,
+        rawScore: 0,
+        normalizedScore: 0,
+        constraints: [],
+        supportingEvidenceIds: [],
+      })),
+      rationale: [`Synthetic ${scenario.outcome} outcome preserved without a winner.`],
+      evidenceIds: [],
+      truthAssessmentIds: [],
+    };
+
+    const plan = createSolandraExplanationPlan(decision, laptopFixture.candidates, truth);
+    assert.equal(plan.winnerCandidateId, undefined);
+    assert.equal(plan.winnerLabel, undefined);
+    assert.equal(plan.outcome, scenario.outcome);
+    assert.deepEqual(plan.frontierCandidateIds, scenario.frontierCandidateIds);
+    assert.deepEqual(plan.tiedCandidateIds, scenario.tiedCandidateIds);
+    assert.deepEqual(plan.materialUnknowns, scenario.materialUnknowns);
+
+    const explanation = renderCanonicalExplanation(plan);
+    const expectedOutcomeText = (scenario.outcome as string).toLowerCase().replaceAll("_", " ");
+    assert.match(explanation, new RegExp(`^Solandra reports ${expectedOutcomeText}\\.`));
+    if (scenario.frontierCandidateIds.length > 0) {
+      assert.match(explanation, new RegExp(`Authoritative frontier: ${scenario.frontierCandidateIds.join(", ")}\\.`));
+    }
+    for (const unknown of scenario.materialUnknowns) {
+      assert.match(explanation, new RegExp(`Unresolved: ${unknown}\\.`));
+    }
+    assert.doesNotThrow(() =>
+      assertSolandraExplanationFidelity(explanation, plan, decision, laptopFixture.candidates, truth));
+  }
 });

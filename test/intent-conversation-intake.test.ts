@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
+import type { FastifyInstance } from "fastify";
 import { Pool } from "pg";
 import { MemoryApiRunControlStore } from "../src/api-control-store.js";
 import { buildApp } from "../src/app.js";
@@ -20,6 +21,20 @@ import { resolveRuntimeConfig } from "../src/runtime-config.js";
 
 const databaseUrl = process.env.DATABASE_URL;
 const initialContent = "I need a tablet under $1,300. I'd like at least 12 hours of battery life, but performance matters more.";
+
+async function waitForCompletedRun(app: FastifyInstance, runId: string): Promise<void> {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    const response = await app.inject({ method: "GET", url: `/api/v1/runs/${runId}` });
+    assert.equal(response.statusCode, 200, response.body);
+    const status = response.json<{ status: string }>().status;
+    if (status === "COMPLETED") return;
+    if (status === "FAILED" || status === "CANCELLED") {
+      throw new Error(`Run ${runId} unexpectedly reached ${status}.`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  throw new Error(`Run ${runId} did not complete.`);
+}
 
 function initialPayload() {
   return {
@@ -70,10 +85,19 @@ test("runtime canonical conversation API routes material clarification through I
       payload: { turnId: "turn-2", message: "Hard requirement." },
     });
     assert.equal(confirmation.statusCode, 202);
-    const accepted = confirmation.json() as { status: string; intentScopeId: string; intentVersionId: string };
+    const accepted = confirmation.json() as { status: string; runId: string; intentScopeId: string; intentVersionId: string };
     assert.equal(accepted.status, "RUN_ACCEPTED");
     assert.equal(accepted.intentScopeId, `consultation:${conversationId}`);
     assert.notEqual(accepted.intentVersionId, pending.intentVersionId);
+
+    await waitForCompletedRun(app, accepted.runId);
+    const outcomeResponse = await app.inject({ method: "GET", url: `/api/v1/runs/${accepted.runId}/outcome` });
+    assert.equal(outcomeResponse.statusCode, 200, outcomeResponse.body);
+    const outcome = outcomeResponse.json<{ outcome: { kind: string; decision: { outcome: string; winnerCandidateId?: string }; explanation: string | null } }>().outcome;
+    assert.equal(outcome.kind, "DECISION_SUPPORT");
+    assert.equal(outcome.decision.outcome, "RECOMMENDATION");
+    assert.ok(outcome.decision.winnerCandidateId);
+    assert.match(outcome.explanation ?? "", /Solandra recommends/);
   } finally {
     await app.close();
   }

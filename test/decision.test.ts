@@ -6,7 +6,7 @@ import { createDecision, explainDecision } from "../src/engine.js";
 import { laptopFixture } from "../src/fixtures.js";
 import { MemoryRunStore } from "../src/run-store.js";
 import { executePersistedRun } from "../src/run-execution.js";
-import { createDefaultOfflineTruthPipeline } from "../src/truth/execution-pipeline.js";
+import { createDefaultOfflineTruthPipeline, OfflineFixtureTruthPipeline } from "../src/truth/execution-pipeline.js";
 
 const request: RunRequest = {
   goal: "Choose a laptop under $1300 with at least 12 hours of battery life, prioritizing performance.",
@@ -106,6 +106,33 @@ test("API creates a persisted-truth, persisted-decision V36 run", async () => {
   assert.equal(retrieve.statusCode, 200);
   assert.deepEqual(retrieve.json(), run);
   await app.close();
+});
+
+test("API persists a non-winner UNRESOLVED decision as authoritative Run storage state", async () => {
+  const dataset = {
+    ...laptopFixture,
+    truthEvidence: laptopFixture.truthEvidence.map((profile) =>
+      profile.evidenceId === "e-nova-battery"
+        ? { ...profile, verification: "UNVERIFIED" as const }
+        : profile),
+  };
+  const app = buildApp({ truthPipeline: new OfflineFixtureTruthPipeline(dataset) });
+  try {
+    const create = await app.inject({ method: "POST", url: "/runs", payload: request });
+    assert.equal(create.statusCode, 201, create.body);
+    const run = create.json();
+    assert.equal(run.status, "COMPLETED");
+    assert.equal(run.decision.outcome, "UNRESOLVED");
+    assert.equal(run.decision.winnerCandidateId, undefined);
+    assert.ok(run.decision.materialUnknowns.length > 0);
+    assert.equal(run.explanation, "Solandra reports unresolved. Unresolved: nova-air:batteryHours.");
+
+    const retrieve = await app.inject({ method: "GET", url: `/runs/${run.id}` });
+    assert.equal(retrieve.statusCode, 200);
+    assert.deepEqual(retrieve.json(), run);
+  } finally {
+    await app.close();
+  }
 });
 
 test("versioned API accepts a durable Run before worker execution and exposes polling lifecycle", async () => {

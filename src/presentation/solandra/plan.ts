@@ -13,16 +13,8 @@ export function createSolandraExplanationPlan(
   bundle: TruthBundle,
 ): SolandraExplanationPlan {
   assertDecisionTruthFidelity(decision, bundle);
-  if (!decision.winnerCandidateId) {
-    throw new Error("Solandra explanation plan requires a selected winner; preserve the authoritative outcome instead.");
-  }
 
   const candidateById = new Map(candidates.map((candidate) => [candidate.id, candidate]));
-  const winner = candidateById.get(decision.winnerCandidateId);
-  if (!winner) {
-    throw new Error("Structured decision references an unknown winning candidate.");
-  }
-
   const candidateViews: SolandraCandidateView[] = decision.evaluations.map((evaluation) => {
     const candidate = candidateById.get(evaluation.candidateId);
     if (!candidate) {
@@ -38,9 +30,19 @@ export function createSolandraExplanationPlan(
     };
   });
 
-  const winnerEvaluation = candidateViews.find((evaluation) => evaluation.candidateId === winner.id);
-  if (!winnerEvaluation?.eligible) {
-    throw new Error("Solandra cannot explain a winner that is not eligible in the authoritative decision.");
+  let winnerCandidateId: string | undefined;
+  let winnerLabel: string | undefined;
+  if (decision.winnerCandidateId) {
+    const winner = candidateById.get(decision.winnerCandidateId);
+    if (!winner) {
+      throw new Error("Structured decision references an unknown winning candidate.");
+    }
+    const winnerEvaluation = candidateViews.find((evaluation) => evaluation.candidateId === winner.id);
+    if (!winnerEvaluation?.eligible) {
+      throw new Error("Solandra cannot explain a winner that is not eligible in the authoritative decision.");
+    }
+    winnerCandidateId = decision.winnerCandidateId;
+    winnerLabel = winner.label;
   }
 
   const assessmentById = new Map(bundle.assessments.map((assessment) => [assessment.id, assessment]));
@@ -61,8 +63,11 @@ export function createSolandraExplanationPlan(
 
   return {
     goal: decision.goal,
-    winnerCandidateId: decision.winnerCandidateId,
-    winnerLabel: winner.label,
+    outcome: decision.outcome ?? (winnerCandidateId ? "RECOMMENDATION" : "UNRESOLVED"),
+    ...(winnerCandidateId && winnerLabel ? { winnerCandidateId, winnerLabel } : {}),
+    frontierCandidateIds: [...(decision.frontierCandidateIds ?? (winnerCandidateId ? [winnerCandidateId] : []))],
+    tiedCandidateIds: [...(decision.tiedCandidateIds ?? [])],
+    materialUnknowns: [...(decision.materialUnknowns ?? [])],
     candidates: candidateViews,
     rationale: [...decision.rationale],
     evidenceIds: [...decision.evidenceIds],
