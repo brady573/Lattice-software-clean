@@ -103,7 +103,7 @@ export function assertTruthSnapshotTransition(
   assertTruthSnapshotIntegrity(snapshot);
   const permitted = snapshot.phase === "INVESTIGATED"
     ? expectedStatus === "INVESTIGATING" && nextStatus === "VALIDATING"
-    : expectedStatus === "VALIDATING" && nextStatus === "DECIDING";
+    : expectedStatus === "VALIDATING" && (nextStatus === "DECIDING" || nextStatus === "COMPLETED");
   if (!permitted) {
     throw new Error(
       `V36 ${snapshot.phase} truth snapshot cannot be committed on ${expectedStatus} -> ${nextStatus}.`,

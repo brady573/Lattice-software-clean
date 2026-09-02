@@ -6,8 +6,6 @@ import { createRuntimeApp } from "../src/runtime-app.js";
 import { resolveRuntimeConfig } from "../src/runtime-config.js";
 import { renderSolandraAuthoritativeConversationPage } from "../src/ui/solandra-authoritative-conversation-page.js";
 
-const boundedUserTurn = "I need a laptop under $1,300 with at least 12 hours of battery life as a hard requirement. Performance matters more.";
-
 async function waitForCompletedRun(app: FastifyInstance, runId: string, timeoutMs = 2_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -23,31 +21,27 @@ async function waitForCompletedRun(app: FastifyInstance, runId: string, timeoutM
   throw new Error(`Run ${runId} did not complete within ${timeoutMs}ms.`);
 }
 
-test("authoritative Solandra baseline binds the composer to durable Product lifecycle and semantic presentation APIs", () => {
+test("authoritative Solandra surface is Conversation + free-form input + adaptive Composer", () => {
   const html = renderSolandraAuthoritativeConversationPage();
 
   assert.match(html, /What do you need to figure out\?/);
-  assert.match(html, /id="resourceFocus"/);
-  assert.match(html, /id="newUpdate"/);
-  assert.match(html, /support-node/);
+  assert.match(html, /id="conversation"/);
+  assert.match(html, /id="conversationInput"/);
+  assert.match(html, /id="composer"/);
   assert.match(html, /\/api\/v1\/conversations/);
-  assert.match(html, /\/clear-user-messages/);
-  assert.match(html, /\/continuity/);
-  assert.match(html, /\/events\/stream/);
-  assert.match(html, /\/result/);
-  assert.match(html, /\/presentation/);
-  assert.match(html, /knownRevision/);
+  assert.match(html, /\/turns/);
+  assert.match(html, /\/outcome/);
   assert.match(html, /event\.isComposing/);
   assert.match(html, /event\.shiftKey/);
-  assert.doesNotMatch(html, /Knowledge Orbit|sunTitle|moonWhy|data-key="budget"|scrollIntoView/i);
-  assert.doesNotMatch(html, /\/api\/v1\/prototype\/model-conversations\//);
+  assert.doesNotMatch(html, /clear-user-messages|decision-plan|winnerCandidateId|Knowledge Orbit|resourceFocus|newUpdate/i);
+  assert.doesNotMatch(html, /Atlas Pro|Nova Air|Forge 15|batteryHours|price\.max\.usd|performance\.relativeToBattery/i);
 
   const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((match) => match[1] ?? "");
-  assert.ok(scripts.length >= 1, "Expected canonical baseline browser script.");
+  assert.ok(scripts.length >= 1, "Expected canonical Conversation browser script.");
   for (const source of scripts) new Script(source);
 });
 
-test("Product runtime serves the baseline and authoritative lifecycle composes into semantic presentation", async () => {
+test("Product runtime accepts ordinary USER text and completes knowledge without DECIDING", async () => {
   const config = resolveRuntimeConfig({
     LATTICE_DEPLOYMENT_MODE: "development",
     LATTICE_TRUTH_MODE: "v36-offline",
@@ -57,65 +51,55 @@ test("Product runtime serves the baseline and authoritative lifecycle composes i
   try {
     const root = await app.inject({ method: "GET", url: "/" });
     assert.equal(root.statusCode, 200);
-    assert.match(root.body, /What do you need to figure out\?/);
-    assert.match(root.body, /id="resourceFocus"/);
-    assert.match(root.body, /id="newUpdate"/);
-    assert.doesNotMatch(root.body, /Knowledge Orbit|sunTitle|moonWhy/i);
+    assert.match(root.body, /id="conversationInput"/);
+    assert.match(root.body, /id="composer"/);
 
     const created = await app.inject({ method: "POST", url: "/api/v1/conversations" });
     assert.equal(created.statusCode, 201, created.body);
     const conversationId = created.json<{ conversation: { id: string } }>().conversation.id;
+    const userText = "Explain the tradeoffs of keeping a local-first hobby app simple while preserving recoverability.";
 
-    const intentScopeId = "m7-g2b-ui-scope";
     const accepted = await app.inject({
       method: "POST",
-      url: `/api/v1/conversations/${conversationId}/intent-scopes/${intentScopeId}/clear-user-messages`,
-      payload: {
-        turnId: "m7-g2b-ui-turn",
-        messageId: "m7-g2b-ui-message",
-        content: boundedUserTurn,
-      },
+      url: `/api/v1/conversations/${conversationId}/turns`,
+      payload: { turnId: "foundational-knowledge-turn", message: userText },
     });
     assert.equal(accepted.statusCode, 202, accepted.body);
-    const runId = accepted.json<{ runId: string; intentVersionId: string }>().runId;
-    const intentVersionId = accepted.json<{ runId: string; intentVersionId: string }>().intentVersionId;
+    const acceptedBody = accepted.json<{
+      runId: string;
+      acceptedUnderstanding: string;
+      provenance: { origin: string; contentDigest: string; intentVersion: number };
+    }>();
+    assert.equal(acceptedBody.acceptedUnderstanding, userText);
+    assert.equal(acceptedBody.provenance.origin, "USER");
+    assert.match(acceptedBody.provenance.contentDigest, /^[a-f0-9]{64}$/u);
+    assert.equal(acceptedBody.provenance.intentVersion, 1);
 
-    const plan = await app.inject({ method: "GET", url: `/api/v1/runs/${runId}/decision-plan` });
-    assert.equal(plan.statusCode, 200, plan.body);
-    assert.equal(plan.json().decisionPlan.intentScopeId, intentScopeId);
-    assert.equal(plan.json().decisionPlan.intentVersionId, intentVersionId);
-    assert.equal(plan.json().decisionPlan.planningMaterial.hardConstraints[0].criterion, "price");
+    await waitForCompletedRun(app, acceptedBody.runId);
 
-    const inProgressPresentation = await app.inject({
-      method: "GET",
-      url: `/api/v1/conversations/${conversationId}/presentation`,
-    });
-    assert.equal(inProgressPresentation.statusCode, 200, inProgressPresentation.body);
-    assert.notEqual(inProgressPresentation.json().presentation.phase, "actionable");
-    assert.equal(inProgressPresentation.json().presentation.nextAction, undefined);
+    const runResponse = await app.inject({ method: "GET", url: `/api/v1/runs/${acceptedBody.runId}` });
+    assert.equal(runResponse.statusCode, 200, runResponse.body);
+    const run = runResponse.json<{ status: string; events: Array<{ type: string }>; decision: unknown }>();
+    assert.equal(run.status, "COMPLETED");
+    assert.equal(run.decision, null);
+    assert.equal(run.events.some((event) => event.type === "DECIDING"), false);
+    assert.deepEqual(run.events.map((event) => event.type), [
+      "CREATED",
+      "UNDERSTANDING",
+      "PLANNING",
+      "INVESTIGATING",
+      "VALIDATING",
+      "COMPLETED",
+    ]);
 
-    await waitForCompletedRun(app, runId);
-
-    const events = await app.inject({ method: "GET", url: `/api/v1/runs/${runId}/events` });
-    assert.equal(events.statusCode, 200, events.body);
-    assert.equal(events.json().events.at(-1).type, "COMPLETED");
-
-    const result = await app.inject({ method: "GET", url: `/api/v1/runs/${runId}/result` });
-    assert.equal(result.statusCode, 200, result.body);
-    assert.match(result.json().explanation, /Nova Air/);
-
-    const presentation = await app.inject({
-      method: "GET",
-      url: `/api/v1/conversations/${conversationId}/presentation`,
-    });
-    assert.equal(presentation.statusCode, 200, presentation.body);
-    assert.equal(presentation.json().presentation.phase, "actionable");
-    assert.equal(
-      presentation.json().presentation.nextAction.winnerCandidateId,
-      result.json().decision.winnerCandidateId,
-    );
-    assert.equal(presentation.json().presentation.durableUnderstanding.requirements[0].criterion, "price");
-    assert.equal(presentation.json().presentation.durableUnderstanding.preferences[0].criterion, "performance");
+    const outcomeResponse = await app.inject({ method: "GET", url: `/api/v1/runs/${acceptedBody.runId}/outcome` });
+    assert.equal(outcomeResponse.statusCode, 200, outcomeResponse.body);
+    const outcome = outcomeResponse.json().outcome;
+    assert.equal(outcome.kind, "KNOWLEDGE");
+    assert.equal(outcome.acceptedUnderstanding, userText);
+    assert.deepEqual(outcome.findings, []);
+    assert.match(outcome.uncertainties[0], /No validated external findings/);
+    assert.equal("decision" in outcome, false);
 
     const continuity = await app.inject({
       method: "GET",
@@ -123,13 +107,40 @@ test("Product runtime serves the baseline and authoritative lifecycle composes i
     });
     assert.equal(continuity.statusCode, 200, continuity.body);
     assert.equal(continuity.json().messages.length, 1);
-    assert.equal(continuity.json().messages[0].content, boundedUserTurn);
-    const historical = continuity.json().runs.find((run: { runId: string }) => run.runId === runId);
-    assert.ok(historical);
-    assert.equal(historical.status, "COMPLETED");
-    assert.equal(historical.resultAvailable, true);
-    assert.equal(historical.exactBinding.intentScopeId, intentScopeId);
-    assert.equal(historical.exactBinding.intentVersionId, intentVersionId);
+    assert.equal(continuity.json().messages[0].content, userText);
+  } finally {
+    await app.close();
+  }
+});
+
+test("prepared resources remain editable material rather than execution authorization", async () => {
+  const config = resolveRuntimeConfig({
+    LATTICE_DEPLOYMENT_MODE: "development",
+    LATTICE_TRUTH_MODE: "v36-offline",
+  } as NodeJS.ProcessEnv);
+  const app = await createRuntimeApp(config, { memoryDispatchDelayMs: 5 });
+  try {
+    const created = await app.inject({ method: "POST", url: "/api/v1/conversations" });
+    const conversationId = created.json<{ conversation: { id: string } }>().conversation.id;
+    const accepted = await app.inject({
+      method: "POST",
+      url: `/api/v1/conversations/${conversationId}/turns`,
+      payload: {
+        turnId: "foundational-resource-turn",
+        message: "Prepare a checklist for reviewing a risky configuration change before I apply it.",
+        prepare: "CHECKLIST",
+      },
+    });
+    assert.equal(accepted.statusCode, 202, accepted.body);
+    const runId = accepted.json<{ runId: string }>().runId;
+    await waitForCompletedRun(app, runId);
+
+    const result = await app.inject({ method: "GET", url: `/api/v1/runs/${runId}/outcome` });
+    assert.equal(result.statusCode, 200, result.body);
+    assert.equal(result.json().outcome.kind, "ACTION_PREPARATION");
+    assert.equal(result.json().outcome.resource.kind, "CHECKLIST");
+    assert.equal(result.json().outcome.resource.editable, true);
+    assert.equal(result.json().outcome.resource.executionAuthorized, false);
   } finally {
     await app.close();
   }

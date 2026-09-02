@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
-import type { Candidate, Evidence } from "../domain.js";
+import type { Candidate, Evidence, LatticeRunRequest } from "../domain.js";
+import { isConsultationRunRequest } from "../domain.js";
 import { defaultDecisionFixture, type FixtureDataset } from "../fixtures.js";
 import type { V36ResearchCheckpoint } from "./continuation.js";
 import {
@@ -52,7 +53,7 @@ export type TruthDurableValidationStep =
 
 export interface TruthExecutionPipeline {
   readonly mode: "v36-offline-fixture";
-  investigate(runId: string): Promise<TruthPipelineInvestigation>;
+  investigate(runId: string, request?: LatticeRunRequest): Promise<TruthPipelineInvestigation>;
   validate(snapshot: TruthSnapshot): Promise<TruthPipelineExecution>;
   beginDurableValidation?(snapshot: TruthSnapshot): Promise<TruthDurableValidationStep>;
   resumeDurableValidation?(
@@ -60,7 +61,7 @@ export interface TruthExecutionPipeline {
     results: readonly V36RuntimeExecutionResult[],
   ): Promise<TruthDurableValidationStep>;
   decisionInputs(snapshot: TruthSnapshot): Promise<TruthDecisionInputs>;
-  execute(runId: string): Promise<TruthPipelineExecution>;
+  execute(runId: string, request?: LatticeRunRequest): Promise<TruthPipelineExecution>;
 }
 
 function initialSerialRounds(snapshot: TruthSnapshot): number {
@@ -68,11 +69,9 @@ function initialSerialRounds(snapshot: TruthSnapshot): number {
 }
 
 /**
- * Deterministic offline execution seam for the current V36 prototype.
- *
- * V36 itself produces stage-tagged snapshots. Validation consumes the exact
- * investigation snapshot directly; it never re-runs fixture compilation or
- * adjudication to authenticate persisted state.
+ * Deterministic offline V36 seam. Candidate/evidence arrays are compatibility
+ * material for the optional decision adapter; truth claims themselves are not
+ * required to carry candidate or criterion bindings.
  */
 export class OfflineFixtureTruthPipeline implements TruthExecutionPipeline {
   readonly mode = "v36-offline-fixture" as const;
@@ -92,6 +91,10 @@ export class OfflineFixtureTruthPipeline implements TruthExecutionPipeline {
     this.executionContractId = `v36-offline-fixture:${createHash("sha256")
       .update(stableStructuredJson(this.dataset))
       .digest("hex")}`;
+  }
+
+  ownsExecutionContract(executionContractId: string): boolean {
+    return executionContractId === this.executionContractId;
   }
 
   private durableAdmissionPolicy(): ResearchEvidenceAdmissionPolicy {
@@ -128,7 +131,7 @@ export class OfflineFixtureTruthPipeline implements TruthExecutionPipeline {
     if (snapshot.phase !== "INVESTIGATED") {
       throw new Error("V36 validation requires an INVESTIGATED truth snapshot.");
     }
-    if (snapshot.executionContractId !== this.executionContractId) {
+    if (!this.ownsExecutionContract(snapshot.executionContractId)) {
       throw new Error("Truth snapshot was produced by a different V36 execution contract.");
     }
 
@@ -150,7 +153,7 @@ export class OfflineFixtureTruthPipeline implements TruthExecutionPipeline {
 
   async beginDurableValidation(snapshot: TruthSnapshot): Promise<TruthDurableValidationStep> {
     assertTruthSnapshotIntegrity(snapshot);
-    if (snapshot.executionContractId !== this.executionContractId) {
+    if (!this.ownsExecutionContract(snapshot.executionContractId)) {
       throw new Error("Truth snapshot was produced by a different V36 execution contract.");
     }
     return this.durableStep(beginDurableV36Validation(snapshot));
@@ -160,7 +163,7 @@ export class OfflineFixtureTruthPipeline implements TruthExecutionPipeline {
     checkpoint: V36ResearchCheckpoint,
     results: readonly V36RuntimeExecutionResult[],
   ): Promise<TruthDurableValidationStep> {
-    if (checkpoint.executionContractId !== this.executionContractId) {
+    if (!this.ownsExecutionContract(checkpoint.executionContractId)) {
       throw new Error("V36 checkpoint was produced by a different execution contract.");
     }
     const prepared = prepareV36RuntimeResume(checkpoint, results);
@@ -177,7 +180,7 @@ export class OfflineFixtureTruthPipeline implements TruthExecutionPipeline {
     if (snapshot.phase !== "VALIDATED") {
       throw new Error("Decision inputs require a VALIDATED V36 truth snapshot.");
     }
-    if (snapshot.executionContractId !== this.executionContractId) {
+    if (!this.ownsExecutionContract(snapshot.executionContractId)) {
       throw new Error("Truth snapshot was produced by a different V36 execution contract.");
     }
     return {
@@ -192,6 +195,60 @@ export class OfflineFixtureTruthPipeline implements TruthExecutionPipeline {
   }
 }
 
+const emptyKnowledgeFixture: FixtureDataset = Object.freeze({
+  candidates: [],
+  evidence: [],
+  truthClaims: [],
+  truthEvidence: [],
+});
+
+/**
+ * Product-default router. Ordinary consultations validate through a neutral
+ * V36 dataset with no candidate/criterion assumptions. The historical fixture
+ * is selected only for legacy qualified-decision requests so old evidence can
+ * remain a compatibility test surface while the primary intake moves forward.
+ */
+class DefaultOfflineTruthPipeline implements TruthExecutionPipeline {
+  readonly mode = "v36-offline-fixture" as const;
+  private readonly knowledge = new OfflineFixtureTruthPipeline(emptyKnowledgeFixture);
+  private readonly legacyDecision = new OfflineFixtureTruthPipeline(defaultDecisionFixture);
+
+  private pipelineForExecutionContract(executionContractId: string): OfflineFixtureTruthPipeline {
+    if (this.knowledge.ownsExecutionContract(executionContractId)) return this.knowledge;
+    if (this.legacyDecision.ownsExecutionContract(executionContractId)) return this.legacyDecision;
+    throw new Error("Truth state was produced by an unknown V36 execution contract.");
+  }
+
+  async investigate(runId: string, request?: LatticeRunRequest): Promise<TruthPipelineInvestigation> {
+    const pipeline = request && isConsultationRunRequest(request) ? this.knowledge : this.legacyDecision;
+    return pipeline.investigate(runId);
+  }
+
+  async validate(snapshot: TruthSnapshot): Promise<TruthPipelineExecution> {
+    return this.pipelineForExecutionContract(snapshot.executionContractId).validate(snapshot);
+  }
+
+  async beginDurableValidation(snapshot: TruthSnapshot): Promise<TruthDurableValidationStep> {
+    return this.pipelineForExecutionContract(snapshot.executionContractId).beginDurableValidation(snapshot);
+  }
+
+  async resumeDurableValidation(
+    checkpoint: V36ResearchCheckpoint,
+    results: readonly V36RuntimeExecutionResult[],
+  ): Promise<TruthDurableValidationStep> {
+    return this.pipelineForExecutionContract(checkpoint.executionContractId).resumeDurableValidation(checkpoint, results);
+  }
+
+  async decisionInputs(snapshot: TruthSnapshot): Promise<TruthDecisionInputs> {
+    return this.pipelineForExecutionContract(snapshot.executionContractId).decisionInputs(snapshot);
+  }
+
+  async execute(runId: string, request?: LatticeRunRequest): Promise<TruthPipelineExecution> {
+    const investigation = await this.investigate(runId, request);
+    return this.validate(investigation.snapshot);
+  }
+}
+
 export function createDefaultOfflineTruthPipeline(): TruthExecutionPipeline {
-  return new OfflineFixtureTruthPipeline(defaultDecisionFixture);
+  return new DefaultOfflineTruthPipeline();
 }

@@ -177,12 +177,16 @@ export interface TruthEvidenceProfile {
   researchQuestionId?: string | null;
 }
 
+/**
+ * V36 claim profiles are domain-neutral. Candidate/criterion bindings are
+ * optional compatibility metadata consumed only by decision adapters.
+ */
 export interface TruthClaimProfile {
   id: string;
   text: string;
   claimType: ClaimType;
-  candidateId: string;
-  criterion: string;
+  candidateId?: string;
+  criterion?: string;
   evidenceIds: string[];
   scope?: string | null;
   effectiveAt?: string | null;

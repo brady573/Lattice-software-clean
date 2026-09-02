@@ -1,5 +1,10 @@
 import { randomUUID } from "node:crypto";
-import type { LatticeRun, RunRequest, RunStatus } from "./domain.js";
+import {
+  isConsultationRunRequest,
+  type LatticeRun,
+  type LatticeRunRequest,
+  type RunStatus,
+} from "./domain.js";
 import { createDecisionFromAdmittedEvidence } from "./engine.js";
 import {
   assertSolandraExplanationFidelity,
@@ -22,6 +27,10 @@ function isSettledStatus(status: RunStatus): boolean {
   return terminalStatuses.has(status) || status === "AWAITING_CLARIFICATION";
 }
 
+function requiresDecision(request: LatticeRunRequest): boolean {
+  return !isConsultationRunRequest(request) || request.decisionNeed === "QUALIFIED";
+}
+
 export type DurableV36ContinuationBridge = Pick<PostgresV36ResearchBridge, "load" | "schedule">;
 type DurableTruthExecutionPipeline = TruthExecutionPipeline & Required<Pick<
   TruthExecutionPipeline,
@@ -37,7 +46,7 @@ function requireDurableTruthPipeline(pipeline: TruthExecutionPipeline): DurableT
 
 export function createPendingRun(
   conversationId: string,
-  request: RunRequest,
+  request: LatticeRunRequest,
   runId = randomUUID(),
 ): LatticeRun {
   return {
@@ -164,7 +173,7 @@ export async function executePersistedRunTick(
       return await advance("INVESTIGATING");
     }
     if (status === "INVESTIGATING") {
-      const investigation = await truthPipeline.investigate(runId);
+      const investigation = await truthPipeline.investigate(runId, run.request);
       if (investigation.snapshot.runId !== runId) {
         throw new Error("Truth pipeline returned investigation state for a different Run.");
       }
@@ -191,14 +200,14 @@ export async function executePersistedRunTick(
         if (durable.snapshot.runId !== runId) {
           throw new Error("V36 durable continuation returned validated state for a different Run.");
         }
-        return await advance("DECIDING", durable.snapshot);
+        return await advance(requiresDecision(run.request) ? "DECIDING" : "COMPLETED", durable.snapshot);
       }
 
       const truth = await truthPipeline.validate(persistedInvestigation);
       if (truth.snapshot.runId !== runId) {
         throw new Error("Truth pipeline returned validated state for a different Run.");
       }
-      return await advance("DECIDING", truth.snapshot);
+      return await advance(requiresDecision(run.request) ? "DECIDING" : "COMPLETED", truth.snapshot);
     }
     if (status === "DECIDING") {
       const persistedSnapshot = await runStore.getTruthSnapshot(runId);
@@ -208,6 +217,9 @@ export async function executePersistedRunTick(
       const persistedTruth = persistedSnapshot.bundle;
       const decisionInputs = await truthPipeline.decisionInputs(persistedSnapshot);
       const decisionState = await refresh();
+      if (isConsultationRunRequest(decisionState.request)) {
+        throw new Error("Qualified consultation decisions require the generalized Decision Engine adapter.");
+      }
 
       if (!decisionState.decision) {
         const decisionEvidence = materializeDecisionEvidence(
@@ -272,7 +284,7 @@ export async function executePersistedRunTick(
         // ownership loss remains controlling state and must not be overwritten.
       }
     }
-    throw new RunExecutionError(error instanceof Error ? error.message : "Unknown decision error", runId);
+    throw new RunExecutionError(error instanceof Error ? error.message : "Unknown Run error", runId);
   }
 }
 
