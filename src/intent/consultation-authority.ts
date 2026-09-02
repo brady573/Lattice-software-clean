@@ -1,15 +1,15 @@
+import type { IntentPreferenceReuseCommand } from "./preference-reuse-command.js";
 import type { IntentAuthorityStore } from "./store.js";
 import type {
   ConfirmPendingIntentProposalCommand,
   CreateIntentScopeInput,
   CreatePendingIntentProposalInput,
   IntentCorrectionCommand,
-  IntentPreferenceReuseCommand,
   IntentResetCommand,
   IntentRevertCommand,
   IntentScope,
   IntentTransitionCommand,
-} from "./index.js";
+} from "./types.js";
 
 function consultationScope(scope: IntentScope | undefined): IntentScope | undefined {
   if (!scope) return undefined;
@@ -17,12 +17,7 @@ function consultationScope(scope: IntentScope | undefined): IntentScope | undefi
   return { ...scope, kind: "consultation" };
 }
 
-/**
- * Primary consultation view over the existing exact-version Intent Authority.
- *
- * Legacy decision scopes remain readable. Consultation identity is explicit at
- * the authority boundary; the PostgreSQL migration persists the same scope kind.
- */
+/** Primary consultation view over the existing exact-version Intent Authority. */
 export class ConsultationIntentAuthorityStore implements IntentAuthorityStore {
   readonly kind: "memory" | "postgres";
 
@@ -49,7 +44,5 @@ export class ConsultationIntentAuthorityStore implements IntentAuthorityStore {
   getPendingProposal(proposalId: string) { return this.base.getPendingProposal(proposalId); }
   confirmPendingProposal(command: ConfirmPendingIntentProposalCommand) { return this.base.confirmPendingProposal(command); }
 
-  async close(): Promise<void> {
-    await this.base.close();
-  }
+  async close(): Promise<void> { await this.base.close(); }
 }
