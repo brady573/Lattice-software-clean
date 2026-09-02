@@ -484,6 +484,7 @@ export class PostgresRunStore implements RunStore {
   }
 
   async getTruthBundle(runId: string): Promise<TruthBundle | undefined> {
+    if (!await this.readSnapshotMetadata(runId)) return undefined;
     const claimRows = await this.pool.query<{
       id: string;
       claim_text: string;
@@ -505,7 +506,6 @@ export class PostgresRunStore implements RunStore {
       "SELECT id,claim_text,claim_type,scope_text,effective_at,jurisdiction_text,unit_text,denominator_text,baseline_text,qualifiers_json,period_text,causal_relation_text,authenticity_target_text,comparison_class_text,quoted_context_text,evidence_risk FROM truth_claims WHERE run_id=$1 ORDER BY created_at,id",
       [runId],
     );
-    if ((claimRows.rowCount ?? 0) === 0) return undefined;
 
     const [
       componentRows,
