@@ -60,7 +60,7 @@ test(
     try {
       await store.create({ ...investigatingRun(runId), request });
 
-      const investigated = await pipeline.investigate(runId, request);
+      const investigated = await pipeline.investigate(runId);
       assert.deepEqual(investigated.snapshot.bundle.claims, []);
       assert.deepEqual(investigated.snapshot.bundle.assessments, []);
 
