@@ -22,7 +22,7 @@ import {
   stableStructuredJson,
   type TruthSnapshot,
 } from "./snapshot.js";
-import type { TruthBundle, TruthClaim, TruthEvidence } from "./types.js";
+import type { TruthClaimProfile, TruthEvidenceProfile } from "./types.js";
 import type {
   TruthDecisionInputs,
   TruthDurableValidationStep,
@@ -34,14 +34,18 @@ import type {
 export interface PrimaryTruthDataset {
   candidates: Candidate[];
   evidence: Evidence[];
-  truthClaims: TruthClaim[];
-  truthEvidence: TruthEvidence[];
+  truthClaims: TruthClaimProfile[];
+  truthEvidence: TruthEvidenceProfile[];
 }
 
 export interface PrimaryDecisionSemantics {
   catalogVersion: number;
   definitions: CriterionDefinition[];
 }
+
+type PrimaryDecisionInputs = TruthDecisionInputs & {
+  criterionCatalog?: PrimaryDecisionSemantics;
+};
 
 function initialSerialRounds(snapshot: TruthSnapshot): number {
   return Math.max(1, ...snapshot.bundle.researchQuestions.map((question) => question.serialRound));
@@ -84,7 +88,7 @@ export class PrimaryOfflineTruthPipeline implements TruthExecutionPipeline {
       : new FailClosedResearchEvidenceAdmissionPolicy();
   }
 
-  private decisionInputsValue(): TruthDecisionInputs {
+  private decisionInputsValue(): PrimaryDecisionInputs {
     return {
       candidates: structuredClone(this.dataset.candidates),
       evidence: structuredClone(this.dataset.evidence),
