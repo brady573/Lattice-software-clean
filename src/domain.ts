@@ -33,7 +33,13 @@ export const consultationRunRequestSchema = z.object({
 });
 
 export type RunRequest = z.infer<typeof runRequestSchema>;
-export type ConsultationRunRequest = z.infer<typeof consultationRunRequestSchema>;
+type ConsultationRequestData = z.infer<typeof consultationRunRequestSchema>;
+export type ConsultationRunRequest = ConsultationRequestData & {
+  /** Compatibility-only absent fields; consultations never require them. */
+  goal?: never;
+  priorities?: never;
+  hardConstraints?: never;
+};
 export type LatticeRunRequest = RunRequest | ConsultationRunRequest;
 export type Priority = z.infer<typeof prioritySchema>;
 export type HardConstraint = z.infer<typeof hardConstraintSchema>;
