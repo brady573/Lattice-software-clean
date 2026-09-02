@@ -1,10 +1,6 @@
-import { renderSolandraPrototypePage } from "./solandra-prototype-page.js";
+import { renderSolandraConversationPage } from "./solandra-conversation-page.js";
 
-/**
- * The authoritative Product UI is the Owner-locked Solandra baseline.
- * Product state enters the page only through the application-owned semantic
- * presentation API consumed by that baseline renderer.
- */
+/** Canonical Product surface: Conversation + free-form input + adaptive Composer. */
 export function renderSolandraAuthoritativeConversationPage(): string {
-  return renderSolandraPrototypePage();
+  return renderSolandraConversationPage();
 }
