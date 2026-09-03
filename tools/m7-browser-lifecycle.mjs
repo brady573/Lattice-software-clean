@@ -381,12 +381,15 @@ async function main() {
       const input=document.getElementById('conversationInput');
       const composerText=document.getElementById('composer').innerText;
       const conversationText=document.getElementById('conversation').innerText;
-      if(input.disabled||!composerText.includes('Fixture limitation.')||!conversationText.includes('Explain the evidence instead.'))return null;
+      const requests=window.__clarificationFixtureRequests;
+      if(input.disabled||!conversationText.includes('Explain the evidence instead.')||!requests.some((item)=>item.path.includes('/runs/run-corrected/outcome')))return null;
       return {composerText,conversationText,requests:window.__clarificationFixtureRequests,turns:document.querySelectorAll('#conversation .turn.user').length};
     })()`));
     assert.equal(correctionRouting.turns, 2);
     assert.equal(correctionRouting.requests.filter((item) => item.path.endsWith('/turns')).length, 2);
+    assert.equal(correctionRouting.requests.filter((item) => item.path.includes('/runs/run-corrected/outcome')).length, 1);
     assert.equal(correctionRouting.requests.some((item) => item.path.includes('/confirm')), false);
+    assert.doesNotMatch(correctionRouting.composerText, /Do you mean the inferred comparison\?|Explain the evidence instead\.|Accepted understanding|semantic status/i);
     evidence.browser.clarificationCorrection = correctionRouting;
 
     await cdp.eval(`window.__latticeReloadMarker='clarification-correction'`);
