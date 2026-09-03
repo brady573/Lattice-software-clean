@@ -35,6 +35,14 @@ test("authoritative Solandra surface is Conversation + free-form input + adaptiv
   assert.match(html, /event\.shiftKey/);
   assert.match(html, /What you said/);
   assert.match(html, /confirmsPending = clarification && isExplicitConfirmation\(message\)/);
+  assert.ok(
+    html.includes('replace(/\\s+/g, " ")'),
+    "Rendered confirmation classifier must retain its whitespace-regex escape.",
+  );
+  assert.ok(
+    html.includes(')\\.?$/iu'),
+    "Rendered confirmation classifier must retain its optional-period escape.",
+  );
   assert.doesNotMatch(html, /clear-user-messages|decision-plan|winnerCandidateId|Knowledge Orbit|resourceFocus|newUpdate/i);
   assert.doesNotMatch(html, /Atlas Pro|Nova Air|Forge 15|batteryHours|price\.max\.usd|performance\.relativeToBattery/i);
 

@@ -103,8 +103,8 @@ export function renderSolandraConversationPage(): string {
         sendButton.disabled = value;
       };
 
-      const isExplicitConfirmation = (message) => /^(?:yes|yes please|yes,? (?:that'?s|that is) (?:right|correct)|confirmed|confirm|that'?s right|that'?s correct|correct|apply it|use that)\.?$/iu
-        .test(message.trim().replace(/\s+/g, " "));
+      const isExplicitConfirmation = (message) => /^(?:yes|yes please|yes,? (?:that'?s|that is) (?:right|correct)|confirmed|confirm|that'?s right|that'?s correct|correct|apply it|use that)\\.?$/iu
+        .test(message.trim().replace(/\\s+/g, " "));
 
       const renderAuthoritativeProgress = (acceptedUnderstanding, detail) => {
         composer.innerHTML = '<h1>' + escapeHtml(acceptedUnderstanding) + '</h1><p class="muted">Accepted understanding</p><p>' + escapeHtml(detail) + '</p>';
