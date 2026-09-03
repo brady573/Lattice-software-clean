@@ -4,7 +4,7 @@
 
 Path from the repaired Product architecture to the 1.0 release
 
-**Canonical Living Design 0.9 | September 3, 2026**
+**Canonical Living Design 0.10 | September 3, 2026**
 
 Repository reconciliation baseline: brady573/Lattice-software-clean main @ 3de31612c46a3e31a70e6977f6e100d20bb6be85
 
@@ -12,7 +12,7 @@ Repository authority: Owner-approved on August 26, 2026 as the canonical living 
 
 **Document purpose**
 
-Define a coherent, implementation-oriented path from the current offline truth-centered prototype to a production-capable Lattice 1.0 while preserving the protected V36 epistemic contract. This is a living design: confirmed requirements and decisions are separated from working assumptions and open decisions, and future revisions should record why the design changed.
+Define a coherent, implementation-oriented path from the repaired Product architecture to a production-capable Lattice 1.0 while preserving its authority boundaries and the protected V36 epistemic contract. This is a living design: confirmed requirements and decisions are separated from working assumptions and open decisions, and future revisions should record why the design changed.
 
 **Design authority**
 
@@ -23,7 +23,7 @@ Define a coherent, implementation-oriented path from the current offline truth-c
 | Field | Value |
 |---|---|
 | Document status | Owner-approved canonical living Product design baseline; not a blanket approval of Proposed or Open decision items. |
-| Version | 0.9 |
+| Version | 0.10 |
 | Repository baseline | main @ 3de31612c46a3e31a70e6977f6e100d20bb6be85 |
 | Current implementation mode | Repaired canonical Product architecture with Intent Authority, conditional DecisionPlan/Decision Engine, generic V36 truth execution, Knowledge and Action Preparation outcomes, durable/async components, and Conversation + Composer Solandra presentation. Legacy and simulation routes are explicit non-canonical compositions. |
 | Target | First production-capable 1.0 release of trustworthy knowledge with conditional decision capability. |
@@ -180,22 +180,22 @@ All paths -> Solandra Experience
 | General-purpose file ingestion | Open decision | Architecturally compatible, but may expand security/storage/parsing scope substantially. See OD-010. |
 | Large plugin/tool ecosystem | Deferred | Provider/tool breadth should not precede quality and authority guarantees. |
 
-# 3. Current Baseline at the Studied Revision
+# 3. Current Baseline at the Reconciled Revision
 
 The following is the starting state for the 1.0 design. It is intentionally summarized here so this document can remain self-contained; deeper detail is in the repository-understanding baseline created from the same revision.
 
 | Area | Current state | 1.0 implication |
 |---|---|---|
 | V36 Truth Core | Implemented offline with typed claims, proof contracts, provenance, adjudication, admission, snapshots, fidelity tests. | Preserve semantics; integrate live/durable research around it. |
-| Lattice Execution Runtime / Run state | Run status/version CAS, durable truth/Run persistence, durable research orchestration components, async API control, and Run worker logic exist as components. | Compose the currently separated durable components into the default runtime/process roles. |
-| Research | Offline fixture enrichment executes in-process; durable research task DAG/attempt/outbox mechanics also exist. | Connect durable provider execution to V36 without giving runtime/orchestration epistemic authority. |
+| Lattice Execution Runtime / Run state | Run status/version CAS, durable truth/Run persistence, durable research orchestration, async API control, and separate Run/Research worker roles are implemented and composed. | Preserve resumability, idempotency, cancellation, and the boundary that runtime state cannot establish truth or decision meaning. |
+| Research | Offline deterministic execution and durable provider-neutral research task DAG/attempt/outbox/continuation paths are implemented. | Qualify provider use without giving runtime or orchestration epistemic authority. |
 | Lattice Model Gateway | Product-owned provider-neutral offline model boundary with deterministic fixture support, bounded/cancellable/idempotent runtime semantics, and loopback-only OpenAI-compatible qualification support. Current main also composes this boundary into a development-only transient simulated-conversation surface. | Reuse for intent/explanation/provider qualification while preserving the rule that model output is proposal/rendering material, not intent, truth, decision, or Product-validation authority. |
-| V7 LLM Simulation Lab | Owner-designated external prototype-stage artifact: `lattice-llm-simulation-lab` `1.7.0-research`, polished standalone/offline module, not Lattice Product code. | Use as the prototype model/API simulation and qualification surface; its experiment outputs do not establish Lattice Product correctness or production readiness. |
-| Solandra offline-prototype UI design | Owner-approved external offline-prototype Product design artifact: `lattice-solandra-ui-design-package-offline-prototype-approved`, status `owner-approved-offline-prototype-preimplementation`. | Use as a qualified Product-design input for the bounded offline-prototype UI Work Item; implementation/browser/accessibility/E2E acceptance remain unearned until executed. |
-| Lattice Intent Authority | Canonical subsystem name and authority boundary are Owner-approved. Current durable/versioned structured intent authority is not implemented. An external conversation-drift handoff is available as a design candidate. | Resolve OD-004 and separately qualify/promote the detailed candidate architecture before implementing it as normative Product behavior. |
-| Lattice Decision Engine | Current prototype decision logic exists with hard constraints and weighted preference scoring using current fixture assumptions. | Introduce typed criteria, utility functions, tri-state constraint state, explicit tie/outcome semantics. |
-| Solandra Experience | Explicit deterministic presentation boundary exists. Current main also includes a development-only transient simulated-conversation testing surface. | Implement the approved offline-prototype UX without moving intent/truth/decision authority into Solandra; later generalize explanation under a qualified fidelity contract. |
-| Auth / durable conversation persistence | Fixture/injectable subject; no 1.0 durable conversation/message authority path. | Required before multi-user 1.0. |
+| V7 LLM Simulation Lab | Historical external prototype-stage artifact: `lattice-llm-simulation-lab` `1.7.0-research`; it remains standalone development evidence, not Lattice Product code or a current implementation target. | Retain only as optional provider-boundary qualification provenance; its outputs do not establish Product correctness or production readiness. |
+| Historical Solandra offline-prototype design | Owner-approved bounded design provenance: `lattice-solandra-ui-design-package-offline-prototype-approved`. The current implemented Product surface is the Core-aligned Conversation + Composer design. | Preserve useful qualified provenance without treating the old offline prototype as the current implementation target or authority over current behavior. |
+| Lattice Intent Authority | Durable/versioned structured intent authority, exact USER provenance, pending material inference, confirmation/correction lineage, and exact Run binding are implemented. | Preserve the boundary that conversation is context/provenance and only Intent Authority establishes canonical intent. |
+| Lattice Decision Engine | Generalized qualified-criterion comparison, requirement eligibility, meaningful difference, material dominance, frontier/tie/unresolved/insufficient-evidence outcomes, and conditional execution are implemented. Legacy weighted fixture scoring is isolated from canonical runtime. | Extend only through qualified criterion semantics and V36-admitted evidence; never restore raw cross-scale scoring or a forced winner. |
+| Solandra Experience | The current Conversation + Composer implementation presents authoritative Product state through a behavior-subordinate deterministic boundary with browser/mobile acceptance coverage. Development simulation surfaces are explicitly non-canonical. | Preserve adaptive trustworthy presentation without moving intent, truth, decision, or authorization authority into the UI. |
+| Auth / durable conversation persistence | Authenticated-subject ownership, durable conversations/messages, continuity, preferences, deletion, and cross-subject isolation are implemented. | Preserve fail-closed ownership and privacy while completing only separately qualified 1.0 security/operations work. |
 | Deployment | One web service + PostgreSQL blueprint; no final worker topology. | Introduce process-role deployment and readiness gates. |
 
 ## 3.1 Prototype-stage V7 LLM Simulation Lab
@@ -213,9 +213,9 @@ Bound artifact evidence supplied for this design revision:
 
 Interpretation boundary: V7's micro-evolution capacities and held-out improvement are evidence about the declared standalone simulator experiment only. They are not Lattice Product capacity recommendations, V36 acceptance evidence, real-model reliability measurements, or production-readiness evidence. The package's own validation explicitly records `latticeProductValidation: false` and `productionReady: false`.
 
-## 3.2 Owner-approved Solandra offline-prototype UI design package
+## 3.2 Historical Solandra offline-prototype UI design package
 
-**Confirmed Owner approval:** the refined Solandra UI design is approved as the normative Product-design target for the bounded offline prototype. Approval is design authority for that scope, not implementation validation or production authorization.
+**Historical Owner approval:** the refined Solandra UI design was approved as the Product-design target for its bounded offline-prototype scope. It remains provenance for that completed design stage, not the current implementation target and not authority over the Core-aligned Conversation + Composer behavior now implemented.
 
 Bound artifact evidence supplied for this design revision:
 
@@ -229,7 +229,7 @@ Bound artifact evidence supplied for this design revision:
 - Premium validation report status: `DESIGN PACKAGE PREMIUM-VALIDATED AND OWNER-APPROVED FOR OFFLINE PROTOTYPE — NOT IMPLEMENTATION VALIDATION`.
 - Package refinement includes explicit scroll ownership, overlay/layer ownership, IME-safe composer semantics, active-Run local drafting without implicit queueing, new-update behavior, focus/touch requirements, degraded-transport handling, and an acceptance corpus.
 
-Unclaimed validation remains explicit: implementation does not yet exist by virtue of approval; official designmd lint, strict repository audit, browser, keyboard, screen-reader, responsive, reduced-motion, visual-regression, and end-to-end Product acceptance require execution against the exact implementation revision.
+Validation remains revision-bound: the historical package approval did not itself validate implementation. Current browser/mobile and Product acceptance evidence belongs only to the exact current implementation revision and does not retroactively promote the package into runtime authority.
 
 Interpretation boundary: this Owner decision promotes the design requirements for the offline-prototype UI scope only. It does not change V36 Truth Core authority, Lattice Decision Engine authority, Lattice Intent Authority semantics, Solandra's read-only fidelity boundary, live-provider status, or production readiness.
 
@@ -663,7 +663,7 @@ This generalizes today’s structured deterministic fidelity boundary without gi
 | GET /api/v1/runs/:id/events | Durable event history | Existing concept retained; paginated/cursor-ready. |
 | GET /api/v1/runs/:id/events/stream | SSE progress | Reconnect with Last-Event-ID or equivalent sequence cursor. |
 | POST /api/v1/runs/:id/cancel | Cancel active Run | Existing CAS semantics retained. |
-| GET /api/v1/runs/:id/result | Read authoritative result | Only after completion or terminal outcome contract. |
+| GET /api/v1/runs/:id/outcome | Read the polymorphic Product outcome | Returns Knowledge, Decision Support, or Action Preparation from completed authoritative state; active Runs return current status. |
 
 ## 13.3 Error model
 
@@ -958,6 +958,7 @@ All paths --------------------------------------------> M12 1.0 stabilization
 | 0.4 | 2026-08-26 | 73d707b5921e01b46458381dad633203d8d63af0 | Reconciles the merged provider-neutral offline model boundary and Owner placement of the external Solandra UI Design Package v2 in the prototype stage. Records exact package provenance and pre-implementation/nonclaim boundaries; inserts the package as M2 and shifts the prior forward M2-M11 sequence to M3-M12 with dependent references updated. |
 | 0.5 | 2026-08-26 | cad448809a8f02df6d31de4e516cd1df21d5b456 | Reconciles the development-only simulated-conversation surface; installs the Owner-approved canonical Lattice system registry/naming convention; names the user-intent subsystem Lattice Intent Authority while retaining its uploaded drift architecture as a candidate under OD-004; records the Owner-approved Solandra offline-prototype UI package and exact artifact hash; updates authority maps, roadmap terminology, system flow, risks, and ADR register without changing V36 or decision semantics. |
 | 0.9 | 2026-09-03 | 3de31612c46a3e31a70e6977f6e100d20bb6be85 | Reconciles the Living Design to the Core and repaired Product architecture: trustworthy knowledge plus conditional decision capability; three outcome paths; conditional DecisionPlan/Decision Engine; adaptive Conversation + Composer presentation; current Intent/V36/decision boundaries; and explicit non-canonical legacy/development composition. |
+| 0.10 | 2026-09-03 | 3de31612c46a3e31a70e6977f6e100d20bb6be85 | Reconciles the current baseline with implemented Intent Authority, generalized conditional decision semantics, current Conversation + Composer behavior, durable runtime/auth boundaries, and one canonical polymorphic `/outcome` surface; retains old prototype packages and decision-only `/result` behavior as historical or explicit legacy scope only. |
 
 # 27. Proposed 1.0 Definition of Done
 

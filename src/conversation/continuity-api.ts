@@ -92,7 +92,7 @@ export function registerConversationContinuityApi(
           status: run.status,
           version: run.version,
           eventCount: run.events.length,
-          resultAvailable: run.status === "COMPLETED" && (
+          outcomeAvailable: run.status === "COMPLETED" && (
             isConsultationRunRequest(run.request)
               ? true
               : run.decision !== null && run.explanation !== null
@@ -116,7 +116,7 @@ export function registerConversationContinuityApi(
             run: `/api/v1/runs/${encodeURIComponent(run.id)}`,
             events: `/api/v1/runs/${encodeURIComponent(run.id)}/events`,
             eventStream: `/api/v1/runs/${encodeURIComponent(run.id)}/events/stream`,
-            result: `/api/v1/runs/${encodeURIComponent(run.id)}/result`,
+            outcome: `/api/v1/runs/${encodeURIComponent(run.id)}/outcome`,
             decisionPlan: `/api/v1/runs/${encodeURIComponent(run.id)}/decision-plan`,
           },
         };

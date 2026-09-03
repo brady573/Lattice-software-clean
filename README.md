@@ -95,7 +95,7 @@ curl -sS -X POST http://127.0.0.1:3000/api/v1/conversations/CONVERSATION_ID/turn
 
 Canonical runtime composition contains no built-in domain grammar, candidate fixture, criterion catalog, legacy `/runs` intake, old structured-message intake, or simulated model/Android prototype routes. Historical adapter tests use `src/legacy/legacy-test-app.ts`; simulations use explicit `src/development/` composition. A qualified interpreter, criterion catalog, and evidence composition must be supplied before a decision need can move from `UNRESOLVED` to `QUALIFIED`; material interpreted meaning remains pending until USER confirmation.
 
-The versioned message API has an atomic asynchronous Run-acceptance boundary, durable idempotency, polling/result surfaces, durable cancellation, and an at-least-once Run-worker execution boundary. Durable Execution Runtime composition, the V36 continuation handshake, conversation/progress continuity, and M8 subject/privacy boundaries have all been implemented in their accepted milestone scopes; exact validation provenance remains revision-bound. See `docs/ROADMAP.md` for the current execution view.
+The canonical turn API has an atomic asynchronous Run-acceptance boundary, durable idempotency, polling and polymorphic outcome surfaces, durable cancellation, and an at-least-once Run-worker execution boundary. Durable Execution Runtime composition, the V36 continuation handshake, conversation/progress continuity, and M8 subject/privacy boundaries have all been implemented in their accepted milestone scopes; exact validation provenance remains revision-bound. See `docs/ROADMAP.md` for the current execution view.
 
 ## Durable development path
 

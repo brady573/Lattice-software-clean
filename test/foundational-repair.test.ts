@@ -741,6 +741,8 @@ test("legacy bounded and historical default routes are absent from the canonical
     assert.equal(hasPostRoute(
       "/api/v1/conversations/:conversationId/clarifications/:proposalId/confirm",
     ), true);
+    assert.equal(app.hasRoute({ method: "GET", url: "/api/v1/runs/:runId/outcome" }), true);
+    assert.equal(app.hasRoute({ method: "GET", url: "/api/v1/runs/:runId/result" }), false);
   } finally {
     await app.close();
   }
@@ -753,6 +755,8 @@ test("legacy and simulated routes require explicit non-canonical composition", a
     await Promise.all([legacy.ready(), development.ready()]);
     assert.equal(legacy.hasRoute({ method: "POST", url: "/runs" }), true);
     assert.equal(legacy.hasRoute({ method: "GET", url: "/runs/:id" }), true);
+    assert.equal(legacy.hasRoute({ method: "GET", url: "/api/v1/runs/:runId/result" }), true);
+    assert.equal(legacy.hasRoute({ method: "GET", url: "/api/v1/runs/:runId/outcome" }), false);
     assert.equal(legacy.hasRoute({
       method: "POST",
       url: "/api/v1/conversations/:conversationId/messages",

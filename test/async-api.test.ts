@@ -80,7 +80,7 @@ test("concurrent identical API submissions converge while changed-body key reuse
   }
 });
 
-test("runtime completes an accepted in-memory asynchronous Run and exposes its lifecycle result", async () => {
+test("runtime completes an accepted in-memory asynchronous Run and exposes its Decision Support outcome", async () => {
   const config = resolveRuntimeConfig({
     LATTICE_DEPLOYMENT_MODE: "development",
     LATTICE_TRUTH_MODE: "v36-offline",
@@ -122,11 +122,12 @@ test("runtime completes an accepted in-memory asynchronous Run and exposes its l
       ["CREATED", "UNDERSTANDING", "PLANNING", "INVESTIGATING", "VALIDATING", "DECIDING", "EXPLAINING", "COMPLETED"],
     );
 
-    const result = await app.inject({ method: "GET", url: `/api/v1/runs/${runId}/result` });
-    assert.equal(result.statusCode, 200);
-    assert.equal(result.json().status, "COMPLETED");
-    assert.equal(result.json().decision.winnerCandidateId, "cedar");
-    assert.match(result.json().explanation, /Cedar/i);
+    const outcome = await app.inject({ method: "GET", url: `/api/v1/runs/${runId}/outcome` });
+    assert.equal(outcome.statusCode, 200);
+    assert.equal(outcome.json().status, "COMPLETED");
+    assert.equal(outcome.json().outcome.kind, "DECISION_SUPPORT");
+    assert.equal(outcome.json().outcome.decision.winnerCandidateId, "cedar");
+    assert.match(outcome.json().outcome.explanation, /Cedar/i);
   } finally {
     await app.close();
   }

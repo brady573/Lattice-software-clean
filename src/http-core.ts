@@ -81,14 +81,5 @@ export function createHttpCore(options: HttpCoreOptions = {}): HttpCore {
     return { runId: run.id, events: run.events };
   });
 
-  app.get<{ Params: { runId: string } }>("/api/v1/runs/:runId/result", async (request, reply) => {
-    const run = await runStore.get(request.params.runId);
-    if (!run) return reply.status(404).send({ error: "RUN_NOT_FOUND" });
-    if (run.status !== "COMPLETED" || !run.decision || !run.explanation) {
-      return reply.status(409).send({ error: "RUN_NOT_COMPLETED", status: run.status });
-    }
-    return { runId: run.id, status: run.status, decision: run.decision, explanation: run.explanation };
-  });
-
   return { app, runStore, truthPipeline, decisionEvidenceProvider, apiControlStore, apiSubjectForRequest };
 }
