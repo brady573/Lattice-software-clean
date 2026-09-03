@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { FixtureDataset } from "../src/fixtures.js";
-import { laptopFixture } from "../src/fixtures.js";
+import type { FixtureDataset } from "../src/truth/fixture-dataset.js";
+import { laptopFixture } from "./fixtures/legacy-laptop-fixture.js";
 import { createDecisionFromAdmittedEvidence } from "../src/engine.js";
 import { evaluateFixtureTruth } from "../src/truth/fixture-evaluation.js";
+import { materializeFixtureDecisionEvidence } from "../src/truth/decision-evidence-provider.js";
 import { requiredProofObligations } from "../src/truth/contracts.js";
 import { independentSupportComponents, deriveProvenanceComponentMap, recoverOriginalArtifact } from "../src/truth/provenance.js";
 import { recomputeRatio, percentagePointChange, relativePercentChange, quantitativeCompatibility } from "../src/truth/numerical.js";
@@ -38,15 +39,12 @@ function datasetForClaim(options: {
 }): FixtureDataset {
   const evidenceItems = options.relations.map((_, index) => ({
     id: `e-${index}`,
-    candidateId: "candidate",
-    criterion: "criterion",
     value: 1,
     sourceId: `source-${index}`,
     sourceLabel: `source ${index}`,
     admitted: true,
   }));
   return {
-    candidates: [{ id: "candidate", label: "Candidate" }],
     evidence: evidenceItems,
     truthClaims: [{
       id: "claim",
@@ -182,7 +180,7 @@ test("claim-centric aggregation lets two independent sources satisfy one causal 
   assert.equal(result.bundle.claims.length, 1);
   assert.equal(result.bundle.claimEvidence.length, 2);
   assert.equal(result.assessments[0]?.verdict, "TRUE");
-  assert.equal(result.decisionEvidence.filter((item) => item.admitted).length, 2);
+  assert.equal(result.bundle.claimEvidence.filter((item) => item.admitted).length, 2);
 });
 
 test("same-origin repetition and false consensus do not satisfy independent corroboration", () => {
@@ -221,7 +219,7 @@ test("unknown provenance and rejected evidence fail closed for positive release"
     verification: ["REJECTED"],
   }));
   assert.equal(rejected.assessments[0]?.verdict, "UNVERIFIED");
-  assert.equal(rejected.decisionEvidence.some((item) => item.admitted), false);
+  assert.equal(rejected.bundle.claimEvidence.some((item) => item.admitted), false);
 });
 
 test("current-state staleness is OUTDATED and context omission is MISLEADING", () => {
@@ -398,7 +396,7 @@ test("same-Run integrity and explanation fidelity fail closed", () => {
       priorities: [{ criterion: "performance", weight: 1 }],
     },
     laptopFixture.candidates,
-    truth.decisionEvidence,
+    materializeFixtureDecisionEvidence(laptopFixture, truth.bundle),
     truth.assessments.map((assessment) => assessment.id),
   );
   const canonical = renderCanonicalExplanation(decision, laptopFixture.candidates);

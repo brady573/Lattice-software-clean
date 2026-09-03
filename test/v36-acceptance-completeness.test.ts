@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { laptopFixture, type FixtureDataset } from "../src/fixtures.js";
+import type { FixtureDataset } from "../src/truth/fixture-dataset.js";
+import { laptopFixture } from "./fixtures/legacy-laptop-fixture.js";
 import { evaluateFixtureTruth } from "../src/truth/fixture-evaluation.js";
 import { evaluatePositiveBurden } from "../src/truth/positive-burden.js";
 import { requiredProofObligations } from "../src/truth/contracts.js";
@@ -77,10 +78,9 @@ test("generic HIGH-risk positive claims require a materially independent second 
 
 test("collapsed low-confidence provenance cannot use the authoritative-primary shortcut", () => {
   const dataset: FixtureDataset = {
-    candidates: [{ id: "candidate", label: "Candidate" }],
     evidence: [
-      { id: "e-primary", candidateId: "candidate", criterion: "criterion", value: true, sourceId: "original", sourceLabel: "Original", admitted: true },
-      { id: "e-copy", candidateId: "candidate", criterion: "criterion", value: true, sourceId: "copy", sourceLabel: "Copy", admitted: true },
+      { id: "e-primary", value: true, sourceId: "original", sourceLabel: "Original", admitted: true },
+      { id: "e-copy", value: true, sourceId: "copy", sourceLabel: "Copy", admitted: true },
     ],
     truthClaims: [{
       id: "claim",

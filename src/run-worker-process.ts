@@ -1,4 +1,7 @@
 import { randomUUID } from "node:crypto";
+import type { QualifiedCriterionCatalog } from "./decision/criterion-catalog.js";
+import { createIntentAuthorityGeneralizedDecisionAdapter } from "./intent/generalized-decision-adapter.js";
+import { PostgresIntentAuthorityStore } from "./intent/index.js";
 import { PostgresOrchestrationStore } from "./postgres-orchestration-store.js";
 import { PostgresRunStore } from "./postgres-run-store.js";
 import { processRunDispatches } from "./run-worker.js";
@@ -6,6 +9,9 @@ import {
   createDefaultOfflineTruthPipeline,
   type TruthExecutionPipeline,
 } from "./truth/execution-pipeline.js";
+import {
+  type DecisionEvidenceProvider,
+} from "./truth/decision-evidence-provider.js";
 import { PostgresV36ResearchBridge } from "./v36-research-bridge.js";
 import { assertV36ResearchContinuationRoundsReady } from "./v36-research-round-schema.js";
 
@@ -138,6 +144,8 @@ export class PollingRunWorkerLoop {
 
 export interface StandaloneRunWorkerOptions {
   truthPipeline?: TruthExecutionPipeline;
+  criterionCatalog?: QualifiedCriterionCatalog;
+  decisionEvidenceProvider?: DecisionEvidenceProvider;
   onPollError?: (error: unknown) => void;
 }
 
@@ -161,24 +169,38 @@ export async function createStandaloneRunWorker(
   const runStore = await PostgresRunStore.connect(config.databaseUrl, { migrate: false });
   let orchestrationStore: PostgresOrchestrationStore | undefined;
   let continuationBridge: PostgresV36ResearchBridge | undefined;
+  let intentStore: PostgresIntentAuthorityStore | undefined;
   try {
     orchestrationStore = await PostgresOrchestrationStore.connect(config.databaseUrl, { migrate: false });
     continuationBridge = await PostgresV36ResearchBridge.connect(config.databaseUrl, { migrate: false });
+    intentStore = await PostgresIntentAuthorityStore.connect(config.databaseUrl, { migrate: false });
   } catch (error) {
+    if (intentStore) await intentStore.close();
+    if (continuationBridge) await continuationBridge.close();
     if (orchestrationStore) await orchestrationStore.close();
     await runStore.close();
     throw error;
   }
+  if (!orchestrationStore || !continuationBridge || !intentStore) {
+    await runStore.close();
+    throw new Error("Standalone Run worker failed to initialize its required durable stores.");
+  }
 
+  const generalizedDecisionAdapter = options.criterionCatalog
+    ? createIntentAuthorityGeneralizedDecisionAdapter(intentStore, options.criterionCatalog)
+    : undefined;
   const truthPipeline = options.truthPipeline ?? createDefaultOfflineTruthPipeline();
+  const decisionEvidenceProvider = options.decisionEvidenceProvider;
   const loop = new PollingRunWorkerLoop({
     pollMs: config.pollMs,
     poll: async () => {
       await processRunDispatches({
         runStore,
-        orchestrationStore: orchestrationStore!,
-        continuationBridge: continuationBridge!,
+        orchestrationStore,
+        continuationBridge,
         truthPipeline,
+        ...(generalizedDecisionAdapter ? { generalizedDecisionAdapter } : {}),
+        ...(decisionEvidenceProvider ? { decisionEvidenceProvider } : {}),
         workerId: config.workerId,
         now: new Date(),
         leaseMs: config.leaseMs,
@@ -201,12 +223,16 @@ export async function createStandaloneRunWorker(
       closed = true;
       await loop.close();
       try {
-        await continuationBridge!.close();
+        await continuationBridge.close();
       } finally {
         try {
-          await orchestrationStore!.close();
+          await orchestrationStore.close();
         } finally {
-          await runStore.close();
+          try {
+            await intentStore.close();
+          } finally {
+            await runStore.close();
+          }
         }
       }
     },

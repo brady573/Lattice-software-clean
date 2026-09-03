@@ -16,6 +16,7 @@ import {
 import { registerConsultationIntake } from "./consultation-intake.js";
 import { buildApp } from "./http-app.js";
 import { registerConversationApi } from "./conversation/conversation-api.js";
+import { registerConversationMembershipGuard } from "./conversation/conversation-membership-guard.js";
 import { registerConversationContinuityApi } from "./conversation/continuity-api.js";
 import {
   MemoryConversationStore,
@@ -41,14 +42,15 @@ import {
   type IntentUserMessageStore,
   type UserPreferenceStore,
 } from "./intent/index.js";
-import { registerBoundedClearDecisionIntentIntake } from "./intent/bounded-clear-decision-intake.js";
-import { registerBoundedDecisionCorrection } from "./intent/bounded-decision-correction.js";
-import { registerBoundedDecisionIntentIntake } from "./intent/bounded-decision-intake.js";
 import { registerDecisionPlanApi } from "./intent/decision-plan-api.js";
 import { DecisionPlanRecordingApiRunControlStore } from "./intent/decision-plan-run-control.js";
+import { createIntentAuthorityGeneralizedDecisionAdapter } from "./intent/generalized-decision-adapter.js";
+import type { ConsultationInterpreter } from "./intent/consultation-interpreter.js";
+import type { QualifiedCriterionCatalog } from "./decision/criterion-catalog.js";
 import {
   MemoryDecisionPlanStore,
   PostgresDecisionPlanStore,
+  type DecisionPlanFidelityPolicy,
   type DecisionPlanStore,
 } from "./intent/decision-plan-store.js";
 import { migrateRunIntentBindings } from "./intent/postgres-run-binding-store.js";
@@ -64,13 +66,16 @@ import { PostgresOrchestrationStore } from "./postgres-orchestration-store.js";
 import { PostgresRunStore } from "./postgres-run-store.js";
 import { registerRunEventStream } from "./progress/run-event-stream.js";
 import { registerAndroidModelPrototype } from "./prototype/android-model-prototype.js";
-import { executePersistedRun } from "./run-execution.js";
+import { executePersistedRun, type GeneralizedDecisionAdapter } from "./run-execution.js";
 import { MemoryRunStore, type RunStore } from "./run-store.js";
 import type { RuntimeConfig } from "./runtime-config.js";
 import {
   createDefaultOfflineTruthPipeline,
   type TruthExecutionPipeline,
 } from "./truth/execution-pipeline.js";
+import {
+  type DecisionEvidenceProvider,
+} from "./truth/decision-evidence-provider.js";
 import { PostgresV36ResearchBridge } from "./v36-research-bridge.js";
 import { migrateV36ResearchContinuationRounds } from "./v36-research-round-schema.js";
 
@@ -80,6 +85,9 @@ export interface RuntimeAppOptions {
   truthPipeline?: TruthExecutionPipeline;
   memoryDispatchDelayMs?: number;
   authenticatedSubjectResolver?: AuthenticatedSubjectResolver;
+  consultationInterpreter?: ConsultationInterpreter;
+  criterionCatalog?: QualifiedCriterionCatalog;
+  decisionEvidenceProvider?: DecisionEvidenceProvider;
 }
 
 function nonNegativeDelay(value: number | undefined, fallback: number, name: string): number {
@@ -118,6 +126,8 @@ class DeferredMemoryApiRunControlStore implements ApiRunControlStore {
     private readonly runStore: RunStore,
     private readonly truthPipeline: TruthExecutionPipeline,
     private readonly dispatchDelayMs: number,
+    private readonly generalizedDecisionAdapter?: GeneralizedDecisionAdapter,
+    private readonly decisionEvidenceProvider?: DecisionEvidenceProvider,
   ) {}
 
   async submitRun(input: ApiRunSubmissionInput): Promise<ApiRunSubmissionResult> {
@@ -142,7 +152,14 @@ class DeferredMemoryApiRunControlStore implements ApiRunControlStore {
           resolve();
           return;
         }
-        void executePersistedRun(this.runStore, this.truthPipeline, runId)
+        void executePersistedRun(
+          this.runStore,
+          this.truthPipeline,
+          runId,
+          undefined,
+          this.generalizedDecisionAdapter,
+          this.decisionEvidenceProvider,
+        )
           .then(() => resolve(), () => resolve());
       }, this.dispatchDelayMs);
     });
@@ -151,6 +168,7 @@ class DeferredMemoryApiRunControlStore implements ApiRunControlStore {
   }
 
   async close(): Promise<void> {
+
     this.closed = true;
     await Promise.allSettled([...this.executions]);
     await this.base.close();
@@ -181,9 +199,15 @@ export async function migrateRuntimeDatabase(databaseUrl: string): Promise<void>
   await apiControlStore.close();
 }
 
-async function createPostgresRuntime(
+/**
+ * Connect the canonical PostgreSQL-backed stores and recording adapters used
+ * by createRuntimeApp. An optional planning-fidelity policy is accepted only
+ * by explicit non-canonical compositions; canonical runtime supplies none.
+ */
+export async function connectPostgresRuntimeStores(
   databaseUrl: string,
   autoMigrate: boolean,
+  decisionPlanFidelityPolicy?: DecisionPlanFidelityPolicy,
 ): Promise<{
   runStore: RunStore;
   apiControlStore: ApiRunControlStore;
@@ -208,7 +232,10 @@ async function createPostgresRuntime(
           try {
             const baseApiControlStore = await PostgresApiRunControlStore.connect(databaseUrl, { migrate: false });
             try {
-              const decisionPlanStore = await PostgresDecisionPlanStore.connect(databaseUrl, { migrate: false });
+              const decisionPlanStore = await PostgresDecisionPlanStore.connect(databaseUrl, {
+                migrate: false,
+                ...(decisionPlanFidelityPolicy ? { fidelityPolicy: decisionPlanFidelityPolicy } : {}),
+              });
               try {
                 const runIndexStore = await PostgresConversationRunIndexStore.connect(databaseUrl);
                 const decisionPlanControl = new DecisionPlanRecordingApiRunControlStore(baseApiControlStore, decisionPlanStore);
@@ -258,6 +285,7 @@ export async function createRuntimeApp(
   options: RuntimeAppOptions = {},
 ): Promise<FastifyInstance> {
   const truthPipeline = options.truthPipeline ?? createDefaultOfflineTruthPipeline();
+  const decisionEvidenceProvider = options.decisionEvidenceProvider;
   const memoryDispatchDelayMs = nonNegativeDelay(
     options.memoryDispatchDelayMs,
     DEFAULT_MEMORY_DISPATCH_DELAY_MS,
@@ -283,7 +311,7 @@ export async function createRuntimeApp(
       conversationStore,
       decisionPlanStore,
       runIndexStore,
-    } = await createPostgresRuntime(config.databaseUrl, config.autoMigrate));
+    } = await connectPostgresRuntimeStores(config.databaseUrl, config.autoMigrate));
   } else {
     const memoryRunStore = new MemoryRunStore();
     const memoryIntentStore = new MemoryIntentAuthorityStore();
@@ -306,6 +334,10 @@ export async function createRuntimeApp(
         memoryRunStore,
         truthPipeline,
         memoryDispatchDelayMs,
+        options.criterionCatalog
+          ? createIntentAuthorityGeneralizedDecisionAdapter(memoryIntentStore, options.criterionCatalog)
+          : undefined,
+        decisionEvidenceProvider,
       ),
       memoryDecisionPlanStore,
     );
@@ -342,12 +374,17 @@ export async function createRuntimeApp(
       options.authenticatedSubjectResolver,
     ),
   });
+  registerConversationMembershipGuard(app, { conversationStore, runStore });
   registerConversationApi(app, { conversationStore, runStore });
   registerDurableUserMessageHistory(app, { userMessageStore });
   registerConsultationIntake(app, {
+    intentStore,
+    conversationStore,
     userMessageStore,
     apiControlStore,
     runStore,
+    ...(options.consultationInterpreter ? { interpreter: options.consultationInterpreter } : {}),
+    ...(options.criterionCatalog ? { criterionCatalog: options.criterionCatalog } : {}),
     apiSubject: authenticatedApiSubject,
   });
   registerRunEventStream(app, { runStore });
@@ -358,31 +395,13 @@ export async function createRuntimeApp(
     runStore,
     runIndexStore,
     decisionPlanStore,
+    intentStore,
   });
   registerUserPreferenceControlsApi(app, {
     preferenceStore: userPreferenceStore,
     intentStore,
     userMessageStore,
   });
-  registerBoundedDecisionIntentIntake(app, {
-    intentStore,
-    userMessageStore,
-    apiControlStore,
-    apiSubject: authenticatedApiSubject,
-  });
-  registerBoundedClearDecisionIntentIntake(app, {
-    intentStore,
-    userMessageStore,
-    apiControlStore,
-    apiSubject: authenticatedApiSubject,
-  });
-  registerBoundedDecisionCorrection(app, {
-    intentStore,
-    userMessageStore,
-    apiControlStore,
-    runStore,
-  });
-
   app.addHook("onClose", async () => {
     await conversationStore.close();
     await userMessageStore.close();

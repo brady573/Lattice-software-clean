@@ -3,6 +3,10 @@ import { randomUUID } from "node:crypto";
 import test from "node:test";
 import type { RunRequest } from "../src/domain.js";
 import {
+  createLegacyDecisionTruthComposition,
+  laptopFixture,
+} from "./fixtures/legacy-laptop-fixture.js";
+import {
   createPendingRun,
   executePersistedRun,
   executePersistedRunTick,
@@ -13,7 +17,7 @@ import {
   type RunTransition,
   type RunTransitionResult,
 } from "../src/run-store.js";
-import { createDefaultOfflineTruthPipeline } from "../src/truth/execution-pipeline.js";
+import { OfflineFixtureTruthPipeline } from "../src/truth/execution-pipeline.js";
 
 const request: RunRequest = {
   goal: "Choose a laptop under $1300 with at least 12 hours of battery life, prioritizing performance.",
@@ -26,7 +30,7 @@ const request: RunRequest = {
 
 test("Run coordinator tick advances at most one durable epoch and remains resumable", async () => {
   const store = new MemoryRunStore();
-  const pipeline = createDefaultOfflineTruthPipeline();
+  const { truthPipeline: pipeline, decisionEvidenceProvider } = createLegacyDecisionTruthComposition();
   const run = createPendingRun("coordinator-tick", request, randomUUID());
   await store.create(run);
 
@@ -44,7 +48,14 @@ test("Run coordinator tick advances at most one durable epoch and remains resuma
     for (const [status, version] of expected) {
       const before = await store.get(run.id);
       assert.ok(before);
-      const after = await executePersistedRunTick(store, pipeline, run.id);
+      const after = await executePersistedRunTick(
+        store,
+        pipeline,
+        run.id,
+        undefined,
+        undefined,
+        decisionEvidenceProvider,
+      );
       assert.equal(after.status, status);
       assert.equal(after.version, version);
       assert.equal(after.version, before.version + 1);
@@ -60,11 +71,25 @@ test("Run coordinator tick advances at most one durable epoch and remains resuma
       ["CREATED", "UNDERSTANDING", "PLANNING", "INVESTIGATING", "VALIDATING", "DECIDING", "EXPLAINING", "COMPLETED"],
     );
 
-    const settled = await executePersistedRunTick(store, pipeline, run.id);
+    const settled = await executePersistedRunTick(
+      store,
+      pipeline,
+      run.id,
+      undefined,
+      undefined,
+      decisionEvidenceProvider,
+    );
     assert.equal(settled.status, "COMPLETED");
     assert.equal(settled.version, 8);
 
-    const compatibility = await executePersistedRun(store, pipeline, run.id);
+    const compatibility = await executePersistedRun(
+      store,
+      pipeline,
+      run.id,
+      undefined,
+      undefined,
+      decisionEvidenceProvider,
+    );
     assert.equal(compatibility.status, "COMPLETED");
     assert.equal(compatibility.version, 8);
   } finally {
@@ -80,7 +105,7 @@ class StaleTransitionRunStore extends MemoryRunStore {
 
 test("Run coordinator tick reports lost epoch ownership as retryable without overwriting state", async () => {
   const store = new StaleTransitionRunStore();
-  const pipeline = createDefaultOfflineTruthPipeline();
+  const pipeline = new OfflineFixtureTruthPipeline(laptopFixture);
   const run = createPendingRun("coordinator-stale", request, randomUUID());
   await store.create(run);
 

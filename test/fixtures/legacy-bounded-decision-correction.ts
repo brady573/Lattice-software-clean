@@ -1,12 +1,12 @@
 import { createHash } from "node:crypto";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import type { ApiRunControlStore } from "../api-control-store.js";
-import type { LatticeRun, RunRequest, RunStatus } from "../domain.js";
-import { createPendingRun } from "../run-execution.js";
-import { deriveQualifiedLegacyBoundedRunRequest } from "./exact-planning-fidelity.js";
-import type { IntentAuthorityStore } from "./store.js";
-import type { IntentUserMessageStore } from "./source-message-store.js";
+import type { ApiRunControlStore } from "../../src/api-control-store.js";
+import type { LatticeRun, RunRequest, RunStatus } from "../../src/domain.js";
+import { createPendingRun } from "../../src/run-execution.js";
+import { deriveQualifiedLegacyBoundedRunRequest } from "./legacy-exact-planning-fidelity.js";
+import type { IntentAuthorityStore } from "../../src/intent/store.js";
+import type { IntentUserMessageStore } from "../../src/intent/source-message-store.js";
 
 const USER_TEXT_MAX_CHARS = 2_000;
 const ID_MAX_CHARS = 200;
@@ -26,7 +26,7 @@ export interface BoundedDecisionCorrectionOptions {
   intentStore: IntentAuthorityStore;
   userMessageStore: IntentUserMessageStore;
   apiControlStore: ApiRunControlStore;
-  runStore: import("../run-store.js").RunStore;
+  runStore: import("../../src/run-store.js").RunStore;
 }
 
 function digestHex(...parts: string[]): string {

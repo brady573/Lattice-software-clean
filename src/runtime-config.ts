@@ -1,4 +1,5 @@
 export type DeploymentMode = "development" | "durable";
+/** Runtime truth capability only; Product decision criteria are supplied by qualified adapters. */
 export type TruthMode = "v36-offline";
 export type AuthenticationMode = "development-fixture" | "required";
 

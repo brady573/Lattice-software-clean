@@ -10,7 +10,7 @@ Repository reconciliation baseline: `main @ 8c893bb8b0132b87837a6740709dc1dfff79
 
 Lattice is a Trusted Decision Product. Its central semantic boundary is the boundary between **what the USER means** and **what Lattice concludes from that meaning plus qualified evidence**.
 
-This document defines that relationship end to end:
+This document defines that relationship end to end when authoritative decision work is actually qualified:
 
 ```text
 conversation / USER input
@@ -24,7 +24,10 @@ interpretation proposal
 canonical IntentVersion
         |
         v
-DecisionPlan
+conditional DecisionPlan
+        |
+        v
+Run / V36-admitted truth state
         |
         +-----------------------------+
         |                             |
@@ -45,6 +48,8 @@ qualified Criterion Catalog      V36 qualified evidence
              Solandra presentation
 ```
 
+Knowledge and non-decision Action Preparation share conversation intake, Intent Authority, Run, and V36, but do not create a DecisionPlan and do not enter the Decision Engine. This diagram is the qualified decision branch, not a universal consultation lifecycle.
+
 The central rule is:
 
 > **USER meaning and Product judgment compose, but they are not the same semantic state.**
@@ -63,7 +68,8 @@ This is a cross-system semantic architecture. It does not replace the subsystem-
 
 It must remain consistent with, and is subordinate at their applicable boundaries to:
 
-- `Lattice-Foundational-Design-Principle.md` — first Product-design filter;
+- `The-Core-Lattice-Philosophy.md` — highest Product-design authority and first filter;
+- `Lattice-Foundational-Design-Principle.md` — subordinate foundational elaboration;
 - `Lattice-Living-Software-Design-to-1.0.md` plus confirmed amendments — canonical forward Product direction;
 - `Lattice-Owner-Decisions-OD-001-to-OD-004.md` — Owner-confirmed Intent Authority, V36 continuation, Decision Engine, and Trusted Decision Product semantics;
 - `Lattice-Owner-Decision-OD-007-M8-Continuity.md` — continuity and reusable preference boundaries;
@@ -81,7 +87,7 @@ Where current implementation is narrower than this architecture, this document s
 
 ## 3. Canonical semantic pipeline
 
-The canonical semantic path is:
+The canonical decision semantic path, used only when decision work is qualified, is:
 
 ```text
 USER expression
@@ -98,7 +104,7 @@ USER expression
   -> faithful Solandra presentation
 ```
 
-No arrow transfers semantic authority merely because data crosses a boundary.
+Knowledge and non-decision Action Preparation stop before the decision-only projection and continue through their own outcome/resource paths. No arrow transfers semantic authority merely because data crosses a boundary.
 
 ### 3.1 Conversation and interpretation
 
@@ -116,7 +122,7 @@ It contains or binds the decision-relevant USER semantics downstream work may re
 
 ### 3.3 Planning boundary
 
-`DecisionPlan` freezes a faithful projection of one exact `IntentVersion` for one Run.
+For actual authoritative decision work, `DecisionPlan` freezes a faithful projection of one exact `IntentVersion` for one Run. It is absent from Knowledge and non-decision Action Preparation Runs.
 
 DecisionPlan is not a second interpretation layer, an editable copy of intent, or a new Product authority.
 
@@ -452,7 +458,7 @@ Only genuine semantic change advances IntentVersion. Restatement, normalization,
 
 ## 15. DecisionPlan
 
-`DecisionPlan` is the durable exact binding between one accepted IntentVersion and faithful planning material used by one Run.
+`DecisionPlan` is the durable exact binding between one accepted IntentVersion and faithful planning material used by one qualified decision Run. It does not exist merely because a Run has an IntentVersion binding.
 
 ```text
 IntentVersion

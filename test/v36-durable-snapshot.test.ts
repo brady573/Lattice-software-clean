@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { LatticeRun, RunRequest } from "../src/domain.js";
-import { laptopFixture } from "../src/fixtures.js";
+import { laptopFixture } from "./fixtures/legacy-laptop-fixture.js";
 import { MemoryRunStore } from "../src/run-store.js";
 import { evaluateFixtureTruth } from "../src/truth/fixture-evaluation.js";
 import { createTruthSnapshot } from "../src/truth/snapshot.js";

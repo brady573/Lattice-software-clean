@@ -1,7 +1,6 @@
 import { createHash } from "node:crypto";
-import type { Candidate, Evidence, LatticeRunRequest } from "../domain.js";
-import { isConsultationRunRequest } from "../domain.js";
-import { defaultDecisionFixture, type FixtureDataset } from "../fixtures.js";
+import type { LatticeRunRequest } from "../domain.js";
+import type { FixtureDataset } from "./fixture-dataset.js";
 import type { V36ResearchCheckpoint } from "./continuation.js";
 import {
   beginDurableV36Validation,
@@ -33,12 +32,7 @@ export interface TruthPipelineInvestigation {
   serialRounds: number;
 }
 
-export interface TruthDecisionInputs {
-  candidates: Candidate[];
-  evidence: Evidence[];
-}
-
-export interface TruthPipelineExecution extends TruthDecisionInputs {
+export interface TruthPipelineExecution {
   snapshot: TruthSnapshot;
   bundle: TruthBundle;
   serialRounds: number;
@@ -60,7 +54,6 @@ export interface TruthExecutionPipeline {
     checkpoint: V36ResearchCheckpoint,
     results: readonly V36RuntimeExecutionResult[],
   ): Promise<TruthDurableValidationStep>;
-  decisionInputs(snapshot: TruthSnapshot): Promise<TruthDecisionInputs>;
   execute(runId: string, request?: LatticeRunRequest): Promise<TruthPipelineExecution>;
 }
 
@@ -69,9 +62,8 @@ function initialSerialRounds(snapshot: TruthSnapshot): number {
 }
 
 /**
- * Deterministic offline V36 seam. Candidate/evidence arrays are compatibility
- * material for the optional decision adapter; truth claims themselves are not
- * required to carry candidate or criterion bindings.
+ * Deterministic offline V36 seam. Truth execution produces validated truth
+ * state only; the optional decision-specific projection is a separate adapter.
  */
 export class OfflineFixtureTruthPipeline implements TruthExecutionPipeline {
   readonly mode = "v36-offline-fixture" as const;
@@ -111,8 +103,6 @@ export class OfflineFixtureTruthPipeline implements TruthExecutionPipeline {
       execution: {
         snapshot,
         bundle: snapshot.bundle,
-        candidates: structuredClone(this.dataset.candidates),
-        evidence: structuredClone(this.dataset.evidence),
         serialRounds: step.serialRounds,
       },
     };
@@ -145,8 +135,6 @@ export class OfflineFixtureTruthPipeline implements TruthExecutionPipeline {
     return {
       snapshot: validated,
       bundle: validated.bundle,
-      candidates: dataset.candidates,
-      evidence: dataset.evidence,
       serialRounds: Math.max(initialSerialRounds(snapshot), enriched.serialCriticalPathRounds),
     };
   }
@@ -175,20 +163,6 @@ export class OfflineFixtureTruthPipeline implements TruthExecutionPipeline {
     ));
   }
 
-  async decisionInputs(snapshot: TruthSnapshot): Promise<TruthDecisionInputs> {
-    assertTruthSnapshotIntegrity(snapshot);
-    if (snapshot.phase !== "VALIDATED") {
-      throw new Error("Decision inputs require a VALIDATED V36 truth snapshot.");
-    }
-    if (!this.ownsExecutionContract(snapshot.executionContractId)) {
-      throw new Error("Truth snapshot was produced by a different V36 execution contract.");
-    }
-    return {
-      candidates: structuredClone(this.dataset.candidates),
-      evidence: structuredClone(this.dataset.evidence),
-    };
-  }
-
   async execute(runId: string): Promise<TruthPipelineExecution> {
     const investigation = await this.investigate(runId);
     return this.validate(investigation.snapshot);
@@ -196,59 +170,10 @@ export class OfflineFixtureTruthPipeline implements TruthExecutionPipeline {
 }
 
 const emptyKnowledgeFixture: FixtureDataset = Object.freeze({
-  candidates: [],
-  evidence: [],
   truthClaims: [],
   truthEvidence: [],
 });
 
-/**
- * Product-default router. Ordinary consultations validate through a neutral
- * V36 dataset with no candidate/criterion assumptions. The historical fixture
- * is selected only for legacy qualified-decision requests so old evidence can
- * remain a compatibility test surface while the primary intake moves forward.
- */
-class DefaultOfflineTruthPipeline implements TruthExecutionPipeline {
-  readonly mode = "v36-offline-fixture" as const;
-  private readonly knowledge = new OfflineFixtureTruthPipeline(emptyKnowledgeFixture);
-  private readonly legacyDecision = new OfflineFixtureTruthPipeline(defaultDecisionFixture);
-
-  private pipelineForExecutionContract(executionContractId: string): OfflineFixtureTruthPipeline {
-    if (this.knowledge.ownsExecutionContract(executionContractId)) return this.knowledge;
-    if (this.legacyDecision.ownsExecutionContract(executionContractId)) return this.legacyDecision;
-    throw new Error("Truth state was produced by an unknown V36 execution contract.");
-  }
-
-  async investigate(runId: string, request?: LatticeRunRequest): Promise<TruthPipelineInvestigation> {
-    const pipeline = request && isConsultationRunRequest(request) ? this.knowledge : this.legacyDecision;
-    return pipeline.investigate(runId);
-  }
-
-  async validate(snapshot: TruthSnapshot): Promise<TruthPipelineExecution> {
-    return this.pipelineForExecutionContract(snapshot.executionContractId).validate(snapshot);
-  }
-
-  async beginDurableValidation(snapshot: TruthSnapshot): Promise<TruthDurableValidationStep> {
-    return this.pipelineForExecutionContract(snapshot.executionContractId).beginDurableValidation(snapshot);
-  }
-
-  async resumeDurableValidation(
-    checkpoint: V36ResearchCheckpoint,
-    results: readonly V36RuntimeExecutionResult[],
-  ): Promise<TruthDurableValidationStep> {
-    return this.pipelineForExecutionContract(checkpoint.executionContractId).resumeDurableValidation(checkpoint, results);
-  }
-
-  async decisionInputs(snapshot: TruthSnapshot): Promise<TruthDecisionInputs> {
-    return this.pipelineForExecutionContract(snapshot.executionContractId).decisionInputs(snapshot);
-  }
-
-  async execute(runId: string, request?: LatticeRunRequest): Promise<TruthPipelineExecution> {
-    const investigation = await this.investigate(runId, request);
-    return this.validate(investigation.snapshot);
-  }
-}
-
 export function createDefaultOfflineTruthPipeline(): TruthExecutionPipeline {
-  return new DefaultOfflineTruthPipeline();
+  return new OfflineFixtureTruthPipeline(emptyKnowledgeFixture);
 }

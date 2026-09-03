@@ -2,9 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { RunRequest } from "../src/domain.js";
 import { createDecisionFromAdmittedEvidence } from "../src/engine.js";
-import { laptopFixture } from "../src/fixtures.js";
+import { laptopFixture } from "./fixtures/legacy-laptop-fixture.js";
 import type { AdmittedDecisionEvidence } from "../src/truth/admission.js";
 import { evaluateFixtureTruth } from "../src/truth/fixture-evaluation.js";
+import { materializeFixtureDecisionEvidence } from "../src/truth/decision-evidence-provider.js";
 
 const runId = "00000000-0000-4000-8000-000000000836";
 const request: RunRequest = {
@@ -18,13 +19,15 @@ const request: RunRequest = {
 
 test("V36 materialization is the only valid decision-evidence boundary", () => {
   const truth = evaluateFixtureTruth(runId, laptopFixture);
-  assert.equal(truth.decisionEvidence.length > 0, true);
-  assert.equal(truth.decisionEvidence.every((item) => item.admitted), true);
+  assert.equal("decisionEvidence" in truth, false);
+  const decisionEvidence = materializeFixtureDecisionEvidence(laptopFixture, truth.bundle);
+  assert.equal(decisionEvidence.length > 0, true);
+  assert.equal(decisionEvidence.every((item) => item.admitted), true);
 
   const decision = createDecisionFromAdmittedEvidence(
     request,
     laptopFixture.candidates,
-    truth.decisionEvidence,
+    decisionEvidence,
     truth.assessments.map((assessment) => assessment.id),
   );
   assert.equal(decision.winnerCandidateId, "nova-air");
@@ -42,7 +45,8 @@ test("raw admitted=true fixture evidence cannot bypass V36 admission", () => {
 
 test("generic serialization cannot preserve V36 decision authority", () => {
   const truth = evaluateFixtureTruth(runId, laptopFixture);
-  const serialized = JSON.parse(JSON.stringify(truth.decisionEvidence)) as AdmittedDecisionEvidence[];
+  const decisionEvidence = materializeFixtureDecisionEvidence(laptopFixture, truth.bundle);
+  const serialized = JSON.parse(JSON.stringify(decisionEvidence)) as AdmittedDecisionEvidence[];
 
   assert.throws(
     () => createDecisionFromAdmittedEvidence(

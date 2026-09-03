@@ -1,5 +1,5 @@
 import { isDeepStrictEqual } from "node:util";
-import type { FixtureDataset } from "../fixtures.js";
+import type { FixtureDataset } from "./fixture-dataset.js";
 import { adjudicateClaim } from "./adjudication.js";
 import { assertTruthBundleIntegrity } from "./invariants.js";
 import type { TruthResearchProvider } from "./pipeline.js";
@@ -150,7 +150,7 @@ export async function enrichTruthBundleWithResearch(
     return { claimId: claim.id, result };
   }));
 
-  const materialEvidenceIds = new Set(dataset.evidence.map((item) => item.id));
+  const materialEvidenceIds = new Set((dataset.evidence ?? []).map((item) => item.id));
   const mergedEvidence = mergeClaimEvidenceStrict(
     [bundle.claimEvidence, ...research.map((item) => item.result.evidence)],
     { reservedExternalEvidenceIds: materialEvidenceIds },

@@ -4,7 +4,7 @@ import test from "node:test";
 import { Pool } from "pg";
 import { MemoryApiRunControlStore } from "../src/api-control-store.js";
 import { buildApp } from "../src/app.js";
-import { registerBoundedClearDecisionIntentIntake } from "../src/intent/bounded-clear-decision-intake.js";
+import { registerBoundedClearDecisionIntentIntake } from "./fixtures/legacy-bounded-clear-decision-intake.js";
 import {
   MemoryIntentAuthorityStore,
   MemoryIntentBoundRunStore,

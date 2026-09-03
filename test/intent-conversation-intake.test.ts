@@ -1,12 +1,11 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
+import type { FastifyInstance } from "fastify";
 import { Pool } from "pg";
 import { MemoryApiRunControlStore } from "../src/api-control-store.js";
 import { buildApp } from "../src/app.js";
-import {
-  registerBoundedDecisionIntentIntake,
-} from "../src/intent/bounded-decision-intake.js";
+import { registerBoundedDecisionIntentIntake } from "./fixtures/legacy-bounded-decision-intake.js";
 import {
   MemoryIntentAuthorityStore,
   MemoryIntentBoundRunStore,
@@ -17,10 +16,31 @@ import {
 import { PostgresApiRunControlStore } from "../src/postgres-api-control-store.js";
 import { PostgresRunStore } from "../src/postgres-run-store.js";
 import { MemoryRunStore } from "../src/run-store.js";
-import { migrateRuntimeDatabase } from "../src/runtime-app.js";
+import { createRuntimeApp, migrateRuntimeDatabase } from "../src/runtime-app.js";
+import { resolveRuntimeConfig } from "../src/runtime-config.js";
+import {
+  DECISION_MESSAGE,
+  FoundationalConsultationInterpreter,
+  createFoundationalTruthComposition,
+  foundationalCriterionCatalog,
+} from "./fixtures/foundational-consultation-fixture.js";
 
 const databaseUrl = process.env.DATABASE_URL;
 const initialContent = "I need a tablet under $1,300. I'd like at least 12 hours of battery life, but performance matters more.";
+
+async function waitForCompletedRun(app: FastifyInstance, runId: string): Promise<void> {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    const response = await app.inject({ method: "GET", url: `/api/v1/runs/${runId}` });
+    assert.equal(response.statusCode, 200, response.body);
+    const status = response.json<{ status: string }>().status;
+    if (status === "COMPLETED") return;
+    if (status === "FAILED" || status === "CANCELLED") {
+      throw new Error(`Run ${runId} unexpectedly reached ${status}.`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  throw new Error(`Run ${runId} did not complete.`);
+}
 
 function initialPayload() {
   return {
@@ -37,6 +57,64 @@ function confirmationPayload() {
     content: "Hard requirement.",
   };
 }
+
+test("runtime canonical conversation API routes material clarification through Intent Authority", async () => {
+  const app = await createRuntimeApp(
+    resolveRuntimeConfig({
+      PORT: "3000",
+      HOST: "127.0.0.1",
+      LATTICE_DEPLOYMENT_MODE: "development",
+      LATTICE_AUTO_MIGRATE: "false",
+      LATTICE_AUTHENTICATION_MODE: "development-fixture",
+    }),
+    {
+      memoryDispatchDelayMs: 1,
+      ...createFoundationalTruthComposition(),
+      consultationInterpreter: new FoundationalConsultationInterpreter(),
+      criterionCatalog: foundationalCriterionCatalog,
+    },
+  );
+
+  try {
+    const created = await app.inject({ method: "POST", url: "/api/v1/conversations" });
+    assert.equal(created.statusCode, 201);
+    const conversationId = (created.json() as { conversation: { id: string } }).conversation.id;
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/v1/conversations/${conversationId}/turns`,
+      payload: { turnId: "turn-1", message: DECISION_MESSAGE },
+    });
+    assert.equal(response.statusCode, 202);
+    const pending = response.json() as { status: string; proposalId: string; intentScopeId: string; intentVersionId: string };
+    assert.equal(pending.status, "NEEDS_CLARIFICATION");
+    assert.equal(pending.intentScopeId, `consultation:${conversationId}`);
+    assert.match(pending.intentVersionId, /^[0-9a-f-]{36}$/u);
+    assert.match(pending.proposalId, /^[0-9a-f-]{36}$/u);
+
+    const confirmation = await app.inject({
+      method: "POST",
+      url: `/api/v1/conversations/${conversationId}/clarifications/${pending.proposalId}/confirm`,
+      payload: { turnId: "turn-2", message: "Yes, that's correct." },
+    });
+    assert.equal(confirmation.statusCode, 202);
+    const accepted = confirmation.json() as { status: string; runId: string; intentScopeId: string; intentVersionId: string };
+    assert.equal(accepted.status, "RUN_ACCEPTED");
+    assert.equal((confirmation.json() as { decisionNeed: string }).decisionNeed, "QUALIFIED");
+    assert.equal(accepted.intentScopeId, `consultation:${conversationId}`);
+    assert.notEqual(accepted.intentVersionId, pending.intentVersionId);
+
+    await waitForCompletedRun(app, accepted.runId);
+    const outcomeResponse = await app.inject({ method: "GET", url: `/api/v1/runs/${accepted.runId}/outcome` });
+    assert.equal(outcomeResponse.statusCode, 200, outcomeResponse.body);
+    const outcome = outcomeResponse.json<{ outcome: { kind: string; decision: { outcome: string; winnerCandidateId?: string }; explanation: string | null } }>().outcome;
+    assert.equal(outcome.kind, "DECISION_SUPPORT");
+    assert.equal(outcome.decision.outcome, "RECOMMENDATION");
+    assert.equal(outcome.decision.winnerCandidateId, "cedar");
+    assert.match(outcome.explanation ?? "", /Solandra recommends/);
+  } finally {
+    await app.close();
+  }
+});
 
 test("bounded USER message becomes exact clarified IntentVersion before memory Run intake", async () => {
   const conversationId = "conversation-m5i-memory";

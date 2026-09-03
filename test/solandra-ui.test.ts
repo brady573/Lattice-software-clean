@@ -8,7 +8,6 @@ import {
   type ModelProvider,
   type ModelProviderResult,
 } from "../src/model/index.js";
-import type { ConsultationProjection } from "../src/presentation/solandra/index.js";
 
 class EchoConversationProvider implements ModelProvider {
   readonly kind = "test-conversation";
@@ -142,7 +141,7 @@ test("simulated conversation requires a user message as the newest turn", async 
   }
 });
 
-test("default consultation projects authoritative state without raw ranking scores", async () => {
+test("historical default consultation is absent from the canonical HTTP composition", async () => {
   const app = buildApp();
   try {
     const removedRoute = await app.inject({
@@ -157,27 +156,7 @@ test("default consultation projects authoritative state without raw ranking scor
       url: "/api/v1/prototype/consultations/default",
       payload: {},
     });
-    assert.equal(response.statusCode, 201, response.body);
-    const projection = response.json() as ConsultationProjection;
-    assert.equal(projection.status, "COMPLETED");
-    assert.equal(projection.result.recommendation.candidateId, "nova-air");
-    assert.equal(projection.result.recommendation.label, "Nova Air");
-    assert.equal(projection.conversation.priorities[0]?.criterion, "performance");
-    assert.equal(projection.conversation.priorities[0]?.rank, 1);
-
-    const atlas = projection.result.alternatives.find((item) => item.candidateId === "atlas-pro");
-    assert.ok(atlas);
-    assert.equal(atlas.eligible, false);
-    assert.equal(
-      atlas.requirementEffects.find((item) => item.criterion === "price")?.status,
-      "failed",
-    );
-
-    const serialized = JSON.stringify(projection);
-    assert.doesNotMatch(serialized, /rawScore/);
-    assert.doesNotMatch(serialized, /normalizedScore/);
-    assert.ok(projection.evidenceTraces.length > 0);
-    assert.ok(projection.evidenceTraces.every((trace) => trace.sources.length > 0));
+    assert.equal(response.statusCode, 404);
   } finally {
     await app.close();
   }

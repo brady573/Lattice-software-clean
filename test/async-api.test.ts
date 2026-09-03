@@ -3,7 +3,11 @@ import test from "node:test";
 import type { FastifyInstance } from "fastify";
 import { buildApp } from "../src/app.js";
 import type { RunRequest } from "../src/domain.js";
-import { laptopFixture } from "../src/fixtures.js";
+import {
+  createLegacyDecisionTruthComposition,
+  laptopFixture,
+} from "./fixtures/legacy-laptop-fixture.js";
+import { createFixtureDecisionEvidenceProvider } from "../src/truth/decision-evidence-provider.js";
 import { createPendingRun, executePersistedRun } from "../src/run-execution.js";
 import { MemoryRunStore } from "../src/run-store.js";
 import { createRuntimeApp } from "../src/runtime-app.js";
@@ -75,7 +79,10 @@ test("runtime completes an accepted in-memory asynchronous Run and exposes its l
     LATTICE_DEPLOYMENT_MODE: "development",
     LATTICE_TRUTH_MODE: "v36-offline",
   } as NodeJS.ProcessEnv);
-  const app = await createRuntimeApp(config, { memoryDispatchDelayMs: 5 });
+  const app = await createRuntimeApp(config, {
+    memoryDispatchDelayMs: 5,
+    ...createLegacyDecisionTruthComposition(),
+  });
   try {
     const createdConversation = await app.inject({ method: "POST", url: "/api/v1/conversations" });
     assert.equal(createdConversation.statusCode, 201);
@@ -149,7 +156,11 @@ test("automatic in-memory asynchronous execution preserves immediate cancellatio
 test("cancellation is durable and prevents later worker execution from mutating the Run", async () => {
   const store = new MemoryRunStore();
   const pipeline = new OfflineFixtureTruthPipeline(laptopFixture);
-  const app = buildApp({ runStore: store, truthPipeline: pipeline });
+  const app = buildApp({
+    runStore: store,
+    truthPipeline: pipeline,
+    decisionEvidenceProvider: createLegacyDecisionTruthComposition().decisionEvidenceProvider,
+  });
   try {
     const submit = await app.inject({
       method: "POST",
@@ -195,11 +206,17 @@ test("worker resumes DECIDING from persisted V36 state without re-running invest
     mode: "v36-offline-fixture",
     investigate: async () => { throw new Error("investigate must not be re-run after DECIDING"); },
     validate: async () => { throw new Error("validate must not be re-run after DECIDING"); },
-    decisionInputs: (snapshot) => base.decisionInputs(snapshot),
     execute: async () => { throw new Error("execute must not be used by durable resume"); },
   };
 
-  const completed = await executePersistedRun(store, replayOnly, run.id);
+  const completed = await executePersistedRun(
+    store,
+    replayOnly,
+    run.id,
+    undefined,
+    undefined,
+    createFixtureDecisionEvidenceProvider(laptopFixture, (id) => base.ownsExecutionContract(id)),
+  );
   assert.equal(completed.status, "COMPLETED");
   assert.equal(completed.version, 8);
   assert.equal(completed.decision?.winnerCandidateId, "nova-air");

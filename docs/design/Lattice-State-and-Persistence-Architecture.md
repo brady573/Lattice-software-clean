@@ -10,18 +10,21 @@ Repository reconciliation baseline: `main @ 648bcc7241d6827736fbce6e2c52524465f0
 
 Lattice now has enough durable Product state that persistence itself needs an explicit cross-system architecture.
 
-This document defines lifecycle, ownership, persistence, reconstruction, invalidation, deletion, and purge behavior across the durable decision graph:
+This document defines lifecycle, ownership, persistence, reconstruction, invalidation, deletion, and purge behavior across the durable consultation graph:
 
 ```text
 Conversation
   -> USER Message / provenance
   -> IntentScope / IntentVersion
-  -> DecisionPlan
   -> Run
   -> operational results / continuation checkpoints
   -> V36 evidence / truth checkpoints
-  -> StructuredDecision
-  -> Solandra presentation projection
+  -> KnowledgeOutcome or Resource
+
+Qualified decision branch only:
+IntentVersion -> DecisionPlan -> Run -> V36 decision projection -> StructuredDecision
+
+All valid outcomes -> Solandra presentation projection
 ```
 
 The core rule is:
@@ -36,7 +39,8 @@ This document is a cross-system state architecture. It does not replace or reint
 
 It must remain consistent with, and is subordinate at their applicable boundaries to:
 
-- `Lattice-Foundational-Design-Principle.md` — first Product-design filter;
+- `The-Core-Lattice-Philosophy.md` — highest Product-design authority and first filter;
+- `Lattice-Foundational-Design-Principle.md` — subordinate foundational elaboration;
 - `Lattice-Living-Software-Design-to-1.0.md` plus confirmed amendments — canonical forward Product direction;
 - `Lattice-Owner-Decisions-OD-001-to-OD-004.md` and the v0.6 amendment — confirmed Intent Authority, V36 continuation, Decision Engine, and Solandra boundaries;
 - `Lattice-Owner-Decision-OD-007-M8-Continuity.md` and the v0.7 amendment — continuity, ownership, deletion, and retention direction;
@@ -92,7 +96,7 @@ Examples include:
 - cancellation and supersession state;
 - durable research scheduling/results;
 - V36 continuation transport/checkpoint delivery state; and
-- exact DecisionPlan-to-Run association.
+- exact DecisionPlan-to-Run association when decision work is qualified.
 
 Operational durability may persist outputs owned by another subsystem, but the embedded values retain their original semantic owners.
 
@@ -105,7 +109,7 @@ Examples include:
 - Conversation owner subject;
 - USER-message IDs, digests, logical turn identity, and message horizon;
 - IntentVersion predecessor/lineage metadata;
-- DecisionPlan exact `intentVersionId` binding;
+- conditional DecisionPlan exact `intentVersionId` binding;
 - V36 source/provenance relationships; and
 - request hashes used for idempotency.
 
@@ -146,18 +150,17 @@ Conversation
         |   Lattice Intent Authority
         |   IntentScope -> IntentVersion(s)
         |                    |
-        |                    | faithful exact planning projection
-        |                    v
-        |               DecisionPlan
-        |                    |
-        |                    | exact Run binding
-        |                    v
+        |                    +--> DecisionPlan (qualified decision only)
+        |                    |          |
+        |                    |          | exact decision binding
+        |                    |          v
         +------------------> Run
                              |
                              +--> operational lifecycle / events
                              +--> durable V36 continuation transport
                              +--> V36 truth checkpoints / admitted evidence
-                             +--> StructuredDecision
+                             +--> KnowledgeOutcome / Resource
+                             +--> StructuredDecision (qualified decision only)
                              +--> persisted renderings where currently required
                              |
                              v
@@ -251,7 +254,7 @@ A newer IntentVersion changes what is current. It does not mutate an already-bou
 
 ### 6.4 DecisionPlan
 
-**Role:** durable exact planning contract between one accepted `IntentVersion` and one Run.
+**Role:** durable exact planning contract between one accepted `IntentVersion` and one qualified decision Run. Knowledge and non-decision Action Preparation Runs do not create this record.
 
 **Semantic authority:** **none independently.** DecisionPlan is an implementation-level durable binding, not a peer Product authority.
 
@@ -513,7 +516,7 @@ AuthenticatedSubject
  -> ordered USER provenance/messages
  -> IntentScope + current/historical IntentVersions
  -> Conversation-associated Runs
- -> exact DecisionPlan per Run
+ -> exact DecisionPlan for each qualified decision Run, absent otherwise
  -> current Run lifecycle/version/events
  -> exact V36 continuation checkpoint/result state when research is in flight
  -> current persisted V36 truth checkpoint/evidence state
@@ -831,10 +834,10 @@ The state architecture remains correct only while all of these remain true:
        Lattice Intent Authority
          IntentVersion[n]
               |
-              | faithful immutable binding
-              v
-          DecisionPlan
-              |
+              +--> DecisionPlan (qualified decision only)
+              |          |
+              |          | faithful immutable binding
+              |          v
               v
              Run <------ Runtime CAS epoch / events / recovery
               |
@@ -844,13 +847,14 @@ The state architecture remains correct only while all of these remain true:
  V36 immutable   worker/provider    V36 truth state
  continuation       material         / evidence
  checkpoints          |                  |
-       ^              |                  |
+       ^              |                  +--> KnowledgeOutcome / Resource
        +--------------+------------------+
-                      |
-                      v
-              Lattice Decision Engine
-                StructuredDecision
-        frontier / tie / selection as valid
+                                      |
+                                      v
+                              Lattice Decision Engine
+                                (qualified decision only)
+                                StructuredDecision
+                        frontier / tie / selection as valid
                       |
                       v
               Solandra Experience
@@ -863,7 +867,7 @@ The state architecture remains correct only while all of these remain true:
 
 The durable graph should therefore be read as:
 
-> **USER-authored provenance becomes canonical intent only through Intent Authority; exact intent becomes executable through an immutable DecisionPlan; Runtime advances work through guarded operational epochs; V36 alone governs epistemic continuation and factual admission; the Decision Engine alone produces authoritative decision state; and Solandra reconstructs a faithful presentation from those states without becoming another truth or decision store.**
+> **USER-authored provenance becomes canonical intent only through Intent Authority; Runtime advances work from that exact intent through guarded operational epochs; V36 alone governs epistemic continuation and factual admission; only qualified decision work creates an immutable DecisionPlan and enters the Decision Engine; and Solandra reconstructs a faithful presentation from authoritative states without becoming another intent, truth, or decision store.**
 
 ## 22. Draft status and next use
 

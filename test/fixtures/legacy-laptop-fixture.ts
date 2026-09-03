@@ -1,29 +1,14 @@
-import type { Candidate, Evidence } from "./domain.js";
-import { requiredProofObligations } from "./truth/contracts.js";
+import { requiredProofObligations } from "../../src/truth/contracts.js";
+import type { DecisionFixtureDataset, FixtureDataset } from "../../src/truth/fixture-dataset.js";
+import { createFixtureDecisionEvidenceProvider } from "../../src/truth/decision-evidence-provider.js";
+import { OfflineFixtureTruthPipeline } from "../../src/truth/execution-pipeline.js";
 import type {
   ProofCheckStatus,
-  SourceEdgeType,
   TruthClaimProfile,
   TruthEvidenceProfile,
-  TruthResearchProfile,
-} from "./truth/types.js";
+} from "../../src/truth/types.js";
 
-export interface FixtureSourceEdge {
-  fromSourceId: string;
-  toSourceId: string;
-  edgeType: SourceEdgeType;
-  confidence: number;
-  contentSimilarity?: number | null;
-}
-
-export interface FixtureDataset {
-  candidates: Candidate[];
-  evidence: Evidence[];
-  truthClaims: TruthClaimProfile[];
-  truthEvidence: TruthEvidenceProfile[];
-  truthSourceEdges?: FixtureSourceEdge[];
-  truthResearch?: TruthResearchProfile[];
-}
+export type { DecisionFixtureDataset, FixtureDataset, FixtureSourceEdge } from "../../src/truth/fixture-dataset.js";
 
 function passedChecks(claimType: TruthClaimProfile["claimType"]): Readonly<Record<string, ProofCheckStatus>> {
   return Object.fromEntries(
@@ -71,7 +56,7 @@ function primaryEvidence(
   };
 }
 
-export const defaultDecisionFixture: FixtureDataset = {
+export const defaultDecisionFixture: DecisionFixtureDataset = {
   candidates: [
     { id: "atlas-pro", label: "Atlas Pro" },
     { id: "nova-air", label: "Nova Air" },
@@ -114,6 +99,19 @@ export const defaultDecisionFixture: FixtureDataset = {
 
 /**
  * Backward-compatible fixture alias for historical tests and validation assets.
- * Product runtime composition uses defaultDecisionFixture directly.
+ * Canonical Product runtime composition does not import this scenario fixture.
  */
-export const laptopFixture: FixtureDataset = structuredClone(defaultDecisionFixture);
+export const laptopFixture: DecisionFixtureDataset = structuredClone(defaultDecisionFixture);
+
+export function createLegacyDecisionTruthComposition(
+  dataset: DecisionFixtureDataset = laptopFixture,
+) {
+  const truthPipeline = new OfflineFixtureTruthPipeline(dataset);
+  return {
+    truthPipeline,
+    decisionEvidenceProvider: createFixtureDecisionEvidenceProvider(
+      dataset,
+      (executionContractId) => truthPipeline.ownsExecutionContract(executionContractId),
+    ),
+  };
+}

@@ -29,8 +29,8 @@ async function createBoundRun(app: Awaited<ReturnType<typeof createRuntimeApp>>,
   const conversationId = created.json<{ conversation: { id: string } }>().conversation.id;
   const accepted = await app.inject({
     method: "POST",
-    url: `/api/v1/conversations/${conversationId}/intent-scopes/scope-${suffix}/clear-user-messages`,
-    payload: { turnId: `turn-${suffix}`, messageId: `message-${suffix}`, content: clearContent },
+    url: `/api/v1/conversations/${conversationId}/turns`,
+    payload: { turnId: `turn-${suffix}`, message: clearContent },
   });
   assert.equal(accepted.statusCode, 202);
   return { conversationId, accepted: accepted.json<{ runId: string; intentScopeId: string; intentVersionId: string }>() };
@@ -45,7 +45,7 @@ test("Conversation continuity rediscovers USER provenance and exact-bound Run fr
     const body = response.json();
     assert.equal(body.conversation.id, conversationId);
     assert.equal(body.messages.length, 1);
-    assert.equal(body.messages[0].id, "message-m7-f-memory");
+    assert.equal(body.messages[0].content, clearContent);
     assert.equal(body.runs.length, 1);
     assert.equal(body.runs[0].runId, accepted.runId);
     assert.equal(body.runs[0].exactBinding.intentScopeId, accepted.intentScopeId);

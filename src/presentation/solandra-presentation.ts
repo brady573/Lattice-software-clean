@@ -1,6 +1,14 @@
 import { createHash } from "node:crypto";
-import type { LatticeRun, RunRequest } from "../domain.js";
-import type { DurableDecisionPlan } from "../intent/decision-plan-store.js";
+import {
+  type LatticeRun,
+  type RunRequest,
+} from "../domain.js";
+import type {
+  DecisionPlanningMaterial,
+  DurableDecisionPlan,
+} from "../intent/decision-plan-store.js";
+import type { DecisionInputSnapshot } from "../decision/decision-input-snapshot.js";
+import type { IntentVersion } from "../intent/types.js";
 
 export type SolandraSemanticPhase = "listening" | "understanding" | "knowledge_gap" | "actionable";
 export type SolandraPresentationTransition = "initial" | "updated" | "reconnected";
@@ -24,8 +32,8 @@ export interface PresentationBasis {
 
 export interface DurableUnderstanding {
   goal: string;
-  requirements: Array<{ criterion: string; operator: "lte" | "gte" | "eq"; value: string | number | boolean }>;
-  preferences: Array<{ criterion: string; weight: number }>;
+  requirements: Array<{ criterion: string; operator: "lte" | "gte" | "eq" | "LTE" | "GTE" | "EQ"; value: string | number | boolean }>;
+  preferences: Array<{ criterion: string; weight?: number; tier?: string }>;
 }
 
 export interface MaterialUncertainty {
@@ -43,7 +51,11 @@ export interface SupportingKnowledge {
 }
 
 export interface ActionRecommendation {
-  winnerCandidateId: string;
+  outcome: NonNullable<import("../domain.js").StructuredDecision["outcome"]>;
+  winnerCandidateId?: string;
+  frontierCandidateIds: string[];
+  tiedCandidateIds: string[];
+  materialUnknowns: string[];
   rationale: string[];
   provenance: ProvenanceRef[];
 }
@@ -84,8 +96,34 @@ function formatConstraintValue(operator: "lte" | "gte" | "eq", value: string | n
   return `${prefix} ${String(value)}`;
 }
 
-function understandingFromPlan(plan: DurableDecisionPlan | undefined): DurableUnderstanding | undefined {
+type AnyDecisionPlan = DurableDecisionPlan<DecisionPlanningMaterial>;
+
+function isDecisionInput(material: DecisionPlanningMaterial): material is DecisionInputSnapshot {
+  return "schemaVersion" in material;
+}
+
+function understandingFromIntent(version: IntentVersion | undefined): DurableUnderstanding | undefined {
+  const objective = version?.state.objective?.value;
+  if (!version || objective?.state !== "VALUE" || typeof objective.value !== "string") return undefined;
+  return { goal: objective.value, requirements: [], preferences: [] };
+}
+
+function understandingFromPlan(plan: AnyDecisionPlan | undefined): DurableUnderstanding | undefined {
   if (!plan) return undefined;
+  if (isDecisionInput(plan.planningMaterial)) {
+    return {
+      goal: plan.planningMaterial.objective,
+      requirements: plan.planningMaterial.hardRequirements.map((item) => ({
+        criterion: item.criterionId,
+        operator: item.operator,
+        value: item.expected,
+      })),
+      preferences: plan.planningMaterial.priorities.map((item) => ({
+        criterion: item.criterionId,
+        tier: item.tier,
+      })),
+    };
+  }
   return {
     goal: plan.planningMaterial.goal,
     requirements: plan.planningMaterial.hardConstraints.map((item) => ({ ...item })),
@@ -93,12 +131,30 @@ function understandingFromPlan(plan: DurableDecisionPlan | undefined): DurableUn
   };
 }
 
-function supportingFromPlan(plan: DurableDecisionPlan | undefined): SupportingKnowledge[] {
+function supportingFromPlan(plan: AnyDecisionPlan | undefined): SupportingKnowledge[] {
   if (!plan) return [];
   const provenance: ProvenanceRef[] = [
     { authority: "intent_authority", ref: plan.intentVersionId },
     { authority: "decision_plan", ref: plan.decisionPlanId },
   ];
+  if (isDecisionInput(plan.planningMaterial)) {
+    return [
+      ...plan.planningMaterial.hardRequirements.map((item, index) => ({
+        id: `requirement:${index}:${item.criterionId}`,
+        label: item.criterionId,
+        value: `${item.operator} ${String(item.expected)}`,
+        kind: "requirement" as const,
+        provenance,
+      })),
+      ...plan.planningMaterial.priorities.map((item, index) => ({
+        id: `preference:${index}:${item.criterionId}`,
+        label: item.criterionId,
+        value: item.tier,
+        kind: "preference" as const,
+        provenance,
+      })),
+    ];
+  }
   return [
     ...plan.planningMaterial.hardConstraints.map((item, index) => ({
       id: `requirement:${index}:${item.criterion}`,
@@ -117,14 +173,18 @@ function supportingFromPlan(plan: DurableDecisionPlan | undefined): SupportingKn
   ];
 }
 
-function phaseFromRun(run: LatticeRun | undefined, plan: DurableDecisionPlan | undefined): SolandraSemanticPhase {
-  if (!run) return plan ? "understanding" : "listening";
+function phaseFromRun(
+  run: LatticeRun | undefined,
+  plan: AnyDecisionPlan | undefined,
+  intentVersion: IntentVersion | undefined,
+): SolandraSemanticPhase {
+  if (!run) return plan || intentVersion ? "understanding" : "listening";
   if (run.status === "AWAITING_CLARIFICATION") return "knowledge_gap";
   if (run.status === "COMPLETED" && run.decision !== null) return "actionable";
-  return plan ? "understanding" : "listening";
+  return plan || intentVersion ? "understanding" : "listening";
 }
 
-function resourcesFor(run: LatticeRun | undefined, plan: DurableDecisionPlan | undefined): ResourceDescriptor[] {
+function resourcesFor(run: LatticeRun | undefined, plan: AnyDecisionPlan | undefined): ResourceDescriptor[] {
   if (!run || run.status !== "COMPLETED" || run.decision === null || !plan) return [];
   return [
     {
@@ -161,20 +221,21 @@ function revisionFor(snapshot: Omit<SolandraPresentationSnapshot, "presentationR
 export function composeSolandraPresentation(input: {
   conversationId: string;
   run?: LatticeRun;
-  decisionPlan?: DurableDecisionPlan;
+  decisionPlan?: AnyDecisionPlan;
+  intentVersion?: IntentVersion;
   knownRevision?: string;
 }): SolandraPresentationSnapshot {
-  const { conversationId, run, decisionPlan, knownRevision } = input;
+  const { conversationId, run, decisionPlan, intentVersion, knownRevision } = input;
   const basis: PresentationBasis = {
     conversationId,
     ...(run ? { runId: run.id, runVersion: run.version } : {}),
     ...(decisionPlan ? {
       decisionPlanId: decisionPlan.decisionPlanId,
       intentVersionId: decisionPlan.intentVersionId,
-    } : {}),
+    } : intentVersion ? { intentVersionId: intentVersion.intentVersionId } : {}),
   };
-  const phase = phaseFromRun(run, decisionPlan);
-  const durableUnderstanding = understandingFromPlan(decisionPlan);
+  const phase = phaseFromRun(run, decisionPlan, intentVersion);
+  const durableUnderstanding = understandingFromIntent(intentVersion) ?? understandingFromPlan(decisionPlan);
   const supportingKnowledge = supportingFromPlan(decisionPlan);
   const materialUncertainty: MaterialUncertainty[] = run?.status === "AWAITING_CLARIFICATION"
     ? [{
@@ -185,7 +246,14 @@ export function composeSolandraPresentation(input: {
     : [];
   const nextAction = run?.status === "COMPLETED" && run.decision !== null
     ? {
-        winnerCandidateId: run.decision.winnerCandidateId,
+        outcome: run.decision.outcome
+          ?? (run.decision.winnerCandidateId ? "RECOMMENDATION" : "UNRESOLVED"),
+        ...(run.decision.winnerCandidateId
+          ? { winnerCandidateId: run.decision.winnerCandidateId }
+          : {}),
+        frontierCandidateIds: [...(run.decision.frontierCandidateIds ?? [])],
+        tiedCandidateIds: [...(run.decision.tiedCandidateIds ?? [])],
+        materialUnknowns: [...(run.decision.materialUnknowns ?? [])],
         rationale: [...run.decision.rationale],
         provenance: [
           { authority: "structured_decision" as const, ref: run.id },
@@ -213,7 +281,16 @@ export function composeSolandraPresentation(input: {
   return { ...revisionInput, presentationRevision, transition };
 }
 
-function criteriaText(plan: DurableDecisionPlan): string {
+function criteriaText(plan: AnyDecisionPlan): string {
+  if (isDecisionInput(plan.planningMaterial)) {
+    return [
+      plan.planningMaterial.objective,
+      ...plan.planningMaterial.hardRequirements.map((item) =>
+        `Requirement — ${item.criterionId}: ${item.operator} ${String(item.expected)}`),
+      ...plan.planningMaterial.priorities.map((item) =>
+        `Preference — ${item.criterionId}: ${item.tier}`),
+    ].join("\n");
+  }
   const requirements = plan.planningMaterial.hardConstraints
     .map((item) => `Requirement — ${item.criterion}: ${formatConstraintValue(item.operator, item.value)}`);
   const preferences = plan.planningMaterial.priorities
@@ -225,7 +302,7 @@ export function hydrateSolandraResource(input: {
   snapshot: SolandraPresentationSnapshot;
   resourceId: string;
   run?: LatticeRun;
-  decisionPlan?: DurableDecisionPlan;
+  decisionPlan?: AnyDecisionPlan;
 }): HydratedResource | undefined {
   const descriptor = input.snapshot.resources.find((item) => item.id === input.resourceId);
   if (!descriptor) return undefined;
@@ -236,7 +313,7 @@ export function hydrateSolandraResource(input: {
       payload: { kind: "text", text: criteriaText(input.decisionPlan) },
     };
   }
-  if (descriptor.id.startsWith("decision-rationale:") && input.run?.decision) {
+  if (descriptor.id.startsWith("decision-rationale:") && input.run?.decision?.winnerCandidateId) {
     const text = [
       `Winner: ${input.run.decision.winnerCandidateId}`,
       ...input.run.decision.rationale.map((line) => `- ${line}`),

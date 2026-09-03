@@ -33,12 +33,61 @@ test("authoritative Solandra surface is Conversation + free-form input + adaptiv
   assert.match(html, /\/outcome/);
   assert.match(html, /event\.isComposing/);
   assert.match(html, /event\.shiftKey/);
+  assert.match(html, /appendUserTurn\(message\)/);
+  assert.match(html, /appendSolandraTurn\(body\.question/);
+  assert.match(html, /appendSolandraTurn\(outcome\.explanation/);
+  assert.match(html, /confirmsPending = clarification && isExplicitConfirmation\(message\)/);
+  assert.ok(
+    html.includes('replace(/\\s+/g, " ")'),
+    "Rendered confirmation classifier must retain its whitespace-regex escape.",
+  );
+  assert.ok(
+    html.includes(')\\.?$/iu'),
+    "Rendered confirmation classifier must retain its optional-period escape.",
+  );
   assert.doesNotMatch(html, /clear-user-messages|decision-plan|winnerCandidateId|Knowledge Orbit|resourceFocus|newUpdate/i);
+  assert.doesNotMatch(html, /Accepted understanding|What you said|Interpreting against|One clarification|Conversation \+ adaptive Composer|Confidence:|<h2>Provenance<\/h2>/i);
   assert.doesNotMatch(html, /Atlas Pro|Nova Air|Forge 15|batteryHours|price\.max\.usd|performance\.relativeToBattery/i);
 
   const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((match) => match[1] ?? "");
   assert.ok(scripts.length >= 1, "Expected canonical Conversation browser script.");
   for (const source of scripts) new Script(source);
+
+  const beforeAuthority = html.match(/appendUserTurn\(message\);([\s\S]*?)const id = await ensureConversation\(\);/u)?.[1] ?? "";
+  assert.notEqual(beforeAuthority, "");
+  assert.match(beforeAuthority, /composer\.replaceChildren\(\)/);
+  assert.doesNotMatch(beforeAuthority, /composer\.innerHTML|Accepted understanding|What you said|Interpreting/);
+});
+
+test("Composer can present accepted Intent state before terminal Run completion", async () => {
+  const config = resolveRuntimeConfig({
+    LATTICE_DEPLOYMENT_MODE: "development",
+    LATTICE_TRUTH_MODE: "v36-offline",
+  } as NodeJS.ProcessEnv);
+  const app = await createRuntimeApp(config, { memoryDispatchDelayMs: 1_000 });
+  try {
+    const created = await app.inject({ method: "POST", url: "/api/v1/conversations" });
+    const conversationId = created.json<{ conversation: { id: string } }>().conversation.id;
+    const objective = "Explain a trustworthy property of ocean tides.";
+    const accepted = await app.inject({
+      method: "POST",
+      url: `/api/v1/conversations/${conversationId}/turns`,
+      payload: { turnId: "preterminal-authority", message: objective },
+    });
+    assert.equal(accepted.statusCode, 202, accepted.body);
+
+    const presentation = await app.inject({
+      method: "GET",
+      url: `/api/v1/conversations/${conversationId}/presentation`,
+    });
+    assert.equal(presentation.statusCode, 200, presentation.body);
+    assert.equal(presentation.json().presentation.phase, "understanding");
+    assert.equal(presentation.json().presentation.durableUnderstanding.goal, objective);
+    assert.equal(presentation.json().presentation.basis.intentVersionId, accepted.json().intentVersionId);
+    assert.equal(presentation.json().presentation.basis.decisionPlanId, undefined);
+  } finally {
+    await app.close();
+  }
 });
 
 test("Product runtime accepts ordinary USER text and completes knowledge without DECIDING", async () => {

@@ -1,6 +1,13 @@
 import type { FastifyInstance } from "fastify";
 import { getAuthenticatedSubject } from "../auth/authenticated-subject.js";
-import type { DecisionPlanStore, DurableDecisionPlan } from "../intent/decision-plan-store.js";
+import { isConsultationRunRequest, type LatticeRunRequest } from "../domain.js";
+import type {
+  DecisionPlanStore,
+  DecisionPlanningMaterial,
+  DurableDecisionPlan,
+} from "../intent/decision-plan-store.js";
+import type { IntentAuthorityStore } from "../intent/store.js";
+import type { IntentVersion } from "../intent/types.js";
 import type { IntentUserMessageStore } from "../intent/source-message-store.js";
 import {
   composeSolandraPresentation,
@@ -20,6 +27,7 @@ export interface ConversationContinuityApiOptions {
   runStore: RunStore;
   runIndexStore: ConversationRunIndexStore;
   decisionPlanStore: DecisionPlanStore;
+  intentStore?: IntentAuthorityStore;
 }
 
 function validBoundedId(value: string, maxChars: number): string | undefined {
@@ -33,7 +41,8 @@ async function readLatestPresentationBasis(
   options: ConversationContinuityApiOptions,
 ): Promise<{
   run: Awaited<ReturnType<RunStore["get"]>>;
-  decisionPlan: DurableDecisionPlan | undefined;
+  decisionPlan: DurableDecisionPlan<DecisionPlanningMaterial> | undefined;
+  intentVersion: IntentVersion | undefined;
 }> {
   const runIds = await options.runIndexStore.listRunIds(conversationId);
   for (let index = runIds.length - 1; index >= 0; index -= 1) {
@@ -42,9 +51,15 @@ async function readLatestPresentationBasis(
     const run = await options.runStore.get(runId);
     if (!run || run.conversationId !== conversationId) continue;
     const decisionPlan = await options.decisionPlanStore.getByRunId(run.id);
-    return { run, decisionPlan };
+    const intentVersionId = isConsultationRunRequest(run.request)
+      ? run.request.intentVersionId
+      : decisionPlan?.intentVersionId;
+    const intentVersion = intentVersionId && options.intentStore
+      ? await options.intentStore.getVersion(intentVersionId)
+      : undefined;
+    return { run, decisionPlan, intentVersion };
   }
-  return { run: undefined, decisionPlan: undefined };
+  return { run: undefined, decisionPlan: undefined, intentVersion: undefined };
 }
 
 export function registerConversationContinuityApi(
@@ -77,12 +92,26 @@ export function registerConversationContinuityApi(
           status: run.status,
           version: run.version,
           eventCount: run.events.length,
-          resultAvailable: run.status === "COMPLETED" && run.decision !== null && run.explanation !== null,
-          exactBinding: decisionPlan === undefined ? null : {
-            decisionPlanId: decisionPlan.decisionPlanId,
-            intentScopeId: decisionPlan.intentScopeId,
-            intentVersionId: decisionPlan.intentVersionId,
-          },
+          resultAvailable: run.status === "COMPLETED" && (
+            isConsultationRunRequest(run.request)
+              ? true
+              : run.decision !== null && run.explanation !== null
+          ),
+          exactBinding: decisionPlan !== undefined
+            ? {
+              decisionPlanId: decisionPlan.decisionPlanId,
+              intentScopeId: decisionPlan.intentScopeId,
+              intentVersionId: decisionPlan.intentVersionId,
+            }
+            : isConsultationRunRequest(run.request)
+              && run.request.intentScopeId
+              && run.request.intentVersionId
+              ? {
+                decisionPlanId: null,
+                intentScopeId: run.request.intentScopeId,
+                intentVersionId: run.request.intentVersionId,
+              }
+              : null,
           links: {
             run: `/api/v1/runs/${encodeURIComponent(run.id)}`,
             events: `/api/v1/runs/${encodeURIComponent(run.id)}/events`,
@@ -125,11 +154,12 @@ export function registerConversationContinuityApi(
       const conversation = await options.conversationStore.getOwned(conversationId, subjectId);
       if (!conversation) return reply.status(404).send({ error: "CONVERSATION_NOT_FOUND" });
 
-      const { run, decisionPlan } = await readLatestPresentationBasis(conversationId, options);
+      const { run, decisionPlan, intentVersion } = await readLatestPresentationBasis(conversationId, options);
       const snapshot = composeSolandraPresentation({
         conversationId,
         ...(run ? { run } : {}),
         ...(decisionPlan ? { decisionPlan } : {}),
+        ...(intentVersion ? { intentVersion } : {}),
         ...(knownRevision ? { knownRevision } : {}),
       });
       return reply.status(200).send({ presentation: snapshot });
@@ -155,11 +185,12 @@ export function registerConversationContinuityApi(
       const conversation = await options.conversationStore.getOwned(conversationId, subjectId);
       if (!conversation) return reply.status(404).send({ error: "CONVERSATION_NOT_FOUND" });
 
-      const { run, decisionPlan } = await readLatestPresentationBasis(conversationId, options);
+      const { run, decisionPlan, intentVersion } = await readLatestPresentationBasis(conversationId, options);
       const snapshot = composeSolandraPresentation({
         conversationId,
         ...(run ? { run } : {}),
         ...(decisionPlan ? { decisionPlan } : {}),
+        ...(intentVersion ? { intentVersion } : {}),
       });
       if (snapshot.presentationRevision !== expectedRevision) {
         return reply.status(409).send({

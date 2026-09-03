@@ -58,6 +58,7 @@ const migrationNames = [
   "022_intent_authority_core.sql",
   "023_intent_pending_clarifications.sql",
   "024_intent_version_lineage.sql",
+  "025_consultation_scope_kind.sql",
 ] as const;
 
 export interface PostgresIntentAuthorityOptions {
@@ -90,7 +91,7 @@ type TransitionRow = {
 
 type ScopeRow = {
   intent_scope_id: string;
-  scope_kind: "decision";
+  scope_kind: "decision" | "consultation";
   lifecycle: "active";
   current_intent_version_id: string | null;
   next_version_number: string | number;
@@ -447,6 +448,12 @@ export class PostgresIntentAuthorityStore implements IntentAuthorityStore {
        WHERE intent_scope_id=$1`,
       [command.intentScopeId, versionId, nextVersion + 1],
     );
+    await client.query(
+      `UPDATE intent_pending_proposals
+       SET status='STALE',resolved_at=now()
+       WHERE intent_scope_id=$1 AND status='PENDING' AND base_intent_version_id<>$2`,
+      [command.intentScopeId, versionId],
+    );
     await insertTransition(
       client,
       command,
@@ -496,8 +503,8 @@ export class PostgresIntentAuthorityStore implements IntentAuthorityStore {
       await client.query(
         `INSERT INTO intent_scopes(
            intent_scope_id,scope_kind,lifecycle,current_intent_version_id,next_version_number,observed_user_horizon
-         ) VALUES ($1,'decision','active',NULL,1,$2)`,
-        [input.intentScopeId, command.observedMessageHorizon],
+         ) VALUES ($1,$2,'active',NULL,1,$3)`,
+        [input.intentScopeId, input.kind ?? "decision", command.observedMessageHorizon],
       );
       await client.query(
         `INSERT INTO intent_versions(

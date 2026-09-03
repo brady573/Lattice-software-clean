@@ -51,6 +51,7 @@ test("highest materially different tier dominates lower-tier advantages", () => 
   });
 
   assert.deepEqual(result.frontierAlternativeIds, ["alpha"]);
+  assert.equal(result.outcome, "RECOMMENDATION");
   assert.equal(result.pairwiseDecisions[0]?.decisiveTier, "MATTERS_MOST");
   assert.equal(result.pairwiseDecisions[0]?.reason, "LEFT_DOMINATES");
   assert.deepEqual(result.pairwiseDecisions[0]?.materialAdvantages, ["quality@1"]);
@@ -150,6 +151,7 @@ test("unknown higher-tier comparison blocks lower-tier dominance", () => {
 test("missing pairwise evidence preserves alternatives without inventing a ranking", () => {
   const result = build({ comparisons: [] });
   assert.deepEqual(result.frontierAlternativeIds, ["alpha", "beta"]);
+  assert.equal(result.outcome, "INSUFFICIENT_EVIDENCE");
   assert.equal(result.pairwiseDecisions[0]?.reason, "COMPARISON_MISSING");
   assert.equal(result.forcedWinnerAlternativeId, null);
 });
@@ -165,11 +167,47 @@ test("only explicitly eligible alternatives enter the valid frontier", () => {
   });
 
   assert.deepEqual(result.frontierAlternativeIds, ["alpha"]);
+  assert.equal(result.outcome, "RECOMMENDATION");
   assert.deepEqual(result.excludedAlternatives, [
     { alternativeId: "beta", reason: "INELIGIBLE" },
     { alternativeId: "gamma", reason: "ELIGIBILITY_UNKNOWN" },
   ]);
   assert.equal(result.forcedWinnerAlternativeId, null);
+});
+
+test("frontier preserves tie, unresolved, and no-eligible outcomes", () => {
+  assert.equal(build({
+    comparisons: [{
+      leftAlternativeId: "alpha",
+      rightAlternativeId: "beta",
+      criteria: [{
+        criterionId: "quality",
+        criterionVersion: 1,
+        tier: "MATTERS_MOST",
+        state: "WITHIN_TOLERANCE",
+        preferredSide: "NEITHER",
+      }],
+    }],
+  }).outcome, "TIE");
+
+  assert.equal(build({
+    comparisons: [{
+      leftAlternativeId: "alpha",
+      rightAlternativeId: "beta",
+      criteria: [{
+        criterionId: "quality",
+        criterionVersion: 1,
+        tier: "MATTERS_MOST",
+        state: "UNKNOWN",
+        preferredSide: "UNKNOWN",
+      }],
+    }],
+  }).outcome, "UNRESOLVED");
+
+  assert.equal(constructMaterialDominanceFrontier({
+    alternatives: [{ alternativeId: "alpha", eligibility: "INELIGIBLE" }],
+    comparisons: [],
+  }).outcome, "NO_ELIGIBLE_CANDIDATE");
 });
 
 test("comparison orientation does not change the dominant alternative", () => {

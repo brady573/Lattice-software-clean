@@ -290,6 +290,16 @@ export class MemoryIntentAuthorityStore implements IntentAuthorityStore {
     this.versions.set(versionId, structuredClone(version));
     scope.currentIntentVersionId = versionId;
     scope.nextVersionNumber += 1;
+    for (const proposal of this.pendingProposals.values()) {
+      if (
+        proposal.status === "PENDING"
+        && proposal.intentScopeId === identity.intentScopeId
+        && proposal.baseIntentVersionId !== versionId
+      ) {
+        proposal.status = "STALE";
+        proposal.resolvedAt = new Date().toISOString();
+      }
+    }
     this.recordTransition(
       identity,
       fingerprint,
@@ -363,7 +373,7 @@ export class MemoryIntentAuthorityStore implements IntentAuthorityStore {
     };
     const scope: IntentScope = {
       intentScopeId: input.intentScopeId,
-      kind: "decision",
+      kind: input.kind ?? "decision",
       lifecycle: "active",
       currentIntentVersionId: versionId,
       nextVersionNumber: 2,

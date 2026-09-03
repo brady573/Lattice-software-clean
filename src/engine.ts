@@ -8,7 +8,7 @@ import type {
   RunRequest,
   StructuredDecision,
 } from "./domain.js";
-import type { FixtureDataset } from "./fixtures.js";
+import type { DecisionFixtureDataset } from "./truth/fixture-dataset.js";
 import {
   createSolandraExplanationPlan,
   renderCanonicalExplanation,
@@ -18,6 +18,7 @@ import {
   type AdmittedDecisionEvidence,
 } from "./truth/admission.js";
 import { evaluateFixtureTruth } from "./truth/fixture-evaluation.js";
+import { materializeFixtureDecisionEvidence } from "./truth/decision-evidence-provider.js";
 
 const deterministicEvaluationRunId = "00000000-0000-4000-8000-000000000036";
 
@@ -51,17 +52,26 @@ function evaluateConstraints(
   });
 }
 
-function rawPreferenceScore(
+function normalizedPreferenceUtility(
   candidate: Candidate,
   priorities: Priority[],
   evidence: readonly AdmittedDecisionEvidence[],
+  candidates: readonly Candidate[],
 ): number {
   const totalWeight = priorities.reduce((total, priority) => total + priority.weight, 0);
   if (totalWeight === 0) return 0;
   return priorities.reduce((total, priority) => {
     const item = decisionEvidenceFor(evidence, candidate.id, priority.criterion);
     if (!item || typeof item.value !== "number") return total;
-    return total + item.value * (priority.weight / totalWeight);
+    const comparable = candidates.flatMap((alternative) => {
+      const value = decisionEvidenceFor(evidence, alternative.id, priority.criterion)?.value;
+      return typeof value === "number" && Number.isFinite(value) ? [value] : [];
+    });
+    if (comparable.length === 0) return total;
+    const minimum = Math.min(...comparable);
+    const maximum = Math.max(...comparable);
+    const criterionUtility = maximum === minimum ? 1 : (item.value - minimum) / (maximum - minimum);
+    return total + criterionUtility * (priority.weight / totalWeight);
   }, 0);
 }
 
@@ -89,22 +99,70 @@ export function createDecisionFromAdmittedEvidence(
     return {
       candidateId: candidate.id,
       eligible,
-      rawScore: rawPreferenceScore(candidate, request.priorities, evidence),
+      // Historical field name; the value is scale-normalized criterion utility.
+      rawScore: normalizedPreferenceUtility(candidate, request.priorities, evidence, candidates),
       normalizedScore: 0,
       constraints,
       supportingEvidenceIds,
     };
   });
   const normalized = normalizeScores(evaluations);
+  const unresolved = normalized.flatMap((evaluation) =>
+    evaluation.constraints.filter((constraint) => constraint.passed === null)
+      .map((constraint) => `${evaluation.candidateId}:${constraint.criterion}`));
+  if (unresolved.length > 0) {
+    return {
+      goal: request.goal,
+      outcome: "UNRESOLVED",
+      frontierCandidateIds: normalized.filter((evaluation) => evaluation.eligible)
+        .map((evaluation) => evaluation.candidateId),
+      tiedCandidateIds: [],
+      materialUnknowns: unresolved,
+      evaluations: normalized,
+      rationale: ["The available evidence leaves at least one candidate's eligibility unresolved, so no winner is forced."],
+      evidenceIds: [],
+      truthAssessmentIds,
+    };
+  }
   const eligible = normalized.filter((evaluation) => evaluation.eligible).sort((left, right) => right.rawScore - left.rawScore);
   const winner = eligible[0];
-  if (!winner) throw new Error("No candidate satisfies all hard constraints with admitted evidence.");
+  if (!winner) {
+    return {
+      goal: request.goal,
+      outcome: "NO_ELIGIBLE_CANDIDATE",
+      frontierCandidateIds: [],
+      tiedCandidateIds: [],
+      materialUnknowns: [],
+      evaluations: normalized,
+      rationale: ["No candidate satisfies every hard constraint with admitted evidence."],
+      evidenceIds: [],
+      truthAssessmentIds,
+    };
+  }
   const candidateLabel = candidates.find((candidate) => candidate.id === winner.candidateId)?.label ?? winner.candidateId;
+  const tied = eligible.filter((evaluation) => evaluation.rawScore === winner.rawScore);
+  if (tied.length > 1) {
+    return {
+      goal: request.goal,
+      outcome: "TIE",
+      frontierCandidateIds: tied.map((evaluation) => evaluation.candidateId),
+      tiedCandidateIds: tied.map((evaluation) => evaluation.candidateId),
+      materialUnknowns: [],
+      evaluations: normalized,
+      rationale: ["Eligible candidates have equal weighted preference scores; no single recommendation is supported."],
+      evidenceIds: [],
+      truthAssessmentIds,
+    };
+  }
   const disqualifiedHigherScorers = normalized.filter((evaluation) => !evaluation.eligible && evaluation.rawScore > winner.rawScore);
   const rationale = [`${candidateLabel} satisfies every hard constraint and has the highest weighted score among eligible candidates.`];
   if (disqualifiedHigherScorers.length > 0) rationale.push(`${disqualifiedHigherScorers.length} candidate(s) scored higher on preferences but were excluded by hard constraints.`);
   return {
     goal: request.goal,
+    outcome: "RECOMMENDATION",
+    frontierCandidateIds: [winner.candidateId],
+    tiedCandidateIds: [],
+    materialUnknowns: [],
     winnerCandidateId: winner.candidateId,
     evaluations: normalized,
     rationale,
@@ -113,17 +171,17 @@ export function createDecisionFromAdmittedEvidence(
   };
 }
 
-export function createDecision(request: RunRequest, dataset: FixtureDataset): StructuredDecision {
+export function createDecision(request: RunRequest, dataset: DecisionFixtureDataset): StructuredDecision {
   const truth = evaluateFixtureTruth(deterministicEvaluationRunId, dataset);
   return createDecisionFromAdmittedEvidence(
     request,
     dataset.candidates,
-    truth.decisionEvidence,
+    materializeFixtureDecisionEvidence(dataset, truth.bundle),
     truth.assessments.map((assessment) => assessment.id),
   );
 }
 
-export function explainDecision(decision: StructuredDecision, dataset: FixtureDataset): string {
+export function explainDecision(decision: StructuredDecision, dataset: DecisionFixtureDataset): string {
   const truth = evaluateFixtureTruth(deterministicEvaluationRunId, dataset);
   const plan = createSolandraExplanationPlan(decision, dataset.candidates, truth.bundle);
   return renderCanonicalExplanation(plan);

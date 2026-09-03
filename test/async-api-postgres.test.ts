@@ -6,6 +6,7 @@ import { Pool } from "pg";
 import { createApiRequestHash } from "../src/api-control-store.js";
 import { buildApp } from "../src/app.js";
 import type { RunRequest } from "../src/domain.js";
+import { createLegacyDecisionTruthComposition } from "./fixtures/legacy-laptop-fixture.js";
 import { PostgresApiRunControlStore } from "../src/postgres-api-control-store.js";
 import { PostgresOrchestrationStore } from "../src/postgres-orchestration-store.js";
 import { PostgresRunStore } from "../src/postgres-run-store.js";
@@ -202,6 +203,8 @@ test(
         leaseMs: 30_000,
         retryDelayMs: 1_000,
         batchSize: 10,
+      }, {
+      ...createLegacyDecisionTruthComposition(),
       });
       researchWorker.start();
       runWorker.start();

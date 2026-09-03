@@ -30,8 +30,8 @@ test("M7 authoritative USER writes require an existing durable Conversation", as
     const absentConversationId = "conversation-m7-d-absent";
     const rejected = await app.inject({
       method: "POST",
-      url: `/api/v1/conversations/${absentConversationId}/intent-scopes/scope-m7-d-absent/clear-user-messages`,
-      payload: clearPayload,
+      url: `/api/v1/conversations/${absentConversationId}/turns`,
+      payload: { turnId: clearPayload.turnId, message: clearPayload.content },
     });
     assert.equal(rejected.statusCode, 404);
     assert.deepEqual(rejected.json(), { error: "CONVERSATION_NOT_FOUND" });
@@ -49,8 +49,8 @@ test("M7 authoritative USER writes require an existing durable Conversation", as
 
     const accepted = await app.inject({
       method: "POST",
-      url: `/api/v1/conversations/${conversationId}/intent-scopes/scope-m7-d-created/clear-user-messages`,
-      payload: clearPayload,
+      url: `/api/v1/conversations/${conversationId}/turns`,
+      payload: { turnId: clearPayload.turnId, message: clearPayload.content },
     });
     assert.equal(accepted.statusCode, 202);
     assert.equal(accepted.json().status, "RUN_ACCEPTED");
@@ -61,7 +61,7 @@ test("M7 authoritative USER writes require an existing durable Conversation", as
     });
     assert.equal(history.statusCode, 200);
     assert.equal(history.json().messages.length, 1);
-    assert.equal(history.json().messages[0].id, clearPayload.messageId);
+    assert.equal(history.json().messages[0].content, clearPayload.content);
     assert.equal(history.json().messages[0].conversationId, conversationId);
     assert.equal(history.json().messages[0].role, "USER");
   } finally {

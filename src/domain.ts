@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { decisionInputSnapshotSchema } from "./decision/decision-input-snapshot.js";
 
 export const prioritySchema = z.object({
   criterion: z.string().min(1),
@@ -24,17 +25,39 @@ export const runRequestSchema = z.object({
 export const consultationRunRequestSchema = z.object({
   kind: z.literal("consultation"),
   objective: z.string().min(1).max(8_000),
+  /** Non-authoritative conversational/work context for this exact Run. */
   context: z.array(z.string().min(1).max(4_000)).max(32).default([]),
-  decisionNeed: z.enum(["NONE", "QUALIFIED"]).default("NONE"),
+  decisionNeed: z.enum(["NONE", "UNRESOLVED", "QUALIFIED"]).default("NONE"),
   resourceNeed: z.enum(["NONE", "CHECKLIST", "PREPARED_MESSAGE"]).default("NONE"),
   sourceMessageId: z.string().min(1).max(200),
   sourceMessageDigest: z.string().regex(/^[a-f0-9]{64}$/u),
   intentVersion: z.number().int().positive(),
+  intentScopeId: z.string().min(1).max(200).optional(),
+  intentVersionId: z.string().min(1).max(200).optional(),
+  decisionInput: decisionInputSnapshotSchema.optional(),
+}).superRefine((request, context) => {
+  if (request.decisionNeed === "QUALIFIED" && request.decisionInput === undefined) {
+    context.addIssue({
+      code: "custom",
+      path: ["decisionInput"],
+      message: "A qualified consultation requires one exact DecisionInput projection.",
+    });
+  }
+  if (request.decisionNeed !== "QUALIFIED" && request.decisionInput !== undefined) {
+    context.addIssue({
+      code: "custom",
+      path: ["decisionInput"],
+      message: "Non-decision consultations must not carry decision planning material.",
+    });
+  }
 });
 
 export type RunRequest = z.infer<typeof runRequestSchema>;
 type ConsultationRequestData = z.infer<typeof consultationRunRequestSchema>;
-export type ConsultationRunRequest = ConsultationRequestData & {
+export type ConsultationRunRequest = Omit<ConsultationRequestData, "decisionNeed" | "resourceNeed" | "context"> & {
+  context: string[];
+  decisionNeed: "NONE" | "UNRESOLVED" | "QUALIFIED";
+  resourceNeed: "NONE" | "CHECKLIST" | "PREPARED_MESSAGE";
   /** Compatibility-only absent fields; consultations never require them. */
   goal?: never;
   priorities?: never;
@@ -88,12 +111,28 @@ export interface CandidateEvaluation {
 
 export interface StructuredDecision {
   goal: string;
-  winnerCandidateId: string;
+  /**
+   * A decision may deliberately preserve a frontier or non-selection outcome.
+   * `winnerCandidateId` remains optional for compatibility with older decisions.
+   */
+  outcome?: DecisionOutcome;
+  winnerCandidateId?: string;
+  frontierCandidateIds?: string[];
+  tiedCandidateIds?: string[];
+  materialUnknowns?: string[];
   evaluations: CandidateEvaluation[];
   rationale: string[];
   evidenceIds: string[];
   truthAssessmentIds: string[];
 }
+
+export type DecisionOutcome =
+  | "RECOMMENDATION"
+  | "FRONTIER"
+  | "TIE"
+  | "INSUFFICIENT_EVIDENCE"
+  | "UNRESOLVED"
+  | "NO_ELIGIBLE_CANDIDATE";
 
 export type RunStatus =
   | "CREATED"

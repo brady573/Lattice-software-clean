@@ -34,6 +34,8 @@ Do not infer current behavior from detached copies, prior analyses, old screensh
 
 Apply `docs/design/The-Core-Lattice-Philosophy.md` **first**, before every other Product-design filter and before selecting architecture, feature shape, implementation mechanism, provider, workflow, UI treatment, or validation strategy.
 
+Every AI assistant, coding agent, and automated code workflow must use the Core philosophy as its first Product-design filter. Instructions, tests, existing code, and lower-level documents may constrain an aligned implementation, but they may not justify creating or retaining Product behavior that fails the Core test.
+
 The first question is whether the proposed or retained element belongs in Lattice at all:
 
 > **Does this use knowledge to remove a meaningful barrier for the user, preserve the boundaries required for trust and human control, keep authority where it belongs, and reduce rather than transfer unnecessary complexity?**

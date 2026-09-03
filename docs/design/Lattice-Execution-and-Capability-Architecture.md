@@ -15,11 +15,8 @@ The stable composition is:
 ```text
 canonical IntentVersion
         |
-        | faithful planning projection
-        v
-DecisionPlan
+        +--> conditional DecisionPlan for qualified decision work
         |
-        | exact Run binding
         v
 Run
         |
@@ -35,11 +32,9 @@ semantic-owner admission / consumption
         |
         +--> another qualified Product owner where explicitly defined
         |
-        v
-Lattice Decision Engine
+        +--> Lattice Decision Engine only for qualified decision work
         |
-        v
-StructuredDecision
+        +--> KnowledgeOutcome or Resource without decision machinery
 ```
 
 The central rule is:
@@ -47,7 +42,7 @@ The central rule is:
 > **Execution determines how licensed work is performed; it does not determine what the result means.**
 
 - **Lattice Intent Authority** owns canonical USER meaning.
-- **DecisionPlan** freezes the faithful planning projection of one exact IntentVersion for one Run.
+- **DecisionPlan**, when decision work is qualified, freezes the faithful planning projection of one exact IntentVersion for one decision Run. Knowledge and non-decision Action Preparation Runs have no DecisionPlan.
 - **Lattice Execution Runtime** owns durable operational lifecycle, execution-policy checks, dispatch, cancellation, retries, recovery, and operational result persistence.
 - **Capability mechanisms** perform only operations licensed by Product-owned policy.
 - **Lattice Model Gateway** is one non-authoritative capability mechanism/class, not the execution architecture itself.
@@ -63,7 +58,8 @@ This document is a cross-system execution architecture. It does not replace the 
 
 It must remain consistent with, and is subordinate at their applicable boundaries to:
 
-- `Lattice-Foundational-Design-Principle.md` — first Product-design filter;
+- `The-Core-Lattice-Philosophy.md` — highest Product-design authority and first filter;
+- `Lattice-Foundational-Design-Principle.md` — subordinate foundational elaboration;
 - `Lattice-Living-Software-Design-to-1.0.md` plus confirmed amendments — canonical forward Product direction;
 - `Lattice-Architecture-Integrity.md` — protected semantic ownership boundaries;
 - `Lattice-System-Registry-and-Naming.md` — canonical subsystem vocabulary;
@@ -97,8 +93,7 @@ The permanent operational path is:
 ```text
 IntentVersion
    |
-   v
-DecisionPlan
+   +--> conditional DecisionPlan for qualified decision work
    |
    v
 Run
@@ -129,7 +124,7 @@ No arrow transfers semantic authority merely because information crosses a proce
 
 ### 4.1 DecisionPlan is the execution basis, not execution authority
 
-DecisionPlan binds one exact IntentVersion to the faithful planning material used by one Run.
+For qualified decision work, DecisionPlan binds one exact IntentVersion to the faithful planning material used by one Run. Generic Run execution binds directly to the authoritative IntentVersion and does not synthesize a DecisionPlan.
 
 It does not:
 
@@ -169,7 +164,7 @@ It must not become a freestanding autonomous authority capable of broadening USE
 
 ### 5.1 Current implemented state machine
 
-Current canonical source defines:
+Current canonical source defines these available states and conditional paths:
 
 ```text
 CREATED
@@ -192,11 +187,9 @@ VALIDATING
   |
   +--> INVESTIGATING
   |
-  v
-DECIDING
+  +--> COMPLETED (Knowledge or Action Preparation)
   |
-  v
-COMPLETED
+  +--> DECIDING --> COMPLETED (qualified decision work only)
 ```
 
 Applicable nonterminal states may also transition to `CANCELLED` or `FAILED`. `COMPLETED`, `CANCELLED`, and `FAILED` are terminal in the current implementation.
@@ -206,7 +199,7 @@ Applicable nonterminal states may also transition to `CANCELLED` or `FAILED`. `C
 Intermediate state names may evolve, but the architecture requires:
 
 - one durable Run identity;
-- one exact DecisionPlan/IntentVersion basis per Run;
+- one exact IntentVersion basis per Run and, only for qualified decision work, one faithful DecisionPlan;
 - explicit durable operational progress;
 - compare-and-swap or equivalent exact ownership for accepted state changes;
 - no silent reopening of terminal state;
@@ -1099,9 +1092,10 @@ Intent Authority
     v
 IntentVersion
     |
-    v
-DecisionPlan
-    |
+    +--> DecisionPlan (qualified decision work only)
+    |          |
+    |          | exact decision binding
+    |          v
     v
 Run
     |
@@ -1126,11 +1120,9 @@ Semantic admission / consumption
     |
     +--> V36 for factual material
     |
-    v
-Decision Engine
+    +--> KnowledgeOutcome / Resource
     |
-    v
-StructuredDecision
+    +--> Decision Engine -> StructuredDecision (qualified decision work only)
 ```
 
 The permanent ownership rule is:

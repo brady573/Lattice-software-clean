@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { laptopFixture, type FixtureDataset } from "../src/fixtures.js";
+import type { FixtureDataset } from "../src/truth/fixture-dataset.js";
+import { laptopFixture } from "./fixtures/legacy-laptop-fixture.js";
 import {
   OfflineFixtureTruthPipeline,
   type TruthDurableValidationStep,

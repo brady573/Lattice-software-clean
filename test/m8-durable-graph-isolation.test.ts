@@ -50,12 +50,11 @@ test("M8-C isolates Conversation-derived messages, intent writes, Runs, plans, p
 
     const accepted = await app.inject({
       method: "POST",
-      url: `/api/v1/conversations/${conversationId}/intent-scopes/scope-m8-c/clear-user-messages`,
+      url: `/api/v1/conversations/${conversationId}/turns`,
       headers: ownerHeaders,
       payload: {
         turnId: "turn-m8-c-1",
-        messageId: "message-m8-c-1",
-        content: clearContent,
+        message: clearContent,
       },
     });
     assert.equal(accepted.statusCode, 202);
@@ -101,7 +100,8 @@ test("M8-C isolates Conversation-derived messages, intent writes, Runs, plans, p
       url: `/api/v1/runs/${binding.runId}/decision-plan`,
       headers: ownerHeaders,
     });
-    assert.equal(ownerPlan.statusCode, 200);
+    assert.equal(ownerPlan.statusCode, 404);
+    assert.equal(ownerPlan.json().error, "DECISION_PLAN_NOT_FOUND");
 
     const ownerResult = await app.inject({
       method: "GET",
@@ -129,12 +129,11 @@ test("M8-C isolates Conversation-derived messages, intent writes, Runs, plans, p
 
     const crossIntentWrite = await app.inject({
       method: "POST",
-      url: `/api/v1/conversations/${conversationId}/intent-scopes/scope-m8-c/clear-user-messages`,
+      url: `/api/v1/conversations/${conversationId}/turns`,
       headers: otherHeaders,
       payload: {
         turnId: "turn-m8-c-cross",
-        messageId: "message-m8-c-cross",
-        content: clearContent,
+        message: clearContent,
       },
     });
     assert.equal(crossIntentWrite.statusCode, 404);
