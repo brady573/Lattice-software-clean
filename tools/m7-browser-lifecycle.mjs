@@ -386,8 +386,13 @@ async function main() {
     assert.equal(correctionRouting.requests.some((item) => item.path.includes('/confirm')), false);
     evidence.browser.clarificationCorrection = correctionRouting;
 
+    await cdp.eval(`window.__latticeReloadMarker='clarification-correction'`);
     await cdp.send("Page.reload", { ignoreCache: true });
-    await waitFor("reloaded canonical Solandra client", async () => cdp.eval(`document.getElementById('conversationInput') instanceof HTMLTextAreaElement`));
+    await waitFor("reloaded canonical Solandra client", async () => cdp.eval(`
+      window.__latticeReloadMarker!=='clarification-correction'
+      && document.readyState==='complete'
+      && document.getElementById('conversationInput') instanceof HTMLTextAreaElement
+    `));
     await installClarificationFixture();
     await submitBrowserTurn(cdp, "Help me compare these approaches.");
     await waitFor("browser pending clarification before confirmation", async () => cdp.eval(`(() => {
@@ -406,8 +411,13 @@ async function main() {
     assert.equal(confirmationRouting.requests.filter((item) => item.path.includes('/confirm')).length, 1);
     evidence.browser.clarificationConfirmation = confirmationRouting;
 
+    await cdp.eval(`window.__latticeReloadMarker='clarification-confirmation'`);
     await cdp.send("Page.reload", { ignoreCache: true });
-    await waitFor("canonical client after clarification browser checks", async () => cdp.eval(`document.getElementById('conversationInput') instanceof HTMLTextAreaElement`));
+    await waitFor("canonical client after clarification browser checks", async () => cdp.eval(`
+      window.__latticeReloadMarker!=='clarification-confirmation'
+      && document.readyState==='complete'
+      && document.getElementById('conversationInput') instanceof HTMLTextAreaElement
+    `));
 
     const ime = await cdp.eval(`(() => {
       const input=document.getElementById('conversationInput');

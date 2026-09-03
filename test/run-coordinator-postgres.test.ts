@@ -3,14 +3,13 @@ import { randomUUID } from "node:crypto";
 import test from "node:test";
 import { Pool } from "pg";
 import type { RunRequest } from "../src/domain.js";
-import { laptopFixture } from "./fixtures/legacy-laptop-fixture.js";
+import { createLegacyDecisionTruthComposition } from "./fixtures/legacy-laptop-fixture.js";
 import { PostgresRunStore } from "../src/postgres-run-store.js";
 import {
   createPendingRun,
   executePersistedRun,
   executePersistedRunTick,
 } from "../src/run-execution.js";
-import { OfflineFixtureTruthPipeline } from "../src/truth/execution-pipeline.js";
 
 const databaseUrl = process.env.DATABASE_URL;
 
@@ -29,7 +28,7 @@ test(
   async () => {
     assert.ok(databaseUrl);
     const runId = randomUUID();
-    const pipeline = new OfflineFixtureTruthPipeline(laptopFixture);
+    const { truthPipeline: pipeline, decisionEvidenceProvider } = createLegacyDecisionTruthComposition();
     const pool = new Pool({ connectionString: databaseUrl });
     let firstStore: PostgresRunStore | undefined;
     let secondStore: PostgresRunStore | undefined;
@@ -45,7 +44,14 @@ test(
         ["INVESTIGATING", 4],
         ["VALIDATING", 5],
       ] as const) {
-        const state = await executePersistedRunTick(firstStore, pipeline, runId);
+        const state = await executePersistedRunTick(
+          firstStore,
+          pipeline,
+          runId,
+          undefined,
+          undefined,
+          decisionEvidenceProvider,
+        );
         assert.equal(state.status, status);
         assert.equal(state.version, version);
       }
@@ -60,7 +66,14 @@ test(
       assert.equal(reloaded.status, "VALIDATING");
       assert.equal(reloaded.version, 5);
 
-      const validated = await executePersistedRunTick(secondStore, pipeline, runId);
+      const validated = await executePersistedRunTick(
+        secondStore,
+        pipeline,
+        runId,
+        undefined,
+        undefined,
+        decisionEvidenceProvider,
+      );
       assert.equal(validated.status, "DECIDING");
       assert.equal(validated.version, 6);
       const validatedSnapshot = await secondStore.getTruthSnapshot(runId);
@@ -69,7 +82,14 @@ test(
       secondStore = undefined;
 
       thirdStore = await PostgresRunStore.connect(databaseUrl);
-      const completed = await executePersistedRun(thirdStore, pipeline, runId);
+      const completed = await executePersistedRun(
+        thirdStore,
+        pipeline,
+        runId,
+        undefined,
+        undefined,
+        decisionEvidenceProvider,
+      );
       assert.equal(completed.status, "COMPLETED");
       assert.equal(completed.version, 8);
       assert.ok(completed.decision);

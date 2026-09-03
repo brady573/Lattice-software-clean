@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
-import { dirname, relative, resolve } from "node:path";
+import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import test from "node:test";
 import type { FastifyInstance } from "fastify";
 import { Pool } from "pg";
@@ -441,7 +441,12 @@ async function canonicalDependencyClosure(entrypoints: readonly string[]): Promi
     for (const specifier of relativeDependencies(path, source)) {
       if (specifier.endsWith(".json")) continue;
       const resolved = resolve(dirname(path), specifier.replace(/\.js$/u, ".ts"));
-      if (!resolved.startsWith(`${canonicalSourceRoot}/`)) {
+      const runtimeRelativePath = relative(canonicalSourceRoot, resolved);
+      if (
+        runtimeRelativePath === ".."
+        || runtimeRelativePath.startsWith(`..${sep}`)
+        || isAbsolute(runtimeRelativePath)
+      ) {
         throw new Error(
           `canonical runtime imports a non-runtime local dependency: ${relative(process.cwd(), resolved)}`,
         );
