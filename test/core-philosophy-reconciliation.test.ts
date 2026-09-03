@@ -16,7 +16,7 @@ test("Core philosophy controls the current Product-design read order and 1.0 def
     source("docs/design/Lattice-System-Architecture.md"),
   ]);
 
-  assert.match(readme, /^# Lattice Software\n\nLattice makes trustworthy knowledge and conditional decision capability/u);
+  assert.match(readme, /^# Lattice Software\r?\n\r?\nLattice makes trustworthy knowledge and conditional decision capability/u);
   assert.match(living, /highest Product-design authority and the first filter/u);
   assert.match(living, /trustworthy knowledge plus conditional decision capability/u);
   assert.doesNotMatch(living, /Lattice 1\.0 is a Trusted Decision Product/u);
