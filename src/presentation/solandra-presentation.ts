@@ -2,13 +2,15 @@ import { createHash } from "node:crypto";
 import {
   type LatticeRun,
   type RunRequest,
+  runObjective,
 } from "../domain.js";
 import type {
   DecisionPlanningMaterial,
   DurableDecisionPlan,
 } from "../intent/decision-plan-store.js";
 import type { DecisionInputSnapshot } from "../decision/decision-input-snapshot.js";
-import type { IntentVersion } from "../intent/types.js";
+import type { IntentProvenance, IntentValue, IntentVersion } from "../intent/types.js";
+import type { KnowledgeOutcome, RunOutcome } from "../outcome.js";
 
 export type SolandraSemanticPhase = "listening" | "understanding" | "knowledge_gap" | "actionable";
 export type SolandraPresentationTransition = "initial" | "updated" | "reconnected";
@@ -32,8 +34,14 @@ export interface PresentationBasis {
 
 export interface DurableUnderstanding {
   goal: string;
-  requirements: Array<{ criterion: string; operator: "lte" | "gte" | "eq" | "LTE" | "GTE" | "EQ"; value: string | number | boolean }>;
-  preferences: Array<{ criterion: string; weight?: number; tier?: string }>;
+  requirements: AuthoritativeIntentEntry[];
+  preferences: AuthoritativeIntentEntry[];
+}
+
+export interface AuthoritativeIntentEntry {
+  semanticKey: string;
+  value: IntentValue;
+  provenance: IntentProvenance;
 }
 
 export interface MaterialUncertainty {
@@ -105,72 +113,46 @@ function isDecisionInput(material: DecisionPlanningMaterial): material is Decisi
 function understandingFromIntent(version: IntentVersion | undefined): DurableUnderstanding | undefined {
   const objective = version?.state.objective?.value;
   if (!version || objective?.state !== "VALUE" || typeof objective.value !== "string") return undefined;
-  return { goal: objective.value, requirements: [], preferences: [] };
-}
-
-function understandingFromPlan(plan: AnyDecisionPlan | undefined): DurableUnderstanding | undefined {
-  if (!plan) return undefined;
-  if (isDecisionInput(plan.planningMaterial)) {
-    return {
-      goal: plan.planningMaterial.objective,
-      requirements: plan.planningMaterial.hardRequirements.map((item) => ({
-        criterion: item.criterionId,
-        operator: item.operator,
-        value: item.expected,
-      })),
-      preferences: plan.planningMaterial.priorities.map((item) => ({
-        criterion: item.criterionId,
-        tier: item.tier,
-      })),
-    };
-  }
   return {
-    goal: plan.planningMaterial.goal,
-    requirements: plan.planningMaterial.hardConstraints.map((item) => ({ ...item })),
-    preferences: plan.planningMaterial.priorities.map((item) => ({ ...item })),
+    goal: objective.value,
+    requirements: Object.entries(version.state.requirements)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([semanticKey, field]) => ({
+        semanticKey,
+        value: structuredClone(field.value),
+        provenance: structuredClone(field.provenance),
+      })),
+    preferences: Object.entries(version.state.preferences)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([semanticKey, field]) => ({
+        semanticKey,
+        value: structuredClone(field.value),
+        provenance: structuredClone(field.provenance),
+      })),
   };
 }
 
-function supportingFromPlan(plan: AnyDecisionPlan | undefined): SupportingKnowledge[] {
-  if (!plan) return [];
-  const provenance: ProvenanceRef[] = [
-    { authority: "intent_authority", ref: plan.intentVersionId },
-    { authority: "decision_plan", ref: plan.decisionPlanId },
-  ];
-  if (isDecisionInput(plan.planningMaterial)) {
-    return [
-      ...plan.planningMaterial.hardRequirements.map((item, index) => ({
-        id: `requirement:${index}:${item.criterionId}`,
-        label: item.criterionId,
-        value: `${item.operator} ${String(item.expected)}`,
-        kind: "requirement" as const,
-        provenance,
-      })),
-      ...plan.planningMaterial.priorities.map((item, index) => ({
-        id: `preference:${index}:${item.criterionId}`,
-        label: item.criterionId,
-        value: item.tier,
-        kind: "preference" as const,
-        provenance,
-      })),
-    ];
-  }
-  return [
-    ...plan.planningMaterial.hardConstraints.map((item, index) => ({
-      id: `requirement:${index}:${item.criterion}`,
-      label: item.criterion,
-      value: formatConstraintValue(item.operator, item.value),
-      kind: "requirement" as const,
-      provenance,
-    })),
-    ...plan.planningMaterial.priorities.map((item, index) => ({
-      id: `preference:${index}:${item.criterion}`,
-      label: item.criterion,
-      value: `priority weight ${item.weight}`,
-      kind: "preference" as const,
-      provenance,
-    })),
-  ];
+function knowledgeFromOutcome(outcome: RunOutcome | undefined): KnowledgeOutcome | undefined {
+  if (!outcome) return undefined;
+  return outcome.kind === "KNOWLEDGE" ? outcome : outcome.knowledge;
+}
+
+function supportingFromOutcome(run: LatticeRun | undefined, outcome: RunOutcome | undefined): SupportingKnowledge[] {
+  if (!run || run.status !== "COMPLETED") return [];
+  const knowledge = knowledgeFromOutcome(outcome);
+  if (!knowledge || knowledge.objective !== runObjective(run.request)) return [];
+  const admittedAssessmentIds = new Set(run.truthAssessmentIds);
+  if (knowledge.truthAssessmentIds.length !== admittedAssessmentIds.size) return [];
+  if (knowledge.truthAssessmentIds.some((id) => !admittedAssessmentIds.has(id))) return [];
+  const provenance = knowledge.truthAssessmentIds.map((ref) => ({ authority: "v36" as const, ref }));
+  if (knowledge.findings.length > 0 && provenance.length === 0) return [];
+  return knowledge.findings.map((finding) => ({
+    id: `knowledge:${finding.claimId}`,
+    label: finding.status,
+    value: finding.text,
+    kind: "decision_basis" as const,
+    provenance,
+  }));
 }
 
 function phaseFromRun(
@@ -185,9 +167,10 @@ function phaseFromRun(
 }
 
 function resourcesFor(run: LatticeRun | undefined, plan: AnyDecisionPlan | undefined): ResourceDescriptor[] {
-  if (!run || run.status !== "COMPLETED" || run.decision === null || !plan) return [];
-  return [
-    {
+  if (!run || run.status !== "COMPLETED" || run.decision === null) return [];
+  const resources: ResourceDescriptor[] = [];
+  if (plan) {
+    resources.push({
       id: `decision-criteria:${run.id}`,
       kind: "text",
       title: "Decision criteria",
@@ -198,8 +181,9 @@ function resourcesFor(run: LatticeRun | undefined, plan: AnyDecisionPlan | undef
       ],
       status: "available",
       capabilities: ["copy"],
-    },
-    {
+    });
+  }
+  resources.push({
       id: `decision-rationale:${run.id}`,
       kind: "generated_artifact",
       title: "Decision rationale",
@@ -210,8 +194,8 @@ function resourcesFor(run: LatticeRun | undefined, plan: AnyDecisionPlan | undef
       ],
       status: "available",
       capabilities: ["copy", "download"],
-    },
-  ];
+    });
+  return resources;
 }
 
 function revisionFor(snapshot: Omit<SolandraPresentationSnapshot, "presentationRevision" | "transition">): string {
@@ -223,20 +207,19 @@ export function composeSolandraPresentation(input: {
   run?: LatticeRun;
   decisionPlan?: AnyDecisionPlan;
   intentVersion?: IntentVersion;
+  outcome?: RunOutcome;
   knownRevision?: string;
 }): SolandraPresentationSnapshot {
-  const { conversationId, run, decisionPlan, intentVersion, knownRevision } = input;
+  const { conversationId, run, decisionPlan, intentVersion, outcome, knownRevision } = input;
   const basis: PresentationBasis = {
     conversationId,
     ...(run ? { runId: run.id, runVersion: run.version } : {}),
-    ...(decisionPlan ? {
-      decisionPlanId: decisionPlan.decisionPlanId,
-      intentVersionId: decisionPlan.intentVersionId,
-    } : intentVersion ? { intentVersionId: intentVersion.intentVersionId } : {}),
+    ...(decisionPlan ? { decisionPlanId: decisionPlan.decisionPlanId } : {}),
+    ...(intentVersion ? { intentVersionId: intentVersion.intentVersionId } : {}),
   };
   const phase = phaseFromRun(run, decisionPlan, intentVersion);
-  const durableUnderstanding = understandingFromIntent(intentVersion) ?? understandingFromPlan(decisionPlan);
-  const supportingKnowledge = supportingFromPlan(decisionPlan);
+  const durableUnderstanding = understandingFromIntent(intentVersion);
+  const supportingKnowledge = supportingFromOutcome(run, outcome);
   const materialUncertainty: MaterialUncertainty[] = run?.status === "AWAITING_CLARIFICATION"
     ? [{
         id: `clarification:${run.id}:${run.version}`,
@@ -306,18 +289,31 @@ export function hydrateSolandraResource(input: {
 }): HydratedResource | undefined {
   const descriptor = input.snapshot.resources.find((item) => item.id === input.resourceId);
   if (!descriptor) return undefined;
-  if (descriptor.id.startsWith("decision-criteria:") && input.decisionPlan) {
+  if (descriptor.id === `decision-criteria:${input.run?.id ?? ""}` && input.decisionPlan) {
     return {
       descriptor,
       presentationRevision: input.snapshot.presentationRevision,
       payload: { kind: "text", text: criteriaText(input.decisionPlan) },
     };
   }
-  if (descriptor.id.startsWith("decision-rationale:") && input.run?.decision?.winnerCandidateId) {
+  if (descriptor.id === `decision-rationale:${input.run?.id ?? ""}` && input.run?.decision) {
+    const decision = input.run.decision;
+    const outcome = decision.outcome
+      ?? (decision.winnerCandidateId ? "RECOMMENDATION" : "UNRESOLVED");
     const text = [
-      `Winner: ${input.run.decision.winnerCandidateId}`,
-      ...input.run.decision.rationale.map((line) => `- ${line}`),
-      `Evidence: ${input.run.decision.evidenceIds.join(", ") || "none recorded"}`,
+      `Outcome: ${outcome}`,
+      ...(decision.winnerCandidateId ? [`Winner: ${decision.winnerCandidateId}`] : []),
+      ...((decision.frontierCandidateIds?.length ?? 0) > 0
+        ? [`Frontier: ${decision.frontierCandidateIds?.join(", ")}`]
+        : []),
+      ...((decision.tiedCandidateIds?.length ?? 0) > 0
+        ? [`Tied options: ${decision.tiedCandidateIds?.join(", ")}`]
+        : []),
+      ...((decision.materialUnknowns?.length ?? 0) > 0
+        ? [`Material unknowns: ${decision.materialUnknowns?.join(", ")}`]
+        : []),
+      ...decision.rationale.map((line) => `- ${line}`),
+      `Evidence: ${decision.evidenceIds.join(", ") || "none recorded"}`,
     ].join("\n");
     return {
       descriptor,

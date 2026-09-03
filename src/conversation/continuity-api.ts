@@ -9,6 +9,7 @@ import type {
 import type { IntentAuthorityStore } from "../intent/store.js";
 import type { IntentVersion } from "../intent/types.js";
 import type { IntentUserMessageStore } from "../intent/source-message-store.js";
+import { buildRunOutcome, type RunOutcome } from "../outcome.js";
 import {
   composeSolandraPresentation,
   hydrateSolandraResource,
@@ -43,6 +44,7 @@ async function readLatestPresentationBasis(
   run: Awaited<ReturnType<RunStore["get"]>>;
   decisionPlan: DurableDecisionPlan<DecisionPlanningMaterial> | undefined;
   intentVersion: IntentVersion | undefined;
+  outcome: RunOutcome | undefined;
 }> {
   const runIds = await options.runIndexStore.listRunIds(conversationId);
   for (let index = runIds.length - 1; index >= 0; index -= 1) {
@@ -57,9 +59,13 @@ async function readLatestPresentationBasis(
     const intentVersion = intentVersionId && options.intentStore
       ? await options.intentStore.getVersion(intentVersionId)
       : undefined;
-    return { run, decisionPlan, intentVersion };
+    const truth = run.status === "COMPLETED"
+      ? await options.runStore.getTruthBundle(run.id)
+      : undefined;
+    const outcome = truth ? buildRunOutcome(run, truth) : undefined;
+    return { run, decisionPlan, intentVersion, outcome };
   }
-  return { run: undefined, decisionPlan: undefined, intentVersion: undefined };
+  return { run: undefined, decisionPlan: undefined, intentVersion: undefined, outcome: undefined };
 }
 
 export function registerConversationContinuityApi(
@@ -154,12 +160,13 @@ export function registerConversationContinuityApi(
       const conversation = await options.conversationStore.getOwned(conversationId, subjectId);
       if (!conversation) return reply.status(404).send({ error: "CONVERSATION_NOT_FOUND" });
 
-      const { run, decisionPlan, intentVersion } = await readLatestPresentationBasis(conversationId, options);
+      const { run, decisionPlan, intentVersion, outcome } = await readLatestPresentationBasis(conversationId, options);
       const snapshot = composeSolandraPresentation({
         conversationId,
         ...(run ? { run } : {}),
         ...(decisionPlan ? { decisionPlan } : {}),
         ...(intentVersion ? { intentVersion } : {}),
+        ...(outcome ? { outcome } : {}),
         ...(knownRevision ? { knownRevision } : {}),
       });
       return reply.status(200).send({ presentation: snapshot });
@@ -185,12 +192,13 @@ export function registerConversationContinuityApi(
       const conversation = await options.conversationStore.getOwned(conversationId, subjectId);
       if (!conversation) return reply.status(404).send({ error: "CONVERSATION_NOT_FOUND" });
 
-      const { run, decisionPlan, intentVersion } = await readLatestPresentationBasis(conversationId, options);
+      const { run, decisionPlan, intentVersion, outcome } = await readLatestPresentationBasis(conversationId, options);
       const snapshot = composeSolandraPresentation({
         conversationId,
         ...(run ? { run } : {}),
         ...(decisionPlan ? { decisionPlan } : {}),
         ...(intentVersion ? { intentVersion } : {}),
+        ...(outcome ? { outcome } : {}),
       });
       if (snapshot.presentationRevision !== expectedRevision) {
         return reply.status(409).send({
