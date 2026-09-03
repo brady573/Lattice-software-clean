@@ -50,7 +50,7 @@ test("Conversation continuity rediscovers USER provenance and exact-bound Run fr
     assert.equal(body.runs[0].runId, accepted.runId);
     assert.equal(body.runs[0].exactBinding.intentScopeId, accepted.intentScopeId);
     assert.equal(body.runs[0].exactBinding.intentVersionId, accepted.intentVersionId);
-    assert.equal(body.runs[0].links.result, `/api/v1/runs/${accepted.runId}/result`);
+    assert.equal(body.runs[0].links.outcome, `/api/v1/runs/${accepted.runId}/outcome`);
   } finally {
     await app.close();
   }

@@ -1,6 +1,6 @@
 # Lattice Living Software Design to 1.0 — v0.6 Amendment
 
-Status: **OWNER-APPROVED CANONICAL LIVING-DESIGN AMENDMENT**
+Status: **HISTORICAL OWNER-APPROVED AMENDMENT; OD-001 PORTION SUPERSEDED BY THE CORE RECONCILIATION**
 
 Date: **2026-08-27**
 
@@ -14,7 +14,7 @@ Detailed decision record: `docs/design/Lattice-Owner-Decisions-OD-001-to-OD-004.
 
 This amendment is part of the canonical Lattice living Product design. It records explicit Owner decisions resolving OD-001 through OD-004.
 
-Where this amendment or the detailed decision record conflicts with v0.5 sections concerning OD-001, OD-002, OD-003, or OD-004, this amendment and the detailed decision record control. All v0.5 sections not changed by this amendment remain in force at their existing item-level status.
+`The-Core-Lattice-Philosophy.md` and the current Living Design are higher authority. OD-002 through OD-004 remain useful controlling detail where they conform to the Core. Amendment A's mandatory-decision Product definition is retained only as historical decision provenance and must not guide current implementation.
 
 This is design authority only. It does not claim implementation, test validation, production readiness, or cross-revision validation.
 
@@ -22,13 +22,13 @@ The external `lattice-conversation-drift-design-approval-handoff-v1.zip` remains
 
 ---
 
-## Amendment A — §0.3 / OD-001: 1.0 definition is Confirmed
+## Amendment A — §0.3 / OD-001: historical definition, now superseded
 
-The v0.5 “Current working assumption about what 1.0 means” is superseded by this Confirmed Owner decision:
+This August 27 wording formerly superseded the v0.5 working assumption:
 
 > **Lattice 1.0 is a Trusted Decision Product. Its guaranteed Product journey is natural-language goal -> authoritative intent -> material clarification when necessary -> bounded research -> V36 verification -> authoritative decision -> faithful Solandra explanation -> conversational continuation. General explanation, verification, research-report, planning, document-analysis, and autonomous-action products are outside guaranteed 1.0 unless separately promoted.**
 
-The 1.0 scope tables remain useful, but entries are interpreted through this confirmed Product definition. Capabilities required to deliver the guaranteed decision journey remain required; broad standalone assistant/product surfaces are not silently promoted by implementation convenience.
+Current interpretation is instead governed by the Core-aligned OD-001 reconciliation: Lattice 1.0 is trustworthy knowledge plus conditional decision capability. The quoted mandatory-decision wording above is not current Product authority.
 
 Autonomous external actions/transactions remain outside guaranteed 1.0 and require separate Product/authority decisions.
 
@@ -66,7 +66,7 @@ The external Intent Authority handoff remains supporting provenance, but it is n
 - joint decisions create new composite scopes bound to exact source-scope/version snapshots;
 - explicit synchronization is separately versioned/revocable USER intent;
 - scope closure is non-destructive and distinct from privacy deletion;
-- every downstream DecisionPlan/Run binds exact `intentScopeId + intentVersionId`.
+- every downstream Run binds exact `intentScopeId + intentVersionId`; a DecisionPlan additionally binds that exact version only for qualified decision work.
 
 ### Delegation
 
@@ -177,7 +177,7 @@ No implementation milestone is marked complete by these design decisions.
 
 ## Amendment G — §24 risk reconciliation
 
-Replace “1.0 scope is broader/narrower than working assumption” with a confirmed-scope change-control risk: changes to the Trusted Decision Product guarantee require explicit later Owner decision rather than silent scope drift.
+Historical note: this amendment formerly required explicit Owner change control for the Trusted Decision Product guarantee. The September 3, 2026 Owner reconciliation supplied that change; current scope is governed by the Core-aligned trustworthy-knowledge plus conditional-decision definition.
 
 Replace “Resolve OD-004” as the Intent Authority mitigation with: implement the confirmed Product-owned transition/reducer/provenance contract and validate material-ambiguity fail-closed behavior on the exact implementation revision.
 
@@ -193,7 +193,7 @@ The generic Decision Engine risk remains, but its semantic direction is now fixe
 
 | ID | Status | Controlling decision |
 |---|---|---|
-| OD-001 | **RESOLVED / CONFIRMED** | Lattice 1.0 is a Trusted Decision Product with the guaranteed goal -> intent -> clarification -> bounded research -> V36 -> authoritative decision -> Solandra -> continuation journey. |
+| OD-001 | **HISTORICAL WORDING / SUPERSEDED** | The former mandatory Trusted Decision Product journey is superseded by trustworthy knowledge plus conditional decision capability under the Core reconciliation. |
 | OD-002 | **RESOLVED / CONFIRMED** | Full immutable V36 checkpoint at every `NEEDS_RESEARCH` yield; Execution Runtime executes/persists only; V36 owns epistemic continuation. |
 | OD-003 | **RESOLVED / CONFIRMED** | One Decision Engine + qualified Criterion Catalog; four priority tiers; tri-state hard requirements; bounded compensation; material-dominance frontier; explicit delegated selection when authorized. |
 | OD-004 | **RESOLVED / CONFIRMED** | Product-owned immutable/versioned Intent Authority with USER provenance, fail-closed clarification, semantic delta/reducer, exact scope/version binding, corrections/scopes/delegation/composites as detailed in the Owner decision record. |
@@ -233,7 +233,7 @@ All other sequencing remains unchanged unless a later qualified design revision 
 
 | Version | Date | Repository reconciliation baseline | Change |
 |---|---|---|---|
-| 0.6 | 2026-08-27 | 59ad7bab970171b696aa853ff1a56e242e13f7c7 | Reconciles explicit Owner decisions resolving OD-001 through OD-004; confirms Trusted Decision Product scope, V36 full-checkpoint durable continuation, generalized Decision Engine semantics, and detailed Intent Authority semantics including provenance/versioning/correction/scopes/delegation; records Solandra advocacy boundary; updates milestone dependencies and decision register without claiming implementation or validation. |
+| 0.6 | 2026-08-27 | 59ad7bab970171b696aa853ff1a56e242e13f7c7 | Historical amendment that confirmed the then-current Trusted Decision Product scope (later superseded), V36 full-checkpoint continuation, Decision Engine semantics, and detailed Intent Authority semantics. |
 
 ---
 

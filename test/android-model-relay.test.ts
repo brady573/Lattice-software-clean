@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { FastifyInstance } from "fastify";
-import { buildApp } from "../src/app.js";
+import { buildCanonicalApp as buildApp } from "../src/http-app.js";
 import { AndroidRelayModelProvider, ModelRuntime } from "../src/model/index.js";
 import { registerAndroidModelPrototype } from "../src/prototype/android-model-prototype.js";
 
@@ -106,9 +106,9 @@ test("Android relay is isolated from the locked presentation surface and require
     const canonicalPage = await app.inject({ method: "GET", url: "/" });
     assert.equal(canonicalPage.statusCode, 200);
     assert.match(canonicalPage.body, /What do you need to figure out\?/);
-    assert.match(canonicalPage.body, /id="resourceFocus"/);
-    assert.match(canonicalPage.body, /id="newUpdate"/);
-    assert.match(canonicalPage.body, /support-node/);
+    assert.match(canonicalPage.body, /id="conversation"/);
+    assert.match(canonicalPage.body, /id="conversationInput"/);
+    assert.match(canonicalPage.body, /id="composer"/);
     assert.doesNotMatch(canonicalPage.body, /\/api\/v1\/prototype\/model-conversations\//);
     assert.doesNotMatch(canonicalPage.body, /\/api\/v1\/prototype\/android-model-conversations\//);
 

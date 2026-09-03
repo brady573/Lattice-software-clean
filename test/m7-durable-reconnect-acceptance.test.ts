@@ -221,15 +221,16 @@ test(
       const historical = continuityBody.runs.find((run: { runId: string }) => run.runId === firstRunId);
       assert.ok(historical);
       assert.equal(historical.status, "COMPLETED");
-      assert.equal(historical.resultAvailable, true);
+      assert.equal(historical.outcomeAvailable, true);
       assert.equal(historical.exactBinding.decisionPlanId, firstDecisionPlanId);
       assert.equal(historical.exactBinding.intentScopeId, firstScopeId);
       assert.equal(historical.exactBinding.intentVersionId, firstIntentVersionId);
 
-      const result = await reopenedApp.inject({ method: "GET", url: `/api/v1/runs/${firstRunId}/result` });
-      assert.equal(result.statusCode, 200);
-      assert.equal(result.json().runId, firstRunId);
-      assert.equal(result.json().status, "COMPLETED");
+      const outcome = await reopenedApp.inject({ method: "GET", url: `/api/v1/runs/${firstRunId}/outcome` });
+      assert.equal(outcome.statusCode, 200);
+      assert.equal(outcome.json().runId, firstRunId);
+      assert.equal(outcome.json().status, "COMPLETED");
+      assert.equal(outcome.json().outcome.kind, "DECISION_SUPPORT");
 
       const resumed = await fetch(`${address}/api/v1/runs/${firstRunId}/events/stream`, {
         headers: { "Last-Event-ID": "1" },

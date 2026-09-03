@@ -1,12 +1,12 @@
 # Lattice Owner Decisions OD-001 through OD-004
 
-Status: **OWNER-CONFIRMED PRODUCT DESIGN DECISION RECORD**
+Status: **OWNER-CONFIRMED PRODUCT DESIGN DECISION RECORD; OD-001 RECONCILED SEPTEMBER 3, 2026**
 
 Date reconciled: **2026-08-27**
 
 Repository reconciliation baseline: `main @ 59ad7bab970171b696aa853ff1a56e242e13f7c7`
 
-Authority: explicit Owner decisions from the EVODEV Project conversation, incorporated into the canonical Product design by Owner request. This record resolves OD-001 through OD-004 for Product design. It does not establish implementation, test validation, production readiness, or cross-revision validation.
+Authority: explicit Owner decisions incorporated into canonical Product design. `The-Core-Lattice-Philosophy.md` is the higher Product authority and first filter. The September 3, 2026 Owner reconciliation below supersedes the former mandatory-decision reading of OD-001; OD-002 through OD-004 remain controlling within their bounded, Core-conforming semantics. This record does not establish validation or production readiness.
 
 Supporting candidate provenance: `lattice-conversation-drift-design-approval-handoff-v1.zip`, SHA-256 `63933fa9e78e515b1b1c454c746dd3906a46884833571693d366682889218973`, remains supporting design evidence. Its synthetic simulations do not establish Product correctness. Where this record differs from or extends that candidate, this Owner-confirmed record controls Product design.
 
@@ -14,30 +14,30 @@ Protected boundaries remain unchanged: V36 Truth Core owns external factual trut
 
 ---
 
-## OD-001 — Product definition and guaranteed 1.0 journey
+## OD-001 — Product definition and 1.0 capability boundary
 
 **Status: RESOLVED / CONFIRMED**
 
-Lattice 1.0 is a **Trusted Decision Product**.
+Lattice 1.0 is **trustworthy knowledge plus conditional decision capability**.
 
 Its guaranteed Product journey is:
 
 ```text
-natural-language goal
+natural-language question or objective
 -> authoritative intent
 -> material clarification when necessary
 -> bounded research
 -> V36 verification
--> authoritative decision
--> faithful Solandra explanation
+-> KnowledgeOutcome, Action Preparation, or qualified DecisionSupportOutcome
+-> faithful Solandra Conversation + Composer presentation
 -> conversational continuation
 ```
 
-Guaranteed 1.0 capabilities include natural-language decision goals; versioned Lattice Intent Authority; material clarification; bounded research; V36 verification of material external-world facts; generalized Lattice Decision Engine semantics; persisted authoritative `StructuredDecision` state before explanation; Solandra explanation/continuation; durable Run execution/cancellation/recovery/progress; and the authentication, user-isolation, privacy, and operations foundations required for a production-capable release.
+Guaranteed 1.0 capabilities include ordinary-language knowledge, decision, and Action Preparation needs; versioned Intent Authority; material clarification; bounded research where needed; V36 verification of material external-world facts; KnowledgeOutcome without candidate-shaped inputs; conditional generalized Decision Engine semantics; non-consequential Resource preparation; faithful Solandra explanation/continuation; durable Run execution/cancellation/recovery/progress; and the isolation/privacy/operations foundations required for a production-capable release.
 
-Outside the guaranteed 1.0 Product unless separately promoted are standalone general-purpose explanation/teaching, generic verification, general research-report generation, general document-analysis workflows, broad non-decision planning products, and autonomous external actions/transactions. These exclusions do not prohibit such capabilities when they are internal components of the Trusted Decision Product journey.
+Autonomous external actions/transactions remain outside guaranteed 1.0 unless separately promoted and authorized. Generalized provider ecosystems, broad autonomous agents, and unrelated modes are not implied by this capability definition.
 
-**Invariant:** Lattice 1.0 guarantees trustworthy decision support, not a general-purpose assistant product surface.
+**Invariant:** trustworthy knowledge is a complete Product outcome. `DecisionPlan`, decision evidence projection, Decision Engine, and `StructuredDecision` exist only when decision work is actually qualified; they are not universal Run state.
 
 ---
 
@@ -163,7 +163,7 @@ Clear later USER correction creates an immutable successor with correction/super
 
 Non-material correction may allow an existing Run to complete on its historical bound intent; material correction supersedes the decision attempt and creates a successor Run bound to the new exact intent. Evidence/V36 conclusions/Product validation do not transfer automatically.
 
-Every DecisionPlan/Run binds exact `intentScopeId + intentVersionId`. Later correction never moves a historical Run binding.
+Every Run binds exact `intentScopeId + intentVersionId`. When decision work is qualified, its DecisionPlan binds and faithfully projects that same exact IntentVersion. Later correction never moves a historical Run or DecisionPlan binding.
 
 ### Idempotency, concurrency, transition envelope
 

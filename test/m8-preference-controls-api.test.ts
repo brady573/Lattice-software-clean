@@ -12,7 +12,7 @@ import {
   PostgresConversationStore,
   type ConversationStore,
 } from "../src/conversation/conversation-store.js";
-import { buildApp } from "../src/http-app.js";
+import { buildCanonicalApp as buildApp } from "../src/http-app.js";
 import {
   MemoryIntentAuthorityStore,
   MemoryIntentUserMessageStore,

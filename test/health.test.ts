@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildApp } from "../src/app.js";
+import { buildCanonicalApp as buildApp } from "../src/http-app.js";
 
 test("health endpoint reports V36 fixture truth and async dispatch lifecycle mode", async () => {
   const app = buildApp();

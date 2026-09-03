@@ -1,6 +1,6 @@
 # Lattice Architecture Integrity
 
-Status: **Owner-approved cross-cutting Product architecture control**.
+Status: **Owner-approved cross-cutting Product architecture control subordinate to `The-Core-Lattice-Philosophy.md`**.
 
 Approved: **August 26, 2026**.
 
@@ -10,7 +10,7 @@ Source candidate artifact: `lattice-antidrift-handoff-v1.zip`, SHA-256 `d4f015a0
 
 ## 1. Purpose
 
-Lattice Architecture Integrity preserves **Product-semantic ownership and authority boundaries** as Lattice evolves across M3-M12.
+Lattice Architecture Integrity preserves **Product-semantic ownership and authority boundaries** as Lattice evolves across M3-M12. It is subordinate to `The-Core-Lattice-Philosophy.md`, which is the highest Product-design authority and first filter. If an integrity rule, architecture source, or implementation conflicts with the Core, the Core governs and the conflicting element must be reconciled or removed.
 
 It is cross-cutting Product architecture, not a Product subsystem and not a numbered milestone. It supplements the canonical living Product design without renumbering M0-M12.
 
@@ -28,11 +28,11 @@ Use the canonical Product systems when authority distinctions matter:
 - **Lattice Execution Runtime** owns durable operational lifecycle, coordination, cancellation, recovery, and research execution.
 - **Lattice Model Gateway** is a non-authoritative model capability boundary.
 - **V36 Truth Core** owns protected external factual truth/evidence state.
-- **Lattice Decision Engine** owns authoritative eligibility, ranking, frontier, and StructuredDecision semantics.
+- **Lattice Decision Engine** conditionally owns authoritative eligibility, typed comparison, frontier, and StructuredDecision semantics for qualified decision work.
 - **Solandra Experience** owns human-facing conversation, advocacy, presentation, and explanation within its licensed fidelity boundary.
 - **V7 LLM Simulation Lab** is an external development simulation/qualification system, not Product authority.
 
-`DecisionPlan` is the durable exact IntentVersion-to-Run planning binding used by the current implementation. It does not independently own USER meaning, execution lifecycle, truth, decision, or presentation semantics.
+Every Run has an exact IntentVersion binding. `DecisionPlan` is an additional durable, faithful planning projection only for qualified decision work. It does not independently own USER meaning, execution lifecycle, truth, decision, or presentation semantics; Knowledge and non-decision Action Preparation Runs have no DecisionPlan.
 
 A rename, adapter, process split, model output, provider, simulator, UI surface, repository move, persistence boundary, durable binding, or deployment transition does not transfer authority between these systems.
 
@@ -46,7 +46,7 @@ Only the protected V36 contract may admit or change authoritative factual eviden
 
 Transcript/model interpretation may propose USER meaning but must not silently become canonical Lattice Intent Authority state.
 
-V36 truth does not select a winner by itself. Lattice Decision Engine logic must not strengthen evidence to improve a candidate. Solandra may advocate, challenge, clarify, and explain, but generated prose must not create USER intent, external facts, eligibility, recommendation frontier membership, or winner identity.
+V36 truth does not require or select a decision by itself. When decision work is qualified, Decision Engine logic must not strengthen evidence, sum incompatible raw scales, or force a winner. Solandra may advocate, challenge, clarify, and explain, but generated prose must not create USER intent, external facts, eligibility, recommendation frontier membership, or winner identity.
 
 ### AIC-04 — Prototype and provider evidence does not silently promote Product authority
 
@@ -61,7 +61,7 @@ Later milestones may add capability but must preserve confirmed upstream authori
 Examples:
 
 - M4 durable research may extend execution while V36 remains epistemic authority.
-- M5 Intent Authority may structure USER intent without giving Solandra/model inference canonical commit authority; durable DecisionPlan binding preserves exact IntentVersion-to-Run planning fidelity without becoming a new semantic authority.
+- M5 Intent Authority may structure USER intent without giving Solandra/model inference canonical commit authority; every Run preserves exact IntentVersion binding and a conditional DecisionPlan preserves decision-projection fidelity without becoming a new semantic authority.
 - M6 Decision Engine generalization may expand decision semantics without changing V36 evidence strength.
 - M7-M8 conversation/auth continuity may add persistence without changing truth/decision ownership.
 - M9 live-provider work may add provider capability without changing provider non-authority.
@@ -74,8 +74,8 @@ Architecture Integrity applies continuously across **M3-M12** and does not consu
 | Milestone range | Product-semantic integrity requirement |
 |---|---|
 | M3-M4 | Preserve Execution Runtime operational ownership versus V36 epistemic ownership during durable composition and research continuation. |
-| M5 | Prevent transcript/model interpretation from silently becoming canonical Intent Authority; preserve explicit USER-provenance semantics and exact DecisionPlan/Run binding. |
-| M6 | Preserve V36 truth versus Decision Engine decision authority; scoring/utility logic cannot strengthen evidence. |
+| M5 | Prevent transcript/model interpretation from silently becoming canonical Intent Authority; preserve explicit USER provenance, exact Run binding, and conditional DecisionPlan fidelity. |
+| M6 | Preserve V36 truth versus conditional Decision Engine authority; decision logic cannot strengthen evidence, manufacture comparability, or force a winner. |
 | M7-M8 | Preserve conversation/progress/auth/data ownership boundaries while adding persistence and continuity. |
 | M9 | Live-provider capability remains non-authoritative and requires separate Product qualification. |
 | M10 | Solandra remains fidelity-bound over intent/truth/decision authority; generated explanation cannot create material Product facts. |
@@ -93,7 +93,8 @@ AIC-R1 PASS requires the exact release candidate to demonstrate, for the release
 3. no prototype-only or development-only mechanism has silently become canonical or production authority;
 4. Intent Authority, V36 Truth Core, Decision Engine, and Solandra Experience remain semantically separated as specified;
 5. milestone-added capability preserves confirmed upstream Product invariants unless an explicit qualified design change says otherwise;
-6. all release-relevant Product architecture sources are mutually consistent on system ownership and authority boundaries.
+6. all release-relevant Product architecture sources are mutually consistent on system ownership and authority boundaries and subordinate to the Core;
+7. Knowledge, conditional Decision Support, and Action Preparation retain distinct canonical paths, with decision machinery absent where it is not qualified.
 
 AIC-R1 is a Product architecture gate. Applicable Owner/Project operating guidance remains controlling for how release validation, provenance, acceptance, production authorization, and any optional coordination mechanics are executed.
 
@@ -110,7 +111,7 @@ Its minimal repository surface is:
 
 It introduces no runtime dependency, migration, provider, database resource, secret, paid service, production deployment, external infrastructure, team topology, issue tracker, reviewer quorum, or operational staffing requirement.
 
-It does not independently validate Product behavior, transfer validation between revisions, qualify unrelated handoffs, or replace the living Product design, current system architecture map, system registry, V36 contract, applicable Owner/Project operating guidance, or explicit Owner authority.
+It does not independently validate Product behavior, transfer validation between revisions, qualify unrelated handoffs, or replace the higher Core philosophy, conforming Living Design, current system architecture map, system registry, V36 contract, applicable Owner/Project operating guidance, or explicit Owner authority.
 
 ## 6. Change control
 

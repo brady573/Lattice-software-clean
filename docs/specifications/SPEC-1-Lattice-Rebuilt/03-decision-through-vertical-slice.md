@@ -123,7 +123,7 @@ GET /api/v1/runs/:runId
 GET /api/v1/runs/:runId/events  
 POST /api/v1/runs/:runId/clarification  
 POST /api/v1/runs/:runId/cancel  
-GET /api/v1/runs/:runId/result  
+GET /api/v1/runs/:runId/outcome
 GET /api/v1/runs/:runId/sources  
 POST /api/v1/files/upload  
 POST /api/v1/files/:fileId/complete

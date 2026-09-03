@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import test from "node:test";
 import { Pool } from "pg";
 import { MemoryApiRunControlStore } from "../src/api-control-store.js";
-import { buildApp } from "../src/app.js";
+import { buildCanonicalApp as buildApp } from "../src/http-app.js";
 import { registerBoundedDecisionCorrection } from "./fixtures/legacy-bounded-decision-correction.js";
 import { registerBoundedDecisionIntentIntake } from "./fixtures/legacy-bounded-decision-intake.js";
 import {

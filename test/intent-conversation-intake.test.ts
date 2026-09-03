@@ -4,7 +4,7 @@ import test from "node:test";
 import type { FastifyInstance } from "fastify";
 import { Pool } from "pg";
 import { MemoryApiRunControlStore } from "../src/api-control-store.js";
-import { buildApp } from "../src/app.js";
+import { buildCanonicalApp as buildApp } from "../src/http-app.js";
 import { registerBoundedDecisionIntentIntake } from "./fixtures/legacy-bounded-decision-intake.js";
 import {
   MemoryIntentAuthorityStore,

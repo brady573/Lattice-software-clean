@@ -4,9 +4,8 @@ import test from "node:test";
 import type { FastifyInstance } from "fastify";
 import { Pool } from "pg";
 import { createApiRequestHash } from "../src/api-control-store.js";
-import { buildApp } from "../src/app.js";
+import { buildLegacyTestApp as buildApp } from "../src/legacy/legacy-test-app.js";
 import type { RunRequest } from "../src/domain.js";
-import { createLegacyDecisionTruthComposition } from "./fixtures/legacy-laptop-fixture.js";
 import { PostgresApiRunControlStore } from "../src/postgres-api-control-store.js";
 import { PostgresOrchestrationStore } from "../src/postgres-orchestration-store.js";
 import { PostgresRunStore } from "../src/postgres-run-store.js";
@@ -160,12 +159,15 @@ test(
 
       const submit = await firstApp.inject({
         method: "POST",
-        url: `/api/v1/conversations/${conversationId}/messages`,
-        headers: { "idempotency-key": `runtime-${randomUUID()}` },
-        payload: request,
+        url: `/api/v1/conversations/${conversationId}/turns`,
+        payload: {
+          turnId: `runtime-${randomUUID()}`,
+          message: "Explain how volcanic islands form.",
+        },
       });
       assert.equal(submit.statusCode, 202);
-      assert.equal(submit.json().status, "CREATED");
+      assert.equal(submit.json().status, "RUN_ACCEPTED");
+      assert.equal(submit.json().decisionNeed, "NONE");
       runId = submit.json().runId as string;
 
       await new Promise((resolve) => setTimeout(resolve, 100));
@@ -203,8 +205,6 @@ test(
         leaseMs: 30_000,
         retryDelayMs: 1_000,
         batchSize: 10,
-      }, {
-      ...createLegacyDecisionTruthComposition(),
       });
       researchWorker.start();
       runWorker.start();
@@ -216,14 +216,20 @@ test(
       assert.equal(events.statusCode, 200);
       assert.deepEqual(
         events.json().events.map((event: { type: string }) => event.type),
-        ["CREATED", "UNDERSTANDING", "PLANNING", "INVESTIGATING", "VALIDATING", "DECIDING", "EXPLAINING", "COMPLETED"],
+        ["CREATED", "UNDERSTANDING", "PLANNING", "INVESTIGATING", "VALIDATING", "COMPLETED"],
       );
 
-      const result = await secondApp.inject({ method: "GET", url: `/api/v1/runs/${runId}/result` });
-      assert.equal(result.statusCode, 200);
-      assert.equal(result.json().status, "COMPLETED");
-      assert.equal(result.json().decision.winnerCandidateId, "nova-air");
-      assert.match(result.json().explanation, /Nova Air/);
+      const outcome = await secondApp.inject({ method: "GET", url: `/api/v1/runs/${runId}/outcome` });
+      assert.equal(outcome.statusCode, 200);
+      assert.equal(outcome.json().status, "COMPLETED");
+      assert.equal(outcome.json().outcome.kind, "KNOWLEDGE");
+      assert.equal(outcome.json().outcome.acceptedUnderstanding, "Explain how volcanic islands form.");
+
+      const decisionPlan = await secondApp.inject({
+        method: "GET",
+        url: `/api/v1/runs/${runId}/decision-plan`,
+      });
+      assert.equal(decisionPlan.statusCode, 404);
 
       const dispatched = await pool.query<{ dispatched_at: Date | null }>(
         "SELECT dispatched_at FROM dispatch_outbox WHERE run_id=$1 AND queue_name='lattice.run'",

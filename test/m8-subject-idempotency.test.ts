@@ -6,7 +6,7 @@ import {
   getAuthenticatedSubject,
   registerAuthenticatedSubjectBoundary,
 } from "../src/auth/authenticated-subject.js";
-import { buildApp } from "../src/http-app.js";
+import { buildLegacyTestApp as buildApp } from "../src/legacy/legacy-test-app.js";
 import { createRuntimeApp } from "../src/runtime-app.js";
 import { resolveRuntimeConfig } from "../src/runtime-config.js";
 
@@ -117,35 +117,36 @@ test(
 
       const submitA = await app.inject({
         method: "POST",
-        url: `/api/v1/conversations/${conversationA}/messages`,
-        headers: { ...subjectHeaders("subject-a"), "idempotency-key": key },
-        payload: request,
+        url: `/api/v1/conversations/${conversationA}/turns`,
+        headers: subjectHeaders("subject-a"),
+        payload: { turnId: key, message: "Explain how volcanic islands form." },
       });
       assert.equal(submitA.statusCode, 202);
       runA = submitA.json().runId as string;
 
       const replayA = await app.inject({
         method: "POST",
-        url: `/api/v1/conversations/${conversationA}/messages`,
-        headers: { ...subjectHeaders("subject-a"), "idempotency-key": key },
-        payload: request,
+        url: `/api/v1/conversations/${conversationA}/turns`,
+        headers: subjectHeaders("subject-a"),
+        payload: { turnId: key, message: "Explain how volcanic islands form." },
       });
       assert.equal(replayA.statusCode, 202);
       assert.equal(replayA.json().runId, runA);
 
       const conflictA = await app.inject({
         method: "POST",
-        url: `/api/v1/conversations/${conversationA}/messages`,
-        headers: { ...subjectHeaders("subject-a"), "idempotency-key": key },
-        payload: { ...request, goal: `${request.goal} changed` },
+        url: `/api/v1/conversations/${conversationA}/turns`,
+        headers: subjectHeaders("subject-a"),
+        payload: { turnId: key, message: "Explain how coral islands form." },
       });
       assert.equal(conflictA.statusCode, 409);
+      assert.equal(conflictA.json().error, "USER_MESSAGE_PROVENANCE_CONFLICT");
 
       const submitB = await app.inject({
         method: "POST",
-        url: `/api/v1/conversations/${conversationB}/messages`,
-        headers: { ...subjectHeaders("subject-b"), "idempotency-key": key },
-        payload: request,
+        url: `/api/v1/conversations/${conversationB}/turns`,
+        headers: subjectHeaders("subject-b"),
+        payload: { turnId: key, message: "Explain how volcanic islands form." },
       });
       assert.equal(submitB.statusCode, 202);
       runB = submitB.json().runId as string;
@@ -153,11 +154,11 @@ test(
 
       const rows = await pool.query<{ scope_key: string }>(
         "SELECT scope_key FROM api_idempotency_keys WHERE idempotency_key=$1 ORDER BY scope_key",
-        [key],
+        [`consultation:${key}`],
       );
       assert.deepEqual(rows.rows.map((row) => row.scope_key), ["subject-a", "subject-b"]);
     } finally {
-      await pool.query("DELETE FROM api_idempotency_keys WHERE idempotency_key=$1", [key]);
+      await pool.query("DELETE FROM api_idempotency_keys WHERE idempotency_key=$1", [`consultation:${key}`]);
       if (runA) await pool.query("DELETE FROM runs WHERE id=$1", [runA]);
       if (runB) await pool.query("DELETE FROM runs WHERE id=$1", [runB]);
       if (conversationA) await pool.query("DELETE FROM conversations WHERE id=$1", [conversationA]);

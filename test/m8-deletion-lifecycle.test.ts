@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
 import { Pool } from "pg";
-import { buildApp } from "../src/app.js";
+import { buildCanonicalApp as buildApp } from "../src/http-app.js";
 import { registerAuthenticatedSubjectBoundary } from "../src/auth/authenticated-subject.js";
 import { registerConversationApi } from "../src/conversation/conversation-api.js";
 import { MemoryConversationStore, PostgresConversationStore } from "../src/conversation/conversation-store.js";
@@ -30,6 +30,10 @@ function testApp() {
     "/api/v1/runs/:runId/events/stream",
     async (_request, reply) => reply.status(200).send({ ok: true }),
   );
+  app.get<{ Params: { runId: string } }>(
+    "/api/v1/runs/:runId/outcome",
+    async (_request, reply) => reply.status(200).send({ ok: true }),
+  );
   return { app, conversationStore, runStore };
 }
 
@@ -51,7 +55,7 @@ function pendingRun(runId: string, conversationId: string): LatticeRun {
   };
 }
 
-test("M8-F2 deletion immediately hides conversation, execution, progress, result, reconnect, and mutation scope", async () => {
+test("M8-F2 deletion immediately hides conversation, execution, progress, outcome, reconnect, and mutation scope", async () => {
   const { app, conversationStore, runStore } = testApp();
   try {
     const created = await app.inject({
@@ -116,7 +120,7 @@ test("M8-F2 deletion immediately hides conversation, execution, progress, result
       }),
       app.inject({
         method: "GET",
-        url: `/api/v1/runs/${runId}/result`,
+        url: `/api/v1/runs/${runId}/outcome`,
         headers: { "x-test-subject": "subject-a" },
       }),
       app.inject({

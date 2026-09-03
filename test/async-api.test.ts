@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { FastifyInstance } from "fastify";
-import { buildApp } from "../src/app.js";
+import { buildLegacyTestApp as buildApp } from "../src/legacy/legacy-test-app.js";
 import type { RunRequest } from "../src/domain.js";
 import {
   createLegacyDecisionTruthComposition,
@@ -12,6 +12,12 @@ import { createPendingRun, executePersistedRun } from "../src/run-execution.js";
 import { MemoryRunStore } from "../src/run-store.js";
 import { createRuntimeApp } from "../src/runtime-app.js";
 import { resolveRuntimeConfig } from "../src/runtime-config.js";
+import {
+  DECISION_MESSAGE,
+  FoundationalConsultationInterpreter,
+  createFoundationalTruthComposition,
+  foundationalCriterionCatalog,
+} from "./fixtures/foundational-consultation-fixture.js";
 import {
   OfflineFixtureTruthPipeline,
   type TruthExecutionPipeline,
@@ -74,27 +80,36 @@ test("concurrent identical API submissions converge while changed-body key reuse
   }
 });
 
-test("runtime completes an accepted in-memory asynchronous Run and exposes its lifecycle result", async () => {
+test("runtime completes an accepted in-memory asynchronous Run and exposes its Decision Support outcome", async () => {
   const config = resolveRuntimeConfig({
     LATTICE_DEPLOYMENT_MODE: "development",
     LATTICE_TRUTH_MODE: "v36-offline",
   } as NodeJS.ProcessEnv);
   const app = await createRuntimeApp(config, {
     memoryDispatchDelayMs: 5,
-    ...createLegacyDecisionTruthComposition(),
+    ...createFoundationalTruthComposition(),
+    consultationInterpreter: new FoundationalConsultationInterpreter(),
+    criterionCatalog: foundationalCriterionCatalog,
   });
   try {
     const createdConversation = await app.inject({ method: "POST", url: "/api/v1/conversations" });
     assert.equal(createdConversation.statusCode, 201);
     const conversationId = createdConversation.json<{ conversation: { id: string } }>().conversation.id;
 
+    const pending = await app.inject({
+      method: "POST",
+      url: `/api/v1/conversations/${conversationId}/turns`,
+      payload: { turnId: "async-decision-turn", message: DECISION_MESSAGE },
+    });
+    assert.equal(pending.statusCode, 202);
+    assert.equal(pending.json().status, "NEEDS_CLARIFICATION");
     const submit = await app.inject({
       method: "POST",
-      url: `/api/v1/conversations/${conversationId}/messages`,
-      payload: request,
+      url: `/api/v1/conversations/${conversationId}/clarifications/${pending.json().proposalId}/confirm`,
+      payload: { turnId: "async-decision-confirm", message: "Yes, that's correct." },
     });
     assert.equal(submit.statusCode, 202);
-    assert.equal(submit.json().status, "CREATED");
+    assert.equal(submit.json().status, "RUN_ACCEPTED");
     const runId = submit.json().runId as string;
 
     const completed = await waitForCompletedRun(app, runId);
@@ -107,11 +122,12 @@ test("runtime completes an accepted in-memory asynchronous Run and exposes its l
       ["CREATED", "UNDERSTANDING", "PLANNING", "INVESTIGATING", "VALIDATING", "DECIDING", "EXPLAINING", "COMPLETED"],
     );
 
-    const result = await app.inject({ method: "GET", url: `/api/v1/runs/${runId}/result` });
-    assert.equal(result.statusCode, 200);
-    assert.equal(result.json().status, "COMPLETED");
-    assert.equal(result.json().decision.winnerCandidateId, "nova-air");
-    assert.match(result.json().explanation, /Nova Air/);
+    const outcome = await app.inject({ method: "GET", url: `/api/v1/runs/${runId}/outcome` });
+    assert.equal(outcome.statusCode, 200);
+    assert.equal(outcome.json().status, "COMPLETED");
+    assert.equal(outcome.json().outcome.kind, "DECISION_SUPPORT");
+    assert.equal(outcome.json().outcome.decision.winnerCandidateId, "cedar");
+    assert.match(outcome.json().outcome.explanation, /Cedar/i);
   } finally {
     await app.close();
   }
@@ -130,8 +146,8 @@ test("automatic in-memory asynchronous execution preserves immediate cancellatio
 
     const submit = await app.inject({
       method: "POST",
-      url: `/api/v1/conversations/${conversationId}/messages`,
-      payload: request,
+      url: `/api/v1/conversations/${conversationId}/turns`,
+      payload: { turnId: "cancel-knowledge-turn", message: "Explain how volcanic islands form." },
     });
     assert.equal(submit.statusCode, 202);
     const runId = submit.json().runId as string;

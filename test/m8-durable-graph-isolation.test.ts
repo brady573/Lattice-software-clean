@@ -103,13 +103,13 @@ test("M8-C isolates Conversation-derived messages, intent writes, Runs, plans, p
     assert.equal(ownerPlan.statusCode, 404);
     assert.equal(ownerPlan.json().error, "DECISION_PLAN_NOT_FOUND");
 
-    const ownerResult = await app.inject({
+    const ownerOutcome = await app.inject({
       method: "GET",
-      url: `/api/v1/runs/${binding.runId}/result`,
+      url: `/api/v1/runs/${binding.runId}/outcome`,
       headers: ownerHeaders,
     });
-    assert.equal(ownerResult.statusCode, 409);
-    assert.equal(ownerResult.json().error, "RUN_NOT_COMPLETED");
+    assert.equal(ownerOutcome.statusCode, 202);
+    assert.equal(ownerOutcome.json().status, "CREATED");
 
     const missingConversationId = randomUUID();
     for (const url of [
@@ -139,23 +139,14 @@ test("M8-C isolates Conversation-derived messages, intent writes, Runs, plans, p
     assert.equal(crossIntentWrite.statusCode, 404);
     assert.deepEqual(crossIntentWrite.json(), { error: "CONVERSATION_NOT_FOUND" });
 
-    const crossRunCreation = await app.inject({
+    assert.equal(app.hasRoute({
       method: "POST",
-      url: `/api/v1/conversations/${conversationId}/messages`,
-      headers: otherHeaders,
-      payload: {},
-    });
-    assert.equal(crossRunCreation.statusCode, 404);
-    assert.deepEqual(crossRunCreation.json(), { error: "CONVERSATION_NOT_FOUND" });
-
-    const crossExactRunCreation = await app.inject({
+      url: "/api/v1/conversations/:conversationId/messages",
+    }), false);
+    assert.equal(app.hasRoute({
       method: "POST",
-      url: `/api/v1/conversations/${conversationId}/intent-scopes/${binding.intentScopeId}/versions/${binding.intentVersionId}/runs`,
-      headers: otherHeaders,
-      payload: {},
-    });
-    assert.equal(crossExactRunCreation.statusCode, 404);
-    assert.deepEqual(crossExactRunCreation.json(), { error: "CONVERSATION_NOT_FOUND" });
+      url: "/api/v1/conversations/:conversationId/intent-scopes/:intentScopeId/versions/:intentVersionId/runs",
+    }), false);
 
     const ownerHistoryAfterRejectedWrites = await app.inject({
       method: "GET",
@@ -170,7 +161,7 @@ test("M8-C isolates Conversation-derived messages, intent writes, Runs, plans, p
       { method: "GET" as const, suffix: "", error: "RUN_NOT_FOUND" },
       { method: "GET" as const, suffix: "/events", error: "RUN_NOT_FOUND" },
       { method: "GET" as const, suffix: "/events/stream", error: "RUN_NOT_FOUND" },
-      { method: "GET" as const, suffix: "/result", error: "RUN_NOT_FOUND" },
+      { method: "GET" as const, suffix: "/outcome", error: "RUN_NOT_FOUND" },
       { method: "POST" as const, suffix: "/cancel", error: "RUN_NOT_FOUND" },
       { method: "GET" as const, suffix: "/decision-plan", error: "DECISION_PLAN_NOT_FOUND" },
     ];

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
 import { Pool } from "pg";
-import { buildApp } from "../src/app.js";
+import { buildLegacyTestApp as buildApp } from "../src/legacy/legacy-test-app.js";
 import type { LatticeRun, RunRequest } from "../src/domain.js";
 import { createLegacyDecisionTruthComposition } from "./fixtures/legacy-laptop-fixture.js";
 import { PostgresApiRunControlStore } from "../src/postgres-api-control-store.js";

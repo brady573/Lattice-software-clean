@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
 import { Pool } from "pg";
-import { buildApp } from "../src/app.js";
+import { buildCanonicalApp as buildApp } from "../src/http-app.js";
 import { PostgresRunStore } from "../src/postgres-run-store.js";
 import { registerRunEventStream } from "../src/progress/run-event-stream.js";
 import { createPendingRun } from "../src/run-execution.js";

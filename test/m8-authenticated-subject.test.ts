@@ -84,7 +84,7 @@ test("development fixture authentication remains explicit and usable for local e
   }
 });
 
-test("development-only prototype model route is not promoted into the authoritative auth boundary", async () => {
+test("development-only prototype model route is absent from canonical RuntimeApp", async () => {
   const app = await createRuntimeApp(resolveRuntimeConfig({
     LATTICE_AUTHENTICATION_MODE: "required",
   }));
@@ -97,11 +97,11 @@ test("development-only prototype model route is not promoted into the authoritat
         messages: [{ role: "user", content: "hello" }],
       },
     });
-    assert.equal(response.statusCode, 503);
-    assert.deepEqual(response.json(), {
-      error: "MODEL_SIMULATION_NOT_CONFIGURED",
-      message: "The offline conversation simulator is not configured for this Lattice process.",
-    });
+    assert.equal(app.hasRoute({
+      method: "POST",
+      url: "/api/v1/prototype/model-conversations/:conversationId/messages",
+    }), false);
+    assert.equal(response.statusCode, 404);
   } finally {
     await app.close();
   }
