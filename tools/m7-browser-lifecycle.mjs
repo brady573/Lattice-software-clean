@@ -377,15 +377,19 @@ async function main() {
       return !input.disabled&&conversation.includes('Do you mean the inferred comparison?')&&!composer.includes('Do you mean the inferred comparison?') ? true : null;
     })()`));
     await submitBrowserTurn(cdp, "No, actually explain the evidence instead.");
-    const correctionRouting = await waitFor("browser clarification correction", async () => cdp.eval(`(() => {
+    await waitFor("browser clarification correction outcome polling", async () => cdp.eval(`
+      window.__clarificationFixtureRequests.some((item)=>item.path.includes('/runs/run-corrected/outcome')) ? true : null
+    `));
+    const correctionRouting = await waitFor("browser clarification correction completion", async () => cdp.eval(`(() => {
       const input=document.getElementById('conversationInput');
       const composerText=document.getElementById('composer').innerText;
       const conversationText=document.getElementById('conversation').innerText;
       const requests=window.__clarificationFixtureRequests;
-      if(input.disabled||!conversationText.includes('Explain the evidence instead.')||!requests.some((item)=>item.path.includes('/runs/run-corrected/outcome')))return null;
-      return {composerText,conversationText,requests:window.__clarificationFixtureRequests,turns:document.querySelectorAll('#conversation .turn.user').length};
+      if(input.disabled)return null;
+      return {composerText,conversationText,requests,turns:document.querySelectorAll('#conversation .turn.user').length};
     })()`));
     assert.equal(correctionRouting.turns, 2);
+    assert.match(correctionRouting.conversationText, /Explain the evidence instead\./u);
     assert.equal(correctionRouting.requests.filter((item) => item.path.endsWith('/turns')).length, 2);
     assert.equal(correctionRouting.requests.filter((item) => item.path.includes('/runs/run-corrected/outcome')).length, 1);
     assert.equal(correctionRouting.requests.some((item) => item.path.includes('/confirm')), false);
