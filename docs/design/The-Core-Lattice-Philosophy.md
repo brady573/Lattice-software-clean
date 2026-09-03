@@ -1,10 +1,14 @@
 # The Core Lattice Philosophy
 
-Status: **Owner-authored concise Product philosophy companion**.
+Status: **Owner-approved highest Product philosophy authority**.
 
 Scope: **Lattice Product-wide**.
 
-Authority: This document summarizes the core philosophy expressed by `Lattice-Foundational-Design-Principle.md`. It does not replace, supersede, or independently modify that canonical foundational design. Where greater precision or a conflict exists, the canonical foundational design and more-specific controlling Product sources govern.
+Authority: **Within Lattice Product direction, this document stands above every other Product design, architecture, specification, contract, implementation convention, workflow, UI structure, validation model, roadmap artifact, and historical decision.** All subordinate Product sources and software behavior must conform to it.
+
+If any subordinate source, architecture, implementation, feature, workflow, interface, or retained mechanism conflicts with this philosophy, **this document governs**. The conflicting element must be changed, removed, or explicitly reconciled to restore alignment. Historical presence, implementation cost, lower-level specification, architectural convenience, or prior approval does not justify retaining something that violates this philosophy.
+
+Only an explicit current Owner decision may amend or supersede this document. No feature development, refactor, architecture proposal, implementation detail, automated process, or subordinate Product source may silently redefine it.
 
 ## Core philosophy
 
@@ -146,12 +150,12 @@ Architecture should never become self-justifying.
 
 > **Make trustworthy knowledge and decision capability easier to reach, understand, and use — while Lattice manages the machinery.**
 
-## Practical design test
+## Supreme Product test
 
-For any substantial Product choice, ask:
+For every Product design, architecture, feature, implementation mechanism, workflow, interface, retained subsystem, and substantial change, ask:
 
 > **Does this use knowledge to remove a meaningful barrier for the user, preserve the boundaries required for trust and human control, keep authority where it belongs, and reduce rather than transfer unnecessary complexity?**
 
-If yes, the choice is philosophically aligned and can proceed to the applicable Product, architecture, implementation, and validation requirements.
+If yes, it is philosophically eligible to proceed through the subordinate Product, architecture, implementation, and validation requirements.
 
-If not, there must be a specific controlling reason for the trade-off, and that discrepancy should be surfaced rather than silently normalized.
+If no, **it does not belong in Lattice**. It must not be introduced, retained, expanded, or defended solely by lower-level requirements or historical implementation. The subordinate design must instead be changed or removed until the Product is aligned with this philosophy.
