@@ -67,7 +67,8 @@ This document owns the stable Resource and prepared-action model. It does not re
 
 It must remain consistent with:
 
-- `Lattice-Foundational-Design-Principle.md` — first Product-design filter;
+- `The-Core-Lattice-Philosophy.md` — highest Product-design authority and first filter;
+- `Lattice-Foundational-Design-Principle.md` — subordinate foundational elaboration;
 - `Lattice-Architecture-Integrity.md` — protected semantic ownership boundaries;
 - `Lattice-System-Registry-and-Naming.md` — canonical subsystem vocabulary;
 - `Lattice-System-Architecture.md` — current structural composition;
@@ -304,7 +305,7 @@ Provenance may include:
 
 ```text
 IntentVersion
-DecisionPlan
+DecisionPlan, when the Resource depends on qualified decision work
 Run / Run version
 V36 evidence or truth checkpoint
 StructuredDecision

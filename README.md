@@ -135,12 +135,16 @@ The repository PostgreSQL validation lane exercises restart survival, Run epoch/
 
 ## Governing Product design and specifications
 
-The canonical living Product design and forward 1.0 roadmap is `docs/design/Lattice-Living-Software-Design-to-1.0.md`. Its item-level status vocabulary is controlling except where a later explicit Owner decision supersedes an older item for the same bounded scope.
+The highest Product philosophy authority and first Product-design filter is `docs/design/The-Core-Lattice-Philosophy.md`. Every subordinate Product design, architecture, specification, implementation convention, workflow, UI structure, validation model, roadmap artifact, and retained mechanism must conform to it. If any subordinate source or software behavior conflicts with the Core philosophy, **the Core philosophy governs and the conflicting element must be changed, removed, or explicitly reconciled by the Owner**.
+
+Future AI-assisted design and code work must read and apply the Core philosophy before treating existing architecture, specifications, tests, implementation, or UI structure as a reason to preserve a Product direction.
+
+Only after a Product direction passes the Core check should the subordinate design sources be used for additional precision and implementation guidance. `docs/design/Lattice-Foundational-Design-Principle.md` elaborates the Core philosophy and is subordinate to it. The canonical living Product design and forward 1.0 roadmap is `docs/design/Lattice-Living-Software-Design-to-1.0.md`; its item-level status vocabulary controls subordinate Product direction and sequencing except where a later explicit Owner decision supersedes an older item for the same bounded scope, and always subject to the Core philosophy.
 
 For the **current structural implementation map**, including subsystem ownership, conditional decision machinery, authoritative/durable/derived state, and trust boundaries, read `docs/design/Lattice-System-Architecture.md`.
 
-The first Product-design filter is `docs/design/Lattice-Foundational-Design-Principle.md`; canonical system vocabulary is defined by `docs/design/Lattice-System-Registry-and-Naming.md`; and cross-cutting semantic ownership constraints are protected by `docs/design/Lattice-Architecture-Integrity.md`. The Owner-approved offline-prototype Solandra UI design/approval is installed under `docs/design/solandra/`.
+Canonical system vocabulary is defined by `docs/design/Lattice-System-Registry-and-Naming.md`; cross-cutting semantic ownership constraints are protected by `docs/design/Lattice-Architecture-Integrity.md`; and the Owner-approved offline-prototype Solandra UI design/approval is installed under `docs/design/solandra/`. All remain subordinate to `The-Core-Lattice-Philosophy.md`.
 
-`docs/specifications/SPEC-1-Lattice-Rebuilt/` remains the detailed qualified implementation specification for confirmed contracts that the living design has not explicitly superseded. The protected V36 truth-core revision and machine-readable proof obligations remain under `docs/specifications/V36-Truth-Layer/`; `claim-proof-contracts.json` is the exact proof-obligation contract.
+`docs/specifications/SPEC-1-Lattice-Rebuilt/` remains the detailed qualified implementation specification for confirmed contracts that the living design has not explicitly superseded. The protected V36 truth-core revision and machine-readable proof obligations remain under `docs/specifications/V36-Truth-Layer/`; `claim-proof-contracts.json` is the exact proof-obligation contract. These detailed contracts constrain implementation within their qualified boundaries but do not supersede the Core philosophy.
 
 For the current execution view of the living roadmap, see `docs/ROADMAP.md`.

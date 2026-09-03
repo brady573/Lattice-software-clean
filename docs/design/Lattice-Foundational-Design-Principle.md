@@ -1,10 +1,12 @@
 # Lattice Foundational Design Principle
 
-Status: **Owner-approved foundational Product design intent**.
+Status: **Owner-approved foundational Product design intent subordinate to `The-Core-Lattice-Philosophy.md`**.
 
 Scope: **Lattice Product-wide**.
 
-This document is the first Product-design filter for proposed Lattice changes, additions, and updates. It governs choice among otherwise permissible Product directions. It does not override applicable Project operating guidance, explicit Owner authority, protected V36 contracts, safety/security/privacy requirements, validation/acceptance rules, production controls, or more-specific qualified requirements at their applicable boundaries.
+This document elaborates the governing philosophy defined by `The-Core-Lattice-Philosophy.md`. The Core Lattice Philosophy is the highest Product-design authority and exclusion test. This document may add precision and qualified detail only where that detail remains aligned with the Core philosophy. If this document, any more-specific Product source, or any implementation conflicts with the Core philosophy, **the Core philosophy governs and the conflicting element must be reconciled or removed**.
+
+This document does not override explicit Owner authority, applicable safety/security/privacy requirements, validation/acceptance rules, or production controls. Those controls constrain execution; they do not redefine the Product philosophy.
 
 ## 1. Core philosophy
 
@@ -283,7 +285,7 @@ Once governing authority, safety, and requirement qualification permit a Product
 8. **Experience** — can Lattice absorb the complexity rather than forcing the user to manage it?
 9. **Product-observable proof** — can the claimed improvement be demonstrated rather than inferred from architecture alone?
 
-This order does not weaken more-specific qualified requirements. It governs design choice within them.
+This order does not weaken more-specific qualified requirements, provided those requirements themselves remain aligned with `The-Core-Lattice-Philosophy.md`. No lower-level requirement can authorize a Product direction that fails the Core philosophy.
 
 ## 17. Change rule
 
@@ -298,13 +300,13 @@ A material change to it requires explicit Owner consideration of:
 - affected qualified Product sources;
 - migration or reconciliation consequences.
 
-Feature development, refactoring, implementation convenience, provider changes, UI redesign, deployment topology, or new model capability must not silently redefine the foundational objective.
+Feature development, refactoring, implementation convenience, provider changes, UI redesign, deployment topology, or new model capability must not silently redefine the foundational objective or the Core Lattice Philosophy above it.
 
 ## 18. Relationship to other Product sources
 
-This document is the first Product-design filter, not a replacement for detailed Product authority.
+This document is a detailed foundational elaboration beneath `The-Core-Lattice-Philosophy.md`. It is not the highest Product-design authority and must remain consistent with the Core philosophy.
 
-After a proposal passes the foundational filter:
+After a proposal passes the Core philosophy and this foundational filter:
 
 - the canonical living design controls confirmed Product direction and forward sequencing;
 - the Lattice System Architecture document provides the concise current implementation structural map;
@@ -315,7 +317,7 @@ After a proposal passes the foundational filter:
 - exact current repository state establishes what is actually implemented;
 - executed Product-observable validation establishes what behavior has actually been demonstrated.
 
-A proposal can be philosophically aligned and still be unauthorized, incorrectly designed, unimplemented, unvalidated, or unsafe. Passing this filter is necessary for Product alignment, not sufficient for acceptance or execution authority.
+Every source in that hierarchy remains subordinate to the Core Lattice Philosophy. A proposal can be philosophically aligned and still be unauthorized, incorrectly designed, unimplemented, unvalidated, or unsafe. Passing the Core philosophy is necessary for Product belonging; subordinate requirements determine whether an aligned proposal is correctly specified, implemented, and accepted.
 
 ---
 
@@ -327,4 +329,4 @@ For every material Lattice Product change, addition, or update:
 
 If yes, continue through the applicable qualified Product requirements, architecture, implementation, and validation gates.
 
-If not, do not proceed unless a more-specific controlling Product requirement explicitly requires the trade-off and the discrepancy is surfaced for reconciliation.
+If not, **do not proceed**. A more-specific Product source cannot override the Core philosophy. The proposal, requirement, or existing implementation must instead be reconciled or removed until Lattice is philosophically aligned.

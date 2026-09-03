@@ -48,7 +48,8 @@ When two documents materially conflict, resolve the conflict through the applica
 
 | Responsibility | Primary maintenance home | Notes |
 |---|---|---|
-| First Product-design filter / philosophy | `Lattice-Foundational-Design-Principle.md` | Owner-approved Product-wide filter: remove unnecessary barriers while preserving necessary boundaries. |
+| Highest Product philosophy authority and first filter | `The-Core-Lattice-Philosophy.md` | Owner-approved Product-wide exclusion test. Every subordinate source and implementation must conform to it. |
+| Foundational Product-design elaboration | `Lattice-Foundational-Design-Principle.md` | Subordinate filter that adds precision only where it remains aligned with the Core philosophy. |
 | Cross-cutting semantic ownership and anti-drift invariants | `Lattice-Architecture-Integrity.md` | Owner-approved architecture control. Does not replace subsystem semantics. |
 | Canonical subsystem names and naming grammar | `Lattice-System-Registry-and-Naming.md` | Owner-approved naming/architecture-boundary convention. |
 | 1.0 Product definition, forward direction, milestone sequencing, unresolved decisions | `Lattice-Living-Software-Design-to-1.0.md` plus approved amendments and applicable Owner decision records | Living design remains the direction/sequence record at its stated item-level statuses. Stable domain detail should be maintained in permanent architecture documents rather than continually expanding the living design. |
@@ -126,7 +127,7 @@ Keep durable-state classes, ownership roots, lifecycle/reconstruction, version/c
 
 ### `Lattice-Intent-and-Decision-Architecture.md`
 
-Keep the permanent semantic path from USER expression through canonical IntentVersion and DecisionPlan to admitted evidence, criteria, Decision Engine and StructuredDecision here. It may describe presentation constraints only far enough to protect semantic fidelity; Solandra UI behavior belongs in the Solandra contracts.
+Keep the permanent semantic boundary from USER expression to canonical IntentVersion here, together with the conditional decision path from qualified authoritative decision work through DecisionPlan, admitted evidence, criteria, Decision Engine, and StructuredDecision. Knowledge and non-decision Action Preparation bypass DecisionPlan and the Decision Engine. This document may describe presentation constraints only far enough to protect semantic fidelity; Solandra UI behavior belongs in the Solandra contracts and cannot define Product semantics.
 
 ### `Lattice-Execution-and-Capability-Architecture.md`
 

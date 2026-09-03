@@ -24,7 +24,8 @@ This document does **not** replace the **Lattice Living Product Design**. The li
 
 It also does not replace:
 
-- `Lattice-Foundational-Design-Principle.md`, which is the first Product-design filter;
+- `The-Core-Lattice-Philosophy.md`, which is the highest Product-design authority and first filter;
+- `Lattice-Foundational-Design-Principle.md`, which elaborates that philosophy as a subordinate Product-design filter;
 - `Lattice-Architecture-Integrity.md`, which protects cross-cutting semantic ownership and authority boundaries;
 - `Lattice-System-Registry-and-Naming.md`, which defines canonical system names; or
 - the protected V36 specifications, which remain controlling for V36 epistemic semantics.
