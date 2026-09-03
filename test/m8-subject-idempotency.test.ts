@@ -6,7 +6,7 @@ import {
   getAuthenticatedSubject,
   registerAuthenticatedSubjectBoundary,
 } from "../src/auth/authenticated-subject.js";
-import { buildApp } from "../src/http-app.js";
+import { buildLegacyTestApp as buildApp } from "../src/legacy/legacy-test-app.js";
 import { createRuntimeApp } from "../src/runtime-app.js";
 import { resolveRuntimeConfig } from "../src/runtime-config.js";
 

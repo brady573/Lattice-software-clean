@@ -4,7 +4,7 @@ import test from "node:test";
 import type { FastifyInstance } from "fastify";
 import { Pool } from "pg";
 import { createApiRequestHash } from "../src/api-control-store.js";
-import { buildApp } from "../src/app.js";
+import { buildLegacyTestApp as buildApp } from "../src/legacy/legacy-test-app.js";
 import type { RunRequest } from "../src/domain.js";
 import { createLegacyDecisionTruthComposition } from "./fixtures/legacy-laptop-fixture.js";
 import { PostgresApiRunControlStore } from "../src/postgres-api-control-store.js";

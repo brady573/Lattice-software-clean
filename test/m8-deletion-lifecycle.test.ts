@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
 import { Pool } from "pg";
-import { buildApp } from "../src/app.js";
+import { buildCanonicalApp as buildApp } from "../src/http-app.js";
 import { registerAuthenticatedSubjectBoundary } from "../src/auth/authenticated-subject.js";
 import { registerConversationApi } from "../src/conversation/conversation-api.js";
 import { MemoryConversationStore, PostgresConversationStore } from "../src/conversation/conversation-store.js";

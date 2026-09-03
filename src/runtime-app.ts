@@ -14,7 +14,7 @@ import {
   type AuthenticatedSubjectResolver,
 } from "./auth/authenticated-subject.js";
 import { registerConsultationIntake } from "./consultation-intake.js";
-import { buildApp } from "./http-app.js";
+import { buildCanonicalApp } from "./http-app.js";
 import { registerConversationApi } from "./conversation/conversation-api.js";
 import { registerConversationMembershipGuard } from "./conversation/conversation-membership-guard.js";
 import { registerConversationContinuityApi } from "./conversation/continuity-api.js";
@@ -55,17 +55,10 @@ import {
 } from "./intent/decision-plan-store.js";
 import { migrateRunIntentBindings } from "./intent/postgres-run-binding-store.js";
 import { registerUserPreferenceControlsApi } from "./intent/user-preference-controls-api.js";
-import {
-  AndroidRelayModelProvider,
-  LocalOfflineModelRuntime,
-  ModelRuntime,
-  OpenAiCompatibleModelProvider,
-} from "./model/index.js";
 import { PostgresApiRunControlStore } from "./postgres-api-control-store.js";
 import { PostgresOrchestrationStore } from "./postgres-orchestration-store.js";
 import { PostgresRunStore } from "./postgres-run-store.js";
 import { registerRunEventStream } from "./progress/run-event-stream.js";
-import { registerAndroidModelPrototype } from "./prototype/android-model-prototype.js";
 import { executePersistedRun, type GeneralizedDecisionAdapter } from "./run-execution.js";
 import { MemoryRunStore, type RunStore } from "./run-store.js";
 import type { RuntimeConfig } from "./runtime-config.js";
@@ -347,25 +340,14 @@ export async function createRuntimeApp(
     );
   }
 
-  const localModelProviderBaseUrl = config.localModelProviderBaseUrl ?? config.modelSimulatorBaseUrl;
-  const localModelProviderModel = config.localModelProviderModel ?? config.modelSimulatorModel;
-  const modelRuntime = localModelProviderBaseUrl === undefined
-    ? undefined
-    : new LocalOfflineModelRuntime(new OpenAiCompatibleModelProvider({
-        baseUrl: localModelProviderBaseUrl,
-      }));
   const authenticatedApiSubject = (request: Parameters<typeof getAuthenticatedSubject>[0]): string =>
     getAuthenticatedSubject(request).subjectId;
 
-  const app = buildApp({
+  const app = buildCanonicalApp({
     runStore,
     truthPipeline,
     apiControlStore,
     apiSubject: authenticatedApiSubject,
-    authoritativeConversationUi: true,
-    ...(modelRuntime === undefined
-      ? {}
-      : { modelRuntime, modelName: localModelProviderModel }),
   });
 
   registerAuthenticatedSubjectBoundary(app, {
@@ -408,21 +390,6 @@ export async function createRuntimeApp(
     await userPreferenceStore.close();
     await intentStore.close();
   });
-
-  if (config.androidModelRelayToken !== undefined) {
-    const provider = new AndroidRelayModelProvider({
-      timeoutMs: config.androidModelRelayTimeoutMs,
-    });
-    const androidRuntime = new ModelRuntime(provider, {
-      timeoutMs: config.androidModelRelayTimeoutMs + 5_000,
-    });
-    registerAndroidModelPrototype(app, {
-      provider,
-      runtime: androidRuntime,
-      modelName: config.androidModelRelayModel,
-      relayToken: config.androidModelRelayToken,
-    });
-  }
 
   return app;
 }

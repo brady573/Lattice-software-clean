@@ -37,9 +37,11 @@ The intended user journey is:
 ```text
 question or objective
         -> understanding
-        -> informed decision
+        -> informed decision, when needed and qualified
         -> authorized action, when applicable
 ```
+
+Not every consultation traverses every stage. Trustworthy knowledge is a complete successful Product outcome; Action Preparation may also proceed without a decision when the action basis does not require decision support.
 
 The user should not need to manually navigate providers, models, workers, orchestration, persistence, truth machinery, decision machinery, or validation machinery simply to obtain useful understanding.
 
@@ -86,31 +88,19 @@ Lattice does not make uncertainty disappear. It makes uncertainty understandable
 The foundational philosophy is realized through the current canonical Lattice Product boundaries rather than through an abstract collection of agents or experts. The current implementation-level composition is mapped in `docs/design/Lattice-System-Architecture.md`.
 
 ```text
-User conversation
-      |
-      v
-Lattice Intent Authority
-      | confirmed IntentVersion
-      v
-DecisionPlan
-      | exact planning projection for one Run
-      v
-Lattice Execution Runtime
-      | research / operational work
-      v
-V36 Truth Core
-      | admitted decision evidence
-      v
-Lattice Decision Engine
-      | StructuredDecision
-      v
-Solandra Experience
-      |
-      v
-User
+User conversation -> Lattice Intent Authority -> exact IntentVersion -> Run -> V36 Truth Core
+
+V36 state -> KnowledgeOutcome
+V36 state -> Action Preparation
+
+Qualified decision only:
+exact IntentVersion -> DecisionPlan -> Run -> V36
+-> decision evidence projection -> Lattice Decision Engine -> DecisionSupportOutcome
+
+All applicable outcomes -> Solandra Experience -> User
 ```
 
-`DecisionPlan` is a durable implementation binding, not a peer semantic authority. Lattice Intent Authority remains the owner of USER meaning; DecisionPlan freezes the faithful planning projection of one exact `IntentVersion` for one Run.
+Every Run binds one exact authoritative `IntentVersion`. `DecisionPlan` is a conditional durable decision binding, not a peer semantic authority or universal Run-planning object. When present, it freezes a faithful projection of all execution-significant USER decision meaning from one exact `IntentVersion`; it cannot create independent USER meaning. Knowledge and non-decision Action Preparation have no DecisionPlan and do not invoke the Decision Engine.
 
 The **Lattice Model Gateway** is a provider-neutral, non-authoritative capability boundary. Models, providers, retrieval systems, adapters, and tools may assist Product systems where qualified designs permit them, but their output does not become user intent, V36 truth, Decision Engine authority, or Product validation merely because it was generated or retrieved.
 
@@ -119,7 +109,7 @@ The canonical ownership rule is:
 - **Lattice Intent Authority** owns canonical versioned USER intent and correction lineage.
 - **Lattice Execution Runtime** owns durable operational lifecycle, coordination, cancellation, recovery, and research execution.
 - **V36 Truth Core** owns authoritative external factual truth/evidence state.
-- **Lattice Decision Engine** owns authoritative eligibility, trade-off, frontier, selection, and `StructuredDecision` semantics.
+- **Lattice Decision Engine** conditionally owns authoritative eligibility, typed comparison, trade-off, frontier, licensed selection, and `StructuredDecision` semantics when decision work is qualified.
 - **Solandra Experience** owns human-facing conversation, advocacy, progress presentation, explanation, and continuation within its fidelity boundary.
 - **Lattice Model Gateway** supplies non-authoritative model capability.
 
@@ -262,11 +252,11 @@ The preferred interaction is:
 
 1. The user expresses an objective conversationally.
 2. Lattice Intent Authority determines and preserves the authoritative structured meaning, asking only material clarifications.
-3. DecisionPlan freezes the faithful planning projection of the exact accepted IntentVersion for the Run without becoming a new authority.
-4. Lattice Execution Runtime performs the required durable operational work.
-5. V36 Truth Core qualifies and admits material external factual evidence.
-6. Lattice Decision Engine converts qualified intent and truth into authoritative decision state.
-7. Solandra communicates useful knowledge, uncertainty, evidence, alternatives, progress, and decision boundaries in a human-appropriate form.
+3. Lattice Execution Runtime performs the required durable operational work bound to that exact IntentVersion, retaining useful conversational work context without promoting it into intent.
+4. V36 Truth Core qualifies and admits material external factual evidence into generic truth state.
+5. Knowledge work produces a KnowledgeOutcome; non-decision Action Preparation produces a Resource.
+6. Only qualified decision work creates a faithful DecisionPlan, projects decision-specific evidence from V36 state, and invokes the Decision Engine.
+7. Solandra Conversation carries questions, clarifications, acknowledgements, and concise explanations; Composer presents the most useful trustworthy visual material currently available.
 8. The user intervenes where judgment, correction, or authorization genuinely requires them.
 
 Internal complexity should be available for audit without becoming mandatory for ordinary use.

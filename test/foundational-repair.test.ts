@@ -7,6 +7,8 @@ import type { FastifyInstance } from "fastify";
 import { Pool } from "pg";
 import ts from "typescript";
 import { createRuntimeApp } from "../src/runtime-app.js";
+import { buildLegacyTestApp } from "../src/legacy/legacy-test-app.js";
+import { buildDevelopmentPrototypeApp } from "../src/development/development-prototype-app.js";
 import { resolveRuntimeConfig } from "../src/runtime-config.js";
 import { createStandaloneRunWorker, type StandaloneRunWorker } from "../src/run-worker-process.js";
 import { isConsultationRunRequest, type LatticeRunRequest } from "../src/domain.js";
@@ -611,6 +613,10 @@ test("Example Firewall rejects canonical imports, calls, and dependencies on leg
     "test/fixtures/legacy-bounded-clear-decision-intake.ts",
     "test/fixtures/legacy-bounded-decision-correction.ts",
     "test/fixtures/legacy-exact-planning-fidelity.ts",
+    "src/legacy/legacy-test-app.ts",
+    "src/development/development-prototype-app.ts",
+    "src/development/development-runtime-app.ts",
+    "src/prototype/android-model-prototype.ts",
   ].map((path) => resolve(path));
   for (const forbidden of forbiddenModules) {
     assert.equal(
@@ -630,6 +636,10 @@ test("Example Firewall rejects canonical imports, calls, and dependencies on leg
     "deriveQualifiedLegacyBoundedRunRequest(",
     "defaultDecisionFixture",
     "laptopFixture",
+    "buildLegacyTestApp(",
+    "buildDevelopmentPrototypeApp(",
+    "createDevelopmentRuntimeApp(",
+    "registerAndroidModelPrototype(",
   ]) {
     assert.equal(
       canonicalSource.includes(forbiddenCall),
@@ -670,6 +680,14 @@ test("legacy bounded and historical default routes are absent from the canonical
     await app.ready();
     const hasPostRoute = (url: string): boolean => app.hasRoute({ method: "POST", url });
     assert.equal(hasPostRoute("/api/v1/prototype/consultations/default"), false);
+    assert.equal(hasPostRoute("/runs"), false);
+    assert.equal(app.hasRoute({ method: "GET", url: "/runs/:id" }), false);
+    assert.equal(hasPostRoute("/api/v1/conversations/:conversationId/messages"), false);
+    assert.equal(hasPostRoute(
+      "/api/v1/conversations/:conversationId/intent-scopes/:intentScopeId/versions/:intentVersionId/runs",
+    ), false);
+    assert.equal(hasPostRoute("/api/v1/prototype/model-conversations/:conversationId/messages"), false);
+    assert.equal(hasPostRoute("/api/v1/prototype/android-model-conversations/:conversationId/messages"), false);
     assert.equal(hasPostRoute(
       "/api/v1/conversations/:conversationId/intent-scopes/:intentScopeId/user-messages",
     ), false);
@@ -688,6 +706,30 @@ test("legacy bounded and historical default routes are absent from the canonical
     ), true);
   } finally {
     await app.close();
+  }
+});
+
+test("legacy and simulated routes require explicit non-canonical composition", async () => {
+  const legacy = buildLegacyTestApp();
+  const development = buildDevelopmentPrototypeApp();
+  try {
+    await Promise.all([legacy.ready(), development.ready()]);
+    assert.equal(legacy.hasRoute({ method: "POST", url: "/runs" }), true);
+    assert.equal(legacy.hasRoute({ method: "GET", url: "/runs/:id" }), true);
+    assert.equal(legacy.hasRoute({
+      method: "POST",
+      url: "/api/v1/conversations/:conversationId/messages",
+    }), true);
+    assert.equal(development.hasRoute({
+      method: "POST",
+      url: "/api/v1/prototype/model-conversations/:conversationId/messages",
+    }), true);
+    assert.equal(legacy.hasRoute({
+      method: "POST",
+      url: "/api/v1/prototype/model-conversations/:conversationId/messages",
+    }), false);
+  } finally {
+    await Promise.all([legacy.close(), development.close()]);
   }
 });
 

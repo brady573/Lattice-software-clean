@@ -1,8 +1,10 @@
 # Lattice Software
 
-Fast, zero-cost Lattice prototype proving the V36 truth-centered consultation architecture with deterministic offline evidence, a Product-owned provider-neutral model boundary, durable asynchronous control components, and a fidelity-bound Solandra presentation layer.
+Lattice makes trustworthy knowledge and conditional decision capability easier to reach, understand, and use—while it manages the machinery.
 
-For a concise current implementation map before opening source, read `docs/design/Lattice-System-Architecture.md`.
+That mission comes from [`docs/design/The-Core-Lattice-Philosophy.md`](docs/design/The-Core-Lattice-Philosophy.md), the highest Product-design authority and first filter for every Product, architecture, code, AI, workflow, UI, and validation decision. The current repository is a zero-cost implementation of that mission with Intent Authority, durable Runtime coordination, V36 truth adjudication, conditional decision support, Action Preparation, and a fidelity-bound Conversation + Composer Solandra experience.
+
+Read the Core first. For the concise current implementation map afterward, read `docs/design/Lattice-System-Architecture.md`.
 
 ## Canonical Product slice
 
@@ -51,7 +53,7 @@ The canonical prototype truth mode is `LATTICE_TRUTH_MODE=v36-offline`. Live-pro
 
 ### Zero-cost local model provider
 
-Development mode can use a locally running OpenAI-compatible model server, such as a local Qwen model exposed by Ollama, without a paid model API. The route is explicitly classified as `LOCAL_OFFLINE` and `PINNED`; it remains a non-authoritative model capability and does not activate external live-provider routing or bypass V36.
+The explicit non-canonical development composition can use a locally running OpenAI-compatible model server, such as a local Qwen model exposed by Ollama, without a paid model API. Its simulator route is classified as `LOCAL_OFFLINE` and `PINNED`; it remains non-authoritative and cannot activate external live-provider routing or bypass V36. Canonical `npm run dev` never mounts simulator or Android prototype routes.
 
 The exact `qwen3:4b-instruct` + Ollama `0.33.2` combination has been qualified on canonical `main @ 80d50a3cf06f60fbd0c5deb6e00411fe7f21137a` for the bounded local development/model-contract role: the direct `/v1/chat/completions` probe returned the requested licensed output and the deterministic local-model suite passed 18/18 attempts. See `docs/implementation/M9-local-offline-qwen-qualification.md` for exact provenance and limitations.
 
@@ -60,7 +62,7 @@ For an Ollama-compatible endpoint on its default local port, the tested developm
 ```bash
 LATTICE_LOCAL_MODEL_PROVIDER_BASE_URL=http://127.0.0.1:11434/v1
 LATTICE_LOCAL_MODEL_PROVIDER_MODEL=qwen3:4b-instruct
-npm run dev
+npm run dev:prototype
 ```
 
 Other exact installed model tags may be used for experiments, but qualification does not transfer by model-family name alone. In particular, the thinking-specific `qwen3:4b` artifact tested during qualification did not satisfy the deterministic licensed-output contract under the tested runtime; do not substitute it for `qwen3:4b-instruct` and assume equivalent behavior.
@@ -91,7 +93,7 @@ curl -sS -X POST http://127.0.0.1:3000/api/v1/conversations/CONVERSATION_ID/turn
   }'
 ```
 
-Canonical runtime composition contains no built-in domain grammar, candidate fixture, or criterion catalog. A qualified interpreter, criterion catalog, and evidence composition must be supplied before a decision need can move from `UNRESOLVED` to `QUALIFIED`; material interpreted meaning remains pending until USER confirmation.
+Canonical runtime composition contains no built-in domain grammar, candidate fixture, criterion catalog, legacy `/runs` intake, old structured-message intake, or simulated model/Android prototype routes. Historical adapter tests use `src/legacy/legacy-test-app.ts`; simulations use explicit `src/development/` composition. A qualified interpreter, criterion catalog, and evidence composition must be supplied before a decision need can move from `UNRESOLVED` to `QUALIFIED`; material interpreted meaning remains pending until USER confirmation.
 
 The versioned message API has an atomic asynchronous Run-acceptance boundary, durable idempotency, polling/result surfaces, durable cancellation, and an at-least-once Run-worker execution boundary. Durable Execution Runtime composition, the V36 continuation handshake, conversation/progress continuity, and M8 subject/privacy boundaries have all been implemented in their accepted milestone scopes; exact validation provenance remains revision-bound. See `docs/ROADMAP.md` for the current execution view.
 
@@ -125,8 +127,8 @@ The repository PostgreSQL validation lane exercises restart survival, Run epoch/
 - **V36 Truth Core** is the protected epistemic authority for material external-world factual evidence used by authoritative decisions. The durable V36 research continuation contract established through M4 preserves V36-only admission/sufficiency authority even when Runtime workers execute research.
 - The current default V36 truth pipeline remains deterministic/offline. Live-provider promotion is separately governed by M9 and is not implied by local model or provider-contract support.
 - `src/model/` is the non-authoritative **Lattice Model Gateway**. Model/provider output is proposal, interpretation, or rendering material until the owning Product authority accepts it under its own contract.
-- **Lattice Decision Engine** owns authoritative eligibility, trade-off, frontier, selection, and `StructuredDecision` semantics from bound planning material plus V36-admitted evidence.
-- **Solandra Experience** is downstream of intent/truth/decision authority. Its semantic presentation is derived from authoritative Product state and must not silently create USER intent, V36 truth, eligibility, ranking, or winner identity.
+- **Lattice Decision Engine** conditionally owns authoritative eligibility, typed comparison, trade-off, frontier, licensed selection, and `StructuredDecision` semantics from an exact DecisionPlan plus a decision-specific projection of V36-admitted evidence. Knowledge and non-decision Action Preparation bypass it.
+- **Solandra Experience** is downstream of Product authority. Conversation carries questions, clarifications, acknowledgements, and concise explanation; Composer is the adaptive visual information surface. Neither may dictate backend behavior or silently create USER intent, V36 truth, eligibility, ranking, or winner identity.
 - M7 durable Conversation/USER-message/continuity/reconnect behavior and M8 authenticated-subject ownership, derived-graph isolation, subject-scoped idempotency, explicit USER-controlled preference continuity, historical immutability, historical-fact non-reuse, and deletion-state enforcement are implemented in their accepted scopes. Generalized memory, retention duration, and purge execution remain outside those acceptance claims.
 - PostgreSQL-backed Run/truth/decision/intent/conversation/planning/preference persistence exists for the durable development runtime; in-memory storage remains available for local fixture development.
 - Production deployment, production database mutation, live-provider acceptance, paid infrastructure, and production readiness are not implied by repository state or development validation.

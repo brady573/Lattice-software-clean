@@ -4,7 +4,7 @@ Status: **Owner-approved current implementation structural map**.
 
 Approved: **August 31, 2026**.
 
-Repository reconciliation: PR #2 foundational-remediation candidate. The exact candidate SHA and revision-bound validation evidence are recorded in the pull-request description.
+Repository reconciliation baseline: merged foundational repair on `main @ 3de31612c46a3e31a70e6977f6e100d20bb6be85`. Later validation claims remain bound to their exact candidate SHA.
 
 ## 1. Purpose
 
@@ -724,7 +724,7 @@ Solandra Experience
 | Structured USER intent and IntentVersion lineage | Lattice Intent Authority |
 | Run lifecycle and execution state | Lattice Execution Runtime |
 | External factual claims, evidence, assessments, proof state | V36 Truth Core |
-| Eligibility, ranking, frontier, winner, `StructuredDecision` | Lattice Decision Engine |
+| Qualified decision eligibility, comparison, frontier, licensed selection, `StructuredDecision` | Lattice Decision Engine |
 | Human-facing explanation and semantic presentation | Solandra Experience |
 
 ### 14.2 Durable binding and coordination state
@@ -747,10 +747,9 @@ Prefer derived state where it can be faithfully reconstructed from authoritative
 
 Current examples include:
 
-- Solandra semantic phase derived from Run and authoritative IntentVersion state;
-- current-understanding presentation derived from the authoritative IntentVersion;
-- supporting knowledge derived from planning material;
-- next-action presentation derived from `StructuredDecision`;
+- accepted-understanding presentation derived only from the authoritative IntentVersion;
+- supporting knowledge derived from V36 truth state and applicable outcome state, never from planning material alone;
+- next-action presentation derived from an applicable prepared Resource or qualified DecisionSupportOutcome, not a universal `StructuredDecision`;
 - presentation revision derived from its authoritative basis;
 - meaningful-difference and frontier state derived from qualified criterion semantics and admitted evidence; and
 - UI/progress projections derived from Run lifecycle.
@@ -807,7 +806,7 @@ The calling Product authority remains responsible for accepting or rejecting mod
 truth != decision
 ```
 
-V36 establishes factual/evidence state. The Decision Engine applies requirements and preference semantics to that admitted evidence.
+V36 establishes generic factual/evidence state. Only when decision work is qualified does a decision-specific projection adapt admitted evidence for the Decision Engine, which applies authoritative requirements and qualified comparison semantics.
 
 ### F. Decision Engine → Solandra
 
@@ -888,6 +887,7 @@ After this document, read according to the change being made.
 ### Product philosophy and long-term direction
 
 ```text
+docs/design/The-Core-Lattice-Philosophy.md
 docs/design/Lattice-Foundational-Design-Principle.md
 docs/design/Lattice-Living-Software-Design-to-1.0.md
 ```

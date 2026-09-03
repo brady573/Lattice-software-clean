@@ -139,23 +139,14 @@ test("M8-C isolates Conversation-derived messages, intent writes, Runs, plans, p
     assert.equal(crossIntentWrite.statusCode, 404);
     assert.deepEqual(crossIntentWrite.json(), { error: "CONVERSATION_NOT_FOUND" });
 
-    const crossRunCreation = await app.inject({
+    assert.equal(app.hasRoute({
       method: "POST",
-      url: `/api/v1/conversations/${conversationId}/messages`,
-      headers: otherHeaders,
-      payload: {},
-    });
-    assert.equal(crossRunCreation.statusCode, 404);
-    assert.deepEqual(crossRunCreation.json(), { error: "CONVERSATION_NOT_FOUND" });
-
-    const crossExactRunCreation = await app.inject({
+      url: "/api/v1/conversations/:conversationId/messages",
+    }), false);
+    assert.equal(app.hasRoute({
       method: "POST",
-      url: `/api/v1/conversations/${conversationId}/intent-scopes/${binding.intentScopeId}/versions/${binding.intentVersionId}/runs`,
-      headers: otherHeaders,
-      payload: {},
-    });
-    assert.equal(crossExactRunCreation.statusCode, 404);
-    assert.deepEqual(crossExactRunCreation.json(), { error: "CONVERSATION_NOT_FOUND" });
+      url: "/api/v1/conversations/:conversationId/intent-scopes/:intentScopeId/versions/:intentVersionId/runs",
+    }), false);
 
     const ownerHistoryAfterRejectedWrites = await app.inject({
       method: "GET",

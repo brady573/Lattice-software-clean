@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildApp } from "../src/app.js";
+import { buildDevelopmentPrototypeApp as buildApp } from "../src/development/development-prototype-app.js";
 import {
   ModelRuntime,
   type CanonicalModelRequest,

@@ -6,8 +6,9 @@ This file summarizes current milestone position for day-to-day execution. It doe
 
 ## Controlling design and maintenance sources
 
-The canonical 1.0 Product direction and forward milestone sequence are defined by:
+The controlling order is:
 
+- `docs/design/The-Core-Lattice-Philosophy.md` — highest Product-design authority and first filter;
 - `docs/design/Lattice-Living-Software-Design-to-1.0.md`;
 - `docs/design/Lattice-Living-Software-Design-to-1.0-v0.6-amendment.md`;
 - `docs/design/Lattice-Living-Software-Design-to-1.0-v0.7-amendment.md`;
@@ -26,18 +27,17 @@ Permanent domain maintenance homes are:
 - `docs/design/Lattice-Resource-and-Action-Architecture.md` — Resource identity/provenance/validity/hydration and ActionProposal semantics; and
 - `docs/design/Lattice-Reliability-and-Recovery-Architecture.md` — failure classes, recovery ownership, retry/replay/reconnect, degraded operation and observability.
 
-These documents retain their own stated status. Their presence does not silently supersede Owner-approved decisions. The protected V36 specification remains controlling for V36 epistemic semantics.
+These documents retain their own stated status and are valid only where they conform to the Core. The protected V36 specification remains controlling for V36 epistemic semantics within that subordinate boundary.
 
 M9-specific live-provider/model route qualification remains in `docs/design/M9-Live-Provider-Promotion-Architecture.md` and its executed qualification records. Generic execution and reliability behavior belongs in the permanent domain architectures rather than being redefined by M9.
 
-The current Solandra primary presentation direction is the Owner-approved `docs/design/solandra/PRIMARY-INTERACTION-CONTRACT.md`, supported by the companion Solandra design documents. The earlier offline prototype package and Knowledge Orbit work remain historical approval/implementation provenance where applicable; they do not override the later Composer/three-phase primary interaction lock.
+The current Solandra primary presentation direction is the Owner-approved `docs/design/solandra/PRIMARY-INTERACTION-CONTRACT.md`, supported by the companion Solandra design documents. The earlier offline prototype package, Knowledge Orbit, and fixed three-stage language remain historical provenance only. Current Solandra is a continuous Conversation + ConversationInput + adaptive Composer composition; it does not impose a fixed presentation sequence or define backend Product behavior.
 
 ## Reconciliation baseline
 
 Roadmap reconciled against canonical:
 
-- `main @ 63251dde6cfb6aa08c3a054b24d4ca7d1127bc65`
-- tree `18ebbe3e345c1e504316decb599848602c465bcd`
+- `main @ 3de31612c46a3e31a70e6977f6e100d20bb6be85`
 
 Fresh canonical source controls implementation-status claims. Historical validation remains scoped to the exact revision and execution surface on which it ran; this roadmap does not transfer validation across revisions.
 
@@ -59,7 +59,7 @@ The canonical system names are **Lattice Product**, **Lattice Intent Authority**
 
 M7 durable Conversation/progress/reconnect acceptance is historical exact-revision evidence. Canonical `main @ 4d9548b7e8c64b57c60eb37a9e605a1c391b810b` established the PostgreSQL-backed durable Conversation/USER-message/continuity/reconnect stack through M7-G2A. PR #120 subsequently integrated the then-current Knowledge Orbit presentation and real-browser M7-G2C acceptance, and exact-main validation later passed on `4ec9cbcb4faca04896cecac310ed5e5e7e532e26` in GitHub Actions run `33296051622`.
 
-The Knowledge Orbit portion is retained as **historical M7 acceptance provenance only**. Later Owner-approved Solandra design and implementation replaced orbit-first primary presentation with the semantic Composer baseline and the Listen / Current understanding / Provide knowledge interaction lock. That presentation supersession does not invalidate the durable M7 backend/reconnect evidence.
+The Knowledge Orbit portion is retained as **historical M7 acceptance provenance only**. Later Owner-approved Solandra design and implementation replaced orbit-first and fixed-stage presentation with continuous Conversation + ConversationInput + adaptive Composer. That presentation supersession does not invalidate the durable M7 backend/reconnect evidence.
 
 ### M8
 
@@ -77,21 +77,21 @@ M8 therefore has bounded acceptance evidence for authenticated subject ownership
 | Prototype | **M2 — Solandra Offline Prototype UI Design** | **COMPLETE / OWNER-APPROVED HISTORICAL OFFLINE-PROTOTYPE DESIGN** | The approved archive remains valid approval provenance for its bounded offline-prototype scope. Later Owner-approved Solandra primary-interaction design supersedes conflicting orbit-first/dashboard-first presentation direction without erasing the M2 approval event. |
 | Build to 1.0 | **M3 — Lattice Execution Runtime durable composition** | **COMPLETE / EXACT-REVISION ACCEPTED** | Durable API/Run-worker/Research-worker composition, resumable Run coordination and PostgreSQL process boundaries were accepted on their exact milestone revisions. Generic execution semantics are now maintained in `Lattice-Execution-and-Capability-Architecture.md`. |
 | Build to 1.0 | **M4 — Durable V36 Truth Core research handshake** | **COMPLETE / EXACT-REVISION ACCEPTED** | Full checkpoint/research continuation is implemented: Runtime executes operational work; V36 alone admits evidence and advances truth. Live-provider qualification remains a separate M9 concern. |
-| Build to 1.0 | **M5 — Lattice Intent Authority + clarification + planning** | **COMPLETE / EXACT-REVISION ACCEPTED** | M5-A through M5-K established immutable USER-provenance intent, clarification/correction lineage, exact DecisionPlan/Run binding, supersession and bounded delegation. Permanent semantics are maintained in `Lattice-Intent-and-Decision-Architecture.md`. |
+| Build to 1.0 | **M5 — Lattice Intent Authority + conditional planning** | **COMPLETE / EXACT-REVISION ACCEPTED** | M5-A through M5-K plus the foundational repair established immutable USER-provenance intent, clarification/correction lineage, exact IntentVersion-to-Run binding, conditional faithful DecisionPlan, supersession and bounded delegation. Permanent semantics are maintained in `Lattice-Intent-and-Decision-Architecture.md`. |
 | Build to 1.0 | **M6 — Lattice Decision Engine generalization** | **COMPLETE / EXACT-REVISION ACCEPTED** | Typed/versioned criteria, priority tiers, tri-state hard requirements, material-dominance frontier, structured trade-offs and bounded delegated selection are implemented and accepted at the milestone boundary. |
 | Build to 1.0 | **M7 — Conversation + progress API** | **COMPLETE / EXACT-REVISION ACCEPTED** | Durable Conversation, USER-message provenance, SSE reconnect, reload reconstruction and continuation are accepted. Knowledge Orbit is historical presentation provenance, not the current primary UI contract. |
 | Build to 1.0 | **M8 — Auth + privacy + continuity** | **COMPLETE / EXACT-REVISION ACCEPTED** | OD-007 explicit preference continuity, authenticated ownership/isolation, subject-scoped idempotency, deletion enforcement and continuity controls have bounded exact-revision acceptance. |
 | Build to 1.0 | **M9 — Live-provider promotion** | **IN PROGRESS / M9-4 BOUNDED LIVE ROUTE QUALIFIED / OD-005 PARTIALLY BLOCKING** | M9-1 invocation provenance, M9-2 capability execution policy and M9-3 bounded external context projection are present in canonical history. M9-4 has qualified a pinned zero-cost `LIVE_DIRECT` NVIDIA NIM development route using `nvidia/nemotron-3.5-lightning-30b-a3b` with 18/18 live behavioral passes under synthetic/non-sensitive input restrictions. This does not authorize production routing/data or automatic fallback. M9-5 durable live research is the next unclosed milestone slice; M9-6 routing/fallback promotion remains blocked on OD-005; M9-7 integrated acceptance follows. |
-| Build to 1.0 | **M10 — Solandra Experience 1.0 explanation** | **PARTIAL / PRIMARY INTERACTION LOCKED / OD-006 BLOCKS GENERALIZED EXPLANATION** | The semantic Solandra baseline replaced Knowledge Orbit in active presentation, and the Owner-approved primary interaction is now Conversation + ConversationInput + Composer with exactly Listen / Current understanding / Provide knowledge. Resource presentation and reliability presentation have permanent application-level semantic owners. OD-006 generalized model-assisted explanation licensing/fidelity and its milestone acceptance remain unresolved; current presentation progress does not complete M10. |
+| Build to 1.0 | **M10 — Solandra Experience 1.0 explanation** | **PARTIAL / PRIMARY INTERACTION LOCKED / OD-006 BLOCKS GENERALIZED EXPLANATION** | The semantic Solandra baseline replaced Knowledge Orbit and fixed stages. The Owner-approved primary interaction is continuous Conversation + ConversationInput + adaptive Composer: dialogue and concise explanation stay in Conversation; Composer presents the most useful trustworthy visual material currently available. Resource and reliability presentation retain their application-level semantic owners. OD-006 generalized model-assisted explanation licensing/fidelity remains unresolved. |
 | Production / release | **M11 — Production operations** | **BLOCKED** | Requires Owner-bound production topology/SLO/backup/limit/security/rollback decisions and operational acceptance. Completion of M8/M9 development surfaces does not authorize production deployment. |
 | Production / release | **M12 — 1.0 stabilization** | **BLOCKED** | Requires all applicable release gates on one exact release candidate, including AIC-R1, plus resolution/acceptance of release-blocking open decisions. |
 
 ## Confirmed Product decisions controlling forward work
 
-- **OD-001 — RESOLVED / CONFIRMED:** Lattice 1.0 is a **Trusted Decision Product**. Guaranteed journey: natural-language goal → authoritative intent → material clarification when necessary → bounded research → V36 verification → authoritative decision → faithful Solandra explanation → conversational continuation.
+- **OD-001 — RESOLVED / SUPERSEDED BY CORE RECONCILIATION:** Lattice 1.0 is trustworthy knowledge plus conditional decision capability. Knowledge and non-decision Action Preparation are complete Product paths; DecisionPlan, decision evidence projection, Decision Engine, and StructuredDecision exist only for qualified decision work.
 - **OD-002 — RESOLVED / CONFIRMED:** V36 yields immutable continuation state and research requests; Execution Runtime durably executes/persists operational results; only V36 resumes epistemic state. Operational inability is not epistemic judgment.
 - **OD-003 — RESOLVED / CONFIRMED:** one Decision Engine with qualified typed/versioned Criterion Catalog, USER priority tiers, tri-state hard requirements, layered tolerance ownership, material-dominance frontier, no forced #1 and explicit bounded final-choice delegation.
-- **OD-004 — RESOLVED / CONFIRMED:** transcript is context/provenance; immutable versioned structured intent is authority; canonical mutation requires USER-origin meaning or exact proposal-bound confirmation; corrections preserve lineage; DecisionPlans/Runs bind exact intent versions; delegation is explicit and bounded.
+- **OD-004 — RESOLVED / CONFIRMED:** transcript is context/provenance; immutable versioned structured intent is authority; canonical mutation requires USER-origin meaning or exact proposal-bound confirmation; corrections preserve lineage; every Run binds an exact intent version; a DecisionPlan additionally exists only for qualified decision work and must faithfully project that version; delegation is explicit and bounded.
 - **OD-007 — RESOLVED / CONFIRMED:** Lattice 1.0 continuity is explicit USER-authored/confirmed preference continuity, not generalized conversational memory. Reuse is visible, revocable, versioned and provenance-preserving; transcript/model/Solandra inference and historical external facts do not silently become reusable memory/truth.
 
 Still unresolved where not separately qualified:
@@ -107,7 +107,7 @@ Still unresolved where not separately qualified:
 3. **M9-5 — durable live research through Execution Runtime and V36.** Reuse the already-qualified bounded M9-4 live route only within its synthetic/non-sensitive development boundary. Provider success remains operational evidence; V36 remains factual admission authority.
 4. **M9-6 — routing/fallback promotion only after OD-005.** Qualification of one pinned route does not authorize autonomous provider selection or failover policy.
 5. **M9-7 — integrated exact-revision Product acceptance.** Validate the complete promoted M9 path on the exact candidate without transferring provider/model authority into Product semantics.
-6. **M10 — continue presentation work only within current semantic owners while OD-006 remains unresolved.** The primary interaction lock may be implemented/refined without inventing generalized explanation licensing. Resources remain governed by Resource/Action architecture; failure/recovery presentation remains governed by Reliability/Recovery; truth/decision/intent remain upstream authorities.
+6. **M10 — continue presentation work only within current semantic owners while OD-006 remains unresolved.** Conversation + Composer may be refined without inventing generalized explanation licensing or dictating backend phases. Resources remain governed by Resource/Action architecture; failure/recovery presentation remains governed by Reliability/Recovery; truth/conditional-decision/intent remain upstream authorities.
 7. **M11 — bind production operations explicitly.** Production topology, SLOs, backups, security, data/provider policy, limits, rollback and deployment require their own qualified decisions and Owner authorization.
 8. **M12 — stabilize one exact release candidate.** Execute all applicable release gates, including Architecture Integrity, without transferring validation from prior revisions.
 
@@ -132,11 +132,12 @@ COMPLETE: M4 Durable V36 research handshake
                                       |                    M9-7 integrated accept   PENDING
                                       |
                                       v
-COMPLETE: M5 Intent Authority/planning
+COMPLETE: M5 Intent Authority + exact Run binding
+      |-- knowledge/action paths bypass decision machinery
+      '-- qualified decision path -> COMPLETE: M6 Decision Engine generalization
                                       |
                                       v
-COMPLETE: M6 Decision Engine generalization
-      -> M10 Solandra Experience — primary interaction locked; generalized explanation blocked on OD-006
+M10 Solandra Experience — Conversation + adaptive Composer locked; generalized explanation blocked on OD-006
                                       |
                                       v
 COMPLETE: M7 Conversation + Progress API

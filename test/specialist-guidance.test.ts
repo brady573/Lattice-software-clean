@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import type { FastifyInstance } from "fastify";
-import { buildApp } from "../src/app.js";
+import { buildCanonicalApp as buildApp } from "../src/http-app.js";
 import { AndroidRelayModelProvider, ModelRuntime } from "../src/model/index.js";
 import { registerAndroidModelPrototype } from "../src/prototype/android-model-prototype.js";
 import {
