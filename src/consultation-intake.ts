@@ -31,6 +31,7 @@ import { createPendingRun } from "./run-execution.js";
 import type { RunStore } from "./run-store.js";
 
 const IDEMPOTENCY_RETENTION_MS = 24 * 60 * 60 * 1_000;
+const MAX_RUN_CONTEXT_ITEMS = 32;
 
 const consultationTurnSchema = z.object({
   turnId: z.string().min(1).max(200),
@@ -378,9 +379,18 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
       const qualification = interpretation.decisionRequested
         ? qualifiedDecisionNeed(version, options.criterionCatalog)
         : { decisionNeed: "NONE" as const };
+      const runContext = interpretation.objectiveEffect.kind === "PRESERVE"
+        ? [sourceMessage.content, ...(parsed.data.context ?? [])]
+        : [...(parsed.data.context ?? [])];
+      if (runContext.length > MAX_RUN_CONTEXT_ITEMS) {
+        return reply.status(400).send({
+          error: "CONSULTATION_CONTEXT_LIMIT_EXCEEDED",
+          message: `Current-turn work context is limited to ${MAX_RUN_CONTEXT_ITEMS} items.`,
+        });
+      }
       const requestBody = consultationRequest({
         objective: authoritativeObjective(version),
-        context: [],
+        context: runContext,
         decisionNeed: qualification.decisionNeed,
         resourceNeed: interpretation.resourceNeed,
         sourceMessageId: sourceMessage.messageId,

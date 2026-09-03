@@ -25,6 +25,7 @@ export const runRequestSchema = z.object({
 export const consultationRunRequestSchema = z.object({
   kind: z.literal("consultation"),
   objective: z.string().min(1).max(8_000),
+  /** Non-authoritative conversational/work context for this exact Run. */
   context: z.array(z.string().min(1).max(4_000)).max(32).default([]),
   decisionNeed: z.enum(["NONE", "UNRESOLVED", "QUALIFIED"]).default("NONE"),
   resourceNeed: z.enum(["NONE", "CHECKLIST", "PREPARED_MESSAGE"]).default("NONE"),

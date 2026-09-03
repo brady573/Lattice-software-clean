@@ -33,7 +33,9 @@ test("authoritative Solandra surface is Conversation + free-form input + adaptiv
   assert.match(html, /\/outcome/);
   assert.match(html, /event\.isComposing/);
   assert.match(html, /event\.shiftKey/);
-  assert.match(html, /What you said/);
+  assert.match(html, /appendUserTurn\(message\)/);
+  assert.match(html, /appendSolandraTurn\(body\.question/);
+  assert.match(html, /appendSolandraTurn\(outcome\.explanation/);
   assert.match(html, /confirmsPending = clarification && isExplicitConfirmation\(message\)/);
   assert.ok(
     html.includes('replace(/\\s+/g, " ")'),
@@ -44,15 +46,17 @@ test("authoritative Solandra surface is Conversation + free-form input + adaptiv
     "Rendered confirmation classifier must retain its optional-period escape.",
   );
   assert.doesNotMatch(html, /clear-user-messages|decision-plan|winnerCandidateId|Knowledge Orbit|resourceFocus|newUpdate/i);
+  assert.doesNotMatch(html, /Accepted understanding|What you said|Interpreting against|One clarification|Conversation \+ adaptive Composer|Confidence:|<h2>Provenance<\/h2>/i);
   assert.doesNotMatch(html, /Atlas Pro|Nova Air|Forge 15|batteryHours|price\.max\.usd|performance\.relativeToBattery/i);
 
   const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((match) => match[1] ?? "");
   assert.ok(scripts.length >= 1, "Expected canonical Conversation browser script.");
   for (const source of scripts) new Script(source);
 
-  const beforeAuthority = html.match(/appendTurn\(message\);([\s\S]*?)const id = await ensureConversation\(\);/u)?.[1] ?? "";
-  assert.match(beforeAuthority, /What you said/);
-  assert.doesNotMatch(beforeAuthority, /Accepted understanding/);
+  const beforeAuthority = html.match(/appendUserTurn\(message\);([\s\S]*?)const id = await ensureConversation\(\);/u)?.[1] ?? "";
+  assert.notEqual(beforeAuthority, "");
+  assert.match(beforeAuthority, /composer\.replaceChildren\(\)/);
+  assert.doesNotMatch(beforeAuthority, /composer\.innerHTML|Accepted understanding|What you said|Interpreting/);
 });
 
 test("Composer can present accepted Intent state before terminal Run completion", async () => {

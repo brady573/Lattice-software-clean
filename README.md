@@ -22,7 +22,7 @@ Start the application and open:
 http://127.0.0.1:3000/
 ```
 
-Free-form turns use `POST /api/v1/conversations/:conversationId/turns`. The server records exact USER provenance, interprets the turn against the current IntentVersion, and changes canonical intent only when the USER establishes or explicitly corrects the objective or confirms material proposed meaning. Ordinary follow-ups preserve the objective. V36 then supports Knowledge, conditional Decision Support, or Action Preparation at `/api/v1/runs/:runId/outcome`.
+Free-form turns use `POST /api/v1/conversations/:conversationId/turns`. The server records exact USER provenance, interprets the turn against the current IntentVersion, and changes canonical intent only when the USER establishes or explicitly corrects the objective or confirms material proposed meaning. Ordinary follow-ups preserve the objective and IntentVersion while remaining non-authoritative conversational/work context for the exact Run handling that turn. V36 then supports Knowledge, conditional Decision Support, or Action Preparation at `/api/v1/runs/:runId/outcome`.
 
 ## Requirements
 

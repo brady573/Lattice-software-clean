@@ -21,9 +21,6 @@ export class DecisionPlanRecordingApiRunControlStore implements ApiRunControlSto
     if (!input.intentBinding) return;
     const request = input.run.request;
     if (isConsultationRunRequest(request) && request.decisionNeed !== "QUALIFIED") return;
-    if (isConsultationRunRequest(request) && request.context.length > 0) {
-      throw new Error("Qualified DecisionPlan cannot include non-authoritative conversation context.");
-    }
     await this.decisionPlanStore.bind({
       decisionPlanId: decisionPlanIdForRun(input.run.id),
       runId: input.run.id,

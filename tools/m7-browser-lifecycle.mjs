@@ -335,6 +335,7 @@ async function main() {
     assert.equal(baseline.prototypeSurface, false);
     assert.equal(baseline.placeholder, "What do you need to figure out?");
     assert.doesNotMatch(baseline.bodyText, /Atlas Pro|Nova Air|Forge 15/i);
+    assert.doesNotMatch(baseline.bodyText, /Conversation \+ adaptive Composer|Accepted understanding|semantic status/i);
     evidence.browser.baseline = baseline;
 
     const installClarificationFixture = async () => cdp.eval(`(() => {
@@ -371,15 +372,17 @@ async function main() {
     await submitBrowserTurn(cdp, "Help me compare these approaches.");
     await waitFor("browser pending clarification", async () => cdp.eval(`(() => {
       const input=document.getElementById('conversationInput');
-      const text=document.getElementById('composer').innerText;
-      return !input.disabled&&text.includes('One clarification') ? true : null;
+      const conversation=document.getElementById('conversation').innerText;
+      const composer=document.getElementById('composer').innerText;
+      return !input.disabled&&conversation.includes('Do you mean the inferred comparison?')&&!composer.includes('Do you mean the inferred comparison?') ? true : null;
     })()`));
     await submitBrowserTurn(cdp, "No, actually explain the evidence instead.");
     const correctionRouting = await waitFor("browser clarification correction", async () => cdp.eval(`(() => {
       const input=document.getElementById('conversationInput');
-      const text=document.getElementById('composer').innerText;
-      if(input.disabled||!text.includes('Explain the evidence instead.'))return null;
-      return {text,requests:window.__clarificationFixtureRequests,turns:document.querySelectorAll('#conversation .turn.user').length};
+      const composerText=document.getElementById('composer').innerText;
+      const conversationText=document.getElementById('conversation').innerText;
+      if(input.disabled||!composerText.includes('Fixture limitation.')||!conversationText.includes('Explain the evidence instead.'))return null;
+      return {composerText,conversationText,requests:window.__clarificationFixtureRequests,turns:document.querySelectorAll('#conversation .turn.user').length};
     })()`));
     assert.equal(correctionRouting.turns, 2);
     assert.equal(correctionRouting.requests.filter((item) => item.path.endsWith('/turns')).length, 2);
@@ -397,8 +400,9 @@ async function main() {
     await submitBrowserTurn(cdp, "Help me compare these approaches.");
     await waitFor("browser pending clarification before confirmation", async () => cdp.eval(`(() => {
       const input=document.getElementById('conversationInput');
-      const text=document.getElementById('composer').innerText;
-      return !input.disabled&&text.includes('One clarification') ? true : null;
+      const conversation=document.getElementById('conversation').innerText;
+      const composer=document.getElementById('composer').innerText;
+      return !input.disabled&&conversation.includes('Do you mean the inferred comparison?')&&!composer.includes('Do you mean the inferred comparison?') ? true : null;
     })()`));
     await submitBrowserTurn(cdp, "Yes, that's correct.");
     const confirmationRouting = await waitFor("browser clarification confirmation", async () => cdp.eval(`(() => {
@@ -458,13 +462,13 @@ async function main() {
     await submitBrowserTurn(cdp, knowledgeMessage);
     const pausedRequestId = await waitFor("paused first consultation turn", async () => pausedTurnRequestId);
     const preAuthority = await cdp.eval(`(() => ({
-      text:document.getElementById('composer').innerText,
+      composerText:document.getElementById('composer').innerText,
       userTurn:document.querySelector('#conversation .turn.user')?.textContent ?? '',
     }))()`);
     assert.equal(preAuthority.userTurn, knowledgeMessage);
-    assert.match(preAuthority.text, /What you said/);
-    assert.match(preAuthority.text, /Interpreting/);
-    assert.doesNotMatch(preAuthority.text, /Accepted understanding/);
+    assert.equal(preAuthority.composerText.trim(), "");
+    assert.equal(preAuthority.composerText.includes(knowledgeMessage), false);
+    assert.doesNotMatch(preAuthority.composerText, /Accepted understanding|What you said|Interpreting/);
     evidence.browser.preAuthority = preAuthority;
     await cdp.send("Fetch.continueRequest", { requestId: pausedRequestId });
     await cdp.send("Fetch.disable");
@@ -493,14 +497,18 @@ async function main() {
       const composer=document.getElementById('composer');
       if(input.disabled)return null;
       const text=composer.innerText;
-      return text.includes(${JSON.stringify(knowledgeMessage)}) && text.includes('Findings') ? {
+      const conversationText=document.getElementById('conversation').innerText;
+      return text.includes('No validated external findings')&&conversationText.includes('I don’t have validated external findings') ? {
         text,
+        conversationText,
         conversationTurns:document.querySelectorAll('#conversation .turn.user').length,
         pageOverflow:document.documentElement.scrollWidth>document.documentElement.clientWidth,
       } : null;
     })()`));
     assert.equal(renderedKnowledge.conversationTurns, 1);
     assert.equal(renderedKnowledge.pageOverflow, false);
+    assert.equal(renderedKnowledge.text.includes(knowledgeMessage), false);
+    assert.doesNotMatch(renderedKnowledge.text, /Accepted understanding|What you said|Interpreting|Confidence:|Provenance/i);
     assert.doesNotMatch(renderedKnowledge.text, /winner|Atlas Pro|Nova Air|Forge 15/i);
     evidence.browser.knowledge = renderedKnowledge;
     await screenshot(cdp, "knowledge-desktop.png");
@@ -529,12 +537,16 @@ async function main() {
       return {
         editable:!prepared.disabled&&!prepared.readOnly,
         title:composer.innerText.includes('Prepared checklist'),
+        stackedKnowledge:composer.innerText.includes('What remains uncertain')||composer.innerText.includes('No validated external findings'),
+        solandraAcknowledgement:document.getElementById('conversation').innerText.includes('Nothing has been sent or executed.'),
         conversationTurns:document.querySelectorAll('#conversation .turn.user').length,
         pageOverflow:document.documentElement.scrollWidth>document.documentElement.clientWidth,
       };
     })()`));
     assert.equal(resourceTakeover.editable, true);
     assert.equal(resourceTakeover.title, true);
+    assert.equal(resourceTakeover.stackedKnowledge, false);
+    assert.equal(resourceTakeover.solandraAcknowledgement, true);
     assert.equal(resourceTakeover.conversationTurns, 2);
     assert.equal(resourceTakeover.pageOverflow, false);
     evidence.browser.resourceTakeover = resourceTakeover;

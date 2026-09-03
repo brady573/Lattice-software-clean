@@ -9,6 +9,7 @@ import ts from "typescript";
 import { createRuntimeApp } from "../src/runtime-app.js";
 import { resolveRuntimeConfig } from "../src/runtime-config.js";
 import { createStandaloneRunWorker, type StandaloneRunWorker } from "../src/run-worker-process.js";
+import { isConsultationRunRequest, type LatticeRunRequest } from "../src/domain.js";
 import {
   ACTION_MESSAGE,
   DECISION_MESSAGE,
@@ -202,8 +203,115 @@ test("ordinary conversational follow-ups preserve the authoritative objective", 
       assert.equal(response.json().intentVersionId, initialIntentVersionId);
       assert.equal(response.json().acceptedUnderstanding, objective);
       const run = await app.inject({ method: "GET", url: `/api/v1/runs/${response.json().runId}` });
+      assert.equal(run.statusCode, 200, run.body);
       assert.equal(run.json().request.objective, objective);
+      assert.deepEqual(run.json().request.context, [followUp]);
+      assert.equal(run.json().request.sourceMessageId, response.json().provenance.messageId);
+      await waitForCompletedRun(app, response.json().runId);
+      const outcome = await app.inject({
+        method: "GET",
+        url: `/api/v1/runs/${response.json().runId}/outcome`,
+      });
+      assert.equal(outcome.statusCode, 200, outcome.body);
+      assert.equal(outcome.json().outcome.objective, objective);
     }
+  } finally {
+    await app.close();
+  }
+});
+
+test("qualified follow-up context remains Run-usable without entering IntentVersion or DecisionPlan authority", async () => {
+  const explanationFollowUp = "Why is that recommendation supported?";
+  const foundationalInterpreter = new FoundationalConsultationInterpreter();
+  const truthComposition = createFoundationalTruthComposition();
+  const investigatedRequests: LatticeRunRequest[] = [];
+  const truthPipeline = new Proxy(truthComposition.truthPipeline, {
+    get(target, property) {
+      if (property === "investigate") {
+        return async (runId: string, request?: LatticeRunRequest) => {
+          if (request) investigatedRequests.push(structuredClone(request));
+          return target.investigate(runId, request);
+        };
+      }
+      const value = Reflect.get(target, property, target) as unknown;
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+  const app = await createRuntimeApp(config, {
+    memoryDispatchDelayMs: 1,
+    ...truthComposition,
+    truthPipeline,
+    criterionCatalog: foundationalCriterionCatalog,
+    consultationInterpreter: {
+      async interpret(input) {
+        if (input.message.trim() === explanationFollowUp) {
+          return {
+            objectiveEffect: { kind: "PRESERVE" as const },
+            meaningKind: "RESOURCE_OR_EXPLANATION_REQUEST" as const,
+            decisionRequested: true,
+            resourceNeed: "NONE" as const,
+          };
+        }
+        return foundationalInterpreter.interpret(input);
+      },
+    },
+  });
+  try {
+    const conversationId = await createConversation(app);
+    const pending = await app.inject({
+      method: "POST",
+      url: `/api/v1/conversations/${conversationId}/turns`,
+      payload: { turnId: "decision-with-follow-up", message: DECISION_MESSAGE },
+    });
+    assert.equal(pending.statusCode, 202, pending.body);
+    assert.equal(pending.json().status, "NEEDS_CLARIFICATION");
+
+    const confirmed = await app.inject({
+      method: "POST",
+      url: `/api/v1/conversations/${conversationId}/clarifications/${pending.json().proposalId}/confirm`,
+      payload: { turnId: "decision-with-follow-up-confirm", message: "Yes, that's correct." },
+    });
+    assert.equal(confirmed.statusCode, 202, confirmed.body);
+    assert.equal(confirmed.json().decisionNeed, "QUALIFIED");
+    const authoritativeIntentVersionId = confirmed.json().intentVersionId as string;
+    await waitForCompletedRun(app, confirmed.json().runId);
+
+    const followUp = await app.inject({
+      method: "POST",
+      url: `/api/v1/conversations/${conversationId}/turns`,
+      payload: { turnId: "decision-explanation-follow-up", message: explanationFollowUp },
+    });
+    assert.equal(followUp.statusCode, 202, followUp.body);
+    assert.equal(followUp.json().decisionNeed, "QUALIFIED");
+    assert.equal(followUp.json().intentVersionId, authoritativeIntentVersionId);
+    assert.equal(followUp.json().acceptedUnderstanding, DECISION_MESSAGE);
+
+    const run = await app.inject({ method: "GET", url: `/api/v1/runs/${followUp.json().runId}` });
+    assert.equal(run.statusCode, 200, run.body);
+    assert.equal(run.json().request.objective, DECISION_MESSAGE);
+    assert.deepEqual(run.json().request.context, [explanationFollowUp]);
+
+    const plan = await app.inject({
+      method: "GET",
+      url: `/api/v1/runs/${followUp.json().runId}/decision-plan`,
+    });
+    assert.equal(plan.statusCode, 200, plan.body);
+    assert.equal(plan.json().decisionPlan.intentVersionId, authoritativeIntentVersionId);
+    assert.equal("context" in plan.json().decisionPlan.planningMaterial, false);
+
+    await waitForCompletedRun(app, followUp.json().runId);
+    const outcome = await app.inject({
+      method: "GET",
+      url: `/api/v1/runs/${followUp.json().runId}/outcome`,
+    });
+    assert.equal(outcome.statusCode, 200, outcome.body);
+    assert.equal(outcome.json().outcome.kind, "DECISION_SUPPORT");
+    const investigatedFollowUp = investigatedRequests.find((request) => (
+      isConsultationRunRequest(request) && request.sourceMessageId === followUp.json().provenance.messageId
+    ));
+    assert.ok(investigatedFollowUp && isConsultationRunRequest(investigatedFollowUp));
+    assert.equal(investigatedFollowUp.objective, DECISION_MESSAGE);
+    assert.deepEqual(investigatedFollowUp.context, [explanationFollowUp]);
   } finally {
     await app.close();
   }
@@ -337,6 +445,7 @@ test("qualified free-form decision intake survives the live PostgreSQL API-to-wo
   let worker: StandaloneRunWorker | undefined;
   let conversationId: string | undefined;
   let runId: string | undefined;
+  let followUpRunId: string | undefined;
   try {
     conversationId = await createConversation(app);
     const pending = await app.inject({
@@ -395,9 +504,36 @@ test("qualified free-form decision intake survives the live PostgreSQL API-to-wo
     assert.equal(persisted.rows[0]?.intent_scope_id, `consultation:${conversationId}`);
     assert.match(persisted.rows[0]?.intent_version_id ?? "", /^[0-9a-f-]{36}$/u);
     assert.equal(persisted.rows[0]?.decision_outcome, "RECOMMENDATION");
+
+    const followUpMessage = "Why is that recommendation supported?";
+    const followUp = await app.inject({
+      method: "POST",
+      url: `/api/v1/conversations/${conversationId}/turns`,
+      payload: { turnId: `pg-follow-up-${randomUUID()}`, message: followUpMessage },
+    });
+    assert.equal(followUp.statusCode, 202, followUp.body);
+    assert.equal(followUp.json().intentVersionId, accepted.json().intentVersionId);
+    assert.equal(followUp.json().acceptedUnderstanding, DECISION_MESSAGE);
+    followUpRunId = followUp.json().runId as string;
+
+    const persistedFollowUp = await app.inject({
+      method: "GET",
+      url: `/api/v1/runs/${followUpRunId}`,
+    });
+    assert.equal(persistedFollowUp.statusCode, 200, persistedFollowUp.body);
+    assert.equal(persistedFollowUp.json().request.objective, DECISION_MESSAGE);
+    assert.deepEqual(persistedFollowUp.json().request.context, [followUpMessage]);
+
+    const followUpPlan = await app.inject({
+      method: "GET",
+      url: `/api/v1/runs/${followUpRunId}/decision-plan`,
+    });
+    assert.equal(followUpPlan.statusCode, 404, followUpPlan.body);
+    await waitForCompletedRun(app, followUpRunId);
   } finally {
     await worker?.close();
     await app.close();
+    if (followUpRunId) await pool.query("DELETE FROM runs WHERE id=$1", [followUpRunId]);
     if (runId) await pool.query("DELETE FROM runs WHERE id=$1", [runId]);
     if (conversationId) await pool.query("DELETE FROM conversations WHERE id=$1", [conversationId]);
     await pool.end();
