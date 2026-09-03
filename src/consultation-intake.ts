@@ -336,7 +336,12 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
           initialTransition: transition,
         });
         intentVersionId = scope.currentIntentVersionId;
-      } else if (interpretation.objectiveEffect.kind === "PRESERVE") {
+      } else if (
+        interpretation.objectiveEffect.kind === "PRESERVE"
+        || currentVersion?.transitionId === transition.transitionId
+      ) {
+        // An exact replay of the turn that authored the current IntentVersion
+        // must reuse that version rather than manufacture a successor.
         intentVersionId = existingScope.currentIntentVersionId;
       } else {
         const applied = await options.intentStore.applyTransition(transition);
@@ -379,7 +384,8 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
       const qualification = interpretation.decisionRequested
         ? qualifiedDecisionNeed(version, options.criterionCatalog)
         : { decisionNeed: "NONE" as const };
-      const runContext = interpretation.objectiveEffect.kind === "PRESERVE"
+      const sourceTurnAuthoredVersion = version.transitionId === transition.transitionId;
+      const runContext = interpretation.objectiveEffect.kind === "PRESERVE" && !sourceTurnAuthoredVersion
         ? [sourceMessage.content, ...(parsed.data.context ?? [])]
         : [...(parsed.data.context ?? [])];
       if (runContext.length > MAX_RUN_CONTEXT_ITEMS) {

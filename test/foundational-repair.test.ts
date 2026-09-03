@@ -139,6 +139,43 @@ test("A Knowledge, B Decision, and C Action Preparation use the same canonical c
   }
 });
 
+test("canonical first-turn replay reuses its authoritative version and original work context", async () => {
+  const app = await createRuntimeApp(config, { memoryDispatchDelayMs: 100 });
+  try {
+    const conversationId = await createConversation(app);
+    const payload = {
+      turnId: "knowledge-replay-turn",
+      message: "Explain how volcanic islands form.",
+    };
+    const first = await app.inject({
+      method: "POST",
+      url: `/api/v1/conversations/${conversationId}/turns`,
+      payload,
+    });
+    assert.equal(first.statusCode, 202, first.body);
+
+    const replay = await app.inject({
+      method: "POST",
+      url: `/api/v1/conversations/${conversationId}/turns`,
+      payload,
+    });
+    assert.equal(replay.statusCode, 202, replay.body);
+    assert.equal(replay.json().runId, first.json().runId);
+    assert.equal(replay.json().intentVersionId, first.json().intentVersionId);
+
+    const run = await app.inject({
+      method: "GET",
+      url: `/api/v1/runs/${first.json().runId}`,
+    });
+    assert.equal(run.statusCode, 200, run.body);
+    const persistedRequest = run.json<{ request: LatticeRunRequest }>().request;
+    assert.ok(isConsultationRunRequest(persistedRequest));
+    assert.deepEqual(persistedRequest.context, []);
+  } finally {
+    await app.close();
+  }
+});
+
 test("an unresolved decision need remains explicit and does not force Decision Engine execution", async () => {
   const message = "I need help making a decision, but I have not supplied the material criteria yet.";
   const app = await createRuntimeApp(config, {
