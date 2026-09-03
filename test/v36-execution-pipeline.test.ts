@@ -2,7 +2,12 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { buildApp } from "../src/app.js";
 import type { RunRequest } from "../src/domain.js";
-import { laptopFixture, type FixtureDataset } from "../src/fixtures.js";
+import type { DecisionFixtureDataset } from "../src/truth/fixture-dataset.js";
+import {
+  createLegacyDecisionTruthComposition,
+  laptopFixture,
+} from "./fixtures/legacy-laptop-fixture.js";
+import { createFixtureDecisionEvidenceProvider } from "../src/truth/decision-evidence-provider.js";
 import { MemoryRunStore } from "../src/run-store.js";
 import {
   OfflineFixtureTruthPipeline,
@@ -19,7 +24,7 @@ const request: RunRequest = {
   priorities: [{ criterion: "performance", weight: 1 }],
 };
 
-function datasetWithUnverifiedNovaBattery(): FixtureDataset {
+function datasetWithUnverifiedNovaBattery(): DecisionFixtureDataset {
   return {
     ...structuredClone(laptopFixture),
     truthEvidence: laptopFixture.truthEvidence.map((profile) =>
@@ -40,8 +45,9 @@ test("offline truth execution pipeline owns deterministic fixture evaluation", a
   assert.equal(first.snapshot.phase, "VALIDATED");
   assert.equal(first.bundle.runId, runId);
   assert.equal(first.bundle.claims.length, 9);
-  assert.equal(first.candidates.length, 3);
-  assert.equal(first.evidence.length, 9);
+  assert.equal("candidates" in first, false);
+  assert.equal("evidence" in first, false);
+  assert.equal("createDecisionEvidenceProvider" in pipeline, false);
   assert.equal(first.bundle.assessments.every((assessment) => assessment.verdict === "TRUE"), true);
 });
 
@@ -53,7 +59,10 @@ test("V36 validates the exact investigation snapshot without reconstructing it",
   const validated = await pipeline.validate(structuredClone(investigation.snapshot));
   assert.equal(validated.snapshot.phase, "VALIDATED");
   assert.equal(validated.snapshot.executionContractId, investigation.snapshot.executionContractId);
-  assert.deepEqual(await pipeline.decisionInputs(validated.snapshot), {
+  assert.deepEqual(await createFixtureDecisionEvidenceProvider(
+    laptopFixture,
+    (id) => pipeline.ownsExecutionContract(id),
+  ).projectDecisionEvidence(validated.snapshot), {
     candidates: laptopFixture.candidates,
     evidence: laptopFixture.evidence,
   });
@@ -78,18 +87,21 @@ test("V36 validates the exact investigation snapshot without reconstructing it",
 test("offline truth execution pipeline snapshots fixture input against caller mutation", async () => {
   const dataset = structuredClone(laptopFixture);
   const pipeline = new OfflineFixtureTruthPipeline(dataset);
+  const decisionEvidenceProvider = createFixtureDecisionEvidenceProvider(
+    dataset,
+    (id) => pipeline.ownsExecutionContract(id),
+  );
   const novaPrice = dataset.evidence.find((item) => item.id === "e-nova-price");
   assert.ok(novaPrice);
   novaPrice.value = 9999;
 
   const result = await pipeline.execute(runId);
-  assert.equal(result.evidence.find((item) => item.id === "e-nova-price")?.value, 1150);
+  const projection = await decisionEvidenceProvider.projectDecisionEvidence(result.snapshot);
+  assert.equal(projection.evidence.find((item) => item.id === "e-nova-price")?.value, 1150);
 });
 
 test("application decision path consumes the injected V36 truth pipeline", async () => {
-  const app = buildApp({
-    truthPipeline: new OfflineFixtureTruthPipeline(datasetWithUnverifiedNovaBattery()),
-  });
+  const app = buildApp(createLegacyDecisionTruthComposition(datasetWithUnverifiedNovaBattery()));
   try {
     const response = await app.inject({ method: "POST", url: "/runs", payload: request });
     assert.equal(response.statusCode, 201);
@@ -109,7 +121,6 @@ test("validation failure leaves the durable investigation snapshot intact", asyn
     mode: "v36-offline-fixture",
     investigate: (subjectRunId) => base.investigate(subjectRunId),
     validate: async () => { throw new Error("Injected validation failure"); },
-    decisionInputs: (snapshot) => base.decisionInputs(snapshot),
     execute: async (subjectRunId) => base.execute(subjectRunId),
   };
   const app = buildApp({ runStore: store, truthPipeline: failing });

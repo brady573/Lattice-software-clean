@@ -4,13 +4,11 @@ import test from "node:test";
 import type { ConsultationRunRequest, LatticeRun } from "../src/domain.js";
 import { PostgresRunStore } from "../src/postgres-run-store.js";
 import { OfflineFixtureTruthPipeline } from "../src/truth/execution-pipeline.js";
-import type { FixtureDataset } from "../src/fixtures.js";
+import type { FixtureDataset } from "../src/truth/fixture-dataset.js";
 
 const databaseUrl = process.env.DATABASE_URL;
 
 const emptyDataset: FixtureDataset = {
-  candidates: [],
-  evidence: [],
   truthClaims: [],
   truthEvidence: [],
 };

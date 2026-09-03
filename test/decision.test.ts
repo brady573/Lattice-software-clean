@@ -3,7 +3,10 @@ import test from "node:test";
 import { buildApp } from "../src/app.js";
 import type { RunRequest } from "../src/domain.js";
 import { createDecision, explainDecision } from "../src/engine.js";
-import { laptopFixture } from "../src/fixtures.js";
+import {
+  createLegacyDecisionTruthComposition,
+  laptopFixture,
+} from "./fixtures/legacy-laptop-fixture.js";
 import { MemoryRunStore } from "../src/run-store.js";
 import { executePersistedRun } from "../src/run-execution.js";
 import { OfflineFixtureTruthPipeline } from "../src/truth/execution-pipeline.js";
@@ -17,7 +20,7 @@ const request: RunRequest = {
   priorities: [{ criterion: "performance", weight: 1 }],
 };
 
-test("hard constraints override a higher raw preference score", () => {
+test("hard constraints override a higher normalized preference utility", () => {
   const decision = createDecision(request, laptopFixture);
   assert.equal(decision.winnerCandidateId, "nova-air");
   const atlas = decision.evaluations.find((item) => item.candidateId === "atlas-pro");
@@ -29,7 +32,7 @@ test("hard constraints override a higher raw preference score", () => {
   assert.equal(nova.eligible, true);
 });
 
-test("priority weights are normalized before candidate scoring", () => {
+test("priority weights and criterion scales are normalized before compatibility scoring", () => {
   const weightedRequest: RunRequest = {
     ...request,
     priorities: [
@@ -50,7 +53,7 @@ test("priority weights are normalized before candidate scoring", () => {
   const scaledNova = scaledDecision.evaluations.find((item) => item.candidateId === "nova-air");
   assert.ok(weightedNova);
   assert.ok(scaledNova);
-  assert.equal(weightedNova.rawScore, 62);
+  assert.ok(weightedNova.rawScore >= 0 && weightedNova.rawScore <= 1);
   assert.equal(scaledNova.rawScore, weightedNova.rawScore);
   assert.equal(scaledDecision.winnerCandidateId, weightedDecision.winnerCandidateId);
 });
@@ -107,7 +110,7 @@ test("Solandra explanation remains faithful to the structured decision", () => {
 });
 
 test("API creates a persisted-truth, persisted-decision V36 run", async () => {
-  const app = buildApp({ truthPipeline: new OfflineFixtureTruthPipeline(laptopFixture) });
+  const app = buildApp(createLegacyDecisionTruthComposition());
   const create = await app.inject({ method: "POST", url: "/runs", payload: request });
   assert.equal(create.statusCode, 201);
   const run = create.json();
@@ -131,7 +134,7 @@ test("API persists a non-winner UNRESOLVED decision as authoritative Run storage
         ? { ...profile, verification: "UNVERIFIED" as const }
         : profile),
   };
-  const app = buildApp({ truthPipeline: new OfflineFixtureTruthPipeline(dataset) });
+  const app = buildApp(createLegacyDecisionTruthComposition(dataset));
   try {
     const create = await app.inject({ method: "POST", url: "/runs", payload: request });
     assert.equal(create.statusCode, 201, create.body);
@@ -153,7 +156,11 @@ test("API persists a non-winner UNRESOLVED decision as authoritative Run storage
 test("versioned API accepts a durable Run before worker execution and exposes polling lifecycle", async () => {
   const store = new MemoryRunStore();
   const pipeline = new OfflineFixtureTruthPipeline(laptopFixture);
-  const app = buildApp({ runStore: store, truthPipeline: pipeline });
+  const app = buildApp({
+    runStore: store,
+    truthPipeline: pipeline,
+    decisionEvidenceProvider: createLegacyDecisionTruthComposition().decisionEvidenceProvider,
+  });
   const submit = await app.inject({
     method: "POST",
     url: "/api/v1/conversations/demo/messages",
@@ -177,7 +184,14 @@ test("versioned API accepts a durable Run before worker execution and exposes po
   assert.equal(pendingResult.statusCode, 409);
   assert.equal(pendingResult.json().status, "CREATED");
 
-  await executePersistedRun(store, pipeline, accepted.runId);
+  await executePersistedRun(
+    store,
+    pipeline,
+    accepted.runId,
+    undefined,
+    undefined,
+    createLegacyDecisionTruthComposition().decisionEvidenceProvider,
+  );
 
   const runResponse = await app.inject({ method: "GET", url: `/api/v1/runs/${accepted.runId}` });
   assert.equal(runResponse.statusCode, 200);

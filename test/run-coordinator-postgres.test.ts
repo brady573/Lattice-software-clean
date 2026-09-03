@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import test from "node:test";
 import { Pool } from "pg";
 import type { RunRequest } from "../src/domain.js";
-import { laptopFixture } from "../src/fixtures.js";
+import { laptopFixture } from "./fixtures/legacy-laptop-fixture.js";
 import { PostgresRunStore } from "../src/postgres-run-store.js";
 import {
   createPendingRun,

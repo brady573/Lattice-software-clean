@@ -4,8 +4,8 @@ import test from "node:test";
 import { Pool } from "pg";
 import { MemoryApiRunControlStore } from "../src/api-control-store.js";
 import { buildApp } from "../src/app.js";
-import { registerBoundedDecisionCorrection } from "../src/intent/bounded-decision-correction.js";
-import { registerBoundedDecisionIntentIntake } from "../src/intent/bounded-decision-intake.js";
+import { registerBoundedDecisionCorrection } from "./fixtures/legacy-bounded-decision-correction.js";
+import { registerBoundedDecisionIntentIntake } from "./fixtures/legacy-bounded-decision-intake.js";
 import {
   MemoryIntentAuthorityStore,
   MemoryIntentBoundRunStore,

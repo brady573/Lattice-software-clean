@@ -1,12 +1,14 @@
-import { requiredProofObligations } from "./truth/contracts.js";
-import type { FixtureDataset } from "./truth/fixture-dataset.js";
+import { requiredProofObligations } from "../../src/truth/contracts.js";
+import type { DecisionFixtureDataset, FixtureDataset } from "../../src/truth/fixture-dataset.js";
+import { createFixtureDecisionEvidenceProvider } from "../../src/truth/decision-evidence-provider.js";
+import { OfflineFixtureTruthPipeline } from "../../src/truth/execution-pipeline.js";
 import type {
   ProofCheckStatus,
   TruthClaimProfile,
   TruthEvidenceProfile,
-} from "./truth/types.js";
+} from "../../src/truth/types.js";
 
-export type { FixtureDataset, FixtureSourceEdge } from "./truth/fixture-dataset.js";
+export type { DecisionFixtureDataset, FixtureDataset, FixtureSourceEdge } from "../../src/truth/fixture-dataset.js";
 
 function passedChecks(claimType: TruthClaimProfile["claimType"]): Readonly<Record<string, ProofCheckStatus>> {
   return Object.fromEntries(
@@ -54,7 +56,7 @@ function primaryEvidence(
   };
 }
 
-export const defaultDecisionFixture: FixtureDataset = {
+export const defaultDecisionFixture: DecisionFixtureDataset = {
   candidates: [
     { id: "atlas-pro", label: "Atlas Pro" },
     { id: "nova-air", label: "Nova Air" },
@@ -99,4 +101,17 @@ export const defaultDecisionFixture: FixtureDataset = {
  * Backward-compatible fixture alias for historical tests and validation assets.
  * Canonical Product runtime composition does not import this scenario fixture.
  */
-export const laptopFixture: FixtureDataset = structuredClone(defaultDecisionFixture);
+export const laptopFixture: DecisionFixtureDataset = structuredClone(defaultDecisionFixture);
+
+export function createLegacyDecisionTruthComposition(
+  dataset: DecisionFixtureDataset = laptopFixture,
+) {
+  const truthPipeline = new OfflineFixtureTruthPipeline(dataset);
+  return {
+    truthPipeline,
+    decisionEvidenceProvider: createFixtureDecisionEvidenceProvider(
+      dataset,
+      (executionContractId) => truthPipeline.ownsExecutionContract(executionContractId),
+    ),
+  };
+}

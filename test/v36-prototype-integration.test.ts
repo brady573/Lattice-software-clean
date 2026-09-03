@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { FixtureDataset } from "../src/fixtures.js";
+import type { FixtureDataset } from "../src/truth/fixture-dataset.js";
 import { requiredProofObligations } from "../src/truth/contracts.js";
 import { evaluateFixtureTruth } from "../src/truth/fixture-evaluation.js";
 import { buildCorroborationRequest } from "../src/truth/corroboration.js";
@@ -76,10 +76,9 @@ function researchCandidate(id: string): ResearchEvidenceCandidate {
 
 test("source graph collapse is applied before end-to-end positive-burden adjudication", () => {
   const dataset: FixtureDataset = {
-    candidates: [{ id: "candidate", label: "Candidate" }],
     evidence: [
-      { id: "e-a", candidateId: "candidate", criterion: "effect", value: true, sourceId: "wire-copy", sourceLabel: "Wire copy", admitted: true },
-      { id: "e-b", candidateId: "candidate", criterion: "effect", value: true, sourceId: "original", sourceLabel: "Original source", admitted: true },
+      { id: "e-a", value: true, sourceId: "wire-copy", sourceLabel: "Wire copy", admitted: true },
+      { id: "e-b", value: true, sourceId: "original", sourceLabel: "Original source", admitted: true },
     ],
     truthClaims: [{
       id: "claim",

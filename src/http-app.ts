@@ -17,6 +17,9 @@ import {
   createDefaultOfflineTruthPipeline,
   type TruthExecutionPipeline,
 } from "./truth/execution-pipeline.js";
+import {
+  type DecisionEvidenceProvider,
+} from "./truth/decision-evidence-provider.js";
 import { renderSolandraAuthoritativeConversationPage } from "./ui/solandra-authoritative-conversation-page.js";
 import { renderSolandraConversationPrototypePage } from "./ui/solandra-conversation-prototype-page.js";
 import { renderSolandraPrototypePage } from "./ui/solandra-prototype-page.js";
@@ -53,6 +56,7 @@ const prototypeConversationRequestSchema = z.object({
 export type BuildAppOptions = {
   runStore?: RunStore;
   truthPipeline?: TruthExecutionPipeline;
+  decisionEvidenceProvider?: DecisionEvidenceProvider;
   apiControlStore?: ApiRunControlStore;
   /** Fixture subject or request-scoped authenticated subject resolver for API idempotency. */
   apiSubject?: string | ((request: FastifyRequest) => string);
@@ -75,6 +79,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   const app = Fastify({ logger: false });
   const runStore = options.runStore ?? new MemoryRunStore();
   const truthPipeline = options.truthPipeline ?? createDefaultOfflineTruthPipeline();
+  const decisionEvidenceProvider = options.decisionEvidenceProvider;
   const apiControlStore = options.apiControlStore
     ?? (runStore.kind === "memory" ? new MemoryApiRunControlStore(runStore) : undefined);
   const configuredApiSubject = options.apiSubject;
@@ -180,7 +185,14 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     const run = createPendingRun("legacy", parsed.data);
     try {
       await runStore.create(run);
-      return reply.status(201).send(await executePersistedRun(runStore, truthPipeline, run.id));
+      return reply.status(201).send(await executePersistedRun(
+        runStore,
+        truthPipeline,
+        run.id,
+        undefined,
+        undefined,
+        decisionEvidenceProvider,
+      ));
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown decision error";
       const runId = error instanceof RunExecutionError ? error.runId : run.id;

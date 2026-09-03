@@ -6,7 +6,7 @@ import { Pool } from "pg";
 import { createApiRequestHash } from "../src/api-control-store.js";
 import { buildApp } from "../src/app.js";
 import type { RunRequest } from "../src/domain.js";
-import { laptopFixture } from "../src/fixtures.js";
+import { createLegacyDecisionTruthComposition } from "./fixtures/legacy-laptop-fixture.js";
 import { PostgresApiRunControlStore } from "../src/postgres-api-control-store.js";
 import { PostgresOrchestrationStore } from "../src/postgres-orchestration-store.js";
 import { PostgresRunStore } from "../src/postgres-run-store.js";
@@ -22,7 +22,7 @@ import {
   type StandaloneRunWorker,
 } from "../src/run-worker-process.js";
 import { processRunDispatches } from "../src/run-worker.js";
-import { createDefaultOfflineTruthPipeline, OfflineFixtureTruthPipeline } from "../src/truth/execution-pipeline.js";
+import { createDefaultOfflineTruthPipeline } from "../src/truth/execution-pipeline.js";
 
 const databaseUrl = process.env.DATABASE_URL;
 const durableTestSubjectResolver = () => ({ subjectId: "durable-async-regression-subject" });
@@ -204,7 +204,7 @@ test(
         retryDelayMs: 1_000,
         batchSize: 10,
       }, {
-        truthPipeline: new OfflineFixtureTruthPipeline(laptopFixture),
+      ...createLegacyDecisionTruthComposition(),
       });
       researchWorker.start();
       runWorker.start();

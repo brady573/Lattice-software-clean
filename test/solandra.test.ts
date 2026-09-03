@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { DecisionOutcome, RunRequest, StructuredDecision } from "../src/domain.js";
 import { createDecision } from "../src/engine.js";
-import { laptopFixture } from "../src/fixtures.js";
+import { laptopFixture } from "./fixtures/legacy-laptop-fixture.js";
 import {
   assertSolandraExplanationFidelity,
   assertSolandraPlanFidelity,

@@ -4,12 +4,12 @@ import { z } from "zod";
 import {
   createApiRequestHash,
   type ApiRunControlStore,
-} from "../api-control-store.js";
-import type { RunRequest } from "../domain.js";
-import { createPendingRun } from "../run-execution.js";
-import { deriveQualifiedLegacyBoundedRunRequest } from "./exact-planning-fidelity.js";
-import type { IntentAuthorityStore } from "./store.js";
-import type { IntentUserMessage, IntentUserMessageStore } from "./source-message-store.js";
+} from "../../src/api-control-store.js";
+import type { RunRequest } from "../../src/domain.js";
+import { createPendingRun } from "../../src/run-execution.js";
+import { deriveQualifiedLegacyBoundedRunRequest } from "./legacy-exact-planning-fidelity.js";
+import type { IntentAuthorityStore } from "../../src/intent/store.js";
+import type { IntentUserMessage, IntentUserMessageStore } from "../../src/intent/source-message-store.js";
 
 const IDEMPOTENCY_RETENTION_MS = 24 * 60 * 60 * 1000;
 const USER_TEXT_MAX_CHARS = 2_000;

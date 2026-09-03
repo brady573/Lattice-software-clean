@@ -4,7 +4,7 @@ Status: **Owner-approved current implementation structural map**.
 
 Approved: **August 31, 2026**.
 
-Repository reconciliation baseline: `main @ 38bfe26ef0b0448f3687d19714b4eb07a201fc11`, tree `7d584ba8a96b0bb1c979362d4489d36694f55a00`.
+Repository reconciliation: PR #2 foundational-remediation candidate. The exact candidate SHA and revision-bound validation evidence are recorded in the pull-request description.
 
 ## 1. Purpose
 
@@ -18,7 +18,7 @@ It answers:
 - what calls what;
 - which state is authoritative, durable, or derived;
 - where the major trust and authority boundaries are; and
-- how **Lattice Intent Authority → DecisionPlan → Run → V36 Truth Core → Lattice Decision Engine → Solandra Experience** compose into one Product flow.
+- how Intent Authority, Run, V36 Truth Core, conditional decision work, Action Preparation, and Solandra compose without collapsing their authority boundaries.
 
 This document does **not** replace the **Lattice Living Product Design**. The living design remains the canonical forward-looking Product design and sequencing source. This document instead describes the current implementation structure at a specific repository baseline.
 
@@ -31,42 +31,22 @@ It also does not replace:
 
 ## 2. System at a glance
 
-The current Product is deliberately separated into semantic authorities, operational runtime, capability boundaries, and presentation:
+The current Product is deliberately separated into semantic authorities, operational runtime, capability boundaries, and presentation. Decision machinery is conditional:
 
 ```text
-USER
- |
- v
-Solandra Experience / conversation surface
- |
- | user messages and interaction
- v
-Lattice Intent Authority
- |
- | exact confirmed IntentVersion
- v
-DecisionPlan
- |
- | exact planning projection for one Run
- v
-Lattice Execution Runtime / Run
- |
- | coordinates investigation and validation
- v
-V36 Truth Core
- |
- | validated and admitted decision evidence
- v
-Lattice Decision Engine
- |
- | authoritative StructuredDecision
- v
-Solandra Experience
- |
- | faithful human-facing understanding and explanation
- v
-USER
+Knowledge:
+IntentVersion -> Run -> V36 -> KnowledgeOutcome -> Solandra
+
+Action Preparation without decision:
+IntentVersion -> Run -> V36 -> Resource -> Solandra Composer
+
+Qualified decision:
+IntentVersion -> DecisionPlan -> Run -> V36
+              -> decision evidence projection
+              -> Decision Engine -> DecisionSupportOutcome -> Solandra
 ```
+
+The first two paths have no DecisionPlan and never enter the Decision Engine. All three start from the same conversation intake, Intent Authority, Run, and V36 architecture; scenario input and qualified adapters vary, not the core Product or primary UI.
 
 The **Lattice Model Gateway** sits beside this flow as a non-authoritative capability boundary. Product subsystems may invoke it where qualified designs permit model assistance. Model/provider output remains proposal, interpretation, or rendering material until the owning Product authority accepts it under its own contract.
 
@@ -228,6 +208,7 @@ src/truth/corroboration.ts
 src/truth/falsification.ts
 src/truth/pipeline.ts
 src/truth/execution-pipeline.ts
+src/truth/decision-evidence-provider.ts
 src/truth/durable-validation.ts
 src/truth/provenance.ts
 src/truth/research-controller.ts
@@ -246,7 +227,7 @@ V36 alone decides whether research/provider material is admissible into protecte
 
 - hard-constraint evaluation;
 - eligibility;
-- preference utility and ranking;
+- qualified preference comparison and coverage;
 - meaningful-difference semantics;
 - material-dominance/frontier semantics;
 - delegated selection where authorized;
@@ -273,7 +254,7 @@ src/decision/material-dominance-frontier.ts
 src/decision/delegated-selection.ts
 ```
 
-The Decision Engine consumes authoritative planning material plus V36-admitted evidence. It cannot strengthen evidence merely to make a candidate eligible or more attractive.
+The Decision Engine consumes authoritative decision planning material plus a decision-specific projection of V36-admitted evidence. It cannot strengthen evidence merely to make a candidate eligible or more attractive, and it does not add raw values from incompatible criterion scales.
 
 ### 3.6 Solandra Experience
 
@@ -310,7 +291,7 @@ Solandra is intentionally downstream of the authoritative Product state it prese
 
 **Primary implementation:** `src/intent/decision-plan-store.ts`
 
-A **DecisionPlan is not a peer Product authority or subsystem**. It is the durable contract joining one exact authoritative `IntentVersion` to the exact planning material executed by one Run.
+A **DecisionPlan is not a peer Product authority or subsystem**. It exists only for actual authoritative decision work and durably joins one exact `IntentVersion` to one exact `DecisionInputSnapshot` executed by one Run. Knowledge and non-decision Action Preparation Runs do not have DecisionPlans.
 
 Conceptually:
 
@@ -321,7 +302,7 @@ IntentVersion
      v
 DecisionPlan
      |
-     | exact RunRequest
+     | exact DecisionInputSnapshot
      v
 Run
 ```
@@ -337,7 +318,7 @@ planningMaterial
 boundAt
 ```
 
-The DecisionPlan store requires the referenced IntentVersion to exist in the requested IntentScope and requires the planning material to remain faithful to that exact version. Reusing the same Run identity with different planning material is rejected.
+The DecisionPlan store requires the referenced IntentVersion to exist in the requested IntentScope and validates the complete execution-significant projection: objective, requirements, preferences, exact criterion bindings, and intent basis identifiers. The snapshot carries its catalog basis; execution rebuilds the projection against the qualified catalog and requires exact equality. Broad field counts are not fidelity. Reusing the same Run identity with different planning material is rejected.
 
 The ownership rule is therefore:
 
@@ -356,7 +337,8 @@ It contains or references state such as:
 ```text
 Run
  |
- +-- request ------------> planning material bound through DecisionPlan
+ +-- request ------------> exact IntentVersion-bound consultation request
+ +-- decision input -----> present only when bound through DecisionPlan
  +-- status/version -----> Execution Runtime authority
  +-- truth snapshot -----> V36-produced epistemic state
  +-- decision -----------> Decision Engine output
@@ -372,7 +354,7 @@ For example:
 - a persisted `StructuredDecision` is still Decision Engine output; and
 - a persisted explanation remains Solandra presentation.
 
-The current durable execution progression is structurally:
+The shared truth progression is structurally:
 
 ```text
 CREATED
@@ -389,11 +371,9 @@ INVESTIGATING
   v
 VALIDATING
   |
-  v
-DECIDING
+  +--> COMPLETED (Knowledge or Action Preparation)
   |
-  v
-COMPLETED
+  +--> DECIDING --> COMPLETED (qualified decision work only)
 ```
 
 `AWAITING_CLARIFICATION`, `CANCELLED`, and `FAILED` represent waiting or terminal states where applicable.
@@ -422,7 +402,7 @@ VALIDATED TruthSnapshot
      |
      | persisted by RunStore
      v
-DECIDING
+COMPLETED or, only for a qualified decision, DECIDING
 ```
 
 The current default truth pipeline remains an offline-fixture execution seam. The architectural contract is nonetheless explicit and is the boundary through which later qualified live research must pass.
@@ -457,12 +437,12 @@ The Runtime owns operational execution. V36 owns epistemic admission and suffici
 
 ## 7. Decision composition
 
-During `DECIDING`, the current execution path:
+Only during qualified `DECIDING`, the current execution path:
 
 1. reloads the persisted `VALIDATED` V36 snapshot;
-2. obtains decision inputs bound to that validated snapshot;
+2. invokes a decision-specific evidence provider to project candidate/criterion evidence from that validated state;
 3. materializes only admitted decision evidence;
-4. invokes the Lattice Decision Engine with the Run's planning request;
+4. invokes the Lattice Decision Engine with the exact DecisionPlan snapshot;
 5. checks decision-to-truth fidelity;
 6. persists the resulting `StructuredDecision`; and
 7. creates a faithful Solandra explanation from the authoritative decision and truth state.
@@ -470,7 +450,7 @@ During `DECIDING`, the current execution path:
 The authority relationship is:
 
 ```text
-DecisionPlan / RunRequest
+DecisionPlan / DecisionInputSnapshot
         |
         +----------+
                    |
@@ -480,7 +460,7 @@ DecisionPlan / RunRequest
                    |
         +----------+
         |
-Validated V36 evidence
+Decision-specific projection of validated V36 evidence
 ```
 
 The resulting `StructuredDecision` belongs to the Decision Engine even though the Runtime persists it and Solandra presents it.
@@ -513,7 +493,7 @@ presentation revision
 
 Examples of the dependency direction:
 
-- durable understanding derives from the DecisionPlan;
+- durable understanding derives from the accepted IntentVersion, whether or not decision work exists;
 - progress/knowledge-gap state derives from the Run;
 - recommendation derives from the persisted `StructuredDecision`;
 - evidence provenance refers back to V36 assessments; and
@@ -595,6 +575,7 @@ RunStore
 ApiRunControlStore
 ConversationRunIndexStore
 TruthExecutionPipeline
+DecisionEvidenceProvider (injected only for qualified decision work)
 optional ModelRuntime
 HTTP/API surfaces
 ```
@@ -650,7 +631,7 @@ Run + exact intent binding
        v
 DecisionPlanRecordingApiRunControlStore
        |
-       | persist exact DecisionPlan first
+       | persist an exact DecisionPlan only for qualified decision work
        v
 ConversationRunIndexRecordingApiRunControlStore
        |
@@ -667,7 +648,7 @@ This ordering makes the exact intent/planning basis durable before the underlyin
 
 ## 13. End-to-end composition
 
-The complete current decision path is:
+The current Product has three outcome paths through the same intake and truth architecture:
 
 ```text
 1. USER CONVERSATION
@@ -680,12 +661,7 @@ The complete current decision path is:
    IntentVersion
        |
        v
-3. DECISIONPLAN
-   binds exact IntentVersion
-   to exact RunRequest
-       |
-       v
-4. RUN / EXECUTION RUNTIME
+3. RUN / EXECUTION RUNTIME
        |
        +--> UNDERSTANDING
        |
@@ -699,9 +675,11 @@ The complete current decision path is:
        |                         |
        +<------------------------+
        |
-       +--> DECIDING
+       +--> COMPLETED ------> KnowledgeOutcome or ActionPreparation
+       |
+       +--> DECIDING (qualified decision work only)
                |
-               | RunRequest + V36-admitted evidence
+               | exact DecisionPlan + decision evidence projection
                v
           DECISION ENGINE
                |
@@ -724,19 +702,13 @@ Compactly:
 IntentVersion
    |
    v
-DecisionPlan
-   |
-   v
 Run
    |
    v
 V36 Truth Core
-   |
-   v
-Lattice Decision Engine
-   |
-   v
-StructuredDecision
+   +--> KnowledgeOutcome
+   +--> ActionPreparation
+   +--> [DecisionPlan required] Decision Engine --> DecisionSupportOutcome
    |
    v
 Solandra Experience
@@ -760,7 +732,7 @@ The following may be durable and materially important, but they do not become ne
 
 | State | Role |
 |---|---|
-| DecisionPlan | Exact IntentVersion → RunRequest binding |
+| DecisionPlan | Exact IntentVersion → DecisionInputSnapshot binding for a qualified decision Run |
 | Run-intent binding | Preserves the authoritative intent identity used by a Run |
 | Conversation Run index | Associates Runs with conversation continuity |
 | API idempotency state | Prevents duplicate operational effects within its scope |
@@ -774,12 +746,12 @@ Prefer derived state where it can be faithfully reconstructed from authoritative
 
 Current examples include:
 
-- Solandra semantic phase derived from Run/DecisionPlan state;
-- current-understanding presentation derived from DecisionPlan;
+- Solandra semantic phase derived from Run and authoritative IntentVersion state;
+- current-understanding presentation derived from the authoritative IntentVersion;
 - supporting knowledge derived from planning material;
 - next-action presentation derived from `StructuredDecision`;
 - presentation revision derived from its authoritative basis;
-- normalized decision scores derived from admitted evidence and priorities; and
+- meaningful-difference and frontier state derived from qualified criterion semantics and admitted evidence; and
 - UI/progress projections derived from Run lifecycle.
 
 The general rule is:
@@ -806,7 +778,7 @@ current mutable conversation context
       already-bound Run meaning
 ```
 
-DecisionPlan freezes one exact intent version and faithful planning projection for one Run. Later changes do not rewrite historical bindings.
+When decision work is qualified, DecisionPlan freezes one exact intent version and faithful decision projection for one Run. Later changes do not rewrite historical bindings. When decision work is absent, no DecisionPlan is created.
 
 ### C. Execution Runtime → V36
 
@@ -872,9 +844,6 @@ The intended semantic dependency direction is:
 Lattice Intent Authority
       |
       v
-DecisionPlan
-      |
-      v
 Lattice Execution Runtime
       |
       +--------------------+
@@ -882,8 +851,9 @@ Lattice Execution Runtime
       v                    v
 V36 Truth Core       Lattice Model Gateway
       |
-      v
-Lattice Decision Engine
+      +--> Knowledge / Action Preparation
+      |
+      +--> conditional DecisionPlan + Decision Engine
       |
       v
 Solandra Experience
@@ -899,10 +869,10 @@ This map describes current structure, not every final 1.0 capability.
 
 At the reconciliation baseline:
 
-- the default V36 `TruthExecutionPipeline` remains an offline-fixture execution seam;
+- the default V36 `TruthExecutionPipeline` remains an offline-fixture execution seam and produces truth state without a candidate-shaped generic contract;
 - local/offline model capability exists through the Model Gateway and remains non-authoritative;
 - M9 live-provider promotion remains separately qualified work and does not follow from local-model support;
-- Solandra semantic presentation is implemented as a bounded projection over current Product state but later generalization remains subject to its qualified Product design;
+- Solandra can present accepted intent and pending clarification before terminal Run completion; partial V36 findings are not yet exposed as a streaming presentation contract and are not fabricated;
 - PostgreSQL provides durable adapters for the current continuity, intent, planning, Run, truth, orchestration, and preference surfaces; and
 - production deployment/readiness is not implied by this structural map.
 
@@ -984,7 +954,7 @@ The current architecture can be summarized as:
 
 ```text
 Intent Authority   = what the USER means
-DecisionPlan       = the exact planning contract for this Run
+DecisionPlan       = the exact planning contract for a qualified decision Run only
 Execution Runtime  = what Lattice is doing
 V36 Truth Core     = what Lattice can support as factual truth
 Decision Engine    = what follows from intent + admitted evidence

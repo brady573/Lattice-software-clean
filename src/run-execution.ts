@@ -21,6 +21,10 @@ import type {
   TruthDurableValidationStep,
   TruthExecutionPipeline,
 } from "./truth/execution-pipeline.js";
+import {
+  type DecisionEvidenceProvider,
+} from "./truth/decision-evidence-provider.js";
+import { isDeepStrictEqual } from "node:util";
 import { assertDecisionTruthFidelity } from "./truth/fidelity.js";
 import type { TruthSnapshot } from "./truth/snapshot.js";
 import type { PostgresV36ResearchBridge } from "./v36-research-bridge.js";
@@ -139,6 +143,7 @@ export async function executePersistedRunTick(
   runId: string,
   continuationBridge?: DurableV36ContinuationBridge,
   generalizedDecisionAdapter?: GeneralizedDecisionAdapter,
+  decisionEvidenceProvider?: DecisionEvidenceProvider,
 ): Promise<LatticeRun> {
   let run = await runStore.get(runId);
   if (!run) throw new RunExecutionError("Durable Run could not be loaded for execution.", runId);
@@ -224,7 +229,10 @@ export async function executePersistedRunTick(
         throw new Error("Persisted validated V36 truth state could not be reloaded before decision-making.");
       }
       const persistedTruth = persistedSnapshot.bundle;
-      const decisionInputs = await truthPipeline.decisionInputs(persistedSnapshot);
+      if (!decisionEvidenceProvider) {
+        throw new Error("Decision work requires an explicit decision evidence projection provider.");
+      }
+      const decisionInputs = await decisionEvidenceProvider.projectDecisionEvidence(persistedSnapshot);
       const decisionState = await refresh();
       if (!decisionState.decision) {
         const decisionEvidence = materializeDecisionEvidence(
@@ -243,10 +251,17 @@ export async function executePersistedRunTick(
             if (consultationRequest.decisionNeed !== "QUALIFIED" || !generalizedDecisionAdapter) {
               throw new Error("Qualified consultation decisions require the generalized Decision Engine adapter.");
             }
+            const exactDecisionInput = consultationRequest.decisionInput;
+            if (!exactDecisionInput) {
+              throw new Error("Qualified consultation decision is missing its exact DecisionInput projection.");
+            }
             const intent = await generalizedDecisionAdapter.loadIntent(consultationRequest);
             const input = buildDecisionInputFromGeneralizedIntent(intent, generalizedDecisionAdapter.catalog);
+            if (!isDeepStrictEqual(input, exactDecisionInput)) {
+              throw new Error("Qualified Run DecisionInput is not faithful to its exact authoritative IntentVersion.");
+            }
             return createGeneralizedDecisionFromAdmittedEvidence(
-              input,
+              exactDecisionInput,
               generalizedDecisionAdapter.catalog,
               decisionInputs.candidates,
               decisionEvidence,
@@ -325,11 +340,19 @@ export async function executePersistedRun(
   runId: string,
   continuationBridge?: DurableV36ContinuationBridge,
   generalizedDecisionAdapter?: GeneralizedDecisionAdapter,
+  decisionEvidenceProvider?: DecisionEvidenceProvider,
 ): Promise<LatticeRun> {
   while (true) {
     const before = await runStore.get(runId);
     if (!before) throw new RunExecutionError("Durable Run could not be loaded for execution.", runId);
-    const run = await executePersistedRunTick(runStore, truthPipeline, runId, continuationBridge, generalizedDecisionAdapter);
+    const run = await executePersistedRunTick(
+      runStore,
+      truthPipeline,
+      runId,
+      continuationBridge,
+      generalizedDecisionAdapter,
+      decisionEvidenceProvider,
+    );
     if (isSettledStatus(run.status)) return run;
     if (run.status === before.status && run.version === before.version) return run;
   }

@@ -1,8 +1,6 @@
 import { createHash } from "node:crypto";
-import type { Evidence } from "../domain.js";
-import type { FixtureDataset } from "./fixture-dataset.js";
+import type { FixtureDataset, FixtureObservation } from "./fixture-dataset.js";
 import { adjudicateClaim } from "./adjudication.js";
-import { materializeDecisionEvidence, type AdmittedDecisionEvidence } from "./admission.js";
 import { compileClaim } from "./claim-compiler.js";
 import {
   conservativeProvenanceConfidence,
@@ -26,7 +24,7 @@ import type {
 
 function sourceArtifact(
   runId: string,
-  evidence: Evidence,
+  evidence: FixtureObservation,
   profiles: TruthEvidenceProfile[],
 ): SourceArtifact {
   const componentKeys = [...new Set(
@@ -62,13 +60,13 @@ function sourceArtifact(
 
 export interface FixtureTruthEvaluation {
   bundle: TruthBundle;
-  decisionEvidence: AdmittedDecisionEvidence[];
   assessments: TruthAssessment[];
   serialRounds: number;
 }
 
 export function evaluateFixtureTruth(runId: string, dataset: FixtureDataset): FixtureTruthEvaluation {
-  const evidenceById = new Map(dataset.evidence.map((evidence) => [evidence.id, evidence]));
+  const externalEvidence = dataset.evidence ?? [];
+  const evidenceById = new Map(externalEvidence.map((evidence) => [evidence.id, evidence]));
   const evidenceProfileById = new Map(dataset.truthEvidence.map((profile) => [profile.evidenceId, profile]));
   const claimProfilesById = new Map(dataset.truthClaims.map((profile) => [profile.id, profile]));
   if (claimProfilesById.size !== dataset.truthClaims.length) {
@@ -118,10 +116,10 @@ export function evaluateFixtureTruth(runId: string, dataset: FixtureDataset): Fi
   }
 
   const sourcesBySourceId = new Map<string, SourceArtifact>();
-  for (const evidence of dataset.evidence) {
+  for (const evidence of externalEvidence) {
     const profile = evidenceProfileById.get(evidence.id);
     if (!profile || sourcesBySourceId.has(evidence.sourceId)) continue;
-    const sameSourceProfiles = dataset.evidence
+    const sameSourceProfiles = externalEvidence
       .filter((item) => item.sourceId === evidence.sourceId)
       .flatMap((item) => {
         const match = evidenceProfileById.get(item.id);
@@ -132,7 +130,7 @@ export function evaluateFixtureTruth(runId: string, dataset: FixtureDataset): Fi
 
   const sources = dedupeArtifactsByHash([...sourcesBySourceId.values()]);
   let sourceBySourceId = new Map<string, SourceArtifact>();
-  for (const evidence of dataset.evidence) {
+  for (const evidence of externalEvidence) {
     const source = sources.find(
       (candidate) => candidate.canonicalUri === `fixture://${encodeURIComponent(evidence.sourceId)}`,
     );
@@ -198,7 +196,7 @@ export function evaluateFixtureTruth(runId: string, dataset: FixtureDataset): Fi
   const provenanceComponents = provenance.components;
   const normalizedSourceById = new Map(normalizedSources.map((source) => [source.id, source]));
   sourceBySourceId = new Map<string, SourceArtifact>();
-  for (const evidence of dataset.evidence) {
+  for (const evidence of externalEvidence) {
     const original = sources.find(
       (candidate) => candidate.canonicalUri === `fixture://${encodeURIComponent(evidence.sourceId)}`,
     );
@@ -302,7 +300,6 @@ export function evaluateFixtureTruth(runId: string, dataset: FixtureDataset): Fi
     assessments.push(assessment);
   }
 
-  const decisionEvidence = materializeDecisionEvidence(dataset.evidence, claimEvidence, assessments);
   const serialRounds = Math.max(1, ...researchQuestions.map((question) => question.serialRound));
 
   return {
@@ -318,7 +315,6 @@ export function evaluateFixtureTruth(runId: string, dataset: FixtureDataset): Fi
       checks,
       assessments,
     },
-    decisionEvidence,
     assessments,
     serialRounds,
   };

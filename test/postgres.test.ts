@@ -4,12 +4,11 @@ import test from "node:test";
 import { Pool } from "pg";
 import { buildApp } from "../src/app.js";
 import type { LatticeRun, RunRequest } from "../src/domain.js";
-import { laptopFixture } from "../src/fixtures.js";
+import { createLegacyDecisionTruthComposition } from "./fixtures/legacy-laptop-fixture.js";
 import { PostgresApiRunControlStore } from "../src/postgres-api-control-store.js";
 import { PostgresOrchestrationStore } from "../src/postgres-orchestration-store.js";
 import { PostgresRunStore } from "../src/postgres-run-store.js";
 import { processRunDispatches } from "../src/run-worker.js";
-import { OfflineFixtureTruthPipeline } from "../src/truth/execution-pipeline.js";
 
 const databaseUrl = process.env.DATABASE_URL;
 
@@ -80,7 +79,7 @@ test(
     const workerOutcomes = await processRunDispatches({
       runStore: secondStore,
       orchestrationStore: orchestration,
-      truthPipeline: new OfflineFixtureTruthPipeline(laptopFixture),
+      ...createLegacyDecisionTruthComposition(),
       workerId: "worker-after-restart",
       now: new Date(Date.now() + 1_000),
       leaseMs: 30_000,

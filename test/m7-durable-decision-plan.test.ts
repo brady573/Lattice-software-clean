@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
 import { MemoryIntentAuthorityStore, PostgresIntentAuthorityStore } from "../src/intent/index.js";
-import { assertPlanningMaterialFaithfulToExactIntent } from "../src/intent/exact-planning-fidelity.js";
+import { assertPlanningMaterialFaithfulToExactIntent } from "./fixtures/legacy-exact-planning-fidelity.js";
 import {
   MemoryDecisionPlanStore,
   PostgresDecisionPlanStore,

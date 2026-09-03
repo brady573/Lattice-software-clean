@@ -1,9 +1,11 @@
-import { laptopFixture } from "../../src/fixtures.js";
+import {
+  createLegacyDecisionTruthComposition,
+  laptopFixture,
+} from "../fixtures/legacy-laptop-fixture.js";
 import {
   createStandaloneRunWorker,
   resolveRunWorkerProcessConfig,
 } from "../../src/run-worker-process.js";
-import { OfflineFixtureTruthPipeline } from "../../src/truth/execution-pipeline.js";
 
 const fixture = structuredClone(laptopFixture);
 const firstEvidence = fixture.truthEvidence[0];
@@ -15,7 +17,7 @@ fixture.truthEvidence[0] = {
 
 const config = resolveRunWorkerProcessConfig(process.env);
 const worker = await createStandaloneRunWorker(config, {
-  truthPipeline: new OfflineFixtureTruthPipeline(fixture),
+  ...createLegacyDecisionTruthComposition(fixture),
   onPollError(error): void {
     console.error("LATTICE_RUN_WORKER_POLL_FAILED", error);
   },

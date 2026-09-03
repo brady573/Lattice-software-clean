@@ -1,11 +1,14 @@
 import { createHash } from "node:crypto";
 import {
-  isConsultationRunRequest,
   type LatticeRun,
-  type LatticeRunRequest,
   type RunRequest,
 } from "../domain.js";
-import type { DurableDecisionPlan } from "../intent/decision-plan-store.js";
+import type {
+  DecisionPlanningMaterial,
+  DurableDecisionPlan,
+} from "../intent/decision-plan-store.js";
+import type { DecisionInputSnapshot } from "../decision/decision-input-snapshot.js";
+import type { IntentVersion } from "../intent/types.js";
 
 export type SolandraSemanticPhase = "listening" | "understanding" | "knowledge_gap" | "actionable";
 export type SolandraPresentationTransition = "initial" | "updated" | "reconnected";
@@ -29,8 +32,8 @@ export interface PresentationBasis {
 
 export interface DurableUnderstanding {
   goal: string;
-  requirements: Array<{ criterion: string; operator: "lte" | "gte" | "eq"; value: string | number | boolean }>;
-  preferences: Array<{ criterion: string; weight: number }>;
+  requirements: Array<{ criterion: string; operator: "lte" | "gte" | "eq" | "LTE" | "GTE" | "EQ"; value: string | number | boolean }>;
+  preferences: Array<{ criterion: string; weight?: number; tier?: string }>;
 }
 
 export interface MaterialUncertainty {
@@ -93,12 +96,33 @@ function formatConstraintValue(operator: "lte" | "gte" | "eq", value: string | n
   return `${prefix} ${String(value)}`;
 }
 
-type AnyDecisionPlan = DurableDecisionPlan<LatticeRunRequest>;
+type AnyDecisionPlan = DurableDecisionPlan<DecisionPlanningMaterial>;
+
+function isDecisionInput(material: DecisionPlanningMaterial): material is DecisionInputSnapshot {
+  return "schemaVersion" in material;
+}
+
+function understandingFromIntent(version: IntentVersion | undefined): DurableUnderstanding | undefined {
+  const objective = version?.state.objective?.value;
+  if (!version || objective?.state !== "VALUE" || typeof objective.value !== "string") return undefined;
+  return { goal: objective.value, requirements: [], preferences: [] };
+}
 
 function understandingFromPlan(plan: AnyDecisionPlan | undefined): DurableUnderstanding | undefined {
   if (!plan) return undefined;
-  if (isConsultationRunRequest(plan.planningMaterial)) {
-    return { goal: plan.planningMaterial.objective, requirements: [], preferences: [] };
+  if (isDecisionInput(plan.planningMaterial)) {
+    return {
+      goal: plan.planningMaterial.objective,
+      requirements: plan.planningMaterial.hardRequirements.map((item) => ({
+        criterion: item.criterionId,
+        operator: item.operator,
+        value: item.expected,
+      })),
+      preferences: plan.planningMaterial.priorities.map((item) => ({
+        criterion: item.criterionId,
+        tier: item.tier,
+      })),
+    };
   }
   return {
     goal: plan.planningMaterial.goal,
@@ -113,7 +137,24 @@ function supportingFromPlan(plan: AnyDecisionPlan | undefined): SupportingKnowle
     { authority: "intent_authority", ref: plan.intentVersionId },
     { authority: "decision_plan", ref: plan.decisionPlanId },
   ];
-  if (isConsultationRunRequest(plan.planningMaterial)) return [];
+  if (isDecisionInput(plan.planningMaterial)) {
+    return [
+      ...plan.planningMaterial.hardRequirements.map((item, index) => ({
+        id: `requirement:${index}:${item.criterionId}`,
+        label: item.criterionId,
+        value: `${item.operator} ${String(item.expected)}`,
+        kind: "requirement" as const,
+        provenance,
+      })),
+      ...plan.planningMaterial.priorities.map((item, index) => ({
+        id: `preference:${index}:${item.criterionId}`,
+        label: item.criterionId,
+        value: item.tier,
+        kind: "preference" as const,
+        provenance,
+      })),
+    ];
+  }
   return [
     ...plan.planningMaterial.hardConstraints.map((item, index) => ({
       id: `requirement:${index}:${item.criterion}`,
@@ -132,11 +173,15 @@ function supportingFromPlan(plan: AnyDecisionPlan | undefined): SupportingKnowle
   ];
 }
 
-function phaseFromRun(run: LatticeRun | undefined, plan: AnyDecisionPlan | undefined): SolandraSemanticPhase {
-  if (!run) return plan ? "understanding" : "listening";
+function phaseFromRun(
+  run: LatticeRun | undefined,
+  plan: AnyDecisionPlan | undefined,
+  intentVersion: IntentVersion | undefined,
+): SolandraSemanticPhase {
+  if (!run) return plan || intentVersion ? "understanding" : "listening";
   if (run.status === "AWAITING_CLARIFICATION") return "knowledge_gap";
   if (run.status === "COMPLETED" && run.decision !== null) return "actionable";
-  return plan ? "understanding" : "listening";
+  return plan || intentVersion ? "understanding" : "listening";
 }
 
 function resourcesFor(run: LatticeRun | undefined, plan: AnyDecisionPlan | undefined): ResourceDescriptor[] {
@@ -177,19 +222,20 @@ export function composeSolandraPresentation(input: {
   conversationId: string;
   run?: LatticeRun;
   decisionPlan?: AnyDecisionPlan;
+  intentVersion?: IntentVersion;
   knownRevision?: string;
 }): SolandraPresentationSnapshot {
-  const { conversationId, run, decisionPlan, knownRevision } = input;
+  const { conversationId, run, decisionPlan, intentVersion, knownRevision } = input;
   const basis: PresentationBasis = {
     conversationId,
     ...(run ? { runId: run.id, runVersion: run.version } : {}),
     ...(decisionPlan ? {
       decisionPlanId: decisionPlan.decisionPlanId,
       intentVersionId: decisionPlan.intentVersionId,
-    } : {}),
+    } : intentVersion ? { intentVersionId: intentVersion.intentVersionId } : {}),
   };
-  const phase = phaseFromRun(run, decisionPlan);
-  const durableUnderstanding = understandingFromPlan(decisionPlan);
+  const phase = phaseFromRun(run, decisionPlan, intentVersion);
+  const durableUnderstanding = understandingFromIntent(intentVersion) ?? understandingFromPlan(decisionPlan);
   const supportingKnowledge = supportingFromPlan(decisionPlan);
   const materialUncertainty: MaterialUncertainty[] = run?.status === "AWAITING_CLARIFICATION"
     ? [{
@@ -236,7 +282,15 @@ export function composeSolandraPresentation(input: {
 }
 
 function criteriaText(plan: AnyDecisionPlan): string {
-  if (isConsultationRunRequest(plan.planningMaterial)) return plan.planningMaterial.objective;
+  if (isDecisionInput(plan.planningMaterial)) {
+    return [
+      plan.planningMaterial.objective,
+      ...plan.planningMaterial.hardRequirements.map((item) =>
+        `Requirement — ${item.criterionId}: ${item.operator} ${String(item.expected)}`),
+      ...plan.planningMaterial.priorities.map((item) =>
+        `Preference — ${item.criterionId}: ${item.tier}`),
+    ].join("\n");
+  }
   const requirements = plan.planningMaterial.hardConstraints
     .map((item) => `Requirement — ${item.criterion}: ${formatConstraintValue(item.operator, item.value)}`);
   const preferences = plan.planningMaterial.priorities

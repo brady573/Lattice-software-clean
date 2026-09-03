@@ -1,5 +1,5 @@
-import { runRequestSchema, type LatticeRunRequest, type RunRequest } from "../domain.js";
-import { intentStateSchema, type IntentState } from "./types.js";
+import { runRequestSchema, type RunRequest } from "../../src/domain.js";
+import { intentStateSchema, type IntentState } from "../../src/intent/types.js";
 
 const BOUNDED_OBJECTIVE_PATTERN = /^choose (?:a|an) [a-z0-9][a-z0-9 .+'/_-]{0,120}$/i;
 
@@ -63,7 +63,7 @@ export function deriveQualifiedLegacyBoundedRunRequest(stateInput: IntentState):
 
 export function assertPlanningMaterialFaithfulToExactIntent(
   stateInput: IntentState,
-  planningMaterialInput: LatticeRunRequest,
+  planningMaterialInput: unknown,
 ): void {
   const expected = deriveQualifiedLegacyBoundedRunRequest(stateInput);
   const planningMaterial = runRequestSchema.parse(planningMaterialInput);

@@ -9,13 +9,16 @@ import {
 import { requiredProofObligations } from "../../src/truth/contracts.js";
 import {
   OfflineFixtureTruthPipeline,
-  type TruthDecisionInputs,
   type TruthDurableValidationStep,
   type TruthExecutionPipeline,
   type TruthPipelineExecution,
   type TruthPipelineInvestigation,
 } from "../../src/truth/execution-pipeline.js";
-import type { FixtureDataset } from "../../src/truth/fixture-dataset.js";
+import {
+  createFixtureDecisionEvidenceProvider,
+  type DecisionEvidenceProvider,
+} from "../../src/truth/decision-evidence-provider.js";
+import type { DecisionFixtureDataset, FixtureDataset } from "../../src/truth/fixture-dataset.js";
 import type { V36ResearchCheckpoint } from "../../src/truth/continuation.js";
 import type { V36RuntimeExecutionResult } from "../../src/truth/runtime-handoff.js";
 import type { TruthSnapshot } from "../../src/truth/snapshot.js";
@@ -34,11 +37,8 @@ function knowledgeDataset(claim: string, suffix: string): FixtureDataset {
   const claimId = `claim-${suffix}`;
   const sourceId = `source-${suffix}`;
   return {
-    candidates: [],
     evidence: [{
       id: evidenceId,
-      candidateId: "knowledge",
-      criterion: "statement",
       value: claim,
       sourceId,
       sourceLabel: `Reference fixture ${suffix}`,
@@ -66,7 +66,7 @@ function knowledgeDataset(claim: string, suffix: string): FixtureDataset {
   };
 }
 
-function decisionDataset(): FixtureDataset {
+function decisionDataset(): DecisionFixtureDataset {
   const candidates = [
     { id: "cedar", label: "Cedar" },
     { id: "granite", label: "Granite" },
@@ -147,7 +147,10 @@ export class FoundationalConsultationInterpreter implements ConsultationInterpre
   async interpret(input: ConsultationInterpretationInput): Promise<ConsultationInterpretationProposal> {
     if (input.message.trim() !== DECISION_MESSAGE) return this.#fallback.interpret(input);
     return {
-      objective: input.message.trim(),
+      objectiveEffect: input.currentIntentVersion
+        ? { kind: "PRESERVE" }
+        : { kind: "ESTABLISH", value: input.message.trim() },
+      meaningKind: "MATERIAL_INFERENCE",
       decisionRequested: true,
       resourceNeed: "NONE",
       materialClarification: {
@@ -208,12 +211,26 @@ export class FoundationalTruthPipeline implements TruthExecutionPipeline {
     return this.#forContract(checkpoint.executionContractId).resumeDurableValidation(checkpoint, results);
   }
 
-  decisionInputs(snapshot: TruthSnapshot): Promise<TruthDecisionInputs> {
-    return this.#forContract(snapshot.executionContractId).decisionInputs(snapshot);
+  createDecisionEvidenceProvider(): DecisionEvidenceProvider {
+    return createFixtureDecisionEvidenceProvider(
+      decisionDataset(),
+      (executionContractId) => this.#decision.ownsExecutionContract(executionContractId),
+    );
   }
 
   async execute(runId: string, request?: LatticeRunRequest): Promise<TruthPipelineExecution> {
     const investigation = await this.investigate(runId, request);
     return this.validate(investigation.snapshot);
   }
+}
+
+export function createFoundationalTruthComposition(): {
+  truthPipeline: FoundationalTruthPipeline;
+  decisionEvidenceProvider: DecisionEvidenceProvider;
+} {
+  const truthPipeline = new FoundationalTruthPipeline();
+  return {
+    truthPipeline,
+    decisionEvidenceProvider: truthPipeline.createDecisionEvidenceProvider(),
+  };
 }

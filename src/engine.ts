@@ -8,7 +8,7 @@ import type {
   RunRequest,
   StructuredDecision,
 } from "./domain.js";
-import type { FixtureDataset } from "./truth/fixture-dataset.js";
+import type { DecisionFixtureDataset } from "./truth/fixture-dataset.js";
 import {
   createSolandraExplanationPlan,
   renderCanonicalExplanation,
@@ -18,6 +18,7 @@ import {
   type AdmittedDecisionEvidence,
 } from "./truth/admission.js";
 import { evaluateFixtureTruth } from "./truth/fixture-evaluation.js";
+import { materializeFixtureDecisionEvidence } from "./truth/decision-evidence-provider.js";
 
 const deterministicEvaluationRunId = "00000000-0000-4000-8000-000000000036";
 
@@ -51,17 +52,26 @@ function evaluateConstraints(
   });
 }
 
-function rawPreferenceScore(
+function normalizedPreferenceUtility(
   candidate: Candidate,
   priorities: Priority[],
   evidence: readonly AdmittedDecisionEvidence[],
+  candidates: readonly Candidate[],
 ): number {
   const totalWeight = priorities.reduce((total, priority) => total + priority.weight, 0);
   if (totalWeight === 0) return 0;
   return priorities.reduce((total, priority) => {
     const item = decisionEvidenceFor(evidence, candidate.id, priority.criterion);
     if (!item || typeof item.value !== "number") return total;
-    return total + item.value * (priority.weight / totalWeight);
+    const comparable = candidates.flatMap((alternative) => {
+      const value = decisionEvidenceFor(evidence, alternative.id, priority.criterion)?.value;
+      return typeof value === "number" && Number.isFinite(value) ? [value] : [];
+    });
+    if (comparable.length === 0) return total;
+    const minimum = Math.min(...comparable);
+    const maximum = Math.max(...comparable);
+    const criterionUtility = maximum === minimum ? 1 : (item.value - minimum) / (maximum - minimum);
+    return total + criterionUtility * (priority.weight / totalWeight);
   }, 0);
 }
 
@@ -89,7 +99,8 @@ export function createDecisionFromAdmittedEvidence(
     return {
       candidateId: candidate.id,
       eligible,
-      rawScore: rawPreferenceScore(candidate, request.priorities, evidence),
+      // Historical field name; the value is scale-normalized criterion utility.
+      rawScore: normalizedPreferenceUtility(candidate, request.priorities, evidence, candidates),
       normalizedScore: 0,
       constraints,
       supportingEvidenceIds,
@@ -160,17 +171,17 @@ export function createDecisionFromAdmittedEvidence(
   };
 }
 
-export function createDecision(request: RunRequest, dataset: FixtureDataset): StructuredDecision {
+export function createDecision(request: RunRequest, dataset: DecisionFixtureDataset): StructuredDecision {
   const truth = evaluateFixtureTruth(deterministicEvaluationRunId, dataset);
   return createDecisionFromAdmittedEvidence(
     request,
     dataset.candidates,
-    truth.decisionEvidence,
+    materializeFixtureDecisionEvidence(dataset, truth.bundle),
     truth.assessments.map((assessment) => assessment.id),
   );
 }
 
-export function explainDecision(decision: StructuredDecision, dataset: FixtureDataset): string {
+export function explainDecision(decision: StructuredDecision, dataset: DecisionFixtureDataset): string {
   const truth = evaluateFixtureTruth(deterministicEvaluationRunId, dataset);
   const plan = createSolandraExplanationPlan(decision, dataset.candidates, truth.bundle);
   return renderCanonicalExplanation(plan);

@@ -448,6 +448,12 @@ export class PostgresIntentAuthorityStore implements IntentAuthorityStore {
        WHERE intent_scope_id=$1`,
       [command.intentScopeId, versionId, nextVersion + 1],
     );
+    await client.query(
+      `UPDATE intent_pending_proposals
+       SET status='STALE',resolved_at=now()
+       WHERE intent_scope_id=$1 AND status='PENDING' AND base_intent_version_id<>$2`,
+      [command.intentScopeId, versionId],
+    );
     await insertTransition(
       client,
       command,

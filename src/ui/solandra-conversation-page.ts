@@ -103,6 +103,13 @@ export function renderSolandraConversationPage(): string {
         sendButton.disabled = value;
       };
 
+      const isExplicitConfirmation = (message) => /^(?:yes|yes please|yes,? (?:that'?s|that is) (?:right|correct)|confirmed|confirm|that'?s right|that'?s correct|correct|apply it|use that)\.?$/iu
+        .test(message.trim().replace(/\s+/g, " "));
+
+      const renderAuthoritativeProgress = (acceptedUnderstanding, detail) => {
+        composer.innerHTML = '<h1>' + escapeHtml(acceptedUnderstanding) + '</h1><p class="muted">Accepted understanding</p><p>' + escapeHtml(detail) + '</p>';
+      };
+
       const ensureConversation = async () => {
         if (conversationId) return conversationId;
         const response = await fetch("/api/v1/conversations", { method: "POST" });
@@ -161,11 +168,12 @@ export function renderSolandraConversationPage(): string {
         setPending(true);
         appendTurn(message);
         input.value = "";
-        composer.innerHTML = '<h1>' + escapeHtml(message) + '</h1><p class="muted">Accepted understanding</p><p>Working with the available knowledge and provenance…</p>';
+        composer.innerHTML = '<h1>What you said</h1><p>' + escapeHtml(message) + '</p><p class="muted">Interpreting against the current accepted intent…</p>';
         try {
           const id = await ensureConversation();
           const clarification = pendingClarification;
-          const response = await fetch(clarification
+          const confirmsPending = clarification && isExplicitConfirmation(message);
+          const response = await fetch(confirmsPending
             ? "/api/v1/conversations/" + encodeURIComponent(id) + "/clarifications/" + encodeURIComponent(clarification.proposalId) + "/confirm"
             : "/api/v1/conversations/" + encodeURIComponent(id) + "/turns", {
             method: "POST",
@@ -176,10 +184,11 @@ export function renderSolandraConversationPage(): string {
           if (!response.ok) throw new Error(body.message || body.error || "Consultation intake failed.");
           if (body.status === "NEEDS_CLARIFICATION") {
             pendingClarification = { proposalId: body.proposalId };
-            composer.innerHTML = '<h1>One clarification</h1><p>' + escapeHtml(body.question) + '</p><p class="muted">Reply with “' + escapeHtml(body.confirmationExample) + '” or provide a different clarification.</p>';
+            composer.innerHTML = '<h1>' + escapeHtml(body.acceptedUnderstanding) + '</h1><p class="muted">Accepted understanding</p><h2>One clarification</h2><p>' + escapeHtml(body.question) + '</p><p class="muted">Reply with “' + escapeHtml(body.confirmationExample) + '” to confirm, or state a correction normally.</p>';
             return;
           }
           pendingClarification = null;
+          renderAuthoritativeProgress(body.acceptedUnderstanding, "Working with the available knowledge and provenance…");
           await pollOutcome(body.runId);
         } catch (error) {
           input.value = draft;

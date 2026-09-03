@@ -1,12 +1,27 @@
-import type { IntentOperation } from "./types.js";
+import type { IntentOperation, IntentVersion } from "./types.js";
 
 export type ConsultationResourceNeed = "NONE" | "CHECKLIST" | "PREPARED_MESSAGE";
 
 export interface ConsultationInterpretationInput {
   readonly message: string;
   readonly context: readonly string[];
+  readonly currentIntentVersion?: IntentVersion;
   readonly explicitResourceNeed?: Exclude<ConsultationResourceNeed, "NONE">;
 }
+
+export type ConsultationObjectiveEffect =
+  | { readonly kind: "ESTABLISH"; readonly value: string }
+  | { readonly kind: "REPLACE_EXPLICIT"; readonly value: string }
+  | { readonly kind: "PRESERVE" };
+
+export type ConsultationMeaningKind =
+  | "EXPLICIT_OBJECTIVE"
+  | "EXPLICIT_CORRECTION"
+  | "ADDITIONAL_CONTEXT"
+  | "REQUIREMENT_OR_PREFERENCE_UPDATE"
+  | "CONFIRMATION"
+  | "RESOURCE_OR_EXPLANATION_REQUEST"
+  | "MATERIAL_INFERENCE";
 
 export interface MaterialIntentClarificationProposal {
   /**
@@ -19,8 +34,9 @@ export interface MaterialIntentClarificationProposal {
 }
 
 export interface ConsultationInterpretationProposal {
-  /** The exact USER-authored objective retained as authoritative provenance. */
-  readonly objective: string;
+  /** Proposed objective effect. Intent Authority remains the only writer. */
+  readonly objectiveEffect: ConsultationObjectiveEffect;
+  readonly meaningKind: ConsultationMeaningKind;
   readonly decisionRequested: boolean;
   readonly resourceNeed: ConsultationResourceNeed;
   readonly materialClarification?: MaterialIntentClarificationProposal;
@@ -43,16 +59,28 @@ export interface ConsultationInterpreter {
  */
 export class ConservativeConsultationInterpreter implements ConsultationInterpreter {
   async interpret(input: ConsultationInterpretationInput): Promise<ConsultationInterpretationProposal> {
-    const objective = input.message.trim();
+    const message = input.message.trim();
+    const existingObjective = input.currentIntentVersion?.state.objective;
+    const hasObjective = existingObjective?.value.state === "VALUE"
+      && typeof existingObjective.value.value === "string";
+    const explicitCorrection = hasObjective
+      ? /^(?:no\s*[,;:-]?\s*actually\s*[,;:-]?\s*|actually\s*[,;:-]?\s*(?:my|the)\s+objective\s+(?:is|should be)\s+|(?:change|replace|update)\s+(?:the\s+)?objective\s+(?:to\s+)?|instead\s*[,;:-]?\s*)(.+)$/iu.exec(message)
+      : null;
+    const objectiveEffect: ConsultationObjectiveEffect = !hasObjective
+      ? { kind: "ESTABLISH", value: message }
+      : explicitCorrection?.[1]?.trim()
+        ? { kind: "REPLACE_EXPLICIT", value: explicitCorrection[1].trim() }
+        : { kind: "PRESERVE" };
     if (input.explicitResourceNeed) {
       return {
-        objective,
+        objectiveEffect,
+        meaningKind: "RESOURCE_OR_EXPLANATION_REQUEST",
         decisionRequested: false,
         resourceNeed: input.explicitResourceNeed,
       };
     }
 
-    const normalized = objective.toLocaleLowerCase("en-US");
+    const normalized = message.toLocaleLowerCase("en-US");
     const asksToPrepare = /\b(?:prepare|create|make|build|draft|write|compose)\b/u.test(normalized);
     const resourceNeed: ConsultationResourceNeed = asksToPrepare && /\b(?:checklist|check list)\b/u.test(normalized)
       ? "CHECKLIST"
@@ -60,6 +88,13 @@ export class ConservativeConsultationInterpreter implements ConsultationInterpre
         ? "PREPARED_MESSAGE"
         : "NONE";
 
-    return { objective, decisionRequested: false, resourceNeed };
+    const meaningKind: ConsultationMeaningKind = objectiveEffect.kind === "ESTABLISH"
+      ? "EXPLICIT_OBJECTIVE"
+      : objectiveEffect.kind === "REPLACE_EXPLICIT"
+        ? "EXPLICIT_CORRECTION"
+        : resourceNeed !== "NONE" || /\b(?:why|source|explain|show|tell me|what about)\b/iu.test(message)
+          ? "RESOURCE_OR_EXPLANATION_REQUEST"
+          : "ADDITIONAL_CONTEXT";
+    return { objectiveEffect, meaningKind, decisionRequested: false, resourceNeed };
   }
 }

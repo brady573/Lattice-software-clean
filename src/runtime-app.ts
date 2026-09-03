@@ -73,6 +73,9 @@ import {
   createDefaultOfflineTruthPipeline,
   type TruthExecutionPipeline,
 } from "./truth/execution-pipeline.js";
+import {
+  type DecisionEvidenceProvider,
+} from "./truth/decision-evidence-provider.js";
 import { PostgresV36ResearchBridge } from "./v36-research-bridge.js";
 import { migrateV36ResearchContinuationRounds } from "./v36-research-round-schema.js";
 
@@ -84,6 +87,7 @@ export interface RuntimeAppOptions {
   authenticatedSubjectResolver?: AuthenticatedSubjectResolver;
   consultationInterpreter?: ConsultationInterpreter;
   criterionCatalog?: QualifiedCriterionCatalog;
+  decisionEvidenceProvider?: DecisionEvidenceProvider;
 }
 
 function nonNegativeDelay(value: number | undefined, fallback: number, name: string): number {
@@ -123,6 +127,7 @@ class DeferredMemoryApiRunControlStore implements ApiRunControlStore {
     private readonly truthPipeline: TruthExecutionPipeline,
     private readonly dispatchDelayMs: number,
     private readonly generalizedDecisionAdapter?: GeneralizedDecisionAdapter,
+    private readonly decisionEvidenceProvider?: DecisionEvidenceProvider,
   ) {}
 
   async submitRun(input: ApiRunSubmissionInput): Promise<ApiRunSubmissionResult> {
@@ -147,7 +152,14 @@ class DeferredMemoryApiRunControlStore implements ApiRunControlStore {
           resolve();
           return;
         }
-        void executePersistedRun(this.runStore, this.truthPipeline, runId, undefined, this.generalizedDecisionAdapter)
+        void executePersistedRun(
+          this.runStore,
+          this.truthPipeline,
+          runId,
+          undefined,
+          this.generalizedDecisionAdapter,
+          this.decisionEvidenceProvider,
+        )
           .then(() => resolve(), () => resolve());
       }, this.dispatchDelayMs);
     });
@@ -273,6 +285,7 @@ export async function createRuntimeApp(
   options: RuntimeAppOptions = {},
 ): Promise<FastifyInstance> {
   const truthPipeline = options.truthPipeline ?? createDefaultOfflineTruthPipeline();
+  const decisionEvidenceProvider = options.decisionEvidenceProvider;
   const memoryDispatchDelayMs = nonNegativeDelay(
     options.memoryDispatchDelayMs,
     DEFAULT_MEMORY_DISPATCH_DELAY_MS,
@@ -324,6 +337,7 @@ export async function createRuntimeApp(
         options.criterionCatalog
           ? createIntentAuthorityGeneralizedDecisionAdapter(memoryIntentStore, options.criterionCatalog)
           : undefined,
+        decisionEvidenceProvider,
       ),
       memoryDecisionPlanStore,
     );
@@ -381,6 +395,7 @@ export async function createRuntimeApp(
     runStore,
     runIndexStore,
     decisionPlanStore,
+    intentStore,
   });
   registerUserPreferenceControlsApi(app, {
     preferenceStore: userPreferenceStore,

@@ -150,7 +150,7 @@ export async function enrichTruthBundleWithResearch(
     return { claimId: claim.id, result };
   }));
 
-  const materialEvidenceIds = new Set(dataset.evidence.map((item) => item.id));
+  const materialEvidenceIds = new Set((dataset.evidence ?? []).map((item) => item.id));
   const mergedEvidence = mergeClaimEvidenceStrict(
     [bundle.claimEvidence, ...research.map((item) => item.result.evidence)],
     { reservedExternalEvidenceIds: materialEvidenceIds },

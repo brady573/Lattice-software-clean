@@ -5,6 +5,7 @@ import { dirname, relative, resolve } from "node:path";
 import test from "node:test";
 import type { FastifyInstance } from "fastify";
 import { Pool } from "pg";
+import ts from "typescript";
 import { createRuntimeApp } from "../src/runtime-app.js";
 import { resolveRuntimeConfig } from "../src/runtime-config.js";
 import { createStandaloneRunWorker, type StandaloneRunWorker } from "../src/run-worker-process.js";
@@ -12,8 +13,8 @@ import {
   ACTION_MESSAGE,
   DECISION_MESSAGE,
   FoundationalConsultationInterpreter,
-  FoundationalTruthPipeline,
   KNOWLEDGE_MESSAGE,
+  createFoundationalTruthComposition,
   foundationalCriterionCatalog,
 } from "./fixtures/foundational-consultation-fixture.js";
 
@@ -46,7 +47,7 @@ async function createConversation(app: FastifyInstance): Promise<string> {
 test("A Knowledge, B Decision, and C Action Preparation use the same canonical conversation API", async () => {
   const app = await createRuntimeApp(config, {
     memoryDispatchDelayMs: 1,
-    truthPipeline: new FoundationalTruthPipeline(),
+    ...createFoundationalTruthComposition(),
     consultationInterpreter: new FoundationalConsultationInterpreter(),
     criterionCatalog: foundationalCriterionCatalog,
   });
@@ -72,7 +73,7 @@ test("A Knowledge, B Decision, and C Action Preparation use the same canonical c
       method: "GET",
       url: `/api/v1/runs/${knowledgeAccepted.json().runId}/decision-plan`,
     });
-    assert.equal(knowledgePlan.statusCode, 200, knowledgePlan.body);
+    assert.equal(knowledgePlan.statusCode, 404, knowledgePlan.body);
 
     const decisionConversation = await createConversation(app);
     const decisionPending = await app.inject({
@@ -129,7 +130,7 @@ test("A Knowledge, B Decision, and C Action Preparation use the same canonical c
       method: "GET",
       url: `/api/v1/runs/${actionAccepted.json().runId}/decision-plan`,
     });
-    assert.equal(actionPlan.statusCode, 200, actionPlan.body);
+    assert.equal(actionPlan.statusCode, 404, actionPlan.body);
   } finally {
     await app.close();
   }
@@ -142,7 +143,10 @@ test("an unresolved decision need remains explicit and does not force Decision E
     consultationInterpreter: {
       async interpret(input) {
         return {
-          objective: input.message.trim(),
+          objectiveEffect: input.currentIntentVersion
+            ? { kind: "PRESERVE" as const }
+            : { kind: "ESTABLISH" as const, value: input.message.trim() },
+          meaningKind: "ADDITIONAL_CONTEXT" as const,
           decisionRequested: true,
           resourceNeed: "NONE" as const,
         };
@@ -169,6 +173,153 @@ test("an unresolved decision need remains explicit and does not force Decision E
   }
 });
 
+test("ordinary conversational follow-ups preserve the authoritative objective", async () => {
+  const app = await createRuntimeApp(config, { memoryDispatchDelayMs: 1 });
+  try {
+    const conversationId = await createConversation(app);
+    const objective = "Explain how volcanic islands form.";
+    const initial = await app.inject({
+      method: "POST",
+      url: `/api/v1/conversations/${conversationId}/turns`,
+      payload: { turnId: "objective-initial", message: objective },
+    });
+    assert.equal(initial.statusCode, 202, initial.body);
+    const initialIntentVersionId = initial.json().intentVersionId as string;
+
+    for (const [index, followUp] of [
+      "why?",
+      "show me the sources",
+      "what about the other option?",
+      "tell me more",
+      "actually, what did that source say?",
+    ].entries()) {
+      const response = await app.inject({
+        method: "POST",
+        url: `/api/v1/conversations/${conversationId}/turns`,
+        payload: { turnId: `follow-up-${index}`, message: followUp },
+      });
+      assert.equal(response.statusCode, 202, response.body);
+      assert.equal(response.json().intentVersionId, initialIntentVersionId);
+      assert.equal(response.json().acceptedUnderstanding, objective);
+      const run = await app.inject({ method: "GET", url: `/api/v1/runs/${response.json().runId}` });
+      assert.equal(run.json().request.objective, objective);
+    }
+  } finally {
+    await app.close();
+  }
+});
+
+test("explicit objective correction creates a successor and supersedes a pending material proposal", async () => {
+  const app = await createRuntimeApp(config, {
+    memoryDispatchDelayMs: 1,
+    ...createFoundationalTruthComposition(),
+    consultationInterpreter: new FoundationalConsultationInterpreter(),
+    criterionCatalog: foundationalCriterionCatalog,
+  });
+  try {
+    const conversationId = await createConversation(app);
+    const pending = await app.inject({
+      method: "POST",
+      url: `/api/v1/conversations/${conversationId}/turns`,
+      payload: { turnId: "correction-initial", message: DECISION_MESSAGE },
+    });
+    assert.equal(pending.statusCode, 202, pending.body);
+    assert.equal(pending.json().status, "NEEDS_CLARIFICATION");
+
+    const correctedObjective = "Explain reliable long-term preservation principles instead.";
+    const correction = await app.inject({
+      method: "POST",
+      url: `/api/v1/conversations/${conversationId}/turns`,
+      payload: { turnId: "correction-turn", message: `No, actually ${correctedObjective}` },
+    });
+    assert.equal(correction.statusCode, 202, correction.body);
+    assert.notEqual(correction.json().intentVersionId, pending.json().intentVersionId);
+    assert.equal(correction.json().acceptedUnderstanding, correctedObjective);
+    await waitForCompletedRun(app, correction.json().runId);
+    const continued = await app.inject({
+      method: "GET",
+      url: `/api/v1/runs/${correction.json().runId}/outcome`,
+    });
+    assert.equal(continued.statusCode, 200, continued.body);
+    assert.equal(continued.json().outcome.kind, "KNOWLEDGE");
+    assert.equal(continued.json().outcome.acceptedUnderstanding, correctedObjective);
+
+    const staleConfirmation = await app.inject({
+      method: "POST",
+      url: `/api/v1/conversations/${conversationId}/clarifications/${pending.json().proposalId}/confirm`,
+      payload: { turnId: "stale-confirmation", message: "Yes, that's correct." },
+    });
+    assert.equal(staleConfirmation.statusCode, 409, staleConfirmation.body);
+    assert.equal(staleConfirmation.json().error, "CLARIFICATION_STALE");
+  } finally {
+    await app.close();
+  }
+});
+
+test("decision qualification accepts valid requirement-only and preference-only projections", async () => {
+  const app = await createRuntimeApp(config, {
+    memoryDispatchDelayMs: 1,
+    ...createFoundationalTruthComposition(),
+    criterionCatalog: foundationalCriterionCatalog,
+    consultationInterpreter: {
+      async interpret(input) {
+        const requirementOnly = input.message.includes("constraint-only");
+        return {
+          objectiveEffect: input.currentIntentVersion
+            ? { kind: "PRESERVE" as const }
+            : { kind: "ESTABLISH" as const, value: input.message.trim() },
+          meaningKind: "MATERIAL_INFERENCE" as const,
+          decisionRequested: true,
+          resourceNeed: "NONE" as const,
+          materialClarification: {
+            operations: requirementOnly
+              ? [{
+                  op: "SET" as const,
+                  path: { kind: "REQUIREMENT" as const, key: "cost::max" },
+                  value: { state: "VALUE" as const, value: 100 },
+                }]
+              : [{
+                  op: "SET" as const,
+                  path: { kind: "PREFERENCE" as const, key: "throughput" },
+                  value: { state: "VALUE" as const, value: "IMPORTANT" },
+                }],
+            question: "Confirm the explicit decision semantics?",
+            confirmationExample: "Yes.",
+          },
+        };
+      },
+    },
+  });
+  try {
+    for (const [suffix, message] of [
+      ["requirement", "Use a constraint-only decision projection."],
+      ["preference", "Use a comparative preference-only decision projection."],
+    ]) {
+      const conversationId = await createConversation(app);
+      const pending = await app.inject({
+        method: "POST",
+        url: `/api/v1/conversations/${conversationId}/turns`,
+        payload: { turnId: `${suffix}-turn`, message },
+      });
+      assert.equal(pending.statusCode, 202, pending.body);
+      const accepted = await app.inject({
+        method: "POST",
+        url: `/api/v1/conversations/${conversationId}/clarifications/${pending.json().proposalId}/confirm`,
+        payload: { turnId: `${suffix}-confirm`, message: "Yes." },
+      });
+      assert.equal(accepted.statusCode, 202, accepted.body);
+      assert.equal(accepted.json().decisionNeed, "QUALIFIED");
+      const plan = await app.inject({
+        method: "GET",
+        url: `/api/v1/runs/${accepted.json().runId}/decision-plan`,
+      });
+      assert.equal(plan.statusCode, 200, plan.body);
+    }
+  } finally {
+    await app.close();
+  }
+});
+
 test("qualified free-form decision intake survives the live PostgreSQL API-to-worker boundary", { skip: !databaseUrl }, async () => {
   assert.ok(databaseUrl);
   const pool = new Pool({ connectionString: databaseUrl });
@@ -179,7 +330,7 @@ test("qualified free-form decision intake survives the live PostgreSQL API-to-wo
     LATTICE_AUTO_MIGRATE: "true",
     LATTICE_AUTHENTICATION_MODE: "development-fixture",
   } as NodeJS.ProcessEnv), {
-    truthPipeline: new FoundationalTruthPipeline(),
+    ...createFoundationalTruthComposition(),
     consultationInterpreter: new FoundationalConsultationInterpreter(),
     criterionCatalog: foundationalCriterionCatalog,
   });
@@ -222,7 +373,7 @@ test("qualified free-form decision intake survives the live PostgreSQL API-to-wo
       retryDelayMs: 10,
       batchSize: 10,
     }, {
-      truthPipeline: new FoundationalTruthPipeline(),
+      ...createFoundationalTruthComposition(),
       criterionCatalog: foundationalCriterionCatalog,
     });
     worker.start();
@@ -253,9 +404,33 @@ test("qualified free-form decision intake survives the live PostgreSQL API-to-wo
   }
 });
 
-const importPattern = /(?:import|export)\s+(?:type\s+)?(?:[\s\S]*?\s+from\s+)?["'](\.[^"']+)["']/gu;
+function relativeDependencies(path: string, source: string): string[] {
+  const file = ts.createSourceFile(path, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  const dependencies: string[] = [];
+  const visit = (node: ts.Node): void => {
+    if (
+      (ts.isImportDeclaration(node) || ts.isExportDeclaration(node))
+      && node.moduleSpecifier
+      && ts.isStringLiteral(node.moduleSpecifier)
+      && node.moduleSpecifier.text.startsWith(".")
+    ) {
+      dependencies.push(node.moduleSpecifier.text);
+    }
+    if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword) {
+      const argument = node.arguments[0];
+      if (!argument || !ts.isStringLiteral(argument)) {
+        throw new Error(`canonical runtime uses a constructed dynamic import in ${relative(process.cwd(), path)}`);
+      }
+      if (argument.text.startsWith(".")) dependencies.push(argument.text);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(file);
+  return dependencies;
+}
 
 async function canonicalDependencyClosure(entrypoints: readonly string[]): Promise<Map<string, string>> {
+  const canonicalSourceRoot = resolve("src");
   const pending = entrypoints.map((entrypoint) => resolve(entrypoint));
   const visited = new Map<string, string>();
   while (pending.length > 0) {
@@ -263,10 +438,15 @@ async function canonicalDependencyClosure(entrypoints: readonly string[]): Promi
     if (visited.has(path)) continue;
     const source = await readFile(path, "utf8");
     visited.set(path, source);
-    for (const match of source.matchAll(importPattern)) {
-      const specifier = match[1]!;
+    for (const specifier of relativeDependencies(path, source)) {
+      if (specifier.endsWith(".json")) continue;
       const resolved = resolve(dirname(path), specifier.replace(/\.js$/u, ".ts"));
-      if (resolved.includes("/src/")) pending.push(resolved);
+      if (!resolved.startsWith(`${canonicalSourceRoot}/`)) {
+        throw new Error(
+          `canonical runtime imports a non-runtime local dependency: ${relative(process.cwd(), resolved)}`,
+        );
+      }
+      pending.push(resolved);
     }
   }
   return visited;
@@ -285,6 +465,11 @@ test("Example Firewall rejects canonical imports, calls, and dependencies on leg
     "src/intent/bounded-clear-decision-intake.ts",
     "src/intent/bounded-decision-correction.ts",
     "src/intent/exact-planning-fidelity.ts",
+    "test/fixtures/legacy-laptop-fixture.ts",
+    "test/fixtures/legacy-bounded-decision-intake.ts",
+    "test/fixtures/legacy-bounded-clear-decision-intake.ts",
+    "test/fixtures/legacy-bounded-decision-correction.ts",
+    "test/fixtures/legacy-exact-planning-fidelity.ts",
   ].map((path) => resolve(path));
   for (const forbidden of forbiddenModules) {
     assert.equal(
@@ -311,6 +496,31 @@ test("Example Firewall rejects canonical imports, calls, and dependencies on leg
       `canonical dependency closure must not call or reference ${forbiddenCall}`,
     );
   }
+
+  for (const removedRuntimeModule of forbiddenModules.slice(0, 5)) {
+    await assert.rejects(
+      readFile(removedRuntimeModule, "utf8"),
+      (error: NodeJS.ErrnoException) => error.code === "ENOENT",
+      `${relative(process.cwd(), removedRuntimeModule)} must not remain runtime source`,
+    );
+  }
+});
+
+test("Example Firewall dependency analysis cannot be bypassed by aliases or constructed imports", () => {
+  assert.deepEqual(
+    relativeDependencies(
+      resolve("src/synthetic-canonical.ts"),
+      'import { registerBoundedDecisionIntentIntake as harmlessName } from "./intent/bounded-decision-intake.js";',
+    ),
+    ["./intent/bounded-decision-intake.js"],
+  );
+  assert.throws(
+    () => relativeDependencies(
+      resolve("src/synthetic-canonical.ts"),
+      'const moduleName = "./intent/" + "bounded-decision-intake.js"; void import(moduleName);',
+    ),
+    /constructed dynamic import/,
+  );
 });
 
 test("legacy bounded and historical default routes are absent from the canonical Fastify registry", async () => {

@@ -8,7 +8,7 @@ For a concise current implementation map before opening source, read `docs/desig
 
 The canonical slice accepts a free-form conversation turn, records USER provenance through Intent Authority, evaluates trustworthy knowledge through V36, and presents a `KnowledgeOutcome` in Solandra. When consultation establishes a qualified decision need, the generalized Decision Engine may provide decision support; when explicitly requested, Lattice may prepare (but never execute) a checklist or message.
 
-The included demonstration intentionally contains a candidate with the highest raw preference score that loses because it violates a hard constraint.
+The decision fixture demonstrates qualified requirement eligibility and meaningful-difference/frontier semantics without summing incompatible raw criterion scales.
 
 No paid provider, queue service, or cloud service is required for the offline prototype.
 
@@ -22,7 +22,7 @@ Start the application and open:
 http://127.0.0.1:3000/
 ```
 
-Free-form turns use `POST /api/v1/conversations/:conversationId/turns`. The server records the USER message, creates an exact IntentVersion, runs V36, and returns the licensed outcome at `/api/v1/runs/:runId/outcome`. Solandra renders only authoritative knowledge, decision-support, uncertainty, provenance, and prepared-resource state.
+Free-form turns use `POST /api/v1/conversations/:conversationId/turns`. The server records exact USER provenance, interprets the turn against the current IntentVersion, and changes canonical intent only when the USER establishes or explicitly corrects the objective or confirms material proposed meaning. Ordinary follow-ups preserve the objective. V36 then supports Knowledge, conditional Decision Support, or Action Preparation at `/api/v1/runs/:runId/outcome`.
 
 ## Requirements
 
@@ -120,7 +120,7 @@ The repository PostgreSQL validation lane exercises restart survival, Run epoch/
 
 ## Current boundaries
 
-- **Lattice Intent Authority** owns canonical versioned USER intent. `DecisionPlan` is a durable exact IntentVersion-to-Run planning binding, not a separate Product authority.
+- **Lattice Intent Authority** owns canonical versioned USER intent. `DecisionPlan` is a conditional durable exact IntentVersion-to-DecisionInput binding for qualified decision work, not universal Run planning state or a separate Product authority.
 - **Lattice Execution Runtime** owns durable Run lifecycle, coordination, cancellation, recovery, and research execution. The separated durable API/Run-worker/Research-worker composition established through M3 remains operational infrastructure, not truth or decision authority.
 - **V36 Truth Core** is the protected epistemic authority for material external-world factual evidence used by authoritative decisions. The durable V36 research continuation contract established through M4 preserves V36-only admission/sufficiency authority even when Runtime workers execute research.
 - The current default V36 truth pipeline remains deterministic/offline. Live-provider promotion is separately governed by M9 and is not implied by local model or provider-contract support.
@@ -137,7 +137,7 @@ The repository PostgreSQL validation lane exercises restart survival, Run epoch/
 
 The canonical living Product design and forward 1.0 roadmap is `docs/design/Lattice-Living-Software-Design-to-1.0.md`. Its item-level status vocabulary is controlling except where a later explicit Owner decision supersedes an older item for the same bounded scope.
 
-For the **current structural implementation map**, including subsystem ownership, call direction, authoritative/durable/derived state, trust boundaries, and the `Intent Authority → DecisionPlan → Run → V36 → Decision Engine → Solandra` composition, read `docs/design/Lattice-System-Architecture.md`.
+For the **current structural implementation map**, including subsystem ownership, conditional decision machinery, authoritative/durable/derived state, and trust boundaries, read `docs/design/Lattice-System-Architecture.md`.
 
 The first Product-design filter is `docs/design/Lattice-Foundational-Design-Principle.md`; canonical system vocabulary is defined by `docs/design/Lattice-System-Registry-and-Naming.md`; and cross-cutting semantic ownership constraints are protected by `docs/design/Lattice-Architecture-Integrity.md`. The Owner-approved offline-prototype Solandra UI design/approval is installed under `docs/design/solandra/`.
 

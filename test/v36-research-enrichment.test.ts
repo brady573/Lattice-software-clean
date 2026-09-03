@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createDecisionFromAdmittedEvidence } from "../src/engine.js";
-import { laptopFixture, type FixtureDataset } from "../src/fixtures.js";
+import type { DecisionFixtureDataset } from "../src/truth/fixture-dataset.js";
+import { laptopFixture } from "./fixtures/legacy-laptop-fixture.js";
 import { materializeDecisionEvidence } from "../src/truth/admission.js";
 import { requiredProofObligations } from "../src/truth/contracts.js";
 import { OfflineFixtureTruthPipeline } from "../src/truth/execution-pipeline.js";
@@ -25,7 +26,7 @@ function passedChecks(): Readonly<Record<string, ProofCheckStatus>> {
   );
 }
 
-function causalDataset(): FixtureDataset {
+function causalDataset(): DecisionFixtureDataset {
   return {
     candidates: [{ id: "candidate", label: "Candidate" }],
     evidence: [{

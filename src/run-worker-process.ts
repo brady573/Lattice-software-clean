@@ -9,6 +9,9 @@ import {
   createDefaultOfflineTruthPipeline,
   type TruthExecutionPipeline,
 } from "./truth/execution-pipeline.js";
+import {
+  type DecisionEvidenceProvider,
+} from "./truth/decision-evidence-provider.js";
 import { PostgresV36ResearchBridge } from "./v36-research-bridge.js";
 import { assertV36ResearchContinuationRoundsReady } from "./v36-research-round-schema.js";
 
@@ -142,6 +145,7 @@ export class PollingRunWorkerLoop {
 export interface StandaloneRunWorkerOptions {
   truthPipeline?: TruthExecutionPipeline;
   criterionCatalog?: QualifiedCriterionCatalog;
+  decisionEvidenceProvider?: DecisionEvidenceProvider;
   onPollError?: (error: unknown) => void;
 }
 
@@ -186,6 +190,7 @@ export async function createStandaloneRunWorker(
     ? createIntentAuthorityGeneralizedDecisionAdapter(intentStore, options.criterionCatalog)
     : undefined;
   const truthPipeline = options.truthPipeline ?? createDefaultOfflineTruthPipeline();
+  const decisionEvidenceProvider = options.decisionEvidenceProvider;
   const loop = new PollingRunWorkerLoop({
     pollMs: config.pollMs,
     poll: async () => {
@@ -195,6 +200,7 @@ export async function createStandaloneRunWorker(
         continuationBridge,
         truthPipeline,
         ...(generalizedDecisionAdapter ? { generalizedDecisionAdapter } : {}),
+        ...(decisionEvidenceProvider ? { decisionEvidenceProvider } : {}),
         workerId: config.workerId,
         now: new Date(),
         leaseMs: config.leaseMs,

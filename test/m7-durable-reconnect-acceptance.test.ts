@@ -3,11 +3,11 @@ import { randomUUID } from "node:crypto";
 import test from "node:test";
 import type { FastifyInstance } from "fastify";
 import { Pool } from "pg";
-import { laptopFixture } from "../src/fixtures.js";
+import { createLegacyDecisionTruthComposition } from "./fixtures/legacy-laptop-fixture.js";
 import { createRuntimeApp, connectPostgresRuntimeStores } from "../src/runtime-app.js";
 import { resolveRuntimeConfig } from "../src/runtime-config.js";
-import { registerBoundedClearDecisionIntentIntake } from "../src/intent/bounded-clear-decision-intake.js";
-import { assertPlanningMaterialFaithfulToExactIntent } from "../src/intent/exact-planning-fidelity.js";
+import { registerBoundedClearDecisionIntentIntake } from "./fixtures/legacy-bounded-clear-decision-intake.js";
+import { assertPlanningMaterialFaithfulToExactIntent } from "./fixtures/legacy-exact-planning-fidelity.js";
 import {
   createStandaloneResearchWorker,
   type StandaloneResearchWorker,
@@ -16,7 +16,6 @@ import {
   createStandaloneRunWorker,
   type StandaloneRunWorker,
 } from "../src/run-worker-process.js";
-import { OfflineFixtureTruthPipeline } from "../src/truth/execution-pipeline.js";
 
 const databaseUrl = process.env.DATABASE_URL;
 const durableTestSubjectResolver = () => ({ subjectId: "m7-durable-reconnect-subject" });
@@ -175,7 +174,7 @@ test(
         retryDelayMs: 1_000,
         batchSize: 10,
       }, {
-        truthPipeline: new OfflineFixtureTruthPipeline(laptopFixture),
+        ...createLegacyDecisionTruthComposition(),
       });
       researchWorker.start();
       runWorker.start();

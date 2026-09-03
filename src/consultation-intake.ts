@@ -4,6 +4,7 @@ import { z } from "zod";
 import { createApiRequestHash, type ApiRunControlStore } from "./api-control-store.js";
 import type { ConversationStore } from "./conversation/conversation-store.js";
 import type { QualifiedCriterionCatalog } from "./decision/criterion-catalog.js";
+import type { DecisionInputSnapshot } from "./decision/decision-input-snapshot.js";
 import {
   consultationRunRequestSchema,
   type ConsultationRunRequest,
@@ -91,24 +92,21 @@ function validateProposedOperations(
 function qualifiedDecisionNeed(
   version: IntentVersion,
   criterionCatalog: QualifiedCriterionCatalog | undefined,
-): "UNRESOLVED" | "QUALIFIED" {
-  if (!criterionCatalog) return "UNRESOLVED";
+): { decisionNeed: "UNRESOLVED" } | { decisionNeed: "QUALIFIED"; decisionInput: DecisionInputSnapshot } {
+  if (!criterionCatalog) return { decisionNeed: "UNRESOLVED" };
   try {
     const intent = deriveGeneralizedDecisionIntentFromState(
       version.intentScopeId,
       version.intentVersionId,
       version.state,
     );
-    if (
-      Object.keys(intent.decisionSemantics.hardRequirements).length === 0
-      || Object.keys(intent.decisionSemantics.priorities).length === 0
-    ) {
-      return "UNRESOLVED";
+    const decisionInput = buildDecisionInputFromGeneralizedIntent(intent, criterionCatalog);
+    if (decisionInput.hardRequirements.length === 0 && decisionInput.priorities.length === 0) {
+      return { decisionNeed: "UNRESOLVED" };
     }
-    buildDecisionInputFromGeneralizedIntent(intent, criterionCatalog);
-    return "QUALIFIED";
+    return { decisionNeed: "QUALIFIED", decisionInput };
   } catch {
-    return "UNRESOLVED";
+    return { decisionNeed: "UNRESOLVED" };
   }
 }
 
@@ -121,6 +119,7 @@ function consultationRequest(input: {
   sourceMessageDigest: string;
   intentScopeId: string;
   intentVersion: IntentVersion;
+  decisionInput?: DecisionInputSnapshot;
 }): ConsultationRunRequest {
   return consultationRunRequestSchema.parse({
     kind: "consultation",
@@ -133,7 +132,16 @@ function consultationRequest(input: {
     intentVersion: input.intentVersion.version,
     intentScopeId: input.intentScopeId,
     intentVersionId: input.intentVersion.intentVersionId,
+    ...(input.decisionInput ? { decisionInput: input.decisionInput } : {}),
   });
+}
+
+function authoritativeObjective(version: IntentVersion): string {
+  const field = version.state.objective;
+  if (!field || field.value.state !== "VALUE" || typeof field.value.value !== "string") {
+    throw new Error("Authoritative consultation objective is missing.");
+  }
+  return field.value.value;
 }
 
 async function submitConsultationRun(input: {
@@ -249,21 +257,33 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
         return reply.status(409).send({ error: "USER_MESSAGE_PROVENANCE_CONFLICT", message });
       }
 
+      const existingScope = await options.intentStore.getScope(intentScopeId);
+      const currentVersion = existingScope
+        ? await options.intentStore.getVersion(existingScope.currentIntentVersionId)
+        : undefined;
+      if (existingScope && !currentVersion) {
+        return reply.status(500).send({ error: "AUTHORITATIVE_INTENT_VERSION_MISSING" });
+      }
+
       let interpretation: ConsultationInterpretationProposal;
       try {
         interpretation = await interpreter.interpret({
           message: sourceMessage.content,
           context: parsed.data.context ?? [],
+          ...(currentVersion ? { currentIntentVersion: currentVersion } : {}),
           ...(parsed.data.prepare ? { explicitResourceNeed: parsed.data.prepare } : {}),
         });
       } catch (error) {
         const message = error instanceof Error ? error.message : "Consultation interpretation failed.";
         return reply.status(422).send({ error: "CONSULTATION_INTERPRETATION_FAILED", message });
       }
-      if (interpretation.objective.trim() !== sourceMessage.content.trim()) {
+      if (
+        interpretation.objectiveEffect.kind !== "PRESERVE"
+        && interpretation.objectiveEffect.value.trim().length === 0
+      ) {
         return reply.status(422).send({
-          error: "NON_AUTHORITATIVE_OBJECTIVE_REWRITE",
-          message: "The interpreter may propose decision semantics but may not rewrite the authoritative USER objective.",
+          error: "INVALID_OBJECTIVE_EFFECT",
+          message: "An explicit objective effect must contain non-empty USER meaning.",
         });
       }
       if (interpretation.materialClarification && !interpretation.decisionRequested) {
@@ -273,7 +293,29 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
         });
       }
 
-      const existingScope = await options.intentStore.getScope(intentScopeId);
+      if (!existingScope && interpretation.objectiveEffect.kind !== "ESTABLISH") {
+        return reply.status(422).send({
+          error: "INITIAL_OBJECTIVE_REQUIRED",
+          message: "The first consultation turn must establish an explicit objective.",
+        });
+      }
+      if (existingScope && interpretation.objectiveEffect.kind === "ESTABLISH") {
+        return reply.status(422).send({
+          error: "OBJECTIVE_ALREADY_ESTABLISHED",
+          message: "A later turn must preserve or explicitly replace the current objective.",
+        });
+      }
+
+      const objectiveOperation: IntentOperation = {
+        op: "SET",
+        path: { kind: "OBJECTIVE" },
+        value: {
+          state: "VALUE",
+          value: interpretation.objectiveEffect.kind === "PRESERVE"
+            ? authoritativeObjective(currentVersion!)
+            : interpretation.objectiveEffect.value.trim(),
+        },
+      };
       const transition: IntentTransitionCommand = {
         transitionId: stableUuid("consultation-transition", conversationId, sourceMessage.messageId),
         intentScopeId,
@@ -282,11 +324,7 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
         observedMessageHorizon: sourceMessage.messageHorizon,
         sourceMessageId: sourceMessage.messageId,
         sourceDigest: sourceMessage.contentDigest,
-        operations: [{
-          op: "SET",
-          path: { kind: "OBJECTIVE" },
-          value: { state: "VALUE", value: sourceMessage.content.trim() },
-        }],
+        operations: [objectiveOperation],
       };
 
       let intentVersionId: string;
@@ -297,6 +335,8 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
           initialTransition: transition,
         });
         intentVersionId = scope.currentIntentVersionId;
+      } else if (interpretation.objectiveEffect.kind === "PRESERVE") {
+        intentVersionId = existingScope.currentIntentVersionId;
       } else {
         const applied = await options.intentStore.applyTransition(transition);
         if (!applied.resultingIntentVersionId) {
@@ -325,6 +365,7 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
         return reply.status(202).send({
           status: "NEEDS_CLARIFICATION",
           decisionNeed: "UNRESOLVED",
+          acceptedUnderstanding: authoritativeObjective(version),
           intentScopeId,
           intentVersionId: version.intentVersionId,
           proposalId: proposal.proposalId,
@@ -334,16 +375,19 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
         });
       }
 
-      const decisionNeed = interpretation.decisionRequested ? "UNRESOLVED" : "NONE";
+      const qualification = interpretation.decisionRequested
+        ? qualifiedDecisionNeed(version, options.criterionCatalog)
+        : { decisionNeed: "NONE" as const };
       const requestBody = consultationRequest({
-        objective: sourceMessage.content.trim(),
-        context: parsed.data.context ?? [],
-        decisionNeed,
+        objective: authoritativeObjective(version),
+        context: [],
+        decisionNeed: qualification.decisionNeed,
         resourceNeed: interpretation.resourceNeed,
         sourceMessageId: sourceMessage.messageId,
         sourceMessageDigest: sourceMessage.contentDigest,
         intentScopeId,
         intentVersion: version,
+        ...(qualification.decisionNeed === "QUALIFIED" ? { decisionInput: qualification.decisionInput } : {}),
       });
       const submission = await submitConsultationRun({
         request,
@@ -454,7 +498,8 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
       const version = await options.intentStore.getVersion(confirmation.resultingIntentVersionId);
       if (!version) return reply.status(500).send({ error: "CONFIRMED_INTENT_VERSION_MISSING" });
 
-      const decisionNeed = qualifiedDecisionNeed(version, options.criterionCatalog);
+      const qualification = qualifiedDecisionNeed(version, options.criterionCatalog);
+      const decisionNeed = qualification.decisionNeed;
       const objectiveField = version.state.objective;
       if (
         !objectiveField
@@ -473,6 +518,7 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
         sourceMessageDigest: sourceMessage.contentDigest,
         intentScopeId: proposal.intentScopeId,
         intentVersion: version,
+        ...(qualification.decisionNeed === "QUALIFIED" ? { decisionInput: qualification.decisionInput } : {}),
       });
       const submission = await submitConsultationRun({
         request,
@@ -499,6 +545,7 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
       return reply.status(202).send({
         status: "RUN_ACCEPTED",
         runId: submission.runId,
+        acceptedUnderstanding: objective,
         decisionNeed,
         intentScopeId: proposal.intentScopeId,
         intentVersionId: version.intentVersionId,

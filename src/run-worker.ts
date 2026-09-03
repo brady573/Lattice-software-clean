@@ -6,6 +6,7 @@ import {
   type GeneralizedDecisionAdapter,
 } from "./run-execution.js";
 import type { TruthExecutionPipeline } from "./truth/execution-pipeline.js";
+import type { DecisionEvidenceProvider } from "./truth/decision-evidence-provider.js";
 
 export interface ProcessRunDispatchesInput {
   runStore: RunStore;
@@ -13,6 +14,7 @@ export interface ProcessRunDispatchesInput {
   truthPipeline: TruthExecutionPipeline;
   continuationBridge?: DurableV36ContinuationBridge;
   generalizedDecisionAdapter?: GeneralizedDecisionAdapter;
+  decisionEvidenceProvider?: DecisionEvidenceProvider;
   workerId: string;
   now: Date;
   leaseMs?: number;
@@ -79,6 +81,7 @@ export async function processRunDispatches(input: ProcessRunDispatchesInput): Pr
         dispatch.runId,
         input.continuationBridge,
         input.generalizedDecisionAdapter,
+        input.decisionEvidenceProvider,
       );
       if (!isTerminal(completed.status)) {
         const released = await input.orchestrationStore.releaseDispatch({

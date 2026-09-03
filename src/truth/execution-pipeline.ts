@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { Candidate, Evidence, LatticeRunRequest } from "../domain.js";
+import type { LatticeRunRequest } from "../domain.js";
 import type { FixtureDataset } from "./fixture-dataset.js";
 import type { V36ResearchCheckpoint } from "./continuation.js";
 import {
@@ -32,12 +32,7 @@ export interface TruthPipelineInvestigation {
   serialRounds: number;
 }
 
-export interface TruthDecisionInputs {
-  candidates: Candidate[];
-  evidence: Evidence[];
-}
-
-export interface TruthPipelineExecution extends TruthDecisionInputs {
+export interface TruthPipelineExecution {
   snapshot: TruthSnapshot;
   bundle: TruthBundle;
   serialRounds: number;
@@ -59,7 +54,6 @@ export interface TruthExecutionPipeline {
     checkpoint: V36ResearchCheckpoint,
     results: readonly V36RuntimeExecutionResult[],
   ): Promise<TruthDurableValidationStep>;
-  decisionInputs(snapshot: TruthSnapshot): Promise<TruthDecisionInputs>;
   execute(runId: string, request?: LatticeRunRequest): Promise<TruthPipelineExecution>;
 }
 
@@ -68,9 +62,8 @@ function initialSerialRounds(snapshot: TruthSnapshot): number {
 }
 
 /**
- * Deterministic offline V36 seam. Candidate/evidence arrays are compatibility
- * material for the optional decision adapter; truth claims themselves are not
- * required to carry candidate or criterion bindings.
+ * Deterministic offline V36 seam. Truth execution produces validated truth
+ * state only; the optional decision-specific projection is a separate adapter.
  */
 export class OfflineFixtureTruthPipeline implements TruthExecutionPipeline {
   readonly mode = "v36-offline-fixture" as const;
@@ -110,8 +103,6 @@ export class OfflineFixtureTruthPipeline implements TruthExecutionPipeline {
       execution: {
         snapshot,
         bundle: snapshot.bundle,
-        candidates: structuredClone(this.dataset.candidates),
-        evidence: structuredClone(this.dataset.evidence),
         serialRounds: step.serialRounds,
       },
     };
@@ -144,8 +135,6 @@ export class OfflineFixtureTruthPipeline implements TruthExecutionPipeline {
     return {
       snapshot: validated,
       bundle: validated.bundle,
-      candidates: dataset.candidates,
-      evidence: dataset.evidence,
       serialRounds: Math.max(initialSerialRounds(snapshot), enriched.serialCriticalPathRounds),
     };
   }
@@ -174,20 +163,6 @@ export class OfflineFixtureTruthPipeline implements TruthExecutionPipeline {
     ));
   }
 
-  async decisionInputs(snapshot: TruthSnapshot): Promise<TruthDecisionInputs> {
-    assertTruthSnapshotIntegrity(snapshot);
-    if (snapshot.phase !== "VALIDATED") {
-      throw new Error("Decision inputs require a VALIDATED V36 truth snapshot.");
-    }
-    if (!this.ownsExecutionContract(snapshot.executionContractId)) {
-      throw new Error("Truth snapshot was produced by a different V36 execution contract.");
-    }
-    return {
-      candidates: structuredClone(this.dataset.candidates),
-      evidence: structuredClone(this.dataset.evidence),
-    };
-  }
-
   async execute(runId: string): Promise<TruthPipelineExecution> {
     const investigation = await this.investigate(runId);
     return this.validate(investigation.snapshot);
@@ -195,8 +170,6 @@ export class OfflineFixtureTruthPipeline implements TruthExecutionPipeline {
 }
 
 const emptyKnowledgeFixture: FixtureDataset = Object.freeze({
-  candidates: [],
-  evidence: [],
   truthClaims: [],
   truthEvidence: [],
 });

@@ -5,7 +5,7 @@ import type { FastifyInstance } from "fastify";
 import { Pool } from "pg";
 import { MemoryApiRunControlStore } from "../src/api-control-store.js";
 import { buildApp } from "../src/app.js";
-import { registerBoundedDecisionIntentIntake } from "../src/intent/bounded-decision-intake.js";
+import { registerBoundedDecisionIntentIntake } from "./fixtures/legacy-bounded-decision-intake.js";
 import {
   MemoryIntentAuthorityStore,
   MemoryIntentBoundRunStore,
@@ -21,7 +21,7 @@ import { resolveRuntimeConfig } from "../src/runtime-config.js";
 import {
   DECISION_MESSAGE,
   FoundationalConsultationInterpreter,
-  FoundationalTruthPipeline,
+  createFoundationalTruthComposition,
   foundationalCriterionCatalog,
 } from "./fixtures/foundational-consultation-fixture.js";
 
@@ -69,7 +69,7 @@ test("runtime canonical conversation API routes material clarification through I
     }),
     {
       memoryDispatchDelayMs: 1,
-      truthPipeline: new FoundationalTruthPipeline(),
+      ...createFoundationalTruthComposition(),
       consultationInterpreter: new FoundationalConsultationInterpreter(),
       criterionCatalog: foundationalCriterionCatalog,
     },

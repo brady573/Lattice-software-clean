@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { decisionInputSnapshotSchema } from "./decision/decision-input-snapshot.js";
 
 export const prioritySchema = z.object({
   criterion: z.string().min(1),
@@ -32,6 +33,22 @@ export const consultationRunRequestSchema = z.object({
   intentVersion: z.number().int().positive(),
   intentScopeId: z.string().min(1).max(200).optional(),
   intentVersionId: z.string().min(1).max(200).optional(),
+  decisionInput: decisionInputSnapshotSchema.optional(),
+}).superRefine((request, context) => {
+  if (request.decisionNeed === "QUALIFIED" && request.decisionInput === undefined) {
+    context.addIssue({
+      code: "custom",
+      path: ["decisionInput"],
+      message: "A qualified consultation requires one exact DecisionInput projection.",
+    });
+  }
+  if (request.decisionNeed !== "QUALIFIED" && request.decisionInput !== undefined) {
+    context.addIssue({
+      code: "custom",
+      path: ["decisionInput"],
+      message: "Non-decision consultations must not carry decision planning material.",
+    });
+  }
 });
 
 export type RunRequest = z.infer<typeof runRequestSchema>;
