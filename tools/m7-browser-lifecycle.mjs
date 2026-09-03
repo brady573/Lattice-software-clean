@@ -389,7 +389,8 @@ async function main() {
       return {composerText,conversationText,requests,turns:document.querySelectorAll('#conversation .turn.user').length};
     })()`));
     assert.equal(correctionRouting.turns, 2);
-    assert.match(correctionRouting.conversationText, /Explain the evidence instead\./u);
+    assert.match(correctionRouting.conversationText, /No, actually explain the evidence instead\./u);
+    assert.match(correctionRouting.composerText, /Fixture limitation\./u);
     assert.equal(correctionRouting.requests.filter((item) => item.path.endsWith('/turns')).length, 2);
     assert.equal(correctionRouting.requests.filter((item) => item.path.includes('/runs/run-corrected/outcome')).length, 1);
     assert.equal(correctionRouting.requests.some((item) => item.path.includes('/confirm')), false);
