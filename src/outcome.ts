@@ -87,7 +87,6 @@ function findingStatus(assessment: TruthBundle["assessments"][number]): Knowledg
   switch (assessment.atomicDisposition) {
     case "SUPPORTED": return "SUPPORTED";
     case "REFUTED": return "REFUTED";
-    case "CONFLICT": return "CONFLICTED";
     case "INSUFFICIENT": return "UNRESOLVED";
   }
 }
