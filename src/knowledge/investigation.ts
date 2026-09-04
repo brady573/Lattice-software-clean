@@ -158,13 +158,16 @@ export class ObjectiveKnowledgeRelevanceQualifier implements KnowledgeRelevanceQ
     const queryMatches = matchingTerms(queryTerms, candidateTokens);
     const specificObjectiveMatches = matchingTerms(specificObjectiveTerms, candidateTokens);
     const anchorMatches = matchingTerms(anchorTerms, candidateTokens);
+    const singleSpecificObjective = specificObjectiveTerms.length <= 1;
 
     const relevant = objectiveTerms.length <= 1
       ? objectiveMatches.length >= 1
       : queryTerms.length > 0
-        ? (anchorMatches.length >= 1 && queryMatches.length >= 1)
-          || (objectiveMatches.length >= 1 && queryMatches.length >= 2)
-          || specificObjectiveMatches.length >= 2
+        ? singleSpecificObjective
+          ? anchorMatches.length >= 1 && queryMatches.length >= 1
+          : (anchorMatches.length >= 1 && queryMatches.length >= 1)
+            || (objectiveMatches.length >= 1 && queryMatches.length >= 2)
+            || specificObjectiveMatches.length >= 2
         : specificObjectiveMatches.length >= 2
           || objectiveMatches.length >= 3;
 
