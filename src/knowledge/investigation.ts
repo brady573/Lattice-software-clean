@@ -19,7 +19,8 @@ const STOP_WORDS = new Set([
 
 const GENERIC_RELATION_TERMS = new Set([
   "cause", "causes", "caused", "causing", "direction", "directions", "east", "effect", "effects", "find",
-  "location", "make", "makes", "made", "mechanism", "north", "orientation", "south", "west",
+  "location", "make", "makes", "made", "mechanism", "navigate", "navigation", "north", "orient", "orientation",
+  "sense", "sensing", "south", "west",
 ]);
 
 function normalizedTokens(value: string): string[] {
@@ -83,6 +84,7 @@ export class DeterministicKnowledgeInvestigationQueryDeriver implements Knowledg
     const contextTerms = unique(normalizedTokens(latestContext)).slice(0, 4);
     const concepts = conceptExpansion(`${objective}\n${latestContext}`);
     const specificTerms = objectiveTerms.filter((term) => !GENERIC_RELATION_TERMS.has(term));
+    const relationTerms = objectiveTerms.filter((term) => GENERIC_RELATION_TERMS.has(term));
     const anchor = specificTerms[0] ?? objectiveTerms[0];
 
     const candidates: string[] = [];
@@ -90,7 +92,11 @@ export class DeterministicKnowledgeInvestigationQueryDeriver implements Knowledg
       candidates.push(boundedQuery([anchor, ...concepts]));
     }
     if (objectiveTerms.length > 0) {
-      candidates.push(boundedQuery([...objectiveTerms, ...contextTerms]));
+      if (concepts.length > 0 && specificTerms.length <= 1 && relationTerms.length > 0) {
+        candidates.push(boundedQuery([...concepts, ...relationTerms]));
+      } else {
+        candidates.push(boundedQuery([...objectiveTerms, ...contextTerms]));
+      }
     }
     if (candidates.length === 0) candidates.push(objective.slice(0, MAX_QUERY_CHARS));
 
@@ -139,26 +145,28 @@ export class ObjectiveKnowledgeRelevanceQualifier implements KnowledgeRelevanceQ
     const objectiveTerms = unique(normalizedTokens(input.objective));
     const queryTerms = unique(input.queries.flatMap((query) => normalizedTokens(query)))
       .filter((term) => !objectiveTerms.includes(term));
-    const anchorTerms = objectiveTerms.filter((term) => !GENERIC_RELATION_TERMS.has(term)).slice(0, 3);
+    const specificObjectiveTerms = objectiveTerms.filter((term) => !GENERIC_RELATION_TERMS.has(term));
+    const anchorTerms = specificObjectiveTerms.slice(0, 3);
     const candidateText = [
       input.source.title,
       input.claim.text,
       input.source.content.slice(0, MAX_RELEVANCE_TEXT_CHARS),
     ].join("\n");
     const candidateTokens = unique(normalizedTokens(candidateText));
-    const titleTokens = unique(normalizedTokens(input.source.title));
 
     const objectiveMatches = matchingTerms(objectiveTerms, candidateTokens);
     const queryMatches = matchingTerms(queryTerms, candidateTokens);
+    const specificObjectiveMatches = matchingTerms(specificObjectiveTerms, candidateTokens);
     const anchorMatches = matchingTerms(anchorTerms, candidateTokens);
-    const titleAnchorMatches = matchingTerms(anchorTerms, titleTokens);
 
     const relevant = objectiveTerms.length <= 1
       ? objectiveMatches.length >= 1
-      : titleAnchorMatches.length >= 1
-        || (anchorMatches.length >= 1 && (objectiveMatches.length >= 2 || queryMatches.length >= 1))
-        || (objectiveMatches.length >= 1 && queryMatches.length >= 2)
-        || queryMatches.length >= 3;
+      : queryTerms.length > 0
+        ? (anchorMatches.length >= 1 && queryMatches.length >= 1)
+          || (objectiveMatches.length >= 1 && queryMatches.length >= 2)
+          || specificObjectiveMatches.length >= 2
+        : specificObjectiveMatches.length >= 2
+          || objectiveMatches.length >= 3;
 
     return {
       relevant,
