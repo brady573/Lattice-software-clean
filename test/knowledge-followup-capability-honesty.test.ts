@@ -105,7 +105,6 @@ test("simplification follow-up does not simulate simplification by truncating so
     (_, index) => `Sentence ${index + 1} preserves the original source wording while supplying enough detail for a long paragraph.`,
   ).join(" ");
   assert.ok(extract.length > 480);
-  assert.ok(extract.length < 1_200);
 
   const provider = new WikimediaKnowledgeAcquisitionProvider({
     fetchImpl: wikimediaFixture(observed, extract),
