@@ -55,13 +55,12 @@ function boundedResultLimit(value: number): number {
   return value;
 }
 
-type WorkEmphasis = "GENERAL" | "SOURCES" | "UNCERTAINTY" | "SIMPLIFY" | "EXPLANATION" | "EXPANSION";
+type WorkEmphasis = "GENERAL" | "SOURCES" | "UNCERTAINTY" | "EXPLANATION" | "EXPANSION";
 
 function workEmphasis(context: readonly string[]): WorkEmphasis {
   const latest = context.at(-1)?.trim() ?? "";
   if (/\b(?:source|sources|citation|citations|evidence)\b/iu.test(latest)) return "SOURCES";
-  if (/\b(?:uncertain|uncertainty|disagree|disagrees|conflict|conflicting)\b/iu.test(latest)) return "UNCERTAINTY";
-  if (/\b(?:simpler|simply|plain language)\b/iu.test(latest)) return "SIMPLIFY";
+  if (/\b(?:uncertain|uncertainty)\b/iu.test(latest)) return "UNCERTAINTY";
   if (/^why\??$/iu.test(latest) || /\b(?:explain|tell me more)\b/iu.test(latest)) return "EXPLANATION";
   if (/\bwhat about\b/iu.test(latest)) return "EXPANSION";
   return "GENERAL";
@@ -79,11 +78,10 @@ function queryMaterial(request: KnowledgeAcquisitionRequest): string {
     .slice(0, 8_000);
 }
 
-function sourceClaimText(content: string, emphasis: WorkEmphasis): string {
+function sourceClaimText(content: string): string {
   const firstParagraph = content.split(/\n\s*\n/u).find((part) => part.trim().length > 0)?.trim() ?? "";
-  const limit = emphasis === "SIMPLIFY" ? 480 : MAX_CLAIM_CHARS;
-  if (firstParagraph.length <= limit) return firstParagraph;
-  const bounded = firstParagraph.slice(0, limit);
+  if (firstParagraph.length <= MAX_CLAIM_CHARS) return firstParagraph;
+  const bounded = firstParagraph.slice(0, MAX_CLAIM_CHARS);
   const sentenceEnd = Math.max(bounded.lastIndexOf(". "), bounded.lastIndexOf(".\n"));
   return (sentenceEnd >= 160 ? bounded.slice(0, sentenceEnd + 1) : bounded).trim();
 }
@@ -123,7 +121,8 @@ async function readBoundedJson(response: Response): Promise<unknown> {
 /**
  * Zero-cost development adapter for Wikimedia's public search API. It returns
  * source text and exact source-bound claim proposals only. It does not summarize,
- * assess reliability, assign confidence, or admit anything as knowledge.
+ * simplify, detect semantic contradictions, assess reliability, assign confidence,
+ * or admit anything as knowledge.
  */
 export class WikimediaKnowledgeAcquisitionProvider implements KnowledgeAcquisitionProvider {
   readonly kind = "wikimedia-search";
@@ -223,7 +222,7 @@ export class WikimediaKnowledgeAcquisitionProvider implements KnowledgeAcquisiti
         content: extract,
         metadata: { pageId: Number(pageId), sourceAdapter: this.kind },
       };
-      const text = sourceClaimText(extract, emphasis);
+      const text = sourceClaimText(extract);
       if (!text) continue;
       sources.push(source);
       claims.push({

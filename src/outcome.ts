@@ -92,6 +92,32 @@ function findingStatus(assessment: TruthBundle["assessments"][number]): Knowledg
   }
 }
 
+function followUpCapabilityLimitations(run: LatticeRun): string[] {
+  if (!isConsultationRunRequest(run.request)) return [];
+  const latest = run.request.context.at(-1)?.trim() ?? "";
+  if (!latest) return [];
+
+  const limitations: string[] = [];
+  const simplificationRequested = /\b(?:simpler|simply|plain language)\b/iu.test(latest);
+  if (simplificationRequested) {
+    limitations.push(
+      "This v0.1 Knowledge path does not perform genuine language simplification; it preserves source-grounded wording rather than treating truncation as simplification.",
+    );
+  } else if (/^why\??$/iu.test(latest) || /\b(?:explain|tell me more)\b/iu.test(latest)) {
+    limitations.push(
+      "This v0.1 follow-up uses additional source-grounded retrieval only; it does not produce a model-synthesized explanation.",
+    );
+  }
+
+  if (/\b(?:disagree|disagrees|contradict|contradiction|conflict|conflicting)\b/iu.test(latest)) {
+    limitations.push(
+      "This v0.1 Knowledge path does not perform semantic contradiction detection. Retrieved evidence may contain explicit contradictions, but ordinary retrieval is not treated as proof that disagreement was searched or absent.",
+    );
+  }
+
+  return limitations;
+}
+
 export function buildKnowledgeOutcome(run: LatticeRun, truth: TruthBundle): KnowledgeOutcome {
   const claimsById = new Map(truth.claims.map((claim) => [claim.id, claim]));
   const findings = truth.assessments.flatMap<KnowledgeFinding>((assessment) => {
@@ -135,6 +161,7 @@ export function buildKnowledgeOutcome(run: LatticeRun, truth: TruthBundle): Know
       "Source-report evidence establishes only what the retrieved sources report; it does not independently verify broader real-world claims or satisfy unresolved V36 proof obligations.",
     );
   }
+  uncertainties.push(...followUpCapabilityLimitations(run));
 
   return {
     kind: "KNOWLEDGE",
