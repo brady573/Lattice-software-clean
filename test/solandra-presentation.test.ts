@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { LatticeRun } from "../src/domain.js";
+import type { DecisionOutcome, LatticeRun } from "../src/domain.js";
 import type { DurableDecisionPlan } from "../src/intent/decision-plan-store.js";
+import type { IntentProvenance, IntentVersion } from "../src/intent/types.js";
+import type { KnowledgeOutcome, RunOutcome } from "../src/outcome.js";
 import {
   composeSolandraPresentation,
   hydrateSolandraResource,
@@ -21,6 +23,42 @@ const plan: DurableDecisionPlan = {
     priorities: [{ criterion: "performance", weight: 1 }],
   },
   boundAt: "2026-08-30T14:00:00.000Z",
+};
+
+const intentProvenance: IntentProvenance = {
+  kind: "EXPLICIT_USER",
+  logicalUserTurnId: "turn-1",
+  sourceMessageId: "message-1",
+  sourceDigest: "a".repeat(64),
+};
+
+const intentVersion: IntentVersion = {
+  intentScopeId: "scope-1",
+  intentVersionId: "intent-version-1",
+  version: 1,
+  predecessorIntentVersionId: null,
+  transitionId: "transition-1",
+  lineageKind: "INITIAL",
+  lineageTargetIntentVersionId: null,
+  state: {
+    objective: {
+      value: { state: "VALUE", value: plan.planningMaterial.goal },
+      provenance: intentProvenance,
+    },
+    requirements: {
+      "budget::max": {
+        value: { state: "VALUE", value: 1300 },
+        provenance: intentProvenance,
+      },
+    },
+    preferences: {
+      capability: {
+        value: { state: "VALUE", value: "MATTERS_MOST" },
+        provenance: intentProvenance,
+      },
+    },
+  },
+  createdAt: "2026-08-30T14:00:00.000Z",
 };
 
 function run(status: LatticeRun["status"]): LatticeRun {
@@ -46,23 +84,191 @@ function run(status: LatticeRun["status"]): LatticeRun {
   };
 }
 
-test("presentation is reconstructed from accepted Product state rather than transcript prose", () => {
+function knowledgeOutcome(): KnowledgeOutcome {
+  return {
+    kind: "KNOWLEDGE",
+    objective: plan.planningMaterial.goal,
+    acceptedUnderstanding: plan.planningMaterial.goal,
+    findings: [{
+      claimId: "claim-1",
+      text: "The admitted evidence supports the material finding.",
+      status: "SUPPORTED",
+      confidence: "HIGH",
+      evidenceIds: ["evidence-1"],
+      contradictoryEvidenceIds: [],
+      temporalQualifiers: { effectiveAt: null, period: null },
+    }],
+    uncertainties: [],
+    provenance: [],
+    truthAssessmentIds: ["truth-1"],
+  };
+}
+
+function nonDecisionRun(resourceNeed: "NONE" | "CHECKLIST"): LatticeRun {
+  return {
+    id: `run-${resourceNeed.toLowerCase()}`,
+    conversationId: "conversation-1",
+    status: "COMPLETED",
+    version: 6,
+    request: {
+      kind: "consultation",
+      objective: plan.planningMaterial.goal,
+      context: [],
+      decisionNeed: "NONE",
+      resourceNeed,
+      sourceMessageId: "message-1",
+      sourceMessageDigest: "a".repeat(64),
+      intentVersion: 1,
+      intentScopeId: intentVersion.intentScopeId,
+      intentVersionId: intentVersion.intentVersionId,
+    },
+    decision: null,
+    explanation: null,
+    truthAssessmentIds: ["truth-1"],
+    events: [],
+  };
+}
+
+test("accepted understanding comes only from exact IntentVersion state, including requirements and preferences", () => {
   const listening = composeSolandraPresentation({ conversationId: "conversation-1" });
   assert.equal(listening.phase, "listening");
   assert.equal(listening.durableUnderstanding, undefined);
   assert.deepEqual(listening.supportingKnowledge, []);
 
-  const understanding = composeSolandraPresentation({
+  const planOnly = composeSolandraPresentation({
     conversationId: "conversation-1",
     run: run("PLANNING"),
     decisionPlan: plan,
   });
+  assert.equal(planOnly.durableUnderstanding, undefined);
+  assert.equal(planOnly.basis.intentVersionId, undefined);
+  assert.deepEqual(planOnly.supportingKnowledge, []);
+
+  const understanding = composeSolandraPresentation({
+    conversationId: "conversation-1",
+    run: run("PLANNING"),
+    decisionPlan: plan,
+    intentVersion,
+  });
   assert.equal(understanding.phase, "understanding");
   assert.equal(understanding.durableUnderstanding?.goal, plan.planningMaterial.goal);
-  assert.deepEqual(understanding.durableUnderstanding?.requirements, plan.planningMaterial.hardConstraints);
-  assert.deepEqual(understanding.durableUnderstanding?.preferences, plan.planningMaterial.priorities);
+  assert.deepEqual(understanding.durableUnderstanding?.requirements, [{
+    semanticKey: "budget::max",
+    value: { state: "VALUE", value: 1300 },
+    provenance: intentProvenance,
+  }]);
+  assert.deepEqual(understanding.durableUnderstanding?.preferences, [{
+    semanticKey: "capability",
+    value: { state: "VALUE", value: "MATTERS_MOST" },
+    provenance: intentProvenance,
+  }]);
+  assert.equal(understanding.basis.intentVersionId, intentVersion.intentVersionId);
   assert.equal(understanding.nextAction, undefined);
   assert.equal(JSON.stringify(understanding).includes("Candidate A is the supported recommendation"), false);
+});
+
+test("supporting knowledge comes only from a faithful V36-backed completed outcome", () => {
+  const completed = nonDecisionRun("NONE");
+  const withoutOutcome = composeSolandraPresentation({
+    conversationId: "conversation-1",
+    run: completed,
+    decisionPlan: plan,
+    intentVersion,
+  });
+  assert.deepEqual(withoutOutcome.supportingKnowledge, []);
+
+  const withOutcome = composeSolandraPresentation({
+    conversationId: "conversation-1",
+    run: completed,
+    intentVersion,
+    outcome: knowledgeOutcome(),
+  });
+  assert.deepEqual(withOutcome.supportingKnowledge, [{
+    id: "knowledge:claim-1",
+    label: "SUPPORTED",
+    value: "The admitted evidence supports the material finding.",
+    provenance: [{ authority: "v36", ref: "truth-1" }],
+  }]);
+
+  const mismatched = knowledgeOutcome();
+  mismatched.truthAssessmentIds = ["truth-from-another-run"];
+  assert.deepEqual(composeSolandraPresentation({
+    conversationId: "conversation-1",
+    run: completed,
+    intentVersion,
+    outcome: mismatched,
+  }).supportingKnowledge, []);
+
+  const incomplete = knowledgeOutcome();
+  completed.truthAssessmentIds.push("truth-2");
+  assert.deepEqual(composeSolandraPresentation({
+    conversationId: "conversation-1",
+    run: completed,
+    intentVersion,
+    outcome: incomplete,
+  }).supportingKnowledge, []);
+});
+
+test("Knowledge and Action Preparation present without a DecisionPlan", () => {
+  const knowledge = knowledgeOutcome();
+  const knowledgeSnapshot = composeSolandraPresentation({
+    conversationId: "conversation-1",
+    run: nonDecisionRun("NONE"),
+    intentVersion,
+    outcome: knowledge,
+  });
+  assert.equal(knowledgeSnapshot.basis.decisionPlanId, undefined);
+  assert.equal(knowledgeSnapshot.durableUnderstanding?.goal, knowledge.objective);
+  assert.equal(knowledgeSnapshot.supportingKnowledge.length, 1);
+  assert.equal(knowledgeSnapshot.nextAction, undefined);
+
+  const actionOutcome: RunOutcome = {
+    kind: "ACTION_PREPARATION",
+    knowledge,
+    resource: {
+      kind: "CHECKLIST",
+      title: "Prepared checklist",
+      body: "Review the supported material before acting.",
+      editable: true,
+      executionAuthorized: false,
+    },
+  };
+  const actionSnapshot = composeSolandraPresentation({
+    conversationId: "conversation-1",
+    run: nonDecisionRun("CHECKLIST"),
+    intentVersion,
+    outcome: actionOutcome,
+  });
+  assert.equal(actionSnapshot.basis.decisionPlanId, undefined);
+  assert.equal(actionSnapshot.supportingKnowledge.length, 1);
+  assert.equal(actionSnapshot.nextAction, undefined);
+  assert.deepEqual(actionSnapshot.resources, [{
+    id: "action-preparation:run-checklist",
+    kind: "generated_artifact",
+    title: "Prepared checklist",
+    purpose: "enable_next_action",
+    provenance: [
+      { authority: "execution_runtime", ref: "run-checklist@6" },
+      { authority: "v36", ref: "truth-1" },
+    ],
+    status: "available",
+    capabilities: ["copy", "download"],
+    editable: true,
+    executionAuthorized: false,
+  }]);
+  const hydrated = hydrateSolandraResource({
+    snapshot: actionSnapshot,
+    resourceId: "action-preparation:run-checklist",
+    run: nonDecisionRun("CHECKLIST"),
+    outcome: actionOutcome,
+  });
+  assert.equal(hydrated?.payload.kind, "generated_artifact");
+  assert.equal(hydrated?.descriptor.editable, true);
+  assert.equal(hydrated?.descriptor.executionAuthorized, false);
+  if (hydrated?.payload.kind === "generated_artifact") {
+    assert.equal(hydrated.payload.filename, "solandra-checklist-run-checklist.txt");
+    assert.equal(hydrated.payload.text, actionOutcome.resource.body);
+  }
 });
 
 test("knowledge gaps remain uncertainty and cannot manufacture an actionable winner", () => {
@@ -97,26 +303,52 @@ test("only StructuredDecision supplies winner authority for actionable presentat
   ));
 });
 
-test("Solandra preserves a non-winner decision outcome and frontier", () => {
-  const completed = run("COMPLETED");
-  const { winnerCandidateId: _winnerCandidateId, ...withoutWinner } = completed.decision!;
-  completed.decision = {
-    ...withoutWinner,
-    outcome: "FRONTIER",
-    frontierCandidateIds: ["candidate-a", "candidate-b"],
-    tiedCandidateIds: [],
-    materialUnknowns: ["battery@1"],
-  };
-  const snapshot = composeSolandraPresentation({
-    conversationId: "conversation-1",
-    run: completed,
-    decisionPlan: plan,
-  });
-  assert.equal(snapshot.phase, "actionable");
-  assert.equal(snapshot.nextAction?.outcome, "FRONTIER");
-  assert.equal(snapshot.nextAction?.winnerCandidateId, undefined);
-  assert.deepEqual(snapshot.nextAction?.frontierCandidateIds, ["candidate-a", "candidate-b"]);
-  assert.deepEqual(snapshot.nextAction?.materialUnknowns, ["battery@1"]);
+test("decision-rationale Resources hydrate frontier, tie, unresolved, and winner outcomes without fabricating a winner", () => {
+  const cases: Array<{
+    outcome: DecisionOutcome;
+    winnerCandidateId?: string;
+    frontierCandidateIds?: string[];
+    tiedCandidateIds?: string[];
+    materialUnknowns?: string[];
+    expected: RegExp;
+  }> = [
+    { outcome: "FRONTIER", frontierCandidateIds: ["candidate-a", "candidate-b"], expected: /Frontier: candidate-a, candidate-b/u },
+    { outcome: "TIE", tiedCandidateIds: ["candidate-a", "candidate-b"], expected: /Tied options: candidate-a, candidate-b/u },
+    { outcome: "UNRESOLVED", materialUnknowns: ["criterion@1"], expected: /Material unknowns: criterion@1/u },
+    { outcome: "RECOMMENDATION", winnerCandidateId: "candidate-a", expected: /Winner: candidate-a/u },
+  ];
+
+  for (const fixture of cases) {
+    const completed = run("COMPLETED");
+    const { winnerCandidateId: _priorWinner, ...decisionWithoutWinner } = completed.decision!;
+    completed.decision = {
+      ...decisionWithoutWinner,
+      outcome: fixture.outcome,
+      ...(fixture.winnerCandidateId ? { winnerCandidateId: fixture.winnerCandidateId } : {}),
+      frontierCandidateIds: fixture.frontierCandidateIds ?? [],
+      tiedCandidateIds: fixture.tiedCandidateIds ?? [],
+      materialUnknowns: fixture.materialUnknowns ?? [],
+    };
+    const snapshot = composeSolandraPresentation({
+      conversationId: "conversation-1",
+      run: completed,
+      decisionPlan: plan,
+      intentVersion,
+    });
+    const descriptor = snapshot.resources.find((resource) => resource.id === `decision-rationale:${completed.id}`);
+    assert.ok(descriptor, `Expected an advertised rationale Resource for ${fixture.outcome}.`);
+    const hydrated = hydrateSolandraResource({
+      snapshot,
+      resourceId: descriptor.id,
+      run: completed,
+      decisionPlan: plan,
+    });
+    assert.equal(hydrated?.payload.kind, "generated_artifact");
+    if (hydrated?.payload.kind !== "generated_artifact") continue;
+    assert.match(hydrated.payload.text, new RegExp(`Outcome: ${fixture.outcome}`, "u"));
+    assert.match(hydrated.payload.text, fixture.expected);
+    if (fixture.winnerCandidateId === undefined) assert.doesNotMatch(hydrated.payload.text, /Winner:/u);
+  }
 });
 
 test("presentation revisions are deterministic and transitions distinguish reconnect from update", () => {

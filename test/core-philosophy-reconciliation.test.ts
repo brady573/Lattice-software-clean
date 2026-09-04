@@ -7,13 +7,15 @@ async function source(path: string): Promise<string> {
 }
 
 test("Core philosophy controls the current Product-design read order and 1.0 definition", async () => {
-  const [readme, living, foundational, roadmap, integrity, system] = await Promise.all([
+  const [readme, living, foundational, roadmap, integrity, system, intentDecision, solandra] = await Promise.all([
     source("README.md"),
     source("docs/design/Lattice-Living-Software-Design-to-1.0.md"),
     source("docs/design/Lattice-Foundational-Design-Principle.md"),
     source("docs/ROADMAP.md"),
     source("docs/design/Lattice-Architecture-Integrity.md"),
     source("docs/design/Lattice-System-Architecture.md"),
+    source("docs/design/Lattice-Intent-and-Decision-Architecture.md"),
+    source("docs/design/solandra/DESIGN.md"),
   ]);
 
   assert.match(readme, /^# Lattice Software\r?\n\r?\nLattice makes trustworthy knowledge and conditional decision capability/u);
@@ -37,6 +39,13 @@ test("Core philosophy controls the current Product-design read order and 1.0 def
   assert.ok(coreRead >= 0 && foundationalRead > coreRead, "System Architecture must direct engineers to the Core first.");
   assert.doesNotMatch(system, /supporting knowledge derived from planning material/u);
   assert.doesNotMatch(system, /next-action presentation derived from `StructuredDecision`/u);
+  assert.match(intentDecision, /Lattice makes trustworthy knowledge and conditional decision capability easier to reach/u);
+  assert.match(intentDecision, /This document focuses on the qualified decision branch/u);
+  assert.doesNotMatch(intentDecision, /Lattice is a Trusted Decision Product/u);
+  assert.match(solandra, /V36 authoritative truth -> KnowledgeOutcome/u);
+  assert.match(solandra, /V36 authoritative truth -> ActionPreparation \/ Resource/u);
+  assert.match(solandra, /when decision work is qualified/u);
+  assert.doesNotMatch(solandra, /exact DecisionPlan \/ Run basis\s*\n\s*-> V36 authoritative truth\s*\n\s*-> Lattice Decision Engine/u);
 });
 
 test("canonical RuntimeApp composition names only the canonical HTTP builder", async () => {

@@ -80,9 +80,18 @@ Authority flows conceptually:
 ```text
 USER expression / provenance
   -> Lattice Intent Authority
-  -> exact DecisionPlan / Run basis
-  -> V36 authoritative truth
-  -> Lattice Decision Engine / StructuredDecision
+  -> exact IntentVersion
+       |
+       +--> Run -> V36 authoritative truth -> KnowledgeOutcome
+       |
+       +--> Run -> V36 authoritative truth -> ActionPreparation / Resource
+       |
+       +--> when decision work is qualified:
+              DecisionPlan -> Run -> V36 authoritative truth
+              -> decision evidence projection
+              -> Lattice Decision Engine / DecisionSupportOutcome
+
+Each resulting authoritative Product state
   -> Solandra presentation projection
   -> semantic UI read model
   -> client rendering

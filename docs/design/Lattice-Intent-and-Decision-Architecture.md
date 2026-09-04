@@ -8,7 +8,7 @@ Repository reconciliation baseline: `main @ 8c893bb8b0132b87837a6740709dc1dfff79
 
 ## 1. Purpose
 
-Lattice is a Trusted Decision Product. Its central semantic boundary is the boundary between **what the USER means** and **what Lattice concludes from that meaning plus qualified evidence**.
+Lattice makes trustworthy knowledge and conditional decision capability easier to reach, understand, and use while managing the machinery required to produce it. This document focuses on the qualified decision branch, where the central semantic boundary is the boundary between **what the USER means** and **what Lattice concludes from that meaning plus qualified evidence**.
 
 This document defines that relationship end to end when authoritative decision work is actually qualified:
 
@@ -71,7 +71,7 @@ It must remain consistent with, and is subordinate at their applicable boundarie
 - `The-Core-Lattice-Philosophy.md` — highest Product-design authority and first filter;
 - `Lattice-Foundational-Design-Principle.md` — subordinate foundational elaboration;
 - `Lattice-Living-Software-Design-to-1.0.md` plus confirmed amendments — canonical forward Product direction;
-- `Lattice-Owner-Decisions-OD-001-to-OD-004.md` — Owner-confirmed Intent Authority, V36 continuation, Decision Engine, and Trusted Decision Product semantics;
+- `Lattice-Owner-Decisions-OD-001-to-OD-004.md` — historical Owner decisions reconciled under the Core, including Intent Authority, V36 continuation, and conditional Decision Engine semantics;
 - `Lattice-Owner-Decision-OD-007-M8-Continuity.md` — continuity and reusable preference boundaries;
 - protected V36 specifications — controlling epistemic semantics;
 - `Lattice-Architecture-Integrity.md` — protected semantic ownership boundaries;

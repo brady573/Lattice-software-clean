@@ -186,10 +186,34 @@ test("prepared resources remain editable material rather than execution authoriz
 
     const result = await app.inject({ method: "GET", url: `/api/v1/runs/${runId}/outcome` });
     assert.equal(result.statusCode, 200, result.body);
-    assert.equal(result.json().outcome.kind, "ACTION_PREPARATION");
-    assert.equal(result.json().outcome.resource.kind, "CHECKLIST");
-    assert.equal(result.json().outcome.resource.editable, true);
-    assert.equal(result.json().outcome.resource.executionAuthorized, false);
+    const outcome = result.json().outcome;
+    assert.equal(outcome.kind, "ACTION_PREPARATION");
+    assert.equal(outcome.resource.kind, "CHECKLIST");
+    assert.equal(outcome.resource.editable, true);
+    assert.equal(outcome.resource.executionAuthorized, false);
+
+    const presentationResponse = await app.inject({
+      method: "GET",
+      url: `/api/v1/conversations/${conversationId}/presentation`,
+    });
+    assert.equal(presentationResponse.statusCode, 200, presentationResponse.body);
+    const presentation = presentationResponse.json().presentation;
+    assert.equal(presentation.basis.decisionPlanId, undefined);
+    assert.equal(presentation.resources.length, 1);
+    const descriptor = presentation.resources[0];
+    assert.equal(descriptor.id, `action-preparation:${runId}`);
+    assert.equal(descriptor.editable, true);
+    assert.equal(descriptor.executionAuthorized, false);
+
+    const hydratedResponse = await app.inject({
+      method: "GET",
+      url: `/api/v1/conversations/${conversationId}/presentation/resources/${encodeURIComponent(descriptor.id)}?presentationRevision=${encodeURIComponent(presentation.presentationRevision)}`,
+    });
+    assert.equal(hydratedResponse.statusCode, 200, hydratedResponse.body);
+    const hydrated = hydratedResponse.json().resource;
+    assert.equal(hydrated.descriptor.editable, true);
+    assert.equal(hydrated.descriptor.executionAuthorized, false);
+    assert.equal(hydrated.payload.text, outcome.resource.body);
   } finally {
     await app.close();
   }
