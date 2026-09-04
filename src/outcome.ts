@@ -167,9 +167,7 @@ export function buildKnowledgeOutcome(run: LatticeRun, truth: TruthBundle): Know
     .filter((finding) => finding.status === "UNRESOLVED" || finding.status === "CONFLICTED")
     .map(unresolvedSummary);
   if (findings.length === 0) {
-    uncertainties.push(
-      "I couldn’t establish sufficiently relevant supported knowledge from the available external material.",
-    );
+    uncertainties.push("No validated external findings are sufficiently relevant to this objective.");
   }
   if (findings.some((finding) => finding.basis === "SOURCE_REPORT")) {
     uncertainties.push(

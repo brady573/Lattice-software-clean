@@ -251,7 +251,7 @@ test("no relevant results yield sparse honest Knowledge instead of lexical-noise
     assert.deepEqual(result.outcome.provenance, []);
     assert.deepEqual(result.outcome.evidence, []);
     assert.deepEqual(result.outcome.uncertainties, [
-      "I couldn’t establish sufficiently relevant supported knowledge from the available external material.",
+      "No validated external findings are sufficiently relevant to this objective.",
     ]);
   } finally {
     await app.close();
