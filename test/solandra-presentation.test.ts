@@ -187,7 +187,6 @@ test("supporting knowledge comes only from a faithful V36-backed completed outco
     id: "knowledge:claim-1",
     label: "SUPPORTED",
     value: "The admitted evidence supports the material finding.",
-    kind: "decision_basis",
     provenance: [{ authority: "v36", ref: "truth-1" }],
   }]);
 
@@ -243,7 +242,33 @@ test("Knowledge and Action Preparation present without a DecisionPlan", () => {
   assert.equal(actionSnapshot.basis.decisionPlanId, undefined);
   assert.equal(actionSnapshot.supportingKnowledge.length, 1);
   assert.equal(actionSnapshot.nextAction, undefined);
-  assert.deepEqual(actionSnapshot.resources, []);
+  assert.deepEqual(actionSnapshot.resources, [{
+    id: "action-preparation:run-checklist",
+    kind: "generated_artifact",
+    title: "Prepared checklist",
+    purpose: "enable_next_action",
+    provenance: [
+      { authority: "execution_runtime", ref: "run-checklist@6" },
+      { authority: "v36", ref: "truth-1" },
+    ],
+    status: "available",
+    capabilities: ["copy", "download"],
+    editable: true,
+    executionAuthorized: false,
+  }]);
+  const hydrated = hydrateSolandraResource({
+    snapshot: actionSnapshot,
+    resourceId: "action-preparation:run-checklist",
+    run: nonDecisionRun("CHECKLIST"),
+    outcome: actionOutcome,
+  });
+  assert.equal(hydrated?.payload.kind, "generated_artifact");
+  assert.equal(hydrated?.descriptor.editable, true);
+  assert.equal(hydrated?.descriptor.executionAuthorized, false);
+  if (hydrated?.payload.kind === "generated_artifact") {
+    assert.equal(hydrated.payload.filename, "solandra-checklist-run-checklist.txt");
+    assert.equal(hydrated.payload.text, actionOutcome.resource.body);
+  }
 });
 
 test("knowledge gaps remain uncertainty and cannot manufacture an actionable winner", () => {

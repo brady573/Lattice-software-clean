@@ -54,7 +54,6 @@ export interface SupportingKnowledge {
   id: string;
   label: string;
   value: string;
-  kind: "requirement" | "preference" | "decision_basis";
   provenance: ProvenanceRef[];
 }
 
@@ -76,6 +75,8 @@ export interface ResourceDescriptor {
   provenance: ProvenanceRef[];
   status: ResourceStatus;
   capabilities: ResourceCapability[];
+  editable?: true;
+  executionAuthorized?: false;
 }
 
 export interface SolandraPresentationSnapshot {
@@ -137,20 +138,29 @@ function knowledgeFromOutcome(outcome: RunOutcome | undefined): KnowledgeOutcome
   return outcome.kind === "KNOWLEDGE" ? outcome : outcome.knowledge;
 }
 
-function supportingFromOutcome(run: LatticeRun | undefined, outcome: RunOutcome | undefined): SupportingKnowledge[] {
-  if (!run || run.status !== "COMPLETED") return [];
+function faithfulKnowledgeFromOutcome(
+  run: LatticeRun | undefined,
+  outcome: RunOutcome | undefined,
+): KnowledgeOutcome | undefined {
+  if (!run || run.status !== "COMPLETED") return undefined;
   const knowledge = knowledgeFromOutcome(outcome);
-  if (!knowledge || knowledge.objective !== runObjective(run.request)) return [];
+  if (!knowledge || knowledge.objective !== runObjective(run.request)) return undefined;
   const admittedAssessmentIds = new Set(run.truthAssessmentIds);
-  if (knowledge.truthAssessmentIds.length !== admittedAssessmentIds.size) return [];
-  if (knowledge.truthAssessmentIds.some((id) => !admittedAssessmentIds.has(id))) return [];
+  const projectedAssessmentIds = new Set(knowledge.truthAssessmentIds);
+  if (projectedAssessmentIds.size !== admittedAssessmentIds.size) return undefined;
+  if ([...projectedAssessmentIds].some((id) => !admittedAssessmentIds.has(id))) return undefined;
+  return knowledge;
+}
+
+function supportingFromOutcome(run: LatticeRun | undefined, outcome: RunOutcome | undefined): SupportingKnowledge[] {
+  const knowledge = faithfulKnowledgeFromOutcome(run, outcome);
+  if (!knowledge) return [];
   const provenance = knowledge.truthAssessmentIds.map((ref) => ({ authority: "v36" as const, ref }));
   if (knowledge.findings.length > 0 && provenance.length === 0) return [];
   return knowledge.findings.map((finding) => ({
     id: `knowledge:${finding.claimId}`,
     label: finding.status,
     value: finding.text,
-    kind: "decision_basis" as const,
     provenance,
   }));
 }
@@ -166,8 +176,39 @@ function phaseFromRun(
   return plan || intentVersion ? "understanding" : "listening";
 }
 
-function resourcesFor(run: LatticeRun | undefined, plan: AnyDecisionPlan | undefined): ResourceDescriptor[] {
-  if (!run || run.status !== "COMPLETED" || run.decision === null) return [];
+function actionPreparationResource(
+  run: LatticeRun | undefined,
+  outcome: RunOutcome | undefined,
+): ResourceDescriptor | undefined {
+  if (!run || run.status !== "COMPLETED" || run.decision !== null || outcome?.kind !== "ACTION_PREPARATION") {
+    return undefined;
+  }
+  if (!faithfulKnowledgeFromOutcome(run, outcome)) return undefined;
+  return {
+    id: `action-preparation:${run.id}`,
+    kind: "generated_artifact",
+    title: outcome.resource.title,
+    purpose: "enable_next_action",
+    provenance: [
+      { authority: "execution_runtime", ref: `${run.id}@${run.version}` },
+      ...outcome.knowledge.truthAssessmentIds.map((ref) => ({ authority: "v36" as const, ref })),
+    ],
+    status: "available",
+    capabilities: ["copy", "download"],
+    editable: outcome.resource.editable,
+    executionAuthorized: outcome.resource.executionAuthorized,
+  };
+}
+
+function resourcesFor(
+  run: LatticeRun | undefined,
+  plan: AnyDecisionPlan | undefined,
+  outcome: RunOutcome | undefined,
+): ResourceDescriptor[] {
+  if (!run || run.status !== "COMPLETED") return [];
+  const preparedResource = actionPreparationResource(run, outcome);
+  if (preparedResource) return [preparedResource];
+  if (run.decision === null) return [];
   const resources: ResourceDescriptor[] = [];
   if (plan) {
     resources.push({
@@ -244,7 +285,7 @@ export function composeSolandraPresentation(input: {
         ],
       }
     : undefined;
-  const resources = resourcesFor(run, decisionPlan);
+  const resources = resourcesFor(run, decisionPlan, outcome);
   const revisionInput = {
     conversationId,
     basis,
@@ -286,9 +327,29 @@ export function hydrateSolandraResource(input: {
   resourceId: string;
   run?: LatticeRun;
   decisionPlan?: AnyDecisionPlan;
+  outcome?: RunOutcome;
 }): HydratedResource | undefined {
   const descriptor = input.snapshot.resources.find((item) => item.id === input.resourceId);
   if (!descriptor) return undefined;
+  const preparedResource = actionPreparationResource(input.run, input.outcome);
+  if (
+    preparedResource
+    && descriptor.id === preparedResource.id
+    && input.outcome?.kind === "ACTION_PREPARATION"
+    && input.run
+  ) {
+    const filenameKind = input.outcome.resource.kind === "CHECKLIST" ? "checklist" : "prepared-message";
+    return {
+      descriptor,
+      presentationRevision: input.snapshot.presentationRevision,
+      payload: {
+        kind: "generated_artifact",
+        filename: `solandra-${filenameKind}-${input.run.id}.txt`,
+        mediaType: "text/plain",
+        text: input.outcome.resource.body,
+      },
+    };
+  }
   if (descriptor.id === `decision-criteria:${input.run?.id ?? ""}` && input.decisionPlan) {
     return {
       descriptor,

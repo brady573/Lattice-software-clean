@@ -212,6 +212,7 @@ export function registerConversationContinuityApi(
         resourceId,
         ...(run ? { run } : {}),
         ...(decisionPlan ? { decisionPlan } : {}),
+        ...(outcome ? { outcome } : {}),
       });
       if (!resource) return reply.status(404).send({ error: "RESOURCE_NOT_FOUND" });
       return reply.status(200).send({ resource });
