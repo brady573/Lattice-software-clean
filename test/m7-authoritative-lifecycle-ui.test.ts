@@ -34,7 +34,7 @@ test("authoritative Solandra surface is Conversation + free-form input + adaptiv
   assert.match(html, /event\.isComposing/);
   assert.match(html, /event\.shiftKey/);
   assert.match(html, /appendUserTurn\(message\)/);
-  assert.match(html, /appendSolandraTurn\(body\.question/);
+  assert.match(html, /appendSolandraTurn\(body\.proposalId[\s\S]*\? body\.question/);
   assert.match(html, /appendSolandraTurn\(outcome\.explanation/);
   assert.match(html, /confirmsPending = clarification && isExplicitConfirmation\(message\)/);
   assert.ok(

@@ -51,6 +51,8 @@ The first two paths have no DecisionPlan and never enter the Decision Engine. Al
 
 The **Lattice Model Gateway** sits beside this flow as a non-authoritative capability boundary. Product subsystems may invoke it where qualified designs permit model assistance. Model/provider output remains proposal, interpretation, or rendering material until the owning Product authority accepts it under its own contract.
 
+For Knowledge Consultation v0.1, Runtime may invoke a provider-neutral knowledge-acquisition boundary during investigation. The default live development adapter retrieves bounded Wikimedia source material without credentials. Retrieval creates untrusted source artifacts, claim proposals, and evidence proposals; it does not create authoritative knowledge. V36 alone applies the admission policy and produces the validated TruthSnapshot used by the Knowledge outcome. The deterministic offline truth mode remains the default for CI.
+
 The central architectural rule is:
 
 > **Moving information through a component does not transfer semantic authority to that component.**
@@ -116,6 +118,8 @@ src/orchestration-store.ts
 src/postgres-orchestration-store.ts
 src/research-worker.ts
 src/research-worker-process.ts
+src/knowledge/acquisition.ts
+src/knowledge/wikimedia-acquisition.ts
 ```
 
 **Owns:**
@@ -209,6 +213,8 @@ src/truth/corroboration.ts
 src/truth/falsification.ts
 src/truth/pipeline.ts
 src/truth/execution-pipeline.ts
+src/truth/configured-pipeline.ts
+src/truth/knowledge-acquisition-pipeline.ts
 src/truth/decision-evidence-provider.ts
 src/truth/durable-validation.ts
 src/truth/provenance.ts
@@ -219,6 +225,8 @@ src/truth/runtime-handoff.ts
 ```
 
 V36 alone decides whether research/provider material is admissible into protected truth state. Successful retrieval, model output, worker completion, or provider availability cannot strengthen truth by themselves.
+
+The live Knowledge acquisition pipeline preserves a narrower distinction inside that boundary: a retrieved excerpt is information until V36 qualifies its source binding and integrity. Its conservative default can support the exact proposition that a source reports the admitted excerpt. It does not silently promote the source's broader assertions, adapter-generated prose, or provider confidence into verified world truth. Source-report scope and unresolved/conflicting assessments remain visible in `KnowledgeOutcome` and Solandra.
 
 ### 3.5 Lattice Decision Engine
 

@@ -357,7 +357,7 @@ test("parallel evidence orchestration respects dependencies, retries, and termin
   );
 });
 
-test("offline provider enforces scope and live research remains dormant", async () => {
+test("offline fixtures enforce scope and the explicitly dormant provider still fails closed", async () => {
   const crossScope = {
     ...researchCandidate("cross", "SUPPORTS"),
     runId: "00000000-0000-4000-8000-000000000999",

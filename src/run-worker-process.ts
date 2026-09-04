@@ -6,9 +6,10 @@ import { PostgresOrchestrationStore } from "./postgres-orchestration-store.js";
 import { PostgresRunStore } from "./postgres-run-store.js";
 import { processRunDispatches } from "./run-worker.js";
 import {
-  createDefaultOfflineTruthPipeline,
   type TruthExecutionPipeline,
 } from "./truth/execution-pipeline.js";
+import { createConfiguredTruthPipeline } from "./truth/configured-pipeline.js";
+import type { TruthMode } from "./runtime-config.js";
 import {
   type DecisionEvidenceProvider,
 } from "./truth/decision-evidence-provider.js";
@@ -27,6 +28,7 @@ export interface RunWorkerProcessConfig {
   leaseMs: number;
   retryDelayMs: number;
   batchSize: number;
+  truthMode?: TruthMode;
 }
 
 function parseInteger(
@@ -60,6 +62,11 @@ export function resolveRunWorkerProcessConfig(
     throw new Error("LATTICE_RUN_WORKER_ID must contain between 1 and 160 characters when configured.");
   }
 
+  const truthMode = env.LATTICE_TRUTH_MODE ?? "v36-offline";
+  if (truthMode !== "v36-offline" && truthMode !== "v36-live") {
+    throw new Error(`Unsupported LATTICE_TRUTH_MODE: ${truthMode}`);
+  }
+
   return {
     databaseUrl,
     workerId,
@@ -73,6 +80,7 @@ export function resolveRunWorkerProcessConfig(
       60_000,
     ),
     batchSize: parseInteger(env.LATTICE_RUN_WORKER_BATCH_SIZE, DEFAULT_BATCH_SIZE, "LATTICE_RUN_WORKER_BATCH_SIZE", 1, 100),
+    truthMode,
   };
 }
 
@@ -189,7 +197,7 @@ export async function createStandaloneRunWorker(
   const generalizedDecisionAdapter = options.criterionCatalog
     ? createIntentAuthorityGeneralizedDecisionAdapter(intentStore, options.criterionCatalog)
     : undefined;
-  const truthPipeline = options.truthPipeline ?? createDefaultOfflineTruthPipeline();
+  const truthPipeline = options.truthPipeline ?? createConfiguredTruthPipeline(config.truthMode ?? "v36-offline");
   const decisionEvidenceProvider = options.decisionEvidenceProvider;
   const loop = new PollingRunWorkerLoop({
     pollMs: config.pollMs,

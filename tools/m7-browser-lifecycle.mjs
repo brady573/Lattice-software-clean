@@ -506,7 +506,7 @@ async function main() {
       if(input.disabled)return null;
       const text=composer.innerText;
       const conversationText=document.getElementById('conversation').innerText;
-      return text.includes('No validated external findings')&&conversationText.includes('I don’t have validated external findings') ? {
+      return text.includes('No validated external findings')&&conversationText.includes('I couldn’t establish supported knowledge') ? {
         text,
         conversationText,
         conversationTurns:document.querySelectorAll('#conversation .turn.user').length,

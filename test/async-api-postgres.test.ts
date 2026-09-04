@@ -4,6 +4,7 @@ import test from "node:test";
 import type { FastifyInstance } from "fastify";
 import { Pool } from "pg";
 import { createApiRequestHash } from "../src/api-control-store.js";
+import type { KnowledgeAcquisitionProvider } from "../src/knowledge/acquisition.js";
 import { buildLegacyTestApp as buildApp } from "../src/legacy/legacy-test-app.js";
 import type { RunRequest } from "../src/domain.js";
 import { PostgresApiRunControlStore } from "../src/postgres-api-control-store.js";
@@ -22,6 +23,7 @@ import {
 } from "../src/run-worker-process.js";
 import { processRunDispatches } from "../src/run-worker.js";
 import { createDefaultOfflineTruthPipeline } from "../src/truth/execution-pipeline.js";
+import { KnowledgeAcquisitionTruthPipeline } from "../src/truth/knowledge-acquisition-pipeline.js";
 
 const databaseUrl = process.env.DATABASE_URL;
 const durableTestSubjectResolver = () => ({ subjectId: "durable-async-regression-subject" });
@@ -61,6 +63,31 @@ async function waitForCompletedRun(
   }
   throw new Error(`Run ${runId} did not complete within ${timeoutMs}ms.`);
 }
+
+const durableKnowledgeProvider: KnowledgeAcquisitionProvider = {
+  kind: "deterministic-postgres-knowledge-source",
+  async acquire(request) {
+    const text = `A source-bound report for: ${request.objective}`;
+    return {
+      sources: [{
+        sourceId: "durable-source",
+        canonicalUri: "https://knowledge.example/durable-report",
+        title: "Durable source report",
+        publisher: "Knowledge Example",
+        retrievedAt: "2026-09-04T04:00:00.000Z",
+        publishedAt: "2026-09-01T00:00:00.000Z",
+        contentType: "text/plain",
+        content: text,
+      }],
+      claims: [{
+        claimId: "durable-claim",
+        text,
+        claimType: "INTERPRETIVE",
+        evidence: [{ sourceId: "durable-source", relation: "SUPPORTS", excerpt: text }],
+      }],
+    };
+  },
+};
 
 test(
   "PostgreSQL API acceptance rolls back Run and idempotency when initial dispatch cannot commit",
@@ -241,6 +268,89 @@ test(
       if (researchWorker) await researchWorker.close();
       if (firstApp) await firstApp.close();
       if (secondApp) await secondApp.close();
+      if (runId) await pool.query("DELETE FROM runs WHERE id=$1", [runId]);
+      if (conversationId) await pool.query("DELETE FROM conversations WHERE id=$1", [conversationId]);
+      await pool.end();
+    }
+  },
+);
+
+test(
+  "PostgreSQL preserves V36-qualified Knowledge evidence and provenance without decision state",
+  { skip: !databaseUrl },
+  async () => {
+    assert.ok(databaseUrl);
+    const pool = new Pool({ connectionString: databaseUrl });
+    let app: FastifyInstance | undefined;
+    let runWorker: StandaloneRunWorker | undefined;
+    let runId: string | undefined;
+    let conversationId: string | undefined;
+    try {
+      const liveConfig = resolveRuntimeConfig({
+        DATABASE_URL: databaseUrl,
+        LATTICE_DEPLOYMENT_MODE: "durable",
+        LATTICE_TRUTH_MODE: "v36-live",
+        LATTICE_AUTO_MIGRATE: "true",
+      } as NodeJS.ProcessEnv);
+      app = await createRuntimeApp(liveConfig, {
+        authenticatedSubjectResolver: durableTestSubjectResolver,
+        knowledgeAcquisitionProvider: durableKnowledgeProvider,
+      });
+      const created = await app.inject({ method: "POST", url: "/api/v1/conversations" });
+      assert.equal(created.statusCode, 201, created.body);
+      conversationId = created.json<{ conversation: { id: string } }>().conversation.id;
+
+      const question = "Explain a fact using an inspectable external source.";
+      const submitted = await app.inject({
+        method: "POST",
+        url: `/api/v1/conversations/${conversationId}/turns`,
+        payload: { turnId: `knowledge-pg-${randomUUID()}`, message: question },
+      });
+      assert.equal(submitted.statusCode, 202, submitted.body);
+      runId = submitted.json<{ runId: string }>().runId;
+
+      runWorker = await createStandaloneRunWorker({
+        databaseUrl,
+        workerId: `knowledge-pg-run:${randomUUID()}`,
+        pollMs: 5,
+        leaseMs: 30_000,
+        retryDelayMs: 1_000,
+        batchSize: 10,
+        truthMode: "v36-live",
+      }, {
+        truthPipeline: new KnowledgeAcquisitionTruthPipeline(durableKnowledgeProvider),
+      });
+      runWorker.start();
+      await waitForCompletedRun(app, runId);
+
+      const response = await app.inject({ method: "GET", url: `/api/v1/runs/${runId}/outcome` });
+      assert.equal(response.statusCode, 200, response.body);
+      const outcome = response.json().outcome;
+      assert.equal(outcome.kind, "KNOWLEDGE");
+      assert.equal(outcome.acceptedUnderstanding, question);
+      assert.equal(outcome.findings[0]?.status, "UNRESOLVED");
+      assert.equal(outcome.findings[0]?.confidence, "LOW");
+      assert.ok(
+        outcome.uncertainties.some((item: string) => item.includes("unresolved V36 proof obligations")),
+      );
+      assert.equal(outcome.findings[0]?.basis, "SOURCE_REPORT");
+      assert.equal(outcome.provenance[0]?.canonicalUri, "https://knowledge.example/durable-report");
+      assert.equal(outcome.provenance[0]?.title, "Durable source report");
+      assert.equal(outcome.evidence[0]?.admitted, true);
+      assert.equal(outcome.evidence[0]?.sourceId, outcome.provenance[0]?.sourceId);
+
+      const plan = await app.inject({ method: "GET", url: `/api/v1/runs/${runId}/decision-plan` });
+      assert.equal(plan.statusCode, 404, plan.body);
+      const persistedTruth = await pool.query<{ canonical_uri: string; metadata_json: unknown }>(
+        "SELECT canonical_uri,metadata_json FROM truth_source_artifacts WHERE run_id=$1",
+        [runId],
+      );
+      assert.equal(persistedTruth.rowCount, 1);
+      assert.equal(persistedTruth.rows[0]?.canonical_uri, "https://knowledge.example/durable-report");
+      assert.match(JSON.stringify(persistedTruth.rows[0]?.metadata_json), /Durable source report/u);
+    } finally {
+      if (runWorker) await runWorker.close();
+      if (app) await app.close();
       if (runId) await pool.query("DELETE FROM runs WHERE id=$1", [runId]);
       if (conversationId) await pool.query("DELETE FROM conversations WHERE id=$1", [conversationId]);
       await pool.end();

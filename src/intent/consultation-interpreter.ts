@@ -40,6 +40,8 @@ export interface ConsultationInterpretationProposal {
   readonly decisionRequested: boolean;
   readonly resourceNeed: ConsultationResourceNeed;
   readonly materialClarification?: MaterialIntentClarificationProposal;
+  /** Missing referent/scope question; it proposes no authoritative meaning. */
+  readonly clarificationQuestion?: string;
 }
 
 /**
@@ -64,7 +66,7 @@ export class ConservativeConsultationInterpreter implements ConsultationInterpre
     const hasObjective = existingObjective?.value.state === "VALUE"
       && typeof existingObjective.value.value === "string";
     const explicitCorrection = hasObjective
-      ? /^(?:no\s*[,;:-]?\s*actually\s*[,;:-]?\s*|actually\s*[,;:-]?\s*(?:my|the)\s+objective\s+(?:is|should be)\s+|(?:change|replace|update)\s+(?:the\s+)?objective\s+(?:to\s+)?|instead\s*[,;:-]?\s*)(.+)$/iu.exec(message)
+      ? /^(?:no\s*[,;:-]?\s*actually\s*[,;:-]?\s*|actually\s*[,;:-]?\s*i\s+meant\s+|actually\s*[,;:-]?\s*(?:my|the)\s+objective\s+(?:is|should be)\s+|i\s+mean(?:t)?\s+|(?:change|replace|update)\s+(?:the\s+)?objective\s+(?:to\s+)?|instead\s*[,;:-]?\s*)(.+)$/iu.exec(message)
       : null;
     const objectiveEffect: ConsultationObjectiveEffect = !hasObjective
       ? { kind: "ESTABLISH", value: message }
@@ -81,6 +83,8 @@ export class ConservativeConsultationInterpreter implements ConsultationInterpre
     }
 
     const normalized = message.toLocaleLowerCase("en-US");
+    const missingReferent = !hasObjective
+      && /^(?:is|was|will|would|could|can|should)\s+(?:this|that|it|these|those|they)\b/iu.test(message);
     const asksToPrepare = /\b(?:prepare|create|make|build|draft|write|compose)\b/u.test(normalized);
     const resourceNeed: ConsultationResourceNeed = asksToPrepare && /\b(?:checklist|check list)\b/u.test(normalized)
       ? "CHECKLIST"
@@ -95,6 +99,14 @@ export class ConservativeConsultationInterpreter implements ConsultationInterpre
         : resourceNeed !== "NONE" || /\b(?:why|source|explain|show|tell me|what about)\b/iu.test(message)
           ? "RESOURCE_OR_EXPLANATION_REQUEST"
           : "ADDITIONAL_CONTEXT";
-    return { objectiveEffect, meaningKind, decisionRequested: false, resourceNeed };
+    return {
+      objectiveEffect,
+      meaningKind,
+      decisionRequested: false,
+      resourceNeed,
+      ...(missingReferent
+        ? { clarificationQuestion: "What does the referenced subject refer to? Please restate the question with that material context." }
+        : {}),
+    };
   }
 }

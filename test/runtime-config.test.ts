@@ -184,3 +184,11 @@ test("unknown truth modes fail closed", () => {
     /Unsupported LATTICE_TRUTH_MODE/,
   );
 });
+
+test("live Knowledge acquisition is an explicit replaceable truth mode", () => {
+  const config = resolveRuntimeConfig({
+    LATTICE_DEPLOYMENT_MODE: "development",
+    LATTICE_TRUTH_MODE: "v36-live",
+  } as NodeJS.ProcessEnv);
+  assert.equal(config.truthMode, "v36-live");
+});
