@@ -92,6 +92,7 @@ export function renderSolandraConversationPage(): string {
         .replaceAll(">", "&gt;")
         .replaceAll('"', "&quot;")
         .replaceAll("'", "&#039;");
+      const normalizedText = (value) => String(value).trim().replace(/\\s+/gu, " ");
 
       const appendTurn = (text, role) => {
         const node = document.createElement("div");
@@ -134,10 +135,13 @@ export function renderSolandraConversationPage(): string {
             + '<div>' + escapeHtml(finding.text) + '</div>'
             + (knowledge.evidence || []).filter((item) => item.claimId === finding.claimId).map((item) => {
               const source = sources.get(item.sourceId);
+              const evidenceExcerpt = normalizedText(item.excerpt) === normalizedText(finding.text)
+                ? ""
+                : '<br>' + escapeHtml(item.excerpt);
               return '<div class="evidence">'
                 + escapeHtml(item.admitted ? (item.relation === "CONTRADICTS" ? "Contradicting evidence" : "Supporting evidence") : "Not admitted")
                 + (source ? ' · ' + escapeHtml(source.title || source.canonicalUri) : '')
-                + '<br>' + escapeHtml(item.excerpt)
+                + evidenceExcerpt
                 + (!item.admitted && item.rejectionReason ? '<br>' + escapeHtml(item.rejectionReason) : '')
                 + '</div>';
             }).join("")

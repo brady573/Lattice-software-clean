@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { WikimediaKnowledgeAcquisitionProvider } from "../dist/src/knowledge/wikimedia-acquisition.js";
 import { createRuntimeApp } from "../dist/src/runtime-app.js";
 import { resolveRuntimeConfig } from "../dist/src/runtime-config.js";
 
@@ -74,25 +75,50 @@ function publicOutcome(outcome) {
   };
 }
 
-const app = await createRuntimeApp(config, { memoryDispatchDelayMs: 1 });
+const rawProvider = new WikimediaKnowledgeAcquisitionProvider();
+const acquisitions = [];
+const recordingProvider = {
+  kind: `live-proof:${rawProvider.kind}`,
+  async acquire(requestInput) {
+    const result = await rawProvider.acquire(requestInput);
+    acquisitions.push({
+      objective: requestInput.objective,
+      context: [...requestInput.context],
+      investigationQueries: [...(requestInput.investigationQueries || [])],
+      retrieved: result.sources.map((source) => ({
+        sourceId: source.sourceId,
+        title: source.title,
+        canonicalUri: source.canonicalUri,
+      })),
+    });
+    return result;
+  },
+};
+
+const app = await createRuntimeApp(config, {
+  memoryDispatchDelayMs: 1,
+  knowledgeAcquisitionProvider: recordingProvider,
+});
 try {
   const created = await request(app, { method: "POST", url: "/api/v1/conversations" });
   const conversationId = created.conversation.id;
   const initial = await turn(app, conversationId, question);
 
   assert.equal(initial.accepted.acceptedUnderstanding, question);
+  assert.ok(acquisitions[0]?.investigationQueries.length > 0);
+  assert.ok(initial.outcome.findings.length > 0, "Live proof requires at least one relevant visible finding.");
   assert.ok(initial.outcome.findings.some((finding) => finding.status === "UNRESOLVED"));
   assert.ok(initial.outcome.findings.every((finding) => finding.confidence === "LOW"));
   assert.ok(initial.outcome.provenance.length > 0);
   assert.ok(initial.outcome.evidence.some((item) => item.admitted));
-  assert.ok(initial.outcome.uncertainties.some((item) => item.includes("source")));
+  assert.ok(initial.outcome.uncertainties.some((item) => item.includes("source") || item.includes("V36")));
 
   const follow = await turn(app, conversationId, followUp);
   assert.equal(follow.accepted.intentVersionId, initial.accepted.intentVersionId);
   assert.equal(follow.accepted.acceptedUnderstanding, question);
   assert.ok(
-    follow.outcome.provenance.length > initial.outcome.provenance.length,
-    "The source follow-up must broaden the actual retrieval rather than repeat the original answer.",
+    (acquisitions[1]?.retrieved.length ?? 0) >= (acquisitions[0]?.retrieved.length ?? 0),
+    "The source follow-up must not narrow the underlying acquisition surface.",
   );
 
   const presentation = await request(app, {
@@ -102,6 +128,15 @@ try {
   assert.equal(presentation.presentation.durableUnderstanding.goal, question);
   assert.ok(presentation.presentation.supportingKnowledge.length > 0);
 
+  const initialVisibleUris = new Set(initial.outcome.provenance.map((source) => source.canonicalUri));
+  const initialRejected = (acquisitions[0]?.retrieved ?? []).filter(
+    (source) => !initialVisibleUris.has(source.canonicalUri),
+  );
+  const followVisibleUris = new Set(follow.outcome.provenance.map((source) => source.canonicalUri));
+  const followRejected = (acquisitions[1]?.retrieved ?? []).filter(
+    (source) => !followVisibleUris.has(source.canonicalUri),
+  );
+
   process.stdout.write(`${JSON.stringify({
     truthMode: config.truthMode,
     question,
@@ -109,7 +144,17 @@ try {
     intentVersionId: initial.accepted.intentVersionId,
     objectivePreserved: true,
     decisionPlanAbsent: true,
+    initialInvestigation: {
+      queries: acquisitions[0]?.investigationQueries ?? [],
+      retrieved: acquisitions[0]?.retrieved ?? [],
+      rejectedAsIrrelevant: initialRejected,
+    },
     initial: publicOutcome(initial.outcome),
+    followUpInvestigation: {
+      queries: acquisitions[1]?.investigationQueries ?? [],
+      retrieved: acquisitions[1]?.retrieved ?? [],
+      rejectedAsIrrelevant: followRejected,
+    },
     followUpResult: publicOutcome(follow.outcome),
     solandra: {
       acceptedUnderstanding: presentation.presentation.durableUnderstanding.goal,

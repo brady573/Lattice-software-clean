@@ -6,6 +6,8 @@ export interface KnowledgeAcquisitionRequest {
   readonly objective: string;
   /** Non-authoritative current-turn work context; it never replaces objective. */
   readonly context: readonly string[];
+  /** Optional non-authoritative operational queries derived from the objective/current work. */
+  readonly investigationQueries?: readonly string[];
 }
 
 /**

@@ -117,11 +117,25 @@ function followUpCapabilityLimitations(run: LatticeRun): string[] {
   return limitations;
 }
 
+function isAcquisitionLimitationClaim(claim: TruthBundle["claims"][number]): boolean {
+  return claim.qualifiers.some((item) => item.key === "acquisition-state");
+}
+
+function unresolvedSummary(finding: KnowledgeFinding): string {
+  if (finding.status === "CONFLICTED") {
+    return "CONFLICTED: admitted evidence remains materially conflicting for this finding.";
+  }
+  if (finding.basis === "SOURCE_REPORT") {
+    return "UNRESOLVED: unresolved V36 proof obligations remain beyond this exact source report.";
+  }
+  return "UNRESOLVED: the available evidence does not establish this finding strongly enough yet.";
+}
+
 export function buildKnowledgeOutcome(run: LatticeRun, truth: TruthBundle): KnowledgeOutcome {
   const claimsById = new Map(truth.claims.map((claim) => [claim.id, claim]));
   const findings = truth.assessments.flatMap<KnowledgeFinding>((assessment) => {
     const claim = claimsById.get(assessment.claimId);
-    if (!claim) return [];
+    if (!claim || isAcquisitionLimitationClaim(claim)) return [];
 
     const admittedSupportingEvidenceIds = truth.claimEvidence
       .filter(
@@ -151,9 +165,11 @@ export function buildKnowledgeOutcome(run: LatticeRun, truth: TruthBundle): Know
 
   const uncertainties = findings
     .filter((finding) => finding.status === "UNRESOLVED" || finding.status === "CONFLICTED")
-    .map((finding) => `${finding.status}: ${finding.text}`);
+    .map(unresolvedSummary);
   if (findings.length === 0) {
-    uncertainties.push("No validated external findings are available for this consultation yet.");
+    uncertainties.push(
+      "I couldn’t establish sufficiently relevant supported knowledge from the available external material.",
+    );
   }
   if (findings.some((finding) => finding.basis === "SOURCE_REPORT")) {
     uncertainties.push(
