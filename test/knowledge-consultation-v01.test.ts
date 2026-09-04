@@ -159,6 +159,22 @@ test("retrieved/provider output remains untrusted until V36 qualifies exact sour
   assert.equal(validated.bundle.claimEvidence[0]?.admitted, true);
   assert.equal(validated.bundle.claimEvidence[0]?.verification, "VERIFIED");
   assert.equal(validated.bundle.assessments[0]?.atomicDisposition, "SUPPORTED");
+
+  const passedProofKinds = validated.bundle.checks
+    .filter((check) => check.status === "PASSED")
+    .map((check) => check.kind)
+    .sort();
+  assert.deepEqual(
+    passedProofKinds,
+    ["INTERPRETATION_SEPARATION", "LITERAL_FACT"],
+  );
+  assert.equal(
+    validated.bundle.checks.find((check) => check.kind === "CONTRADICTION_SEARCH")?.status,
+    "UNRESOLVED",
+  );
+  assert.equal(validated.bundle.assessments[0]?.verdict, "UNVERIFIED");
+  assert.equal(validated.bundle.assessments[0]?.confidence, "LOW");
+  assert.ok((validated.bundle.assessments[0]?.unresolvedObligationIds.length ?? 0) > 0);
 });
 
 test("Wikimedia adapter keeps follow-up language out of authority while changing retrieval strategy", async () => {
@@ -269,7 +285,12 @@ test("three unrelated Knowledge consultations use the same canonical runtime wit
       assert.equal(result.accepted.acceptedUnderstanding, objective);
       assert.equal(result.accepted.decisionNeed, "NONE");
       assert.equal(result.outcome.kind, "KNOWLEDGE");
-      assert.equal(result.outcome.findings[0]?.status, "SUPPORTED");
+      assert.equal(result.outcome.findings[0]?.status, "UNRESOLVED");
+      assert.equal(result.outcome.findings[0]?.confidence, "LOW");
+      assert.ok(
+        result.outcome.uncertainties.some((item: string) =>
+          item.includes("unresolved V36 proof obligations")),
+      );
       assert.equal(result.outcome.provenance[0]?.canonicalUri, "https://knowledge.example/articles/a");
       assert.equal(result.outcome.evidence[0]?.admitted, true);
 
@@ -382,6 +403,7 @@ test("Knowledge outcome and Solandra preserve source/evidence provenance without
     });
     assert.equal(presentation.statusCode, 200, presentation.body);
     assert.equal(presentation.json().presentation.supportingKnowledge.length, 1);
+    assert.equal(presentation.json().presentation.supportingKnowledge[0]?.label, "UNRESOLVED");
     assert.equal(presentation.json().presentation.basis.decisionPlanId, undefined);
 
     const html = (await app.inject({ method: "GET", url: "/" })).body;

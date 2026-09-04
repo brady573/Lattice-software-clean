@@ -81,7 +81,8 @@ try {
   const initial = await turn(app, conversationId, question);
 
   assert.equal(initial.accepted.acceptedUnderstanding, question);
-  assert.ok(initial.outcome.findings.some((finding) => finding.status === "SUPPORTED"));
+  assert.ok(initial.outcome.findings.some((finding) => finding.status === "UNRESOLVED"));
+  assert.ok(initial.outcome.findings.every((finding) => finding.confidence === "LOW"));
   assert.ok(initial.outcome.provenance.length > 0);
   assert.ok(initial.outcome.evidence.some((item) => item.admitted));
   assert.ok(initial.outcome.uncertainties.some((item) => item.includes("source")));

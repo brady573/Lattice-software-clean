@@ -81,8 +81,10 @@ export interface DecisionSupportOutcome {
 
 export type RunOutcome = KnowledgeOutcome | DecisionSupportOutcome | ActionPreparationOutcome;
 
-function findingStatus(disposition: TruthBundle["assessments"][number]["atomicDisposition"]): KnowledgeFindingStatus {
-  switch (disposition) {
+function findingStatus(assessment: TruthBundle["assessments"][number]): KnowledgeFindingStatus {
+  if (assessment.atomicDisposition === "CONFLICT") return "CONFLICTED";
+  if (assessment.verdict === "UNVERIFIED") return "UNRESOLVED";
+  switch (assessment.atomicDisposition) {
     case "SUPPORTED": return "SUPPORTED";
     case "REFUTED": return "REFUTED";
     case "CONFLICT": return "CONFLICTED";
@@ -95,12 +97,23 @@ export function buildKnowledgeOutcome(run: LatticeRun, truth: TruthBundle): Know
   const findings = truth.assessments.flatMap<KnowledgeFinding>((assessment) => {
     const claim = claimsById.get(assessment.claimId);
     if (!claim) return [];
+
+    const admittedSupportingEvidenceIds = truth.claimEvidence
+      .filter(
+        (item) =>
+          item.claimId === assessment.claimId
+          && item.admitted
+          && item.verification === "VERIFIED"
+          && item.relation === "SUPPORTS",
+      )
+      .map((item) => item.externalEvidenceId);
+
     return [{
       claimId: claim.id,
       text: claim.text,
-      status: findingStatus(assessment.atomicDisposition),
+      status: findingStatus(assessment),
       confidence: assessment.confidence,
-      evidenceIds: [...assessment.admittedEvidenceIds],
+      evidenceIds: admittedSupportingEvidenceIds,
       contradictoryEvidenceIds: [...assessment.contradictoryEvidenceIds],
       temporalQualifiers: {
         effectiveAt: claim.effectiveAt,
@@ -119,7 +132,7 @@ export function buildKnowledgeOutcome(run: LatticeRun, truth: TruthBundle): Know
   }
   if (findings.some((finding) => finding.basis === "SOURCE_REPORT")) {
     uncertainties.push(
-      "The supported findings establish what the retrieved sources report; they do not independently verify every broader real-world claim in those reports.",
+      "Source-report evidence establishes only what the retrieved sources report; it does not independently verify broader real-world claims or satisfy unresolved V36 proof obligations.",
     );
   }
 

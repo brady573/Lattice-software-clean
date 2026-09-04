@@ -50,6 +50,7 @@ export interface KnowledgeEvidenceDisposition {
   readonly provenanceComponentKey: string | null;
   readonly provenanceConfidence: ProvenanceConfidence;
   readonly authoritativePrimary: boolean;
+  readonly establishedProofKinds?: readonly string[];
 }
 
 export interface KnowledgeEvidenceQualificationInput {
@@ -71,6 +72,7 @@ const rejectedDisposition: KnowledgeEvidenceDisposition = Object.freeze({
   provenanceComponentKey: null,
   provenanceConfidence: "UNKNOWN",
   authoritativePrimary: false,
+  establishedProofKinds: [],
 });
 
 function digest(value: string): string {
@@ -109,6 +111,7 @@ export class ExactSourceReportAdmissionPolicy implements KnowledgeEvidenceAdmiss
       provenanceConfidence: "HIGH",
       // The source is primary only for the narrow literal report of its own content.
       authoritativePrimary: true,
+      establishedProofKinds: ["LITERAL_FACT", "INTERPRETATION_SEPARATION"],
     };
   }
 }
@@ -402,6 +405,7 @@ function validateBundle(
   const bundle = structuredClone(snapshot.bundle);
   const sourceById = new Map(bundle.sources.map((item) => [item.id, item]));
   const claimById = new Map(bundle.claims.map((item) => [item.id, item]));
+  const establishedProofKindsByEvidenceId = new Map<string, ReadonlySet<string>>();
   const qualifiedEvidence = bundle.claimEvidence.map((item) => {
     const claim = claimById.get(item.claimId);
     const source = sourceById.get(item.artifactId);
@@ -418,6 +422,10 @@ function validateBundle(
       proposed,
     });
     const admitted = disposition.admitted && disposition.verification === "VERIFIED";
+    establishedProofKindsByEvidenceId.set(
+      item.id,
+      new Set(admitted ? disposition.establishedProofKinds ?? [] : []),
+    );
     return {
       ...item,
       verification: disposition.verification,
@@ -451,16 +459,20 @@ function validateBundle(
   }
   const checks = bundle.checks.map((check) => {
     const obligation = bundle.obligations.find((item) => item.id === check.obligationId);
-    const admitted = obligation
-      ? (evidenceByClaim.get(obligation.claimId) ?? []).filter((item) => item.admitted)
+    const admittedForProof = obligation
+      ? (evidenceByClaim.get(obligation.claimId) ?? []).filter(
+          (item) =>
+            item.admitted
+            && establishedProofKindsByEvidenceId.get(item.id)?.has(check.kind) === true,
+        )
       : [];
     return {
       ...check,
-      status: admitted.length > 0 ? "PASSED" as const : "UNRESOLVED" as const,
-      evidenceIds: admitted.map((item) => item.externalEvidenceId),
-      explanation: admitted.length > 0
-        ? "V36 verified an exact source-bound report and preserved its provenance."
-        : "No retrieved information passed V36 qualification for this obligation.",
+      status: admittedForProof.length > 0 ? "PASSED" as const : "UNRESOLVED" as const,
+      evidenceIds: admittedForProof.map((item) => item.externalEvidenceId),
+      explanation: admittedForProof.length > 0
+        ? `V36 admitted evidence that specifically establishes ${check.kind}.`
+        : `No admitted evidence specifically establishes the ${check.kind} proof obligation.`,
     };
   });
   const checksByClaim = new Map<string, ProofCheck[]>();
