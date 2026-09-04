@@ -62,10 +62,9 @@ import { registerRunEventStream } from "./progress/run-event-stream.js";
 import { executePersistedRun, type GeneralizedDecisionAdapter } from "./run-execution.js";
 import { MemoryRunStore, type RunStore } from "./run-store.js";
 import type { RuntimeConfig } from "./runtime-config.js";
-import {
-  createDefaultOfflineTruthPipeline,
-  type TruthExecutionPipeline,
-} from "./truth/execution-pipeline.js";
+import type { KnowledgeAcquisitionProvider } from "./knowledge/acquisition.js";
+import { createConfiguredTruthPipeline } from "./truth/configured-pipeline.js";
+import type { TruthExecutionPipeline } from "./truth/execution-pipeline.js";
 import {
   type DecisionEvidenceProvider,
 } from "./truth/decision-evidence-provider.js";
@@ -76,6 +75,7 @@ const DEFAULT_MEMORY_DISPATCH_DELAY_MS = 50;
 
 export interface RuntimeAppOptions {
   truthPipeline?: TruthExecutionPipeline;
+  knowledgeAcquisitionProvider?: KnowledgeAcquisitionProvider;
   memoryDispatchDelayMs?: number;
   authenticatedSubjectResolver?: AuthenticatedSubjectResolver;
   consultationInterpreter?: ConsultationInterpreter;
@@ -277,7 +277,8 @@ export async function createRuntimeApp(
   config: RuntimeConfig,
   options: RuntimeAppOptions = {},
 ): Promise<FastifyInstance> {
-  const truthPipeline = options.truthPipeline ?? createDefaultOfflineTruthPipeline();
+  const truthPipeline = options.truthPipeline
+    ?? createConfiguredTruthPipeline(config.truthMode, options.knowledgeAcquisitionProvider);
   const decisionEvidenceProvider = options.decisionEvidenceProvider;
   const memoryDispatchDelayMs = nonNegativeDelay(
     options.memoryDispatchDelayMs,

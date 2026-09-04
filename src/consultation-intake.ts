@@ -353,6 +353,18 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
       const version = await options.intentStore.getVersion(intentVersionId);
       if (!version) return reply.status(500).send({ error: "AUTHORITATIVE_INTENT_VERSION_MISSING" });
 
+      if (interpretation.clarificationQuestion) {
+        return reply.status(202).send({
+          status: "NEEDS_CLARIFICATION",
+          decisionNeed: "NONE",
+          acceptedUnderstanding: authoritativeObjective(version),
+          intentScopeId,
+          intentVersionId: version.intentVersionId,
+          question: interpretation.clarificationQuestion,
+          confirmationExample: null,
+        });
+      }
+
       if (interpretation.materialClarification) {
         let proposal: PendingIntentProposal;
         try {

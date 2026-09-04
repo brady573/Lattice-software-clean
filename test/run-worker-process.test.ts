@@ -80,6 +80,7 @@ test("standalone Run-worker configuration resolves bounded polling defaults and 
   assert.equal(defaults.leaseMs, 30_000);
   assert.equal(defaults.retryDelayMs, 1_000);
   assert.equal(defaults.batchSize, 10);
+  assert.equal(defaults.truthMode, "v36-offline");
 
   const configured = resolveRunWorkerProcessConfig({
     DATABASE_URL: " postgresql://fixture ",
@@ -96,6 +97,7 @@ test("standalone Run-worker configuration resolves bounded polling defaults and 
     leaseMs: 45_000,
     retryDelayMs: 250,
     batchSize: 4,
+    truthMode: "v36-offline",
   });
 
   assert.throws(

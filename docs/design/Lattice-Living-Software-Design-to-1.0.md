@@ -552,9 +552,9 @@ Open design detail: the exact persisted intermediate V36 work-state contract nee
 - Decision evidence is same-Run unless a separately qualified reusable-evidence contract is introduced.
 - Generated prose cannot mutate truth or decision authority.
 
-## 10.2 Live-provider promotion gate
+## 10.2 Production live-provider promotion gate
 
-A live provider is not enabled merely because the adapter works. The first live integration is a separately qualified Work Item comparing exact live-provider behavior to the accepted offline V36 baseline. Required evidence includes provider-result untrustedness, provenance handling, corroboration semantics, contradiction/falsification behavior, temporal applicability, bounded exhaustion, and decision/explanation fidelity.
+A provider is not production-qualified merely because its adapter works. Knowledge Consultation v0.1 includes an explicit, credential-free `v36-live` development mode that retrieves bounded Wikimedia source reports and preserves their untrusted-information-to-V36-admission boundary. That narrow development capability does not satisfy production provider promotion. Production promotion remains a separately qualified Work Item comparing exact live-provider behavior to the accepted offline V36 baseline. Required evidence includes provider-result untrustedness, provenance handling, corroboration semantics, contradiction/falsification behavior, temporal applicability, bounded exhaustion, and decision/explanation fidelity.
 
 Recommendation: keep v36-offline as a permanent deterministic test mode even after live mode exists. Production/live modes should add capabilities, not remove the reproducible acceptance surface.
 
@@ -792,6 +792,7 @@ Process-role names are deployment/implementation roles, not alternative Product-
 | Environment | Truth/provider mode | Purpose |
 |---|---|---|
 | local deterministic | v36-offline | Fast reproducible development and unit/acceptance work. |
+| local live Knowledge consultation | v36-live + replaceable Wikimedia acquisition adapter | Zero-cost external source retrieval, exact source-report V36 admission, provenance/uncertainty presentation, and live Product proof; not deterministic CI or production qualification. |
 | prototype model simulation | v36-offline + V7 LLM Simulation Lab through Lattice Model Gateway | Offline model/API protocol, fault, idempotency, response-bound, and qualification work without treating simulator output as Product truth or production evidence. |
 | development durable | v36-offline + PostgreSQL | Restart/CAS/outbox/task integration and fault injection. |
 | live-provider test | qualified live mode, non-production | Compare provider integration against accepted offline baseline. |
@@ -864,7 +865,7 @@ The sequence is dependency-oriented rather than calendar-oriented. Each Product 
 | Build to 1.0 | M6 — Conditional Lattice Decision Engine | Preserve typed criteria, tri-state requirements, meaningful difference, material dominance, frontier/tie/uncertainty, and licensed delegation. | Cross-scale tests pass; no forced winner; Knowledge and non-decision Action paths bypass decision machinery. |
 | Build to 1.0 | M7 — Conversation + progress API | Persist messages/conversations and add reliable progress stream. | Reconnectable progress + polling + history work across restart; user-visible lifecycle coherent. Development-only simulated conversation does not satisfy this exit gate. |
 | Build to 1.0 | M8 — Auth + privacy + continuity | Replace fixture subject; add isolation, preference continuity, deletion/retention foundations. | Cross-user access probes fail closed; user corrections/preferences persist correctly. |
-| Build to 1.0 | M9 — Live-provider promotion | Qualify and enable first live research/model provider path. | Offline-to-live acceptance passes on exact revision; dormant/fail-closed behavior remains for unqualified modes. |
+| Build to 1.0 | M9 — Production live-provider promotion | Qualify and enable the first production-eligible live research/model provider path. | Offline-to-live acceptance passes on exact revision; unqualified production modes remain dormant/fail-closed. The bounded `v36-live` development Knowledge path does not satisfy this gate. |
 | Build to 1.0 | M10 — Solandra Experience 1.0 explanation | Add richer model-assisted result rendering with deterministic licensing/fallback. | Fidelity/adversarial explanation suite passes; uncertainty/tradeoffs/citations are usable. |
 | Production / release | M11 — Production operations | Production topology, observability, backups, limits, SLOs, load/security tests, rollback. | Operational gates G8/G9 pass; target SLOs bound and measured. |
 | Production / release | M12 — 1.0 stabilization | Freeze scope, resolve release-blocking open decisions, run full RC program. | All G1-G10 gates pass on the exact candidate revision; known limitations documented and accepted. |

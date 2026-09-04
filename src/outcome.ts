@@ -20,15 +20,30 @@ export interface KnowledgeFinding {
     effectiveAt: string | null;
     period: string | null;
   };
+  rationale?: string[];
+  basis?: "SOURCE_REPORT" | "CLAIM";
 }
 
 export interface OutcomeProvenance {
   sourceId: string;
   canonicalUri: string;
+  title?: string;
   publisher: string | null;
   provenanceConfidence: string;
   authoritativePrimary: boolean;
   retrievedAt: string;
+  publishedAt?: string | null;
+}
+
+export interface KnowledgeEvidence {
+  evidenceId: string;
+  claimId: string;
+  sourceId: string;
+  relation: "SUPPORTS" | "CONTRADICTS" | "CONTEXT" | "NEUTRAL";
+  excerpt: string;
+  verification: "VERIFIED" | "UNVERIFIED" | "REJECTED";
+  admitted: boolean;
+  rejectionReason: string | null;
 }
 
 export interface KnowledgeOutcome {
@@ -38,6 +53,7 @@ export interface KnowledgeOutcome {
   findings: KnowledgeFinding[];
   uncertainties: string[];
   provenance: OutcomeProvenance[];
+  evidence?: KnowledgeEvidence[];
   truthAssessmentIds: string[];
 }
 
@@ -90,6 +106,8 @@ export function buildKnowledgeOutcome(run: LatticeRun, truth: TruthBundle): Know
         effectiveAt: claim.effectiveAt,
         period: claim.period,
       },
+      rationale: [...assessment.rationale],
+      basis: claim.qualifiers.some((item) => item.key === "source-report") ? "SOURCE_REPORT" : "CLAIM",
     }];
   });
 
@@ -98,6 +116,11 @@ export function buildKnowledgeOutcome(run: LatticeRun, truth: TruthBundle): Know
     .map((finding) => `${finding.status}: ${finding.text}`);
   if (findings.length === 0) {
     uncertainties.push("No validated external findings are available for this consultation yet.");
+  }
+  if (findings.some((finding) => finding.basis === "SOURCE_REPORT")) {
+    uncertainties.push(
+      "The supported findings establish what the retrieved sources report; they do not independently verify every broader real-world claim in those reports.",
+    );
   }
 
   return {
@@ -109,10 +132,22 @@ export function buildKnowledgeOutcome(run: LatticeRun, truth: TruthBundle): Know
     provenance: truth.sources.map((source) => ({
       sourceId: source.id,
       canonicalUri: source.canonicalUri,
+      title: typeof source.metadata.title === "string" ? source.metadata.title : source.canonicalUri,
       publisher: source.publisher,
       provenanceConfidence: source.provenanceConfidence,
       authoritativePrimary: source.authoritativePrimary,
       retrievedAt: source.retrievedAt,
+      publishedAt: source.publishedAt,
+    })),
+    evidence: truth.claimEvidence.map((item) => ({
+      evidenceId: item.externalEvidenceId,
+      claimId: item.claimId,
+      sourceId: item.artifactId,
+      relation: item.relation,
+      excerpt: item.specificEvidence,
+      verification: item.verification,
+      admitted: item.admitted,
+      rejectionReason: item.rejectionReason,
     })),
     truthAssessmentIds: truth.assessments.map((assessment) => assessment.id),
   };

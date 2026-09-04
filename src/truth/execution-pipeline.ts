@@ -46,7 +46,7 @@ export type TruthDurableValidationStep =
     };
 
 export interface TruthExecutionPipeline {
-  readonly mode: "v36-offline-fixture";
+  readonly mode: "v36-offline-fixture" | "v36-live-knowledge";
   investigate(runId: string, request?: LatticeRunRequest): Promise<TruthPipelineInvestigation>;
   validate(snapshot: TruthSnapshot): Promise<TruthPipelineExecution>;
   beginDurableValidation?(snapshot: TruthSnapshot): Promise<TruthDurableValidationStep>;

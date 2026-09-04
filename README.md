@@ -12,7 +12,7 @@ The canonical slice accepts a free-form conversation turn, records USER provenan
 
 The decision fixture demonstrates qualified requirement eligibility and meaningful-difference/frontier semantics without summing incompatible raw criterion scales.
 
-No paid provider, queue service, or cloud service is required for the offline prototype.
+No paid provider, queue service, or cloud service is required for local Knowledge Consultation. Deterministic CI remains offline; an explicit zero-cost live development mode retrieves current external source material from Wikimedia without credentials.
 
 ## Solandra conversation UI
 
@@ -49,7 +49,15 @@ npm run dev
 
 The API listens on `127.0.0.1:3000` by default. Without `DATABASE_URL`, development mode uses the in-memory Run store. When `DATABASE_URL` is supplied, the application uses the PostgreSQL Run store. `LATTICE_DEPLOYMENT_MODE=durable` fails closed unless `DATABASE_URL` is configured.
 
-The canonical prototype truth mode is `LATTICE_TRUTH_MODE=v36-offline`. Live-provider truth research remains intentionally dormant during the offline stage.
+The default truth mode is `LATTICE_TRUTH_MODE=v36-offline`, preserving deterministic fixture execution for CI and architecture tests. To exercise real external Knowledge Consultation locally, use:
+
+```bash
+LATTICE_TRUTH_MODE=v36-live npm run dev
+```
+
+The live mode uses a replaceable, provider-neutral acquisition boundary with a credential-free Wikimedia adapter by default. Retrieved pages and excerpts enter the investigation as untrusted information. V36—not the adapter—may admit only exact, content-integrity-bound source reports. A supported source report establishes what that source says; it does not independently verify every broader claim in the report. Solandra therefore presents source identity, retrieval provenance, supporting or rejected evidence, and unresolved/conflicting material alongside the explanation.
+
+This v0.1 path is deliberately conservative. It is extractive rather than model-synthesized, public search relevance can vary, and the default adapter does not independently corroborate a source's wider claims. Acquisition failure yields an unresolved Knowledge outcome rather than confident fallback prose. Live-network execution is opt-in and is not part of deterministic CI.
 
 ### Zero-cost local model provider
 
@@ -124,14 +132,14 @@ The repository PostgreSQL validation lane exercises restart survival, Run epoch/
 
 - **Lattice Intent Authority** owns canonical versioned USER intent. `DecisionPlan` is a conditional durable exact IntentVersion-to-DecisionInput binding for qualified decision work, not universal Run planning state or a separate Product authority.
 - **Lattice Execution Runtime** owns durable Run lifecycle, coordination, cancellation, recovery, and research execution. The separated durable API/Run-worker/Research-worker composition established through M3 remains operational infrastructure, not truth or decision authority.
-- **V36 Truth Core** is the protected epistemic authority for material external-world factual evidence used by authoritative decisions. The durable V36 research continuation contract established through M4 preserves V36-only admission/sufficiency authority even when Runtime workers execute research.
-- The current default V36 truth pipeline remains deterministic/offline. Live-provider promotion is separately governed by M9 and is not implied by local model or provider-contract support.
+- **V36 Truth Core** is the protected epistemic authority for external factual evidence used by Knowledge outcomes or authoritative decisions. The durable V36 research continuation contract established through M4 preserves V36-only admission/sufficiency authority even when Runtime workers execute research.
+- The default V36 truth pipeline remains deterministic/offline. Explicit `v36-live` development mode adds credential-free external acquisition while preserving the same authority boundary; this Product proof is not production-provider qualification or production readiness.
 - `src/model/` is the non-authoritative **Lattice Model Gateway**. Model/provider output is proposal, interpretation, or rendering material until the owning Product authority accepts it under its own contract.
 - **Lattice Decision Engine** conditionally owns authoritative eligibility, typed comparison, trade-off, frontier, licensed selection, and `StructuredDecision` semantics from an exact DecisionPlan plus a decision-specific projection of V36-admitted evidence. Knowledge and non-decision Action Preparation bypass it.
 - **Solandra Experience** is downstream of Product authority. Conversation carries questions, clarifications, acknowledgements, and concise explanation; Composer is the adaptive visual information surface. Neither may dictate backend behavior or silently create USER intent, V36 truth, eligibility, ranking, or winner identity.
 - M7 durable Conversation/USER-message/continuity/reconnect behavior and M8 authenticated-subject ownership, derived-graph isolation, subject-scoped idempotency, explicit USER-controlled preference continuity, historical immutability, historical-fact non-reuse, and deletion-state enforcement are implemented in their accepted scopes. Generalized memory, retention duration, and purge execution remain outside those acceptance claims.
 - PostgreSQL-backed Run/truth/decision/intent/conversation/planning/preference persistence exists for the durable development runtime; in-memory storage remains available for local fixture development.
-- Production deployment, production database mutation, live-provider acceptance, paid infrastructure, and production readiness are not implied by repository state or development validation.
+- Production deployment, production database mutation, production-provider acceptance, paid infrastructure, and production readiness are not implied by repository state or development validation.
 - Browser/usability/accessibility acceptance remains separate from repository build/test success; see `docs/design/solandra/ACCEPTANCE.md` for the Solandra UI acceptance surface.
 - `package-lock.json` is committed and validated on the approved Node 24/npm 11 surface; use `npm ci` so local and CI dependency resolution follows that lockfile.
 

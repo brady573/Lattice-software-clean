@@ -1,6 +1,6 @@
 export type DeploymentMode = "development" | "durable";
 /** Runtime truth capability only; Product decision criteria are supplied by qualified adapters. */
-export type TruthMode = "v36-offline";
+export type TruthMode = "v36-offline" | "v36-live";
 export type AuthenticationMode = "development-fixture" | "required";
 
 export interface RuntimeConfig {
@@ -156,7 +156,7 @@ export function resolveRuntimeConfig(
   }
 
   const truthMode = env.LATTICE_TRUTH_MODE ?? "v36-offline";
-  if (truthMode !== "v36-offline") {
+  if (truthMode !== "v36-offline" && truthMode !== "v36-live") {
     throw new Error(`Unsupported LATTICE_TRUTH_MODE: ${truthMode}`);
   }
 

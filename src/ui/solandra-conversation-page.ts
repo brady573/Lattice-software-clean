@@ -38,6 +38,11 @@ export function renderSolandraConversationPage(): string {
     .finding { padding: 12px 0; border-bottom: 1px solid #ece9df; }
     .finding:last-child { border-bottom: 0; }
     .finding-status { display: inline-block; margin-bottom: 4px; color: #6b6960; font-size: .77rem; letter-spacing: .035em; }
+    .evidence { margin: 8px 0 0; padding-left: 14px; border-left: 2px solid #e2ded2; color: #55534c; font-size: .88rem; }
+    .source-list { display: grid; gap: 9px; padding: 0; list-style: none; }
+    .source-list li { margin: 0; padding: 11px 12px; border: 1px solid #e2ded2; border-radius: 12px; }
+    .source-list a { color: #282722; text-underline-offset: 3px; }
+    .source-meta { color: #6b6960; font-size: .8rem; margin-top: 4px; }
     .resource { margin-top: 24px; padding: 17px; border: 1px solid #cbc7ba; border-radius: 17px; background: #f8f7f2; }
     .resource textarea { min-height: 170px; margin-top: 9px; border: 1px solid #d9d6ca; border-radius: 12px; background: #fffefa; padding: 12px; }
     .error { color: #7d271f; }
@@ -120,24 +125,45 @@ export function renderSolandraConversationPage(): string {
       };
 
       const renderKnowledge = (knowledge) => {
+        const sources = new Map((knowledge.provenance || []).map((source) => [source.sourceId, source]));
         const findings = knowledge.findings.length
           ? knowledge.findings.map((finding) => '<div class="finding">'
-            + (finding.status === "SUPPORTED" ? "" : '<div class="finding-status">' + escapeHtml(finding.status) + '</div>')
-            + '<div>' + escapeHtml(finding.text) + '</div></div>').join("")
+            + '<div class="finding-status">' + escapeHtml(finding.status)
+            + (finding.basis === "SOURCE_REPORT" ? ' SOURCE REPORT' : '')
+            + ' · ' + escapeHtml(finding.confidence) + ' confidence</div>'
+            + '<div>' + escapeHtml(finding.text) + '</div>'
+            + (knowledge.evidence || []).filter((item) => item.claimId === finding.claimId).map((item) => {
+              const source = sources.get(item.sourceId);
+              return '<div class="evidence">'
+                + escapeHtml(item.admitted ? (item.relation === "CONTRADICTS" ? "Contradicting evidence" : "Supporting evidence") : "Not admitted")
+                + (source ? ' · ' + escapeHtml(source.title || source.canonicalUri) : '')
+                + '<br>' + escapeHtml(item.excerpt)
+                + (!item.admitted && item.rejectionReason ? '<br>' + escapeHtml(item.rejectionReason) : '')
+                + '</div>';
+            }).join("")
+            + '</div>').join("")
           : "";
         const uncertainties = knowledge.uncertainties.length
           ? '<h2>What remains uncertain</h2><ul>' + knowledge.uncertainties.map((item) => '<li>' + escapeHtml(item) + '</li>').join("") + '</ul>'
           : "";
-        return findings + uncertainties;
+        const provenance = (knowledge.provenance || []).length
+          ? '<h2>Sources</h2><ul class="source-list">' + knowledge.provenance.map((source) => '<li>'
+            + '<a href="' + escapeHtml(source.canonicalUri) + '" target="_blank" rel="noreferrer">' + escapeHtml(source.title || source.canonicalUri) + '</a>'
+            + '<div class="source-meta">' + escapeHtml(source.publisher || "Publisher not established")
+            + ' · retrieved ' + escapeHtml(source.retrievedAt) + '</div></li>').join("") + '</ul>'
+          : "";
+        return '<h1>' + escapeHtml(knowledge.acceptedUnderstanding) + '</h1>' + findings + uncertainties + provenance;
       };
 
       const renderOutcome = (outcome) => {
         composerHasProductContent = true;
         if (outcome.kind === "KNOWLEDGE") {
           composer.innerHTML = renderKnowledge(outcome);
-          appendSolandraTurn(outcome.findings.length > 0
-            ? "I’ve put the supported findings in the Composer."
-            : "I don’t have validated external findings for that yet.");
+          const supported = outcome.findings.filter((finding) => finding.status === "SUPPORTED").length;
+          appendSolandraTurn(supported > 0
+            ? "I found " + supported + " supported source report" + (supported === 1 ? "" : "s")
+              + " and kept the evidence, sources, and uncertainty visible in the Composer."
+            : "I couldn’t establish supported knowledge from the available sources. The Composer shows what remains unresolved.");
           return;
         }
         if (outcome.kind === "ACTION_PREPARATION") {
@@ -186,8 +212,10 @@ export function renderSolandraConversationPage(): string {
           const body = await response.json();
           if (!response.ok) throw new Error(body.message || body.error || "Consultation intake failed.");
           if (body.status === "NEEDS_CLARIFICATION") {
-            pendingClarification = { proposalId: body.proposalId };
-            appendSolandraTurn(body.question + "\\n\\nReply with “" + body.confirmationExample + "” to confirm, or state a correction normally.");
+            pendingClarification = body.proposalId ? { proposalId: body.proposalId } : null;
+            appendSolandraTurn(body.proposalId
+              ? body.question + "\\n\\nReply with “" + body.confirmationExample + "” to confirm, or state a correction normally."
+              : body.question);
             return;
           }
           pendingClarification = null;
