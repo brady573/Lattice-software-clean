@@ -29,7 +29,7 @@ function claim(sourceId: string, text: string) {
   };
 }
 
-test("single-subject relational questions diversify retrieval and reject topic-only material", () => {
+test("single-subject relational questions require subject-to-mechanism linkage", () => {
   const deriver = new DeterministicKnowledgeInvestigationQueryDeriver();
   const qualifier = new ObjectiveKnowledgeRelevanceQualifier();
   const objective = "How does a duck know what direction south is?";
@@ -51,17 +51,30 @@ test("single-subject relational questions diversify retrieval and reject topic-o
     claim: claim(topicOnly.sourceId, topicOnly.content),
   }).relevant, false);
 
-  const mechanism = source(
-    "mechanism",
-    "Animal navigation",
-    "Navigation and orientation can use environmental cues to determine direction during movement.",
+  const relationOnly = source(
+    "relation-only",
+    "Compass",
+    "A compass shows cardinal directions used for navigation and geographic orientation, including south.",
   );
   assert.equal(qualifier.disposition({
     objective,
     context: [],
     queries,
-    source: mechanism,
-    claim: claim(mechanism.sourceId, mechanism.content),
+    source: relationOnly,
+    claim: claim(relationOnly.sourceId, relationOnly.content),
+  }).relevant, false);
+
+  const linked = source(
+    "linked",
+    "Duck navigation",
+    "A duck can use environmental navigation and orientation cues to determine direction during movement.",
+  );
+  assert.equal(qualifier.disposition({
+    objective,
+    context: [],
+    queries,
+    source: linked,
+    claim: claim(linked.sourceId, linked.content),
   }).relevant, true);
 });
 
