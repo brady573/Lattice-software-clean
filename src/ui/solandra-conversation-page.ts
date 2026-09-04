@@ -152,7 +152,7 @@ export function renderSolandraConversationPage(): string {
             + '<div class="source-meta">' + escapeHtml(source.publisher || "Publisher not established")
             + ' · retrieved ' + escapeHtml(source.retrievedAt) + '</div></li>').join("") + '</ul>'
           : "";
-        return '<h1>' + escapeHtml(knowledge.acceptedUnderstanding) + '</h1>' + findings + uncertainties + provenance;
+        return findings + uncertainties + provenance;
       };
 
       const renderOutcome = (outcome) => {
