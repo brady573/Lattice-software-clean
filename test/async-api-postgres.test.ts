@@ -328,7 +328,11 @@ test(
       const outcome = response.json().outcome;
       assert.equal(outcome.kind, "KNOWLEDGE");
       assert.equal(outcome.acceptedUnderstanding, question);
-      assert.equal(outcome.findings[0]?.status, "SUPPORTED");
+      assert.equal(outcome.findings[0]?.status, "UNRESOLVED");
+      assert.equal(outcome.findings[0]?.confidence, "LOW");
+      assert.ok(
+        outcome.uncertainties.some((item: string) => item.includes("unresolved V36 proof obligations")),
+      );
       assert.equal(outcome.findings[0]?.basis, "SOURCE_REPORT");
       assert.equal(outcome.provenance[0]?.canonicalUri, "https://knowledge.example/durable-report");
       assert.equal(outcome.provenance[0]?.title, "Durable source report");
