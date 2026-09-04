@@ -59,6 +59,9 @@ type WorkEmphasis = "GENERAL" | "SOURCES" | "UNCERTAINTY" | "EXPLANATION" | "EXP
 
 function workEmphasis(context: readonly string[]): WorkEmphasis {
   const latest = context.at(-1)?.trim() ?? "";
+  if (/\b(?:simpler|simply|plain language|disagree|disagrees|contradict|contradiction|conflict|conflicting)\b/iu.test(latest)) {
+    return "GENERAL";
+  }
   if (/\b(?:source|sources|citation|citations|evidence)\b/iu.test(latest)) return "SOURCES";
   if (/\b(?:uncertain|uncertainty)\b/iu.test(latest)) return "UNCERTAINTY";
   if (/^why\??$/iu.test(latest) || /\b(?:explain|tell me more)\b/iu.test(latest)) return "EXPLANATION";
