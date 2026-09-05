@@ -26,7 +26,8 @@ const GENERIC_RELATION_TERMS = new Set([
 const CAUSE_SEEKING_OBJECTIVE_PATTERN = /\b(?:why|cause|causes|caused|causing|mechanism)\b/iu;
 const LOCAL_CAUSAL_RELATION_PATTERN = /\b(?:because|cause|causes|caused|causing|due|affect|affects|affected|affecting|lead|leads|led|leading|result|results|resulted|resulting|require|requires|required|requiring|react|reacts|reacted|reacting|trigger|triggers|triggered|triggering|produce|produces|produced|producing|create|creates|created|creating|make|makes|made|making|drive|drives|drove|driven|driving)\b/iu;
 const EXPLANATION_FOLLOWS_PATTERN = /\b(?:because|due\s+to)\b/iu;
-const EFFECT_FOLLOWS_PATTERN = /\b(?:cause|causes|caused|causing|affect|affects|affected|affecting|lead|leads|led|leading|result|results|resulted|resulting|require|requires|required|requiring|react|reacts|reacted|reacting|trigger|triggers|triggered|triggering|produce|produces|produced|producing|create|creates|created|creating|make|makes|made|making|drive|drives|drove|driven|driving)\b/iu;
+const SUPPORTED_MECHANISM_PATTERN = /\b(?:require|requires|required|requiring|react|reacts|reacted|reacting)\b/iu;
+const EFFECT_FOLLOWS_PATTERN = /\b(?:cause|causes|caused|causing|affect|affects|affected|affecting|lead|leads|led|leading|result|results|resulted|resulting|trigger|triggers|triggered|triggering|produce|produces|produced|producing|create|creates|created|creating|make|makes|made|making|drive|drives|drove|driven|driving)\b/iu;
 
 function normalizedTokens(value: string): string[] {
   return value
@@ -167,14 +168,16 @@ function locallyAnswersCauseSeekingObjective(
     if (explanationFollows?.index !== undefined) {
       const explainedSide = segment.slice(0, explanationFollows.index);
       const explainedTokens = unique(normalizedTokens(explainedSide));
-      return matchingTerms(specificObjectiveTerms, explainedTokens).length >= minimumSpecificMatches;
+      return matchingTerms(specificObjectiveTerms, explainedTokens).length >= 1;
     }
+
+    if (SUPPORTED_MECHANISM_PATTERN.test(segment)) return true;
 
     const effectFollows = EFFECT_FOLLOWS_PATTERN.exec(segment);
     if (effectFollows?.index === undefined) return false;
     const effectSide = segment.slice(effectFollows.index + effectFollows[0].length);
     const effectTokens = unique(normalizedTokens(effectSide));
-    return matchingTerms(specificObjectiveTerms, effectTokens).length >= minimumSpecificMatches;
+    return matchingTerms(specificObjectiveTerms, effectTokens).length >= 1;
   });
 }
 
