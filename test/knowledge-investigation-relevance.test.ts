@@ -90,7 +90,14 @@ async function ask(app: FastifyInstance, message: string) {
   await waitForCompletedRun(app, body.runId);
   const outcomeResponse = await app.inject({ method: "GET", url: `/api/v1/runs/${body.runId}/outcome` });
   assert.equal(outcomeResponse.statusCode, 200, outcomeResponse.body);
-  return { conversationId, accepted: body, outcome: outcomeResponse.json().outcome, runId: body.runId };
+  const resultBody = outcomeResponse.json();
+  return {
+    conversationId,
+    accepted: body,
+    outcome: resultBody.outcome,
+    presentation: resultBody.presentation,
+    runId: body.runId,
+  };
 }
 
 test("query derivation turns natural objectives into bounded operational search concepts without replacing intent", () => {
@@ -157,6 +164,71 @@ test("relevance gate excludes faithful lexical noise without claiming truth auth
   assert.ok(relevant.matchedTerms.some((term) => /navigation|orientation|direction/iu.test(term)));
 });
 
+test("causal relevance distinguishes unrelated, topic-related, and locally relation-responsive material", () => {
+  const deriver = new DeterministicKnowledgeInvestigationQueryDeriver();
+  const qualifier = new ObjectiveKnowledgeRelevanceQualifier();
+  const objective = "Why do leaves change color in autumn?";
+  const queries = deriver.derive({ objective, context: [] });
+  const fixtures = [
+    source("unrelated", "PostgreSQL indexes", "PostgreSQL supports indexes for database queries."),
+    source("topic-only", "Autumn leaf color", "Autumn leaf color is a phenomenon where leaves become red and yellow."),
+    source("disambiguation", "Autumn Leaves", "Autumn Leaves may refer to:"),
+    source(
+      "unrelated-causality",
+      "Leaf peeping",
+      "Leaf peeping concerns fall foliage and changing leaf colors. Tourism can be affected by climate change and severe weather.",
+    ),
+    source(
+      "responsive",
+      "Autumn leaf pigments",
+      "In autumn, shorter daylight and lower temperatures cause changes in leaf pigments; as chlorophyll breaks down, other pigments become visible.",
+    ),
+  ];
+
+  const dispositions = fixtures.map((fixture) => qualifier.disposition({
+    objective,
+    context: [],
+    queries,
+    source: fixture,
+    claim: claim(fixture.sourceId, `${fixture.sourceId}-claim`, fixture.content),
+  }));
+
+  assert.deepEqual(dispositions.map((item) => item.relevant), [false, false, false, false, true]);
+  for (const rejected of dispositions.slice(1, 4)) {
+    assert.match(rejected.rationale, /topic\/concept overlap is insufficient/iu);
+    assert.match(rejected.rationale, /causal relation is not locally addressed/iu);
+  }
+  assert.match(dispositions[4]?.rationale ?? "", /locally links causal\/mechanistic relation evidence/iu);
+});
+
+test("provider wrapper admits only the locally causal leaf fixture before V36", async () => {
+  const objective = "Why do leaves change color in autumn?";
+  const fixtures = [
+    source("unrelated", "PostgreSQL indexes", "PostgreSQL supports indexes for database queries."),
+    source("topic-only", "Autumn leaf color", "Autumn leaf color is a phenomenon where leaves become red and yellow."),
+    source("disambiguation", "Autumn Leaves", "Autumn Leaves may refer to:"),
+    source(
+      "unrelated-causality",
+      "Leaf peeping",
+      "Leaf peeping concerns fall foliage and changing leaf colors. Tourism can be affected by climate change and severe weather.",
+    ),
+    source(
+      "responsive",
+      "Autumn leaf pigments",
+      "In autumn, shorter daylight and lower temperatures cause changes in leaf pigments; as chlorophyll breaks down, other pigments become visible.",
+    ),
+  ];
+  const provider = new RecordingProvider({
+    sources: fixtures,
+    claims: fixtures.map((fixture) => claim(fixture.sourceId, `${fixture.sourceId}-claim`, fixture.content)),
+  });
+  const wrapped = new RelevantKnowledgeAcquisitionProvider(provider);
+  const result = await wrapped.acquire({ runId: "run-leaf-relevance", objective, context: [] });
+
+  assert.deepEqual(result.sources.map((item) => item.sourceId), ["responsive"]);
+  assert.deepEqual(result.claims.map((item) => item.claimId), ["responsive-claim"]);
+});
+
 test("provider-neutral investigation wrapper passes derived queries and removes irrelevant sources before V36", async () => {
   const objective = "How does a duck know what direction south is?";
   const irrelevant = source(
@@ -185,16 +257,24 @@ test("provider-neutral investigation wrapper passes derived queries and removes 
   assert.equal(result.sources[0]?.content, relevant.content);
 });
 
-test("configured live runtime keeps relevant source reports unresolved under V36 and never enters decision execution", async () => {
+test("configured live runtime rejects generic index material and sends only mechanism-responsive source reports to V36", async () => {
   const objective = "Why can database indexes make writes slower?";
+  const generic = source(
+    "index-generic",
+    "Database indexes",
+    "Database indexes are data structures used to speed database queries, and writes update stored data.",
+  );
   const relevant = source(
     "index-report",
     "Index maintenance",
-    `${objective} A source report describes additional maintenance work during writes.`,
+    "Database indexes require additional maintenance during writes, which can slow updates.",
   );
   const provider = new RecordingProvider({
-    sources: [relevant],
-    claims: [claim("index-report", "index-claim", relevant.content)],
+    sources: [generic, relevant],
+    claims: [
+      claim("index-generic", "generic-index-claim", generic.content),
+      claim("index-report", "index-claim", relevant.content),
+    ],
   });
   const config = resolveRuntimeConfig({
     LATTICE_DEPLOYMENT_MODE: "development",
@@ -210,10 +290,56 @@ test("configured live runtime keeps relevant source reports unresolved under V36
     assert.equal(result.accepted.acceptedUnderstanding, objective);
     assert.equal(result.accepted.decisionNeed, "NONE");
     assert.equal(result.outcome.kind, "KNOWLEDGE");
+    assert.equal(result.outcome.findings.length, 1);
+    assert.equal(result.outcome.findings[0]?.text, relevant.content);
     assert.equal(result.outcome.findings[0]?.status, "UNRESOLVED");
+    assert.equal(result.outcome.findings[0]?.basis, "SOURCE_REPORT");
     assert.equal(result.outcome.findings[0]?.confidence, "LOW");
     assert.equal(result.outcome.evidence[0]?.admitted, true);
     assert.ok(result.outcome.uncertainties.some((item: string) => item.includes("unresolved V36 proof obligations")));
+    assert.equal(result.outcome.findings.some((item: { text: string }) => item.text === generic.content), false);
+
+    const plan = await app.inject({ method: "GET", url: `/api/v1/runs/${result.runId}/decision-plan` });
+    assert.equal(plan.statusCode, 404, plan.body);
+    const run = await app.inject({ method: "GET", url: `/api/v1/runs/${result.runId}` });
+    assert.equal(run.json().events.some((event: { type: string }) => event.type === "DECIDING"), false);
+  } finally {
+    await app.close();
+  }
+});
+
+test("causal topic-only results yield empty governed Knowledge and a concise Solandra no-answer response", async () => {
+  const objective = "Why do leaves change color in autumn?";
+  const topicOnly = source(
+    "leaf-description",
+    "Autumn leaf color",
+    "Autumn leaf color is a phenomenon where leaves become red and yellow.",
+  );
+  const disambiguation = source("autumn-leaves", "Autumn Leaves", "Autumn Leaves may refer to:"),
+    provider = new RecordingProvider({
+      sources: [topicOnly, disambiguation],
+      claims: [
+        claim("leaf-description", "leaf-description-claim", topicOnly.content),
+        claim("autumn-leaves", "autumn-leaves-claim", disambiguation.content),
+      ],
+    });
+  const config = resolveRuntimeConfig({
+    LATTICE_DEPLOYMENT_MODE: "development",
+    LATTICE_TRUTH_MODE: "v36-live",
+  } as NodeJS.ProcessEnv);
+  const app = await createRuntimeApp(config, {
+    memoryDispatchDelayMs: 1,
+    knowledgeAcquisitionProvider: provider,
+  });
+
+  try {
+    const result = await ask(app, objective);
+    assert.equal(result.outcome.kind, "KNOWLEDGE");
+    assert.deepEqual(result.outcome.findings, []);
+    assert.deepEqual(result.outcome.provenance, []);
+    assert.deepEqual(result.outcome.evidence, []);
+    assert.equal(result.presentation.assistantMessage, "I couldn't establish why this happens from the available evidence.");
+    assert.doesNotMatch(result.presentation.assistantMessage, /UNRESOLVED|SOURCE REPORT|V36|confidence/iu);
 
     const plan = await app.inject({ method: "GET", url: `/api/v1/runs/${result.runId}/decision-plan` });
     assert.equal(plan.statusCode, 404, plan.body);
