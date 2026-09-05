@@ -213,7 +213,7 @@ export class ObjectiveKnowledgeRelevanceQualifier implements KnowledgeRelevanceQ
           ? CAUSE_SEEKING_OBJECTIVE_PATTERN.test(input.objective)
             ? "Retrieved material locally addresses the requested explanatory relationship with enough objective-specific terms."
             : "Retrieved material overlaps the objective-specific or derived investigation concepts."
-          : "Topic/concept overlap is insufficient because the requested explanatory relationship is not locally addressed in the required direction.",
+          : "Topic/concept overlap is insufficient because the causal relation is not locally addressed in the required direction for the requested explanatory relationship.",
       matchedTerms: unique([...objectiveMatches, ...queryMatches]),
     };
   }
