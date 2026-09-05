@@ -142,8 +142,8 @@ test("relevance gate excludes faithful lexical noise without claiming truth auth
 
   const relevantSource = source(
     "relevant",
-    "Navigation and orientation",
-    "Navigation and orientation use environmental cues to determine direction during movement.",
+    "Duck navigation and orientation",
+    "Duck navigation and orientation can use environmental cues to determine direction during movement.",
   );
   const relevantClaim = claim("relevant", "relevant-claim", relevantSource.content);
   const relevant = qualifier.disposition({
@@ -166,8 +166,8 @@ test("provider-neutral investigation wrapper passes derived queries and removes 
   );
   const relevant = source(
     "direction",
-    "Navigation and orientation",
-    "Navigation and orientation use multiple cues to determine direction during movement.",
+    "Duck navigation and orientation",
+    "Duck navigation and orientation can use multiple cues to determine direction during movement.",
   );
   const provider = new RecordingProvider({
     sources: [irrelevant, relevant],
