@@ -68,13 +68,22 @@ test("CONFLICTED finding preserves material conflict", () => {
   );
 });
 
-test("UNRESOLVED SOURCE_REPORT preserves source-report boundary", () => {
-  const response = renderKnowledgeResponse(knowledge([
-    finding({ status: "UNRESOLVED", basis: "SOURCE_REPORT" }),
-  ]));
-  assert.match(response, /^Retrieved sources report: The governed finding text\./u);
-  assert.match(response, /remains unresolved beyond the source report/u);
-  assert.match(response, /not independent verification/u);
+test("SOURCE_REPORT qualification is preserved for every finding status", () => {
+  const cases: Array<{ status: KnowledgeFinding["status"]; prefix: string }> = [
+    { status: "SUPPORTED", prefix: "Supported as a source report:" },
+    { status: "REFUTED", prefix: "Refuted as a source report:" },
+    { status: "CONFLICTED", prefix: "Materially conflicted as a source report:" },
+    { status: "UNRESOLVED", prefix: "Unresolved as a source report:" },
+  ];
+
+  for (const fixture of cases) {
+    const response = renderKnowledgeResponse(knowledge([
+      finding({ status: fixture.status, basis: "SOURCE_REPORT" }),
+    ]));
+    assert.match(response, new RegExp(`^${fixture.prefix} The governed finding text\\.`, "u"));
+    assert.match(response, /concerns what the retrieved source material reports/u);
+    assert.match(response, /does not independently verify the broader real-world claim/u);
+  }
 });
 
 test("ordinary UNRESOLVED finding does not overstate qualified evidence", () => {

@@ -2,7 +2,16 @@ import type { KnowledgeFinding, KnowledgeOutcome } from "../../outcome.js";
 
 const EMPTY_KNOWLEDGE_MESSAGE = "No validated external findings are sufficiently relevant to this objective.";
 
+function renderSourceReportFinding(finding: KnowledgeFinding): string {
+  const status = finding.status === "CONFLICTED"
+    ? "Materially conflicted"
+    : finding.status[0] + finding.status.slice(1).toLowerCase();
+  return `${status} as a source report: ${finding.text} This status concerns what the retrieved source material reports; it does not independently verify the broader real-world claim.`;
+}
+
 function renderFinding(finding: KnowledgeFinding): string {
+  if (finding.basis === "SOURCE_REPORT") return renderSourceReportFinding(finding);
+
   switch (finding.status) {
     case "SUPPORTED":
       return `Supported: ${finding.text}`;
@@ -11,9 +20,6 @@ function renderFinding(finding: KnowledgeFinding): string {
     case "CONFLICTED":
       return `Material conflict remains: ${finding.text}`;
     case "UNRESOLVED":
-      if (finding.basis === "SOURCE_REPORT") {
-        return `Retrieved sources report: ${finding.text} This remains unresolved beyond the source report and is not independent verification.`;
-      }
       return `Qualified evidence did not establish this strongly enough: ${finding.text}`;
   }
 }
