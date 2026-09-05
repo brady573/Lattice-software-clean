@@ -49,7 +49,7 @@ class RecordingProvider implements KnowledgeAcquisitionProvider {
   }
 }
 
-test("cause-seeking relevance rejects reverse because-direction while accepting an explanation of the requested phenomenon", () => {
+test("cause-seeking relevance rejects reverse and unsupported direction while accepting an explanation of the requested phenomenon", () => {
   const objective = "Why do leaves change color in autumn?";
   const deriver = new DeterministicKnowledgeInvestigationQueryDeriver();
   const qualifier = new ObjectiveKnowledgeRelevanceQualifier();
@@ -58,6 +58,11 @@ test("cause-seeking relevance rejects reverse because-direction while accepting 
     "reverse",
     "Autumn tourism",
     "Tourism increases because leaves change color in autumn.",
+  );
+  const unsupportedDirection = source(
+    "unsupported-direction",
+    "Autumn tourism",
+    "Leaves change color in autumn, leading to increased tourism.",
   );
   const responsive = source(
     "responsive",
@@ -72,6 +77,13 @@ test("cause-seeking relevance rejects reverse because-direction while accepting 
     source: reverse,
     claim: claim(reverse.sourceId, "reverse-claim", reverse.content),
   });
+  const unsupportedDisposition = qualifier.disposition({
+    objective,
+    context: [],
+    queries,
+    source: unsupportedDirection,
+    claim: claim(unsupportedDirection.sourceId, "unsupported-direction-claim", unsupportedDirection.content),
+  });
   const responsiveDisposition = qualifier.disposition({
     objective,
     context: [],
@@ -82,16 +94,58 @@ test("cause-seeking relevance rejects reverse because-direction while accepting 
 
   assert.equal(reverseDisposition.relevant, false);
   assert.match(reverseDisposition.rationale, /required direction/iu);
+  assert.equal(unsupportedDisposition.relevant, false);
+  assert.match(unsupportedDisposition.rationale, /required direction/iu);
   assert.equal(responsiveDisposition.relevant, true);
   assert.match(responsiveDisposition.rationale, /requested explanatory relationship/iu);
 });
 
-test("directional answer relevance filters reverse causality before V36", async () => {
+test("unknown causal direction fails closed outside the leaf fixture domain", () => {
+  const objective = "Why does condensation form?";
+  const deriver = new DeterministicKnowledgeInvestigationQueryDeriver();
+  const qualifier = new ObjectiveKnowledgeRelevanceQualifier();
+  const queries = deriver.derive({ objective, context: [] });
+  const unsupportedDirection = source(
+    "condensation-effect",
+    "Condensation and surfaces",
+    "Condensation forming leads to slippery surfaces.",
+  );
+  const responsive = source(
+    "condensation-cause",
+    "Condensation formation",
+    "Condensation forms because water vapor cools and changes phase.",
+  );
+
+  const unsupportedDisposition = qualifier.disposition({
+    objective,
+    context: [],
+    queries,
+    source: unsupportedDirection,
+    claim: claim(unsupportedDirection.sourceId, "condensation-effect-claim", unsupportedDirection.content),
+  });
+  const responsiveDisposition = qualifier.disposition({
+    objective,
+    context: [],
+    queries,
+    source: responsive,
+    claim: claim(responsive.sourceId, "condensation-cause-claim", responsive.content),
+  });
+
+  assert.equal(unsupportedDisposition.relevant, false);
+  assert.equal(responsiveDisposition.relevant, true);
+});
+
+test("directional answer relevance filters reverse and unsupported causality before V36", async () => {
   const objective = "Why do leaves change color in autumn?";
   const reverse = source(
     "reverse",
     "Autumn tourism",
     "Tourism increases because leaves change color in autumn.",
+  );
+  const unsupportedDirection = source(
+    "unsupported-direction",
+    "Autumn tourism",
+    "Leaves change color in autumn, leading to increased tourism.",
   );
   const responsive = source(
     "responsive",
@@ -99,9 +153,10 @@ test("directional answer relevance filters reverse causality before V36", async 
     "Leaves change color in autumn because seasonal changes affect leaf pigments.",
   );
   const provider = new RecordingProvider({
-    sources: [reverse, responsive],
+    sources: [reverse, unsupportedDirection, responsive],
     claims: [
       claim(reverse.sourceId, "reverse-claim", reverse.content),
+      claim(unsupportedDirection.sourceId, "unsupported-direction-claim", unsupportedDirection.content),
       claim(responsive.sourceId, "responsive-claim", responsive.content),
     ],
   });
