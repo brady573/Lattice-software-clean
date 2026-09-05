@@ -29,7 +29,12 @@ function acquired(
   options: { unsupported?: boolean; conflict?: boolean } = {},
 ): KnowledgeAcquisitionResult {
   const focus = request.context.at(-1) ?? "initial explanation";
-  const claim = `${request.objective} — source material for ${focus}.`;
+  const causalFixture = request.objective === "Why do some volcanic islands eventually disappear?"
+    ? "Volcanic islands can eventually disappear because erosion and subsidence reduce exposed land over time."
+    : request.objective === "Why can database indexes make writes slower?"
+      ? "Database indexes require additional maintenance during writes, which can slow updates."
+      : null;
+  const claim = causalFixture ?? `${request.objective} — source material for ${focus}.`;
   const support = options.unsupported ? "Different retrieved text." : claim;
   const sources = [{
     sourceId: "source-a",
