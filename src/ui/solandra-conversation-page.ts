@@ -159,15 +159,15 @@ export function renderSolandraConversationPage(): string {
         return findings + uncertainties + provenance;
       };
 
-      const renderOutcome = (outcome) => {
+      const renderOutcome = (outcome, presentation) => {
         composerHasProductContent = true;
         if (outcome.kind === "KNOWLEDGE") {
           composer.innerHTML = renderKnowledge(outcome);
-          const supported = outcome.findings.filter((finding) => finding.status === "SUPPORTED").length;
-          appendSolandraTurn(supported > 0
-            ? "I found " + supported + " supported source report" + (supported === 1 ? "" : "s")
-              + " and kept the evidence, sources, and uncertainty visible in the Composer."
-            : "I couldn’t establish supported knowledge from the available sources. The Composer shows what remains unresolved.");
+          const assistantMessage = typeof presentation?.assistantMessage === "string"
+            ? presentation.assistantMessage.trim()
+            : "";
+          if (!assistantMessage) throw new Error("Knowledge response presentation is unavailable.");
+          appendSolandraTurn(assistantMessage);
           return;
         }
         if (outcome.kind === "ACTION_PREPARATION") {
@@ -188,7 +188,7 @@ export function renderSolandraConversationPage(): string {
             continue;
           }
           if (!response.ok) throw new Error(body.message || body.error || "Consultation failed.");
-          renderOutcome(body.outcome);
+          renderOutcome(body.outcome, body.presentation);
           return;
         }
       };
