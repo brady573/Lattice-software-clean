@@ -164,7 +164,7 @@ test("passive causal forms require the requested phenomenon on the explained sub
   const queries = deriver.derive({ objective, context: [] });
   const reversePassive = source(
     "reverse-passive",
-    "Road impacts",
+    "Flooding causes and road impacts",
     "Road closures are caused by flooding.",
   );
   const supportedPassive = source(
@@ -174,7 +174,7 @@ test("passive causal forms require the requested phenomenon on the explained sub
   );
   const ambiguousSibling = source(
     "affected-passive",
-    "Traffic impacts",
+    "Flooding causes and traffic impacts",
     "Traffic is affected by flooding.",
   );
   const supportedResultFrom = source(
