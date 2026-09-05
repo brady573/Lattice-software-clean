@@ -157,6 +157,98 @@ test("require/react cues cannot bypass cause-seeking direction qualification", (
   assert.match(disposition.rationale, /required direction/iu);
 });
 
+test("passive causal forms require the requested phenomenon on the explained subject side", () => {
+  const objective = "Why does flooding happen?";
+  const deriver = new DeterministicKnowledgeInvestigationQueryDeriver();
+  const qualifier = new ObjectiveKnowledgeRelevanceQualifier();
+  const queries = deriver.derive({ objective, context: [] });
+  const reversePassive = source(
+    "reverse-passive",
+    "Road impacts",
+    "Road closures are caused by flooding.",
+  );
+  const supportedPassive = source(
+    "supported-passive",
+    "Flood causes",
+    "Flooding is caused by prolonged heavy rainfall.",
+  );
+  const ambiguousSibling = source(
+    "affected-passive",
+    "Traffic impacts",
+    "Traffic is affected by flooding.",
+  );
+  const supportedResultFrom = source(
+    "result-from",
+    "Flood causes",
+    "Flooding results from prolonged heavy rainfall.",
+  );
+
+  const reverseDisposition = qualifier.disposition({
+    objective,
+    context: [],
+    queries,
+    source: reversePassive,
+    claim: claim(reversePassive.sourceId, "reverse-passive-claim", reversePassive.content),
+  });
+  const supportedDisposition = qualifier.disposition({
+    objective,
+    context: [],
+    queries,
+    source: supportedPassive,
+    claim: claim(supportedPassive.sourceId, "supported-passive-claim", supportedPassive.content),
+  });
+  const siblingDisposition = qualifier.disposition({
+    objective,
+    context: [],
+    queries,
+    source: ambiguousSibling,
+    claim: claim(ambiguousSibling.sourceId, "affected-passive-claim", ambiguousSibling.content),
+  });
+  const resultFromDisposition = qualifier.disposition({
+    objective,
+    context: [],
+    queries,
+    source: supportedResultFrom,
+    claim: claim(supportedResultFrom.sourceId, "result-from-claim", supportedResultFrom.content),
+  });
+
+  assert.equal(reverseDisposition.relevant, false);
+  assert.match(reverseDisposition.rationale, /required direction/iu);
+  assert.equal(supportedDisposition.relevant, true);
+  assert.match(supportedDisposition.rationale, /requested explanatory relationship/iu);
+  assert.equal(siblingDisposition.relevant, false);
+  assert.match(siblingDisposition.rationale, /required direction/iu);
+  assert.equal(resultFromDisposition.relevant, true);
+});
+
+test("passive reverse causality is filtered before V36 while supported direction survives", async () => {
+  const objective = "Why does flooding happen?";
+  const reversePassive = source(
+    "reverse-passive",
+    "Road impacts",
+    "Road closures are caused by flooding.",
+  );
+  const supportedPassive = source(
+    "supported-passive",
+    "Flood causes",
+    "Flooding is caused by prolonged heavy rainfall.",
+  );
+  const provider = new RecordingProvider({
+    sources: [reversePassive, supportedPassive],
+    claims: [
+      claim(reversePassive.sourceId, "reverse-passive-claim", reversePassive.content),
+      claim(supportedPassive.sourceId, "supported-passive-claim", supportedPassive.content),
+    ],
+  });
+  const wrapped = new RelevantKnowledgeAcquisitionProvider(provider);
+
+  const result = await wrapped.acquire({ runId: "run-passive-direction", objective, context: [] });
+
+  assert.equal(provider.requests.length, 1);
+  assert.deepEqual(result.sources.map((item) => item.sourceId), ["supported-passive"]);
+  assert.deepEqual(result.claims.map((item) => item.claimId), ["supported-passive-claim"]);
+});
+
 test("directional answer relevance filters reverse and unsupported causality before V36", async () => {
   const objective = "Why do leaves change color in autumn?";
   const reverse = source(

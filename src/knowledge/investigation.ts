@@ -27,6 +27,7 @@ const CAUSE_SEEKING_OBJECTIVE_PATTERN = /\b(?:why|cause|causes|caused|causing|me
 const LOCAL_CAUSAL_RELATION_PATTERN = /\b(?:because|cause|causes|caused|causing|due|affect|affects|affected|affecting|lead|leads|led|leading|result|results|resulted|resulting|require|requires|required|requiring|react|reacts|reacted|reacting|trigger|triggers|triggered|triggering|produce|produces|produced|producing|create|creates|created|creating|make|makes|made|making|drive|drives|drove|driven|driving)\b/iu;
 const EXPLANATION_FOLLOWS_PATTERN = /\b(?:because|due\s+to)\b/iu;
 const SUBJECT_ANCHORED_MECHANISM_PATTERN = /\b(?:require|requires|required|requiring|react|reacts|reacted|reacting)\b/iu;
+const EXPLAINED_SUBJECT_PATTERN = /\b(?:(?:is|are|was|were|be|been|being)\s+(?:caused|affected)\s+by|(?:result|results|resulted|resulting)\s+from)\b/iu;
 const EFFECT_FOLLOWS_PATTERN = /\b(?:cause|causes|caused|causing|affect|affects|affected|affecting|lead|leads|led|leading|result|results|resulted|resulting|trigger|triggers|triggered|triggering|produce|produces|produced|producing|create|creates|created|creating|make|makes|made|making|drive|drives|drove|driven|driving)\b/iu;
 
 function normalizedTokens(value: string): string[] {
@@ -174,6 +175,13 @@ function locallyAnswersCauseSeekingObjective(
     const subjectAnchoredMechanism = SUBJECT_ANCHORED_MECHANISM_PATTERN.exec(segment);
     if (subjectAnchoredMechanism?.index !== undefined) {
       const subjectSide = segment.slice(0, subjectAnchoredMechanism.index);
+      const subjectTokens = unique(normalizedTokens(subjectSide));
+      return matchingTerms(specificObjectiveTerms, subjectTokens).length >= minimumSpecificMatches;
+    }
+
+    const explainedSubject = EXPLAINED_SUBJECT_PATTERN.exec(segment);
+    if (explainedSubject?.index !== undefined) {
+      const subjectSide = segment.slice(0, explainedSubject.index);
       const subjectTokens = unique(normalizedTokens(subjectSide));
       return matchingTerms(specificObjectiveTerms, subjectTokens).length >= minimumSpecificMatches;
     }
