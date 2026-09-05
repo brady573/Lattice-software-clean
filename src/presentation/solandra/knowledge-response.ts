@@ -3,10 +3,13 @@ import type { KnowledgeFinding, KnowledgeOutcome } from "../../outcome.js";
 const EMPTY_KNOWLEDGE_MESSAGE = "No validated external findings are sufficiently relevant to this objective.";
 
 function renderSourceReportFinding(finding: KnowledgeFinding): string {
-  const status = finding.status === "CONFLICTED"
-    ? "Materially conflicted"
-    : finding.status[0] + finding.status.slice(1).toLowerCase();
-  return `${status} as a source report: ${finding.text} This status concerns what the retrieved source material reports; it does not independently verify the broader real-world claim.`;
+  const statusLabel: Record<KnowledgeFinding["status"], string> = {
+    SUPPORTED: "Supported",
+    REFUTED: "Refuted",
+    CONFLICTED: "Materially conflicted",
+    UNRESOLVED: "Unresolved",
+  };
+  return `${statusLabel[finding.status]} as a source report: ${finding.text} This status concerns what the retrieved source material reports; it does not independently verify the broader real-world claim.`;
 }
 
 function renderFinding(finding: KnowledgeFinding): string {
