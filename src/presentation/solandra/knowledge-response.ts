@@ -1,6 +1,8 @@
 import type { KnowledgeFinding, KnowledgeOutcome } from "../../outcome.js";
 
 const EMPTY_KNOWLEDGE_MESSAGE = "No validated external findings are sufficiently relevant to this objective.";
+const EMPTY_CAUSAL_KNOWLEDGE_MESSAGE = "I couldn't establish why this happens from the available evidence.";
+const CAUSAL_OBJECTIVE_PATTERN = /\b(?:why|cause|causes|caused|causing|mechanism|effect|effects)\b/iu;
 
 function renderSourceReportFinding(finding: KnowledgeFinding): string {
   const statusLabel: Record<KnowledgeFinding["status"], string> = {
@@ -34,6 +36,7 @@ function renderFinding(finding: KnowledgeFinding): string {
  */
 export function renderKnowledgeResponse(knowledge: KnowledgeOutcome): string {
   if (knowledge.findings.length === 0) {
+    if (CAUSAL_OBJECTIVE_PATTERN.test(knowledge.objective)) return EMPTY_CAUSAL_KNOWLEDGE_MESSAGE;
     return knowledge.uncertainties.find((item) => item.includes("No validated external findings"))
       ?? EMPTY_KNOWLEDGE_MESSAGE;
   }
