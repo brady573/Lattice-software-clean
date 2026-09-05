@@ -110,3 +110,36 @@ test("multi-term objectives still admit subject-specific material without requir
     claim: claim(relevant.sourceId, relevant.content),
   }).relevant, true);
 });
+
+test("derived concepts cannot rescue a one-term collision for a multi-specific objective", () => {
+  const deriver = new DeterministicKnowledgeInvestigationQueryDeriver();
+  const qualifier = new ObjectiveKnowledgeRelevanceQualifier();
+  const objective = "Why does cast iron rust?";
+  const queries = deriver.derive({ objective, context: [] });
+
+  const lexicalCollision = source(
+    "castanea",
+    "Castanea crenata",
+    "Castanea crenata is a chestnut species. Its resistance mechanism may involve a gene that causes a defensive response.",
+  );
+  assert.equal(qualifier.disposition({
+    objective,
+    context: [],
+    queries,
+    source: lexicalCollision,
+    claim: claim(lexicalCollision.sourceId, lexicalCollision.content),
+  }).relevant, false);
+
+  const relevantRust = source(
+    "rust",
+    "Rust",
+    "Rust forms when iron reacts with oxygen in the presence of water or air moisture.",
+  );
+  assert.equal(qualifier.disposition({
+    objective,
+    context: [],
+    queries,
+    source: relevantRust,
+    claim: claim(relevantRust.sourceId, relevantRust.content),
+  }).relevant, true);
+});
