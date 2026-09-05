@@ -362,7 +362,7 @@ async function main() {
         if(path.includes('/outcome'))return new Response(JSON.stringify({outcome:{
           kind:'KNOWLEDGE',acceptedUnderstanding:path.includes('run-corrected')?'Explain the evidence instead.':'Compare the available approaches.',
           findings:[],uncertainties:['Fixture limitation.'],provenance:[]
-        }}),{status:200,headers:{'content-type':'application/json'}});
+        },presentation:{assistantMessage:'Fixture limitation.'}}),{status:200,headers:{'content-type':'application/json'}});
         throw new Error('unexpected fixture request '+path);
       };
       return true;
@@ -506,7 +506,8 @@ async function main() {
       if(input.disabled)return null;
       const text=composer.innerText;
       const conversationText=document.getElementById('conversation').innerText;
-      return text.includes('No validated external findings')&&conversationText.includes('I couldn’t establish supported knowledge') ? {
+      const sparseMessage='No validated external findings are sufficiently relevant to this objective.';
+      return text.includes(sparseMessage)&&conversationText.includes(sparseMessage) ? {
         text,
         conversationText,
         conversationTurns:document.querySelectorAll('#conversation .turn.user').length,
@@ -518,6 +519,7 @@ async function main() {
     assert.equal(renderedKnowledge.text.includes(knowledgeMessage), false);
     assert.doesNotMatch(renderedKnowledge.text, /Accepted understanding|What you said|Interpreting|Confidence:|Provenance/i);
     assert.doesNotMatch(renderedKnowledge.text, /winner|Atlas Pro|Nova Air|Forge 15/i);
+    assert.doesNotMatch(renderedKnowledge.conversationText, /I found \d+ supported source report|I couldn’t establish supported knowledge/u);
     evidence.browser.knowledge = renderedKnowledge;
     await screenshot(cdp, "knowledge-desktop.png");
 
