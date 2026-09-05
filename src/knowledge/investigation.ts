@@ -23,6 +23,9 @@ const GENERIC_RELATION_TERMS = new Set([
   "sense", "sensing", "south", "west",
 ]);
 
+const CAUSAL_OBJECTIVE_PATTERN = /\b(?:why|cause|causes|caused|causing|mechanism|effect|effects)\b/iu;
+const LOCAL_CAUSAL_RELATION_PATTERN = /\b(?:because|cause|causes|caused|causing|due|affect|affects|affected|affecting|lead|leads|led|leading|result|results|resulted|resulting|require|requires|required|requiring|react|reacts|reacted|reacting|trigger|triggers|triggered|triggering|produce|produces|produced|producing|create|creates|created|creating|make|makes|made|making|drive|drives|drove|driven|driving)\b/iu;
+
 function normalizedTokens(value: string): string[] {
   return value
     .normalize("NFKC")
@@ -134,6 +137,32 @@ function matchingTerms(terms: readonly string[], candidateTokens: readonly strin
   return unique(terms.filter((term) => candidateTokens.some((candidate) => tokenMatches(term, candidate))));
 }
 
+function relevanceSegments(input: KnowledgeRelevanceQualificationInput): string[] {
+  const values = [
+    input.source.title,
+    input.claim.text,
+    input.source.content.slice(0, MAX_RELEVANCE_TEXT_CHARS),
+  ];
+  return unique(values.flatMap((value) =>
+    value.match(/[^.!?\n]+(?:[.!?]+|$)/gu)?.map((segment) => segment.trim()).filter(Boolean) ?? []
+  ));
+}
+
+function locallyAnswersCausalObjective(
+  input: KnowledgeRelevanceQualificationInput,
+  specificObjectiveTerms: readonly string[],
+): boolean {
+  if (!CAUSAL_OBJECTIVE_PATTERN.test(input.objective)) return true;
+  const minimumSpecificMatches = Math.min(2, specificObjectiveTerms.length);
+  if (minimumSpecificMatches === 0) return false;
+
+  return relevanceSegments(input).some((segment) => {
+    if (!LOCAL_CAUSAL_RELATION_PATTERN.test(segment)) return false;
+    const segmentTokens = unique(normalizedTokens(segment));
+    return matchingTerms(specificObjectiveTerms, segmentTokens).length >= minimumSpecificMatches;
+  });
+}
+
 /**
  * Conservative lexical/concept gate. Passing this gate means only that a source materially
  * overlaps the current investigation objective; V36 still owns evidence admission and truth.
@@ -160,17 +189,23 @@ export class ObjectiveKnowledgeRelevanceQualifier implements KnowledgeRelevanceQ
     const anchorMatches = matchingTerms(anchorTerms, candidateTokens);
     const singleSpecificObjective = specificObjectiveTerms.length <= 1;
 
-    const relevant = objectiveTerms.length <= 1
+    const existingRelevance = objectiveTerms.length <= 1
       ? objectiveMatches.length >= 1
       : singleSpecificObjective
         ? anchorMatches.length >= 1 && queryMatches.length >= 1
         : specificObjectiveMatches.length >= 2;
+    const causalAnswerRelevant = existingRelevance
+      && locallyAnswersCausalObjective(input, specificObjectiveTerms);
 
     return {
-      relevant,
-      rationale: relevant
-        ? "Retrieved material overlaps the objective-specific or derived investigation concepts."
-        : "Retrieved material lacks enough objective-specific overlap to enter visible Knowledge.",
+      relevant: causalAnswerRelevant,
+      rationale: !existingRelevance
+        ? "Retrieved material lacks enough objective-specific overlap to enter visible Knowledge."
+        : causalAnswerRelevant
+          ? CAUSAL_OBJECTIVE_PATTERN.test(input.objective)
+            ? "Retrieved material locally links causal/mechanistic relation evidence with enough objective-specific terms."
+            : "Retrieved material overlaps the objective-specific or derived investigation concepts."
+          : "Topic/concept overlap is insufficient because the requested causal relation is not locally addressed by enough objective-specific terms.",
       matchedTerms: unique([...objectiveMatches, ...queryMatches]),
     };
   }
