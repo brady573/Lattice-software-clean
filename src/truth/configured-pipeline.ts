@@ -1,4 +1,5 @@
 import type { KnowledgeAcquisitionProvider } from "../knowledge/acquisition.js";
+import { RelevantKnowledgeAcquisitionProvider } from "../knowledge/investigation.js";
 import { WikimediaKnowledgeAcquisitionProvider } from "../knowledge/wikimedia-acquisition.js";
 import type { TruthMode } from "../runtime-config.js";
 import {
@@ -13,7 +14,8 @@ export function createConfiguredTruthPipeline(
   provider?: KnowledgeAcquisitionProvider,
 ): TruthExecutionPipeline {
   if (mode === "v36-offline") return createDefaultOfflineTruthPipeline();
+  const acquisitionProvider = provider ?? new WikimediaKnowledgeAcquisitionProvider();
   return new KnowledgeAcquisitionTruthPipeline(
-    provider ?? new WikimediaKnowledgeAcquisitionProvider(),
+    new RelevantKnowledgeAcquisitionProvider(acquisitionProvider),
   );
 }

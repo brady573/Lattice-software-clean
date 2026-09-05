@@ -11,6 +11,8 @@ const DEFAULT_RESULT_LIMIT = 4;
 const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
 const MAX_SOURCE_CONTENT_CHARS = 24_000;
 const MAX_CLAIM_CHARS = 1_200;
+const MAX_TOTAL_RESULTS = 12;
+const MAX_INVESTIGATION_QUERIES = 2;
 
 export interface WikimediaKnowledgeAcquisitionOptions {
   readonly endpoint?: string;
@@ -81,6 +83,14 @@ function queryMaterial(request: KnowledgeAcquisitionRequest): string {
     .slice(0, 8_000);
 }
 
+function investigationQueries(request: KnowledgeAcquisitionRequest): string[] {
+  const derived = (request.investigationQueries ?? [])
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .slice(0, MAX_INVESTIGATION_QUERIES);
+  return derived.length > 0 ? [...new Set(derived)] : [queryMaterial(request)];
+}
+
 function sourceClaimText(content: string): string {
   const firstParagraph = content.split(/\n\s*\n/u).find((part) => part.trim().length > 0)?.trim() ?? "";
   if (firstParagraph.length <= MAX_CLAIM_CHARS) return firstParagraph;
@@ -125,7 +135,7 @@ async function readBoundedJson(response: Response): Promise<unknown> {
  * Zero-cost development adapter for Wikimedia's public search API. It returns
  * source text and exact source-bound claim proposals only. It does not summarize,
  * simplify, detect semantic contradictions, assess reliability, assign confidence,
- * or admit anything as knowledge.
+ * determine relevance, or admit anything as knowledge.
  */
 export class WikimediaKnowledgeAcquisitionProvider implements KnowledgeAcquisitionProvider {
   readonly kind = "wikimedia-search";
@@ -145,95 +155,108 @@ export class WikimediaKnowledgeAcquisitionProvider implements KnowledgeAcquisiti
     if (!request.runId.trim() || !request.objective.trim()) {
       throw new Error("Knowledge acquisition requires an exact Run and objective.");
     }
-    const url = new URL(this.endpoint.href);
     const emphasis = workEmphasis(request.context);
     const resultLimit = emphasis === "SOURCES" || emphasis === "UNCERTAINTY"
       ? Math.min(8, this.resultLimit + 2)
       : emphasis === "EXPLANATION"
         ? Math.min(8, this.resultLimit + 1)
         : this.resultLimit;
-    for (const [key, value] of Object.entries({
-      action: "query",
-      generator: "search",
-      gsrsearch: queryMaterial(request),
-      gsrlimit: String(resultLimit),
-      gsrnamespace: "0",
-      prop: "extracts|info",
-      exintro: "1",
-      explaintext: "1",
-      inprop: "url",
-      format: "json",
-      formatversion: "2",
-      origin: "*",
-    })) {
-      url.searchParams.set(key, value);
-    }
-
-    let response: Response;
-    try {
-      response = await this.fetchImpl(url, {
-        method: "GET",
-        redirect: "error",
-        headers: {
-          accept: "application/json",
-          "user-agent": "Lattice-Knowledge-Consultation/0.1 (source retrieval; no truth authority)",
-        },
-      });
-    } catch (error) {
-      throw new Error(`Knowledge source was unavailable: ${error instanceof Error ? error.message : "request failed"}.`);
-    }
-
-    const root = record(await readBoundedJson(response));
-    const query = record(root?.query);
-    const pages = Array.isArray(query?.pages) ? query.pages : [];
+    const queries = investigationQueries(request);
     const retrievedAt = this.clock().toISOString();
     const sources: RetrievedKnowledgeSource[] = [];
     const claims: RetrievedKnowledgeClaim[] = [];
+    const seenPageIds = new Set<string>();
 
-    for (const rawPage of [...pages].sort((left, right) => {
-      const a = record(left)?.index;
-      const b = record(right)?.index;
-      return (typeof a === "number" ? a : Number.MAX_SAFE_INTEGER)
-        - (typeof b === "number" ? b : Number.MAX_SAFE_INTEGER);
-    })) {
-      const page = record(rawPage) as WikimediaPage | null;
-      if (!page) continue;
-      const pageId = typeof page?.pageid === "number" ? String(page.pageid) : null;
-      const title = typeof page?.title === "string" ? page.title.trim() : "";
-      const fullurl = typeof page?.fullurl === "string" ? page.fullurl : "";
-      const extract = typeof page.extract === "string"
-        ? page.extract.trim().slice(0, MAX_SOURCE_CONTENT_CHARS)
-        : "";
-      if (!pageId || !title || !extract) continue;
-      let canonicalUri: string;
-      try {
-        const canonical = new URL(fullurl);
-        if (canonical.protocol !== "https:") continue;
-        canonicalUri = canonical.href;
-      } catch {
-        continue;
+    for (const [queryIndex, searchQuery] of queries.entries()) {
+      const url = new URL(this.endpoint.href);
+      for (const [key, value] of Object.entries({
+        action: "query",
+        generator: "search",
+        gsrsearch: searchQuery,
+        gsrlimit: String(resultLimit),
+        gsrnamespace: "0",
+        prop: "extracts|info",
+        exintro: "1",
+        explaintext: "1",
+        inprop: "url",
+        format: "json",
+        formatversion: "2",
+        origin: "*",
+      })) {
+        url.searchParams.set(key, value);
       }
-      const sourceId = `page:${pageId}`;
-      const source: RetrievedKnowledgeSource = {
-        sourceId,
-        canonicalUri,
-        title,
-        publisher: "Wikipedia contributors",
-        retrievedAt,
-        publishedAt: typeof page.touched === "string" ? page.touched : null,
-        contentType: "text/plain; charset=utf-8",
-        content: extract,
-        metadata: { pageId: Number(pageId), sourceAdapter: this.kind },
-      };
-      const text = sourceClaimText(extract);
-      if (!text) continue;
-      sources.push(source);
-      claims.push({
-        claimId: `source-report:${pageId}`,
-        text,
-        claimType: "INTERPRETIVE",
-        evidence: [{ sourceId, relation: "SUPPORTS", excerpt: text }],
-      });
+
+      let response: Response;
+      try {
+        response = await this.fetchImpl(url, {
+          method: "GET",
+          redirect: "error",
+          headers: {
+            accept: "application/json",
+            "user-agent": "Lattice-Knowledge-Consultation/0.1 (source retrieval; no truth authority)",
+          },
+        });
+      } catch (error) {
+        throw new Error(`Knowledge source was unavailable: ${error instanceof Error ? error.message : "request failed"}.`);
+      }
+
+      const root = record(await readBoundedJson(response));
+      const query = record(root?.query);
+      const pages = Array.isArray(query?.pages) ? query.pages : [];
+
+      for (const rawPage of [...pages].sort((left, right) => {
+        const a = record(left)?.index;
+        const b = record(right)?.index;
+        return (typeof a === "number" ? a : Number.MAX_SAFE_INTEGER)
+          - (typeof b === "number" ? b : Number.MAX_SAFE_INTEGER);
+      })) {
+        if (sources.length >= MAX_TOTAL_RESULTS) break;
+        const page = record(rawPage) as WikimediaPage | null;
+        if (!page) continue;
+        const pageId = typeof page?.pageid === "number" ? String(page.pageid) : null;
+        const title = typeof page?.title === "string" ? page.title.trim() : "";
+        const fullurl = typeof page?.fullurl === "string" ? page.fullurl : "";
+        const extract = typeof page.extract === "string"
+          ? page.extract.trim().slice(0, MAX_SOURCE_CONTENT_CHARS)
+          : "";
+        if (!pageId || seenPageIds.has(pageId) || !title || !extract) continue;
+        let canonicalUri: string;
+        try {
+          const canonical = new URL(fullurl);
+          if (canonical.protocol !== "https:") continue;
+          canonicalUri = canonical.href;
+        } catch {
+          continue;
+        }
+        const sourceId = `page:${pageId}`;
+        const source: RetrievedKnowledgeSource = {
+          sourceId,
+          canonicalUri,
+          title,
+          publisher: "Wikipedia contributors",
+          retrievedAt,
+          publishedAt: typeof page.touched === "string" ? page.touched : null,
+          contentType: "text/plain; charset=utf-8",
+          content: extract,
+          metadata: {
+            pageId: Number(pageId),
+            sourceAdapter: this.kind,
+            investigationQuery: searchQuery,
+            investigationQueryIndex: queryIndex,
+          },
+        };
+        const text = sourceClaimText(extract);
+        if (!text) continue;
+        seenPageIds.add(pageId);
+        sources.push(source);
+        claims.push({
+          claimId: `source-report:${pageId}`,
+          text,
+          claimType: "INTERPRETIVE",
+          evidence: [{ sourceId, relation: "SUPPORTS", excerpt: text }],
+        });
+      }
+      if (sources.length >= MAX_TOTAL_RESULTS) break;
     }
 
     return { sources, claims };

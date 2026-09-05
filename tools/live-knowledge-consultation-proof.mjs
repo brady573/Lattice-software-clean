@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { WikimediaKnowledgeAcquisitionProvider } from "../dist/src/knowledge/wikimedia-acquisition.js";
 import { createRuntimeApp } from "../dist/src/runtime-app.js";
 import { resolveRuntimeConfig } from "../dist/src/runtime-config.js";
 
@@ -74,25 +75,62 @@ function publicOutcome(outcome) {
   };
 }
 
-const app = await createRuntimeApp(config, { memoryDispatchDelayMs: 1 });
+function assertRelevantOrSparse(outcome) {
+  if (outcome.findings.length === 0) {
+    assert.deepEqual(outcome.provenance, []);
+    assert.deepEqual(outcome.evidence, []);
+    assert.ok(outcome.uncertainties.some((item) => item.includes("sufficiently relevant")));
+    return "SPARSE_NO_RELEVANT_MATERIAL";
+  }
+
+  assert.ok(outcome.findings.some((finding) => finding.status === "UNRESOLVED"));
+  assert.ok(outcome.findings.every((finding) => finding.confidence === "LOW"));
+  assert.ok(outcome.provenance.length > 0);
+  assert.ok(outcome.evidence.some((item) => item.admitted));
+  assert.ok(outcome.uncertainties.some((item) => item.includes("source") || item.includes("V36")));
+  return "VISIBLE_SOURCE_REPORTS";
+}
+
+const rawProvider = new WikimediaKnowledgeAcquisitionProvider();
+const acquisitions = [];
+const recordingProvider = {
+  kind: `live-proof:${rawProvider.kind}`,
+  async acquire(requestInput) {
+    const result = await rawProvider.acquire(requestInput);
+    acquisitions.push({
+      objective: requestInput.objective,
+      context: [...requestInput.context],
+      investigationQueries: [...(requestInput.investigationQueries || [])],
+      retrieved: result.sources.map((source) => ({
+        sourceId: source.sourceId,
+        title: source.title,
+        canonicalUri: source.canonicalUri,
+      })),
+    });
+    return result;
+  },
+};
+
+const app = await createRuntimeApp(config, {
+  memoryDispatchDelayMs: 1,
+  knowledgeAcquisitionProvider: recordingProvider,
+});
 try {
   const created = await request(app, { method: "POST", url: "/api/v1/conversations" });
   const conversationId = created.conversation.id;
   const initial = await turn(app, conversationId, question);
 
   assert.equal(initial.accepted.acceptedUnderstanding, question);
-  assert.ok(initial.outcome.findings.some((finding) => finding.status === "UNRESOLVED"));
-  assert.ok(initial.outcome.findings.every((finding) => finding.confidence === "LOW"));
-  assert.ok(initial.outcome.provenance.length > 0);
-  assert.ok(initial.outcome.evidence.some((item) => item.admitted));
-  assert.ok(initial.outcome.uncertainties.some((item) => item.includes("source")));
+  assert.ok(acquisitions[0]?.investigationQueries.length > 0);
+  const initialMode = assertRelevantOrSparse(initial.outcome);
 
   const follow = await turn(app, conversationId, followUp);
   assert.equal(follow.accepted.intentVersionId, initial.accepted.intentVersionId);
   assert.equal(follow.accepted.acceptedUnderstanding, question);
+  const followMode = assertRelevantOrSparse(follow.outcome);
   assert.ok(
-    follow.outcome.provenance.length > initial.outcome.provenance.length,
-    "The source follow-up must broaden the actual retrieval rather than repeat the original answer.",
+    (acquisitions[1]?.retrieved.length ?? 0) >= (acquisitions[0]?.retrieved.length ?? 0),
+    "The source follow-up must not narrow the underlying acquisition surface.",
   );
 
   const presentation = await request(app, {
@@ -100,7 +138,20 @@ try {
     url: `/api/v1/conversations/${conversationId}/presentation`,
   });
   assert.equal(presentation.presentation.durableUnderstanding.goal, question);
-  assert.ok(presentation.presentation.supportingKnowledge.length > 0);
+  if (followMode === "SPARSE_NO_RELEVANT_MATERIAL") {
+    assert.equal(presentation.presentation.supportingKnowledge.length, 0);
+  } else {
+    assert.ok(presentation.presentation.supportingKnowledge.length > 0);
+  }
+
+  const initialVisibleUris = new Set(initial.outcome.provenance.map((source) => source.canonicalUri));
+  const initialRejected = (acquisitions[0]?.retrieved ?? []).filter(
+    (source) => !initialVisibleUris.has(source.canonicalUri),
+  );
+  const followVisibleUris = new Set(follow.outcome.provenance.map((source) => source.canonicalUri));
+  const followRejected = (acquisitions[1]?.retrieved ?? []).filter(
+    (source) => !followVisibleUris.has(source.canonicalUri),
+  );
 
   process.stdout.write(`${JSON.stringify({
     truthMode: config.truthMode,
@@ -109,12 +160,29 @@ try {
     intentVersionId: initial.accepted.intentVersionId,
     objectivePreserved: true,
     decisionPlanAbsent: true,
+    initialMode,
+    followMode,
+    initialInvestigation: {
+      queries: acquisitions[0]?.investigationQueries ?? [],
+      retrieved: acquisitions[0]?.retrieved ?? [],
+      rejectedAsIrrelevant: initialRejected,
+    },
     initial: publicOutcome(initial.outcome),
+    followUpInvestigation: {
+      queries: acquisitions[1]?.investigationQueries ?? [],
+      retrieved: acquisitions[1]?.retrieved ?? [],
+      rejectedAsIrrelevant: followRejected,
+    },
     followUpResult: publicOutcome(follow.outcome),
     solandra: {
       acceptedUnderstanding: presentation.presentation.durableUnderstanding.goal,
       supportingKnowledgeCount: presentation.presentation.supportingKnowledge.length,
       composerSourceCount: follow.outcome.provenance.length,
+      composerOutput: {
+        findings: follow.outcome.findings.map((finding) => ({ status: finding.status, text: finding.text })),
+        uncertainties: follow.outcome.uncertainties,
+        sources: follow.outcome.provenance.map((source) => ({ title: source.title, canonicalUri: source.canonicalUri })),
+      },
     },
   }, null, 2)}\n`);
 } finally {
