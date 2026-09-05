@@ -113,7 +113,7 @@ test("unknown causal direction fails closed outside the leaf fixture domain", ()
   const responsive = source(
     "condensation-cause",
     "Condensation formation",
-    "Condensation forms because water vapor cools and changes phase.",
+    "Condensation can form because water vapor cools and changes phase.",
   );
 
   const unsupportedDisposition = qualifier.disposition({
