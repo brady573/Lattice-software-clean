@@ -19,8 +19,9 @@ const STOP_WORDS = new Set([
 
 const GENERIC_RELATION_TERMS = new Set([
   "cause", "causes", "caused", "causing", "direction", "directions", "east", "effect", "effects", "find",
-  "location", "make", "makes", "made", "mechanism", "navigate", "navigation", "north", "orient", "orientation",
-  "sense", "sensing", "south", "west",
+  "happen", "happens", "happened", "happening", "location", "make", "makes", "made", "mechanism", "navigate",
+  "navigation", "north", "occur", "occurs", "occurred", "occurring", "orient", "orientation", "sense", "sensing",
+  "south", "west",
 ]);
 
 const CAUSE_SEEKING_OBJECTIVE_PATTERN = /\b(?:why|cause|causes|caused|causing|mechanism)\b/iu;
