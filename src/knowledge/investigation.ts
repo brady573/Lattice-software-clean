@@ -23,8 +23,9 @@ const GENERIC_RELATION_TERMS = new Set([
   "sense", "sensing", "south", "west",
 ]);
 
-const CAUSAL_OBJECTIVE_PATTERN = /\b(?:why|cause|causes|caused|causing|mechanism|effect|effects)\b/iu;
+const CAUSE_SEEKING_OBJECTIVE_PATTERN = /\b(?:why|cause|causes|caused|causing|mechanism)\b/iu;
 const LOCAL_CAUSAL_RELATION_PATTERN = /\b(?:because|cause|causes|caused|causing|due|affect|affects|affected|affecting|lead|leads|led|leading|result|results|resulted|resulting|require|requires|required|requiring|react|reacts|reacted|reacting|trigger|triggers|triggered|triggering|produce|produces|produced|producing|create|creates|created|creating|make|makes|made|making|drive|drives|drove|driven|driving)\b/iu;
+const EXPLANATION_FOLLOWS_PATTERN = /\b(?:because|due\s+to)\b/iu;
 
 function normalizedTokens(value: string): string[] {
   return value
@@ -148,18 +149,25 @@ function relevanceSegments(input: KnowledgeRelevanceQualificationInput): string[
   ));
 }
 
-function locallyAnswersCausalObjective(
+function locallyAnswersCauseSeekingObjective(
   input: KnowledgeRelevanceQualificationInput,
   specificObjectiveTerms: readonly string[],
 ): boolean {
-  if (!CAUSAL_OBJECTIVE_PATTERN.test(input.objective)) return true;
+  if (!CAUSE_SEEKING_OBJECTIVE_PATTERN.test(input.objective)) return true;
   const minimumSpecificMatches = Math.min(2, specificObjectiveTerms.length);
   if (minimumSpecificMatches === 0) return false;
 
   return relevanceSegments(input).some((segment) => {
     if (!LOCAL_CAUSAL_RELATION_PATTERN.test(segment)) return false;
     const segmentTokens = unique(normalizedTokens(segment));
-    return matchingTerms(specificObjectiveTerms, segmentTokens).length >= minimumSpecificMatches;
+    if (matchingTerms(specificObjectiveTerms, segmentTokens).length < minimumSpecificMatches) return false;
+
+    const explanationFollows = EXPLANATION_FOLLOWS_PATTERN.exec(segment);
+    if (!explanationFollows || explanationFollows.index === undefined) return true;
+
+    const explainedSide = segment.slice(0, explanationFollows.index);
+    const explainedTokens = unique(normalizedTokens(explainedSide));
+    return matchingTerms(specificObjectiveTerms, explainedTokens).length >= minimumSpecificMatches;
   });
 }
 
@@ -194,18 +202,18 @@ export class ObjectiveKnowledgeRelevanceQualifier implements KnowledgeRelevanceQ
       : singleSpecificObjective
         ? anchorMatches.length >= 1 && queryMatches.length >= 1
         : specificObjectiveMatches.length >= 2;
-    const causalAnswerRelevant = existingRelevance
-      && locallyAnswersCausalObjective(input, specificObjectiveTerms);
+    const answerRelevant = existingRelevance
+      && locallyAnswersCauseSeekingObjective(input, specificObjectiveTerms);
 
     return {
-      relevant: causalAnswerRelevant,
+      relevant: answerRelevant,
       rationale: !existingRelevance
         ? "Retrieved material lacks enough objective-specific overlap to enter visible Knowledge."
-        : causalAnswerRelevant
-          ? CAUSAL_OBJECTIVE_PATTERN.test(input.objective)
-            ? "Retrieved material locally links causal/mechanistic relation evidence with enough objective-specific terms."
+        : answerRelevant
+          ? CAUSE_SEEKING_OBJECTIVE_PATTERN.test(input.objective)
+            ? "Retrieved material locally addresses the requested explanatory relationship with enough objective-specific terms."
             : "Retrieved material overlaps the objective-specific or derived investigation concepts."
-          : "Topic/concept overlap is insufficient because the requested causal relation is not locally addressed by enough objective-specific terms.",
+          : "Topic/concept overlap is insufficient because the requested explanatory relationship is not locally addressed in the required direction.",
       matchedTerms: unique([...objectiveMatches, ...queryMatches]),
     };
   }
