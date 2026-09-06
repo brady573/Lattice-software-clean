@@ -2,11 +2,6 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
 import type { FastifyInstance, FastifyRequest } from "fastify";
-import type {
-  KnowledgeAcquisitionProvider,
-  KnowledgeAcquisitionRequest,
-  KnowledgeAcquisitionResult,
-} from "../src/knowledge/acquisition.js";
 import { registerModelAssistanceApi } from "../src/model-assistance-api.js";
 import { ModelAssistanceCapabilityService } from "../src/model-assistance-capability.js";
 import { MemoryModelAssistanceAuthorizationStore } from "../src/model-assistance-store.js";
@@ -18,6 +13,8 @@ import type {
 } from "../src/presentation/solandra/knowledge-simplification.js";
 import { createRuntimeApp } from "../src/runtime-app.js";
 import { resolveRuntimeConfig } from "../src/runtime-config.js";
+import { requiredProofObligations } from "../src/truth/contracts.js";
+import { OfflineFixtureTruthPipeline } from "../src/truth/execution-pipeline.js";
 
 const ORIGINAL = "C4 photosynthesis spatially separates initial carbon fixation from the Calvin cycle, which may reduce photorespiration under hot, dry conditions.";
 const SIMPLE = "In C4 photosynthesis, plants first capture carbon separately from the Calvin cycle. This may reduce photorespiration when conditions are hot and dry.";
@@ -34,29 +31,36 @@ const PRODUCT_PROVENANCE: ModelInvocationProvenance = Object.freeze({
   routeProvenance: "COMPLETE",
 });
 
-class SourceProvider implements KnowledgeAcquisitionProvider {
-  readonly kind = "a2-solandra-source";
-  async acquire(_request: KnowledgeAcquisitionRequest): Promise<KnowledgeAcquisitionResult> {
-    return {
-      sources: [{
-        sourceId: "c4-source",
-        canonicalUri: "https://knowledge.example/c4",
-        title: "C4 source",
-        publisher: "Knowledge Example",
-        retrievedAt: "2026-09-06T21:30:00.000Z",
-        publishedAt: null,
-        contentType: "text/plain",
-        content: ORIGINAL,
-      }],
-      claims: [{
-        claimId: "c4-report",
-        text: ORIGINAL,
-        claimType: "INTERPRETIVE",
-        evidence: [{ sourceId: "c4-source", relation: "SUPPORTS", excerpt: ORIGINAL }],
-      }],
-    };
-  }
-}
+const governedKnowledgePipeline = new OfflineFixtureTruthPipeline({
+  evidence: [{
+    id: "a2-c4-evidence",
+    value: ORIGINAL,
+    sourceId: "a2-c4-source",
+    sourceLabel: "A2 governed Knowledge fixture",
+    admitted: true,
+  }],
+  truthClaims: [{
+    id: "a2-c4-claim",
+    text: ORIGINAL,
+    claimType: "FACTUAL",
+    evidenceIds: ["a2-c4-evidence"],
+    scope: "consultation",
+    checks: Object.fromEntries(
+      requiredProofObligations("FACTUAL").map((kind) => [kind, "PASSED"]),
+    ),
+    materiallyMisleading: false,
+  }],
+  truthEvidence: [{
+    evidenceId: "a2-c4-evidence",
+    claimId: "a2-c4-claim",
+    provenanceComponentKey: "a2-c4-source",
+    provenanceConfidence: "HIGH",
+    relation: "SUPPORTS",
+    sourceAccepted: true,
+    authoritativePrimary: true,
+    verification: "VERIFIED",
+  }],
+});
 
 class ProductDelegate implements KnowledgeSimplifier {
   calls = 0;
@@ -124,7 +128,7 @@ test("Solandra journey connects, uses, proves route, disconnects, and fails clos
   const service = new ModelAssistanceCapabilityService(new MemoryModelAssistanceAuthorizationStore(), delegate);
   const app = await createRuntimeApp(config, {
     memoryDispatchDelayMs: 1,
-    knowledgeAcquisitionProvider: new SourceProvider(),
+    truthPipeline: governedKnowledgePipeline,
     modelAssistanceService: service,
     authenticatedSubjectResolver: (request: FastifyRequest) => ({
       subjectId: typeof request.headers["x-test-subject"] === "string" ? request.headers["x-test-subject"] : "subject-a",
@@ -139,7 +143,9 @@ test("Solandra journey connects, uses, proves route, disconnects, and fails clos
     assert.equal(created.statusCode, 201, created.body);
     const conversationId = created.json<{ conversation: { id: string } }>().conversation.id;
 
-    await turn(app, conversationId, subjectId, "Explain C4 photosynthesis.");
+    const governed = await turn(app, conversationId, subjectId, "Explain C4 photosynthesis.");
+    assert.equal(governed.body.outcome.findings[0]?.text, ORIGINAL);
+
     const blocked = await turn(app, conversationId, subjectId, "Put that in plain language.");
     assert.match(blocked.body.presentation.assistantMessage, /Model assistance isn't connected/iu);
     assert.equal(delegate.calls, 0);
