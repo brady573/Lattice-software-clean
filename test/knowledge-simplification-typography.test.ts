@@ -1,13 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { LatticeRun } from "../src/domain.js";
-import { DeterministicFixtureModelProvider } from "../src/model/fixture-provider.js";
-import { ModelRuntime } from "../src/model/runtime.js";
 import type { KnowledgeFinding, KnowledgeOutcome } from "../src/outcome.js";
 import {
-  buildKnowledgeSimplificationRequest,
-  ModelKnowledgeSimplifier,
   validateKnowledgeSimplification,
+  type KnowledgeSimplificationInput,
+  type KnowledgeSimplifier,
 } from "../src/presentation/solandra/knowledge-simplification.js";
 import { renderKnowledgeResponseForRun } from "../src/presentation/solandra/knowledge-response.js";
 
@@ -38,6 +36,18 @@ const PRESERVED_CASES = Object.freeze([
       "The efficiency gain is only valid when the device runs continuously at temperatures below 40 °C; performance under intermittent load was not evaluated.",
   }),
 ]);
+
+class PreservedOutputSimplifier implements KnowledgeSimplifier {
+  readonly results: Array<string | null> = [];
+
+  constructor(private readonly preservedRawText: string) {}
+
+  async simplify(input: KnowledgeSimplificationInput): Promise<string | null> {
+    const result = validateKnowledgeSimplification(input.finding.text, this.preservedRawText);
+    this.results.push(result);
+    return result;
+  }
+}
 
 function syntheticFinding(caseId: string, text: string): KnowledgeFinding {
   return {
@@ -98,25 +108,14 @@ async function replayPreservedLiveOutput(
   const finding = syntheticFinding(fixture.id, fixture.canonical);
   const knowledge = syntheticKnowledge(finding);
   const run = syntheticRun(fixture.id);
-  const model = `preserved-live-output-${fixture.id}`;
-  const request = buildKnowledgeSimplificationRequest(model, finding);
-  const provider = new DeterministicFixtureModelProvider([{
-    id: `preserved-live-output-${fixture.id}`,
-    request,
-    response: {
-      id: `preserved-live-response-${fixture.id}`,
-      model,
-      output: [{ type: "text", text: fixture.raw }],
-    },
-  }]);
-  const simplifier = new ModelKnowledgeSimplifier(new ModelRuntime(provider), model);
+  const simplifier = new PreservedOutputSimplifier(fixture.raw);
   const canonicalBefore = structuredClone(knowledge);
 
-  const guardResult = validateKnowledgeSimplification(fixture.canonical, fixture.raw);
   const presentation = await renderKnowledgeResponseForRun(knowledge, run, simplifier);
+  assert.equal(simplifier.results.length, 1);
 
   return {
-    guardResult,
+    guardResult: simplifier.results[0] ?? null,
     presentation,
     canonicalUnchanged: JSON.stringify(knowledge) === JSON.stringify(canonicalBefore),
   };
