@@ -135,7 +135,9 @@ async function readBoundedJson(response: Response): Promise<unknown> {
  * Zero-cost development adapter for Wikimedia's public search API. It returns
  * source text and exact source-bound claim proposals only. It does not summarize,
  * simplify, detect semantic contradictions, assess reliability, assign confidence,
- * determine relevance, or admit anything as knowledge.
+ * determine relevance, or admit anything as knowledge. Its source metadata marks
+ * Wikimedia as GENERAL_REFERENCE so higher-risk Product presentation can require
+ * an appropriate authoritative source without treating this adapter as authority.
  */
 export class WikimediaKnowledgeAcquisitionProvider implements KnowledgeAcquisitionProvider {
   readonly kind = "wikimedia-search";
@@ -243,6 +245,7 @@ export class WikimediaKnowledgeAcquisitionProvider implements KnowledgeAcquisiti
             sourceAdapter: this.kind,
             investigationQuery: searchQuery,
             investigationQueryIndex: queryIndex,
+            evidentiarySuitability: "GENERAL_REFERENCE",
           },
         };
         const text = sourceClaimText(extract);
