@@ -1,0 +1,83 @@
+name: Evidence — NVIDIA KB-03 Investigation Planner
+
+on:
+  push:
+    branches:
+      - evidence/nvidia-kb03-pr11-5608ae5
+
+permissions:
+  contents: read
+
+jobs:
+  discriminator:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - name: Checkout evidence harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          path: harness
+          persist-credentials: false
+
+      - name: Checkout exact PR subject
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: 5608ae5bdf1500d7d1427c7375b326c82c8bdf23
+          path: subject
+          persist-credentials: false
+
+      - name: Provision Node 24
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          check-latest: false
+
+      - name: Verify exact frozen candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual="$(git -C subject rev-parse HEAD)"
+          test "$actual" = "5608ae5bdf1500d7d1427c7375b326c82c8bdf23"
+          tree="$(git -C subject rev-parse HEAD^{tree})"
+          test "$tree" = "d8aa91a501495b4a87e550a6856f74d5d935ec61"
+          echo "FROZEN_SUBJECT_VERIFIED sha=$actual tree=$tree"
+
+      - name: Install locked dependencies
+        working-directory: subject
+        run: npm ci --no-audit --no-fund
+
+      - name: Build exact subject
+        working-directory: subject
+        run: npm run build
+
+      - name: Run single NVIDIA KB-03 discriminator
+        env:
+          NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
+          SUBJECT_ROOT: ${{ github.workspace }}/subject
+          OUTPUT_PATH: ${{ github.workspace }}/evidence/kb03-nvidia-nemotron-discriminator.json
+        run: |
+          test -n "$NVIDIA_API_KEY"
+          node harness/.github/evidence/kb03-nvidia-nemotron-discriminator.mjs
+
+      - name: Hash preserved evidence
+        if: always()
+        shell: bash
+        run: |
+          if test -f evidence/kb03-nvidia-nemotron-discriminator.json; then
+            sha256sum evidence/kb03-nvidia-nemotron-discriminator.json | tee evidence/kb03-nvidia-nemotron-discriminator.sha256
+          else
+            echo "Evidence JSON was not produced." >&2
+            exit 1
+          fi
+
+      - name: Upload preserved evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: kb03-nvidia-nemotron-discriminator
+          path: |
+            evidence/kb03-nvidia-nemotron-discriminator.json
+            evidence/kb03-nvidia-nemotron-discriminator.sha256
+          if-no-files-found: error
+          retention-days: 7
