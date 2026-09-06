@@ -8,6 +8,7 @@ import {
 import type { TruthBundle, TruthConfidence } from "./truth/types.js";
 
 export type KnowledgeFindingStatus = "SUPPORTED" | "REFUTED" | "CONFLICTED" | "UNRESOLVED";
+export type EvidentiarySuitability = "AUTHORITATIVE_DOMAIN" | "GENERAL_REFERENCE" | "UNKNOWN";
 
 export interface KnowledgeFinding {
   claimId: string;
@@ -31,6 +32,8 @@ export interface OutcomeProvenance {
   publisher: string | null;
   provenanceConfidence: string;
   authoritativePrimary: boolean;
+  /** Product-facing source suitability metadata; it is not truth authority. */
+  evidentiarySuitability?: EvidentiarySuitability;
   retrievedAt: string;
   publishedAt?: string | null;
 }
@@ -127,6 +130,21 @@ function unresolvedSummary(finding: KnowledgeFinding): string {
   return "UNRESOLVED: the available evidence does not establish this finding strongly enough yet.";
 }
 
+function sourceSuitability(source: TruthBundle["sources"][number]): EvidentiarySuitability | undefined {
+  const acquisitionMetadata = source.metadata.acquisitionMetadata;
+  if (
+    acquisitionMetadata === null
+    || typeof acquisitionMetadata !== "object"
+    || Array.isArray(acquisitionMetadata)
+  ) {
+    return undefined;
+  }
+  const value = (acquisitionMetadata as Record<string, unknown>).evidentiarySuitability;
+  return value === "AUTHORITATIVE_DOMAIN" || value === "GENERAL_REFERENCE" || value === "UNKNOWN"
+    ? value
+    : undefined;
+}
+
 export function buildKnowledgeOutcome(run: LatticeRun, truth: TruthBundle): KnowledgeOutcome {
   const claimsById = new Map(truth.claims.map((claim) => [claim.id, claim]));
   const findings = truth.assessments.flatMap<KnowledgeFinding>((assessment) => {
@@ -178,16 +196,20 @@ export function buildKnowledgeOutcome(run: LatticeRun, truth: TruthBundle): Know
     acceptedUnderstanding: runObjective(run.request),
     findings,
     uncertainties,
-    provenance: truth.sources.map((source) => ({
-      sourceId: source.id,
-      canonicalUri: source.canonicalUri,
-      title: typeof source.metadata.title === "string" ? source.metadata.title : source.canonicalUri,
-      publisher: source.publisher,
-      provenanceConfidence: source.provenanceConfidence,
-      authoritativePrimary: source.authoritativePrimary,
-      retrievedAt: source.retrievedAt,
-      publishedAt: source.publishedAt,
-    })),
+    provenance: truth.sources.map((source) => {
+      const suitability = sourceSuitability(source);
+      return {
+        sourceId: source.id,
+        canonicalUri: source.canonicalUri,
+        title: typeof source.metadata.title === "string" ? source.metadata.title : source.canonicalUri,
+        publisher: source.publisher,
+        provenanceConfidence: source.provenanceConfidence,
+        authoritativePrimary: source.authoritativePrimary,
+        ...(suitability === undefined ? {} : { evidentiarySuitability: suitability }),
+        retrievedAt: source.retrievedAt,
+        publishedAt: source.publishedAt,
+      };
+    }),
     evidence: truth.claimEvidence.map((item) => ({
       evidenceId: item.externalEvidenceId,
       claimId: item.claimId,
