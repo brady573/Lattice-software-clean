@@ -67,6 +67,9 @@ export async function renderKnowledgeResponseForRun(
   }
 
   const finding = knowledge.findings[0];
+  if (finding === undefined) {
+    return `${governed}\n\n${KNOWLEDGE_SIMPLIFICATION_FAILURE_MESSAGE}`;
+  }
   const simplified = await simplifier.simplify({ runId: run.id, finding });
   if (simplified === null) {
     return `${governed}\n\n${KNOWLEDGE_SIMPLIFICATION_FAILURE_MESSAGE}`;
