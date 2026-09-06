@@ -7,7 +7,7 @@ const SIMPLIFICATION_REQUEST_PATTERN = /\b(?:simpler|simply|plain language)\b/iu
 const UNSAFE_SENTINEL = "UNSAFE_TO_SIMPLIFY";
 const NEGATION_PATTERN = /\b(?:no|not|never|neither|nor|without|cannot|can't|doesn't|don't|isn't|aren't|wasn't|weren't|didn't|won't|wouldn't|shouldn't|couldn't|mustn't)\b/iu;
 const UNCERTAINTY_PATTERN = /\b(?:may|might|could|possibly|possible|uncertain|unclear|appears?|suggests?|likely|unlikely|risk|association|associated)\b/iu;
-const CONDITION_PATTERN = /\b(?:if|unless|except|only|when|while|during|before|after|until|depending)\b/iu;
+const CONDITION_PATTERN = /\b(?:if|unless|except|only|when|while|during|before|after|until|under|depending)\b/iu;
 const NUMBER_PATTERN = /(?:[$€£¥]\s*)?\b\d+(?:[.,]\d+)*(?:\s*%|\s*[a-zA-Z]{1,8})?/gu;
 const ACRONYM_PATTERN = /\b[A-Z][A-Z0-9-]{1,}\b/gu;
 
