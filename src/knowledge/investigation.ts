@@ -230,7 +230,13 @@ export class ObjectiveKnowledgeRelevanceQualifier implements KnowledgeRelevanceQ
     const objectiveTerms = unique(normalizedTokens(input.objective));
     const queryTerms = unique(input.queries.flatMap((query) => normalizedTokens(query)))
       .filter((term) => !objectiveTerms.includes(term));
-    const specificObjectiveTerms = objectiveTerms.filter((term) => !GENERIC_RELATION_TERMS.has(term));
+    const latestContext = input.context.at(-1)?.trim() ?? "";
+    const clarifiedShortFormTerms = clarificationContextTerms(input.objective, latestContext).length > 0
+      ? new Set(objectiveShortFormTerms(input.objective))
+      : new Set<string>();
+    const specificObjectiveTerms = objectiveTerms.filter(
+      (term) => !GENERIC_RELATION_TERMS.has(term) && !clarifiedShortFormTerms.has(term),
+    );
     const anchorTerms = specificObjectiveTerms.slice(0, 3);
     const candidateText = [
       input.source.title,
@@ -260,7 +266,7 @@ export class ObjectiveKnowledgeRelevanceQualifier implements KnowledgeRelevanceQ
         : answerRelevant
           ? causeSeeking(input)
             ? "Retrieved material locally links causal/mechanistic relation evidence with enough objective-specific terms and addresses the requested explanatory relationship."
-            : "Retrieved material overlaps the objective-specific or derived investigation concepts."
+            : "Retrieved material overlaps the objective-specific or USER-clarified investigation concepts."
           : "Topic/concept overlap is insufficient because the causal relation is not locally addressed in the required direction for the requested explanatory relationship.",
       matchedTerms: unique([...objectiveMatches, ...queryMatches]),
     };
