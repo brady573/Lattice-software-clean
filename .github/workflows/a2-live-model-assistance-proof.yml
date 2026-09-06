@@ -1,0 +1,70 @@
+name: A2 — Live Model Assistance Proof
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/a2-live-model-assistance-proof.yml'
+      - 'src/model-assistance-*.ts'
+      - 'src/model/groq-knowledge-simplifier.ts'
+      - 'src/presentation/solandra/knowledge-simplification.ts'
+      - 'src/presentation/solandra/knowledge-response.ts'
+      - 'src/http-app.ts'
+      - 'src/runtime-app.ts'
+      - 'src/index.ts'
+      - 'tools/a2-live-model-assistance-proof.mjs'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: a2-live-model-assistance-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  live-model-assistance:
+    name: A2 real authorized capability
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+
+    steps:
+      - name: Checkout exact subject source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Provision Node 24
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+
+      - name: Validate exact subject and credential availability
+        env:
+          SUBJECT_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SUBJECT_SOURCE_SHA"
+          test -n "${GROQ_API_KEY:-}" || { echo 'A2_LIVE_PROOF_BLOCKED=provider credential unavailable'; exit 1; }
+
+      - name: Install locked dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Build exact candidate
+        run: npm run build
+
+      - name: Execute Solandra authorization-to-provider journey
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/a2-live
+          node tools/a2-live-model-assistance-proof.mjs | tee artifacts/a2-live/model-assistance.json
+
+      - name: Upload sanitized A2 evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: a2-live-model-assistance-${{ github.event.pull_request.head.sha || github.sha }}
+          path: artifacts/a2-live/
+          if-no-files-found: ignore
