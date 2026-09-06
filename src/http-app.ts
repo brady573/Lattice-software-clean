@@ -10,7 +10,7 @@ import {
 import { renderSolandraAuthoritativeConversationPage } from "./ui/solandra-authoritative-conversation-page.js";
 
 export interface CanonicalAppOptions extends HttpCoreOptions {
-  knowledgeSimplifier?: KnowledgeSimplifier;
+  knowledgeSimplifier?: KnowledgeSimplifier | undefined;
 }
 
 async function withKnowledgePresentation(
