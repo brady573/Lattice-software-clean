@@ -3,8 +3,8 @@ import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { performance } from "node:perf_hooks";
 
-const EXPECTED_CANDIDATE = "78aa33e2b4ab25af14a88b285fceea3eecd67fbd";
-const EXPECTED_TREE = "cdff0ec0e635c47d7a03b6244da514abf0e4c349";
+const EXPECTED_CANDIDATE = "63aa1c39e9e22c66f8374cc9f7d05ca1793249fd";
+const EXPECTED_TREE = "8e614a4bcc8b31f118a8e206ad6c2897d7a789aa";
 const NVIDIA_BASE_URL = "https://integrate.api.nvidia.com/v1";
 const NVIDIA_MODEL = "nvidia/nemotron-3.5-lightning-30b-a3b";
 const PLANNER_KIND = "model-gateway-investigation-brief-v0.1";
@@ -36,7 +36,6 @@ function compactError(error) {
 class NvidiaTextProvider {
   kind = "nvidia-nim-live-direct-evaluation";
   calls = [];
-
   constructor(apiKey) { this.apiKey = apiKey; }
 
   async generate(request, context) {
@@ -102,7 +101,6 @@ function rawTextFromCall(call) {
   const output = call?.providerResult?.response?.output;
   return Array.isArray(output) && output.length === 1 && output[0]?.type === "text" ? output[0].text : null;
 }
-
 function parseRaw(text) {
   if (typeof text !== "string") return null;
   try { return JSON.parse(text); } catch { return null; }
