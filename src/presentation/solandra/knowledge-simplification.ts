@@ -10,6 +10,7 @@ const UNCERTAINTY_PATTERN = /\b(?:may|might|could|possibly|possible|uncertain|un
 const CONDITION_PATTERN = /\b(?:if|unless|except|only|when|while|during|before|after|until|under|depending)\b/iu;
 const NUMBER_PATTERN = /(?:[$€£¥]\s*)?\b\d+(?:[.,]\d+)*(?:\s*%|\s*[a-zA-Z]{1,8})?/gu;
 const ACRONYM_PATTERN = /\b[A-Z][A-Z0-9-]{1,}\b/gu;
+const SEMANTIC_MARKER_APOSTROPHE_PATTERN = /[\u2018\u2019\u02BC\uFF07]/gu;
 
 export const KNOWLEDGE_SIMPLIFICATION_FAILURE_MESSAGE =
   "I couldn't simplify this faithfully, so I kept the original wording.";
@@ -25,6 +26,10 @@ export interface KnowledgeSimplifier {
 
 function normalizeWhitespace(value: string): string {
   return value.trim().replace(/\s+/gu, " ");
+}
+
+function normalizeSemanticMarkerTypography(value: string): string {
+  return value.replace(SEMANTIC_MARKER_APOSTROPHE_PATTERN, "'");
 }
 
 function matches(value: string, pattern: RegExp): string[] {
@@ -45,7 +50,9 @@ function sameMultiset(left: readonly string[], right: readonly string[]): boolea
 }
 
 function preservesSemanticMarker(original: string, candidate: string, pattern: RegExp): boolean {
-  return pattern.test(original) === pattern.test(candidate);
+  const normalizedOriginal = normalizeSemanticMarkerTypography(original);
+  const normalizedCandidate = normalizeSemanticMarkerTypography(candidate);
+  return pattern.test(normalizedOriginal) === pattern.test(normalizedCandidate);
 }
 
 /**
