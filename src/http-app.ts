@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import type { LatticeRun } from "./domain.js";
 import { createHttpCore, type HttpCoreOptions } from "./http-core.js";
+import type { ModelAssistanceCapabilityService } from "./model-assistance-capability.js";
 import type { KnowledgeOutcome } from "./outcome.js";
 import type { KnowledgeSimplifier } from "./presentation/solandra/knowledge-simplification.js";
 import {
@@ -10,7 +11,10 @@ import {
 import { renderSolandraAuthoritativeConversationPage } from "./ui/solandra-authoritative-conversation-page.js";
 
 export interface CanonicalAppOptions extends HttpCoreOptions {
+  /** Compatibility-only direct simplifier for explicit test/non-canonical compositions. */
   knowledgeSimplifier?: KnowledgeSimplifier | undefined;
+  /** Canonical subject-authorized model assistance boundary. */
+  modelAssistanceService?: ModelAssistanceCapabilityService | undefined;
 }
 
 async function withKnowledgePresentation(
@@ -40,13 +44,16 @@ async function withKnowledgePresentation(
  * prototype routes are intentionally unavailable here.
  */
 export function buildCanonicalApp(options: CanonicalAppOptions = {}): FastifyInstance {
-  const { knowledgeSimplifier, ...coreOptions } = options;
-  const { app, runStore } = createHttpCore(coreOptions);
+  const { knowledgeSimplifier, modelAssistanceService, ...coreOptions } = options;
+  const { app, runStore, apiSubjectForRequest } = createHttpCore(coreOptions);
   app.addHook("preSerialization", async (request, _reply, payload) => {
     if (request.routeOptions.url !== "/api/v1/runs/:runId/outcome") return payload;
     const runId = (request.params as { runId?: string }).runId;
     const run = runId === undefined ? undefined : await runStore.get(runId);
-    return await withKnowledgePresentation(payload, run, knowledgeSimplifier);
+    const simplifier = modelAssistanceService === undefined
+      ? knowledgeSimplifier
+      : modelAssistanceService.simplifierFor(apiSubjectForRequest(request));
+    return await withKnowledgePresentation(payload, run, simplifier);
   });
   app.get("/", async (_request, reply) =>
     reply.type("text/html; charset=utf-8").send(renderSolandraAuthoritativeConversationPage())
