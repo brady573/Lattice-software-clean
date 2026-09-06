@@ -1,173 +1,504 @@
-# Lattice 1.0 Roadmap
+# Lattice 1.0 Alpha Roadmap
 
-Status: **DERIVED EXECUTION VIEW — NON-AUTHORITATIVE**
+Status: **OWNER-DIRECTED CURRENT EXECUTION ROADMAP — SUBORDINATE TO THE CORE LATTICE PHILOSOPHY**
 
-This file summarizes current milestone position for day-to-day execution. It does not independently create Product requirements, semantic authority, validation, production readiness, provider qualification, or Owner authorization.
+Date: **2026-09-06**
 
-## Controlling design and maintenance sources
+Reconciliation baseline before this roadmap update:
 
-The controlling order is:
+- canonical `main`: `c590d60322130367d02478488105c359f03287a8`
+- tree: `97a24017c0661eb44f41fff5d6ae1a6f2348ba54`
 
-- `docs/design/The-Core-Lattice-Philosophy.md` — highest Product-design authority and first filter;
-- `docs/design/Lattice-Living-Software-Design-to-1.0.md`;
-- `docs/design/Lattice-Living-Software-Design-to-1.0-v0.6-amendment.md`;
-- `docs/design/Lattice-Living-Software-Design-to-1.0-v0.7-amendment.md`;
-- `docs/design/Lattice-Owner-Decisions-OD-001-to-OD-004.md`;
-- `docs/design/Lattice-Owner-Decision-OD-007-M8-Continuity.md`;
-- `docs/design/Lattice-System-Registry-and-Naming.md`; and
-- `docs/design/Lattice-Architecture-Integrity.md`.
+This roadmap records the Owner-directed execution sequence for reaching a functional Lattice 1.0 Alpha. It does not amend or supersede `docs/design/The-Core-Lattice-Philosophy.md`, which remains the sole highest Product philosophy authority.
 
-`docs/design/README.md` is the non-authoritative design ownership/maintenance map. It identifies where stable cross-system concepts should be maintained without changing the authority status of the underlying design records.
+The roadmap exists to sequence implementation and validation. Repository code, tests, milestone history, architecture documents, provider qualifications, PRs, and this roadmap itself remain subordinate evidence or working Product state.
 
-Permanent domain maintenance homes are:
+## Product direction
 
-- `docs/design/Lattice-State-and-Persistence-Architecture.md` — durable state, lifecycle, reconstruction and deletion/purge structure;
-- `docs/design/Lattice-Intent-and-Decision-Architecture.md` — USER intent, clarification/correction, preference/delegation, evidence-to-decision composition and StructuredDecision semantics;
-- `docs/design/Lattice-Execution-and-Capability-Architecture.md` — Run execution, workers, capability licensing, budgets, cancellation, side effects and operational provenance;
-- `docs/design/Lattice-Resource-and-Action-Architecture.md` — Resource identity/provenance/validity/hydration and ActionProposal semantics; and
-- `docs/design/Lattice-Reliability-and-Recovery-Architecture.md` — failure classes, recovery ownership, retry/replay/reconnect, degraded operation and observability.
+Lattice exists to make trustworthy expertise and decision capability accessible without making the user operate the machinery required to produce it.
 
-These documents retain their own stated status and are valid only where they conform to the Core. The protected V36 specification remains controlling for V36 epistemic semantics within that subordinate boundary.
+For Alpha, progress is therefore measured primarily by complete user-facing Solandra capabilities, not by isolated subsystem completion.
 
-M9-specific live-provider/model route qualification remains in `docs/design/M9-Live-Provider-Promotion-Architecture.md` and its executed qualification records. Generic execution and reliability behavior belongs in the permanent domain architectures rather than being redefined by M9.
-
-The current Solandra primary presentation direction is the Owner-approved `docs/design/solandra/PRIMARY-INTERACTION-CONTRACT.md`, supported by the companion Solandra design documents. The earlier offline prototype package, Knowledge Orbit, and fixed three-stage language remain historical provenance only. Current Solandra is a continuous Conversation + ConversationInput + adaptive Composer composition; it does not impose a fixed presentation sequence or define backend Product behavior.
-
-## Reconciliation baseline
-
-Roadmap reconciled against canonical:
-
-- `main @ 3de31612c46a3e31a70e6977f6e100d20bb6be85`
-
-Fresh canonical source controls implementation-status claims. Historical validation remains scoped to the exact revision and execution surface on which it ran; this roadmap does not transfer validation across revisions.
-
-## Authority and status vocabulary
-
-The living design's item-level status vocabulary remains controlling:
-
-- **Confirmed** — authoritative Product design.
-- **Working assumption** — may guide reversible work while visibly provisional.
-- **Proposed** — recommendation only; does not independently authorize Product mutation.
-- **Open decision** — unresolved and blocks dependent work where the controlling design says it does.
-- **Deferred** — outside the 1.0 critical path unless separately promoted.
-
-The canonical system names are **Lattice Product**, **Lattice Intent Authority**, **Lattice Execution Runtime**, **Lattice Model Gateway**, **V36 Truth Core**, **Lattice Decision Engine**, **Solandra Experience**, and the external **V7 LLM Simulation Lab**. Implementation modules, stores, workers, adapters, providers, Resources, and UI surfaces do not acquire peer Product authority merely because they are separately named or executable.
-
-## Accepted milestone evidence carried forward
-
-### M7
-
-M7 durable Conversation/progress/reconnect acceptance is historical exact-revision evidence. Canonical `main @ 4d9548b7e8c64b57c60eb37a9e605a1c391b810b` established the PostgreSQL-backed durable Conversation/USER-message/continuity/reconnect stack through M7-G2A. PR #120 subsequently integrated the then-current Knowledge Orbit presentation and real-browser M7-G2C acceptance, and exact-main validation later passed on `4ec9cbcb4faca04896cecac310ed5e5e7e532e26` in GitHub Actions run `33296051622`.
-
-The Knowledge Orbit portion is retained as **historical M7 acceptance provenance only**. Later Owner-approved Solandra design and implementation replaced orbit-first and fixed-stage presentation with continuous Conversation + ConversationInput + adaptive Composer. That presentation supersession does not invalidate the durable M7 backend/reconnect evidence.
-
-### M8
-
-PR #138 closed the milestone-level M8 acceptance-evidence gaps and was squash-merged as `main @ 4c00db0254b09d120843c61a544cf89be311f6ad`, tree `8688943a2f7efae0fed2750c28c7ca5b73453265`. Exact post-merge Windows Validation, Windows Prototype Validation, native PostgreSQL 18 durability, and durable real-browser lifecycle validation passed on that exact revision.
-
-M8 therefore has bounded acceptance evidence for authenticated subject ownership, derived-object isolation, subject-scoped idempotency, explicit USER-controlled preference continuity, historical IntentVersion/Run immutability, no silent promotion of historical external facts into reusable V36 truth, and deletion-state enforcement. M8 does not establish generalized memory, retention duration, purge execution, provider promotion, production deployment, or production readiness.
-
-## Current position against the living roadmap
-
-| Stage | Milestone | Current roadmap status | Evidence / remaining boundary |
-|---|---|---|---|
-| Cross-cutting | **Lattice Architecture Integrity** | **ACTIVE / OWNER-APPROVED** | Applies across M3-M12 without consuming a milestone. Preserves Product-semantic authority boundaries. |
-| Prototype | **M0 — Product baseline** | **COMPLETE / PROVENANCE-BOUNDED** | Offline V36, durable operational state, Model Gateway boundary and Product baseline capabilities exist in repository history. Exact validation claims remain revision-scoped. |
-| Prototype | **M1 — V7 LLM Simulation Lab** | **COMPLETE / EXTERNAL PROTOTYPE ARTIFACT VALIDATED** | Owner-supplied standalone simulator evidence remains prototype evidence only; it does not establish Lattice Product or production correctness. |
-| Prototype | **M2 — Solandra Offline Prototype UI Design** | **COMPLETE / OWNER-APPROVED HISTORICAL OFFLINE-PROTOTYPE DESIGN** | The approved archive remains valid approval provenance for its bounded offline-prototype scope. Later Owner-approved Solandra primary-interaction design supersedes conflicting orbit-first/dashboard-first presentation direction without erasing the M2 approval event. |
-| Build to 1.0 | **M3 — Lattice Execution Runtime durable composition** | **COMPLETE / EXACT-REVISION ACCEPTED** | Durable API/Run-worker/Research-worker composition, resumable Run coordination and PostgreSQL process boundaries were accepted on their exact milestone revisions. Generic execution semantics are now maintained in `Lattice-Execution-and-Capability-Architecture.md`. |
-| Build to 1.0 | **M4 — Durable V36 Truth Core research handshake** | **COMPLETE / EXACT-REVISION ACCEPTED** | Full checkpoint/research continuation is implemented: Runtime executes operational work; V36 alone admits evidence and advances truth. Live-provider qualification remains a separate M9 concern. |
-| Build to 1.0 | **M5 — Lattice Intent Authority + conditional planning** | **COMPLETE / EXACT-REVISION ACCEPTED** | M5-A through M5-K plus the foundational repair established immutable USER-provenance intent, clarification/correction lineage, exact IntentVersion-to-Run binding, conditional faithful DecisionPlan, supersession and bounded delegation. Permanent semantics are maintained in `Lattice-Intent-and-Decision-Architecture.md`. |
-| Build to 1.0 | **M6 — Lattice Decision Engine generalization** | **COMPLETE / EXACT-REVISION ACCEPTED** | Typed/versioned criteria, priority tiers, tri-state hard requirements, material-dominance frontier, structured trade-offs and bounded delegated selection are implemented and accepted at the milestone boundary. |
-| Build to 1.0 | **M7 — Conversation + progress API** | **COMPLETE / EXACT-REVISION ACCEPTED** | Durable Conversation, USER-message provenance, SSE reconnect, reload reconstruction and continuation are accepted. Knowledge Orbit is historical presentation provenance, not the current primary UI contract. |
-| Build to 1.0 | **M8 — Auth + privacy + continuity** | **COMPLETE / EXACT-REVISION ACCEPTED** | OD-007 explicit preference continuity, authenticated ownership/isolation, subject-scoped idempotency, deletion enforcement and continuity controls have bounded exact-revision acceptance. |
-| Build to 1.0 | **M9 — Live-provider promotion** | **IN PROGRESS / M9-4 BOUNDED LIVE ROUTE QUALIFIED / OD-005 PARTIALLY BLOCKING** | M9-1 invocation provenance, M9-2 capability execution policy and M9-3 bounded external context projection are present in canonical history. M9-4 has qualified a pinned zero-cost `LIVE_DIRECT` NVIDIA NIM development route using `nvidia/nemotron-3.5-lightning-30b-a3b` with 18/18 live behavioral passes under synthetic/non-sensitive input restrictions. This does not authorize production routing/data or automatic fallback. M9-5 durable live research is the next unclosed milestone slice; M9-6 routing/fallback promotion remains blocked on OD-005; M9-7 integrated acceptance follows. |
-| Build to 1.0 | **M10 — Solandra Experience 1.0 explanation** | **PARTIAL / PRIMARY INTERACTION LOCKED / OD-006 BLOCKS GENERALIZED EXPLANATION** | The semantic Solandra baseline replaced Knowledge Orbit and fixed stages. The Owner-approved primary interaction is continuous Conversation + ConversationInput + adaptive Composer: dialogue and concise explanation stay in Conversation; Composer presents the most useful trustworthy visual material currently available. Resource and reliability presentation retain their application-level semantic owners. OD-006 generalized model-assisted explanation licensing/fidelity remains unresolved. |
-| Production / release | **M11 — Production operations** | **BLOCKED** | Requires Owner-bound production topology/SLO/backup/limit/security/rollback decisions and operational acceptance. Completion of M8/M9 development surfaces does not authorize production deployment. |
-| Production / release | **M12 — 1.0 stabilization** | **BLOCKED** | Requires all applicable release gates on one exact release candidate, including AIC-R1, plus resolution/acceptance of release-blocking open decisions. |
-
-## Confirmed Product decisions controlling forward work
-
-- **OD-001 — RESOLVED / SUPERSEDED BY CORE RECONCILIATION:** Lattice 1.0 is trustworthy knowledge plus conditional decision capability. Knowledge and non-decision Action Preparation are complete Product paths; DecisionPlan, decision evidence projection, Decision Engine, and StructuredDecision exist only for qualified decision work.
-- **OD-002 — RESOLVED / CONFIRMED:** V36 yields immutable continuation state and research requests; Execution Runtime durably executes/persists operational results; only V36 resumes epistemic state. Operational inability is not epistemic judgment.
-- **OD-003 — RESOLVED / CONFIRMED:** one Decision Engine with qualified typed/versioned Criterion Catalog, USER priority tiers, tri-state hard requirements, layered tolerance ownership, material-dominance frontier, no forced #1 and explicit bounded final-choice delegation.
-- **OD-004 — RESOLVED / CONFIRMED:** transcript is context/provenance; immutable versioned structured intent is authority; canonical mutation requires USER-origin meaning or exact proposal-bound confirmation; corrections preserve lineage; every Run binds an exact intent version; a DecisionPlan additionally exists only for qualified decision work and must faithfully project that version; delegation is explicit and bounded.
-- **OD-007 — RESOLVED / CONFIRMED:** Lattice 1.0 continuity is explicit USER-authored/confirmed preference continuity, not generalized conversational memory. Reuse is visible, revocable, versioned and provenance-preserving; transcript/model/Solandra inference and historical external facts do not silently become reusable memory/truth.
-
-Still unresolved where not separately qualified:
-
-- **OD-005:** first qualified provider/routing policy. M9-4 bounded route qualification does not itself resolve Product routing/fallback policy.
-- **OD-006:** generalized Solandra explanation licensing/fidelity contract.
-- **OD-008 through OD-010:** retain their living-design status unless separately resolved by qualified authority.
-
-## Current implementation sequence
-
-1. **Preserve completed M3-M8 mechanisms.** Do not rebuild durable execution, V36 continuation, Intent Authority, Decision Engine, Conversation/reconnect, authenticated ownership or explicit preference continuity under new names.
-2. **Use permanent domain architectures for generic semantics.** New persistence, intent/decision, execution/capability, Resource/Action and reliability behavior should reconcile to their designated maintenance homes rather than being specified ad hoc inside M9, Solandra, or the roadmap.
-3. **M9-5 — durable live research through Execution Runtime and V36.** Reuse the already-qualified bounded M9-4 live route only within its synthetic/non-sensitive development boundary. Provider success remains operational evidence; V36 remains factual admission authority.
-4. **M9-6 — routing/fallback promotion only after OD-005.** Qualification of one pinned route does not authorize autonomous provider selection or failover policy.
-5. **M9-7 — integrated exact-revision Product acceptance.** Validate the complete promoted M9 path on the exact candidate without transferring provider/model authority into Product semantics.
-6. **M10 — continue presentation work only within current semantic owners while OD-006 remains unresolved.** Conversation + Composer may be refined without inventing generalized explanation licensing or dictating backend phases. Resources remain governed by Resource/Action architecture; failure/recovery presentation remains governed by Reliability/Recovery; truth/conditional-decision/intent remain upstream authorities.
-7. **M11 — bind production operations explicitly.** Production topology, SLOs, backups, security, data/provider policy, limits, rollback and deployment require their own qualified decisions and Owner authorization.
-8. **M12 — stabilize one exact release candidate.** Execute all applicable release gates, including Architecture Integrity, without transferring validation from prior revisions.
-
-## Critical dependency snapshot
+The Alpha Product spine is:
 
 ```text
-COMPLETE: M0 Product baseline + M1 V7 Simulation Lab + M2 offline UI design provenance
-                                      |
-                                      v
-COMPLETE: M3 Execution Runtime durable composition
-                                      |
-                                      v
-COMPLETE: M4 Durable V36 research handshake
-                                      |
-                                      +------------------> M9 Live-provider promotion
-                                      |                    M9-1 provenance          present
-                                      |                    M9-2 capability policy   present
-                                      |                    M9-3 context/privacy     present
-                                      |                    M9-4 pinned live route   QUALIFIED
-                                      |                    M9-5 durable live V36    NEXT
-                                      |                    M9-6 routing/fallback    BLOCKED ON OD-005
-                                      |                    M9-7 integrated accept   PENDING
-                                      |
-                                      v
-COMPLETE: M5 Intent Authority + exact Run binding
-      |-- knowledge/action paths bypass decision machinery
-      '-- qualified decision path -> COMPLETE: M6 Decision Engine generalization
-                                      |
-                                      v
-M10 Solandra Experience — Conversation + adaptive Composer locked; generalized explanation blocked on OD-006
-                                      |
-                                      v
-COMPLETE: M7 Conversation + Progress API
-                                      |
-                                      v
-COMPLETE: M8 Auth/privacy/explicit preference continuity
-                                      |
-                                      v
-CURRENT PRODUCT FRONTIER: M9-5 durable live research through Execution Runtime + V36
-
-M7 Conversation/progress + M8 authenticated continuity
-----------------------------------------> M11 Production operations
-
-All paths --------------------------------------------> M12 1.0 stabilization
+open Solandra
+  -> express ordinary human intent
+  -> resolve only materially necessary ambiguity
+  -> use authorized capabilities
+  -> investigate and govern knowledge where required
+  -> produce understandable knowledge or decision support
+  -> preserve authorization before consequential action
+  -> present a useful outcome without exposing internal machinery as the user's job
 ```
 
-## Execution handoff readiness
+A subsystem, provider integration, model adapter, workflow, validation layer, or architecture mechanism is not forward Product progress by itself. It enters the Alpha critical path when it removes an observed user barrier, preserves a necessary trust/control boundary, or is required to compose the end-to-end Product journey.
 
-Execution handoffs are coordination artifacts, not Product authority. They must be rebound against fresh canonical GitHub state and qualified Product sources before reuse.
+## Alpha definition
 
-| Handoff | Readiness | Boundary |
-|---|---|---|
-| **M5 Intent Authority implementation handoff** | **HISTORICAL / COMPLETED** | Retain as implementation provenance only. |
-| **M6 Decision Engine implementation handoff** | **HISTORICAL / COMPLETED** | Retain as bounded execution/acceptance provenance only. |
-| **M7 Conversation + Progress API handoff** | **HISTORICAL / COMPLETED** | Backend/reconnect evidence remains useful; orbit-first presentation details are historical and subordinate to later Solandra design. |
-| **M8 Auth + privacy + continuity acceptance** | **HISTORICAL / COMPLETED** | Records the OD-007 acceptance matrix and exact-candidate closure boundary; does not authorize M9, production, generalized memory or retention/purge policy. |
-| **M9-4 live provider qualification packet** | **CURRENT BOUNDED QUALIFICATION EVIDENCE** | `docs/development/m9-4-nvidia-nemotron-3.5-lightning-qualification-2026-08-31.md` qualifies one pinned zero-cost development route with synthetic/non-sensitive inputs only. It is reusable evidence while its exact qualification dependencies remain materially unchanged. |
+Lattice 1.0 Alpha is the first coherent Solandra application in which the major Product capabilities exist and work together.
 
-## Historical milestone numbering and validation rule
+Alpha does **not** require every mechanism to be generalized, optimized, production-hardened, provider-complete, or polished.
 
-Earlier repository/specification milestone labels and development-session labels remain provenance only. Forward planning uses the living-design M0-M12 sequence; Architecture Integrity is cross-cutting and does not consume a milestone number.
+Alpha **does** require real capability rather than simulation.
 
-Do not reinterpret prior validation across revisions. A merge establishes transition success. A matching tree establishes only the exact reproducible tree relation demonstrated. A revision is validated only by exact-revision validation or by a fully established cross-revision equivalence that includes all relevant non-tree inputs and execution contracts.
+At minimum, an Alpha candidate must establish that:
+
+- a user can interact primarily through Solandra;
+- ordinary user wording can become a workable governed objective without requiring the user to translate their problem into Lattice machinery;
+- Lattice can reach useful trustworthy Knowledge when the available evidence supports it;
+- Lattice can expose concise meaningful uncertainty or blockage when the evidence does not support an answer;
+- at least one real model/service capability can be authorized and genuinely used through a valid Lattice-controlled route;
+- conditional decision support can work end to end when the user's need is actually a decision;
+- bounded Action Preparation can produce useful editable material without falsely claiming execution;
+- conversation, intent, truth, decision, authorization, execution, verification, and presentation boundaries remain distinct where material;
+- ordinary interruption, failure, cancellation, continuation, and recovery do not corrupt authority or user understanding;
+- internal providers, models, workers, Run state, proof-state machinery, and workflow stages do not become work the ordinary user must operate.
+
+## Current evidence baseline
+
+Fresh canonical state before this roadmap change establishes substantial reusable infrastructure:
+
+- Lattice Execution Runtime and durable Run coordination exist in accepted bounded scopes;
+- V36 Truth Core remains the epistemic authority for external factual admission;
+- Intent Authority and exact IntentVersion-to-Run binding exist;
+- the generalized Decision Engine exists for qualified decision work;
+- durable Conversation, continuity, reconnect, authenticated ownership/isolation, explicit preference continuity, and deletion-state enforcement exist in accepted bounded scopes;
+- the Model Gateway, invocation provenance, capability policy, context projection, local model qualification, and bounded live-provider qualification machinery exist;
+- Solandra Conversation + Composer is the current user-facing presentation direction;
+- PR #15 established a real but narrow faithful plain-language Knowledge presentation capability for exactly one Knowledge finding within its qualified boundary.
+
+These mechanisms are retained infrastructure. They are not a forward staircase that must be generalized or completed in subsystem order before Solandra becomes useful.
+
+### Current black-box Product findings
+
+Owner black-box use of canonical Solandra has exposed the current highest-value gaps:
+
+1. Useful governed evidence can exist without Solandra synthesizing it into a direct answer to the user's question.
+2. Ordinary human terminology and context are not yet reliably resolved into effective investigation concepts.
+3. Current live Knowledge acquisition is too narrow for domains where authoritative primary or otherwise appropriate sources materially matter.
+4. Internal epistemic/retrieval machinery can become visible user content rather than remaining behind meaningful Product boundaries.
+5. Fail-closed truth behavior is functioning and must be preserved.
+6. User-controlled model/service authorization through Solandra is not yet established as an end-to-end Product capability.
+
+These observations govern Alpha sequencing more strongly than historical subsystem ordering because they reveal whether Lattice actually removes barriers at the Product surface.
+
+---
+
+# Alpha execution sequence
+
+## A0 — Preserve the foundation; stop speculative machinery expansion
+
+Status: **ACTIVE OPERATING RULE**
+
+Preserve already-established infrastructure unless an observed Alpha blocker requires change:
+
+- Intent Authority;
+- Execution Runtime;
+- V36 Truth Core;
+- Decision Engine;
+- Conversation and continuity;
+- authenticated ownership/privacy boundaries;
+- Model Gateway;
+- capability policy and invocation provenance;
+- existing persistence and recovery mechanisms;
+- Solandra Conversation + Composer direction.
+
+Do not redesign these merely because another architecture is possible.
+
+Do not make historical M9/M10/M11/M12 ordering the automatic implementation sequence.
+
+New infrastructure enters the Alpha critical path only when a concrete Alpha behavior requires it.
+
+### A0 acceptance
+
+PASS when substantial work is being selected by Product barrier or necessary boundary rather than milestone/subsystem completion alone.
+
+---
+
+## A1 — Trustworthy Knowledge spine
+
+Status: **CURRENT PRODUCT FRONTIER / NEXT IMPLEMENTATION OBJECTIVE**
+
+### Product outcome
+
+An ordinary user asks Solandra a Knowledge question in ordinary language. Lattice resolves only materially necessary ambiguity, performs appropriate investigation, governs the resulting information through the existing truth boundary, and returns a concise answer responsive to the actual question with understandable provenance and uncertainty.
+
+The user should not need to understand search vocabulary, V36 proof obligations, provider selection, research workers, internal findings, or evidence-state machinery in order to obtain useful understanding.
+
+The required path is:
+
+```text
+ordinary user wording
+  -> intent/context resolution
+  -> minimal clarification when materially necessary
+  -> investigation planning
+  -> source acquisition appropriate to the domain
+  -> relevance qualification
+  -> V36 evidence/truth handling
+  -> faithful answer synthesis/explanation
+  -> Solandra answer
+  -> inspectable provenance and uncertainty
+```
+
+### Required capability
+
+A1 must address the underlying barrier rather than special-case supplied examples.
+
+It may require bounded improvement to:
+
+- semantic terminology/context resolution;
+- ambiguity handling;
+- investigation query planning;
+- source selection/acquisition;
+- source-quality boundaries by domain;
+- multi-finding Knowledge synthesis;
+- causal/explanatory answering;
+- concise user-facing uncertainty and limitation presentation;
+- Composer/conversation division so internal machinery is not exposed as Product content.
+
+All such mechanisms remain subordinate to V36 and existing authority boundaries.
+
+### Behavioral acceptance
+
+A1 must include black-box scenarios covering at least:
+
+1. **Known-evidence synthesis:** a question such as `Why does cast iron rust?` where governed evidence contains the answer and Solandra must lead with a concise causal explanation rather than source dumps.
+2. **Terminology/context resolution:** ordinary user wording containing a legitimate domain abbreviation or shorthand, such as `TIC`, where Lattice either resolves the term only when sufficiently supported by context or asks the minimal material clarification.
+3. **Negative relation case:** related material exists but does not license the requested conclusion; Lattice must reject or remain unresolved rather than synthesize a fluent unsupported answer.
+4. **Source-quality case:** a domain where authoritative or primary sources materially matter; a general encyclopedia-only route must not masquerade as sufficient expertise.
+5. **Conflicting evidence:** meaningful conflict remains visible and does not disappear during synthesis.
+6. **Unresolved case:** Lattice cannot establish a supported answer and presents a concise meaningful limitation rather than internal proof-state terminology.
+7. **Follow-up comprehension:** `why?`, `explain that more simply`, and `what are your sources?` work without changing authoritative meaning improperly.
+
+### Preserve
+
+- V36 remains truth authority;
+- model output is not truth authority;
+- canonical Knowledge identity/provenance/uncertainty is not silently rewritten;
+- user intent is not silently expanded;
+- semantic ambiguity is not guessed away when material;
+- fail-closed behavior remains intact;
+- no one-off dictionary rule is accepted as the general solution to terminology barriers;
+- no generalized new orchestration stack is introduced without evidence that existing seams cannot support the capability.
+
+### A1 exit condition
+
+PASS when ordinary Knowledge consultation reliably converts supported governed evidence into useful understanding and honestly communicates unresolved boundaries without making the user operate Lattice's internal epistemic machinery.
+
+---
+
+## A2 — User-authorized model/service capability
+
+Status: **PENDING A1 OR EARLIER ONLY IF A1 ESTABLISHES A HARD DEPENDENCY**
+
+### Product outcome
+
+A user can establish at least one real supported model/service capability through the Product, and Lattice can genuinely use that capability while Solandra remains the primary interaction surface.
+
+Provider mechanics are machinery. The provider does not become Product authority.
+
+### Alpha scope
+
+Alpha requires **one genuine supported route**, not a generalized provider marketplace or routing framework.
+
+A second provider may be used later to prove provider neutrality where that becomes materially necessary, but multiple-provider breadth is not required merely to call the first Alpha Product spine real.
+
+### Required behavior
+
+- the user can select/authorize the supported capability through an understandable Product flow;
+- authorization establishes a genuinely usable route;
+- provider credentials/tokens do not become semantic Product authority;
+- the authorized capability is reachable from canonical Solandra behavior;
+- capability availability and limitations are represented honestly;
+- revocation/disconnect/change is respected;
+- provider failure fails visibly rather than silently substituting an unqualified route;
+- Lattice retains provenance needed to know which capability actually performed the work where material;
+- the user is not required to manually operate provider prompts, routing, workers, or intermediate model state.
+
+### A2 exit condition
+
+PASS when the user can authorize a real model/service capability and Solandra/Lattice can genuinely manage its bounded use on the user's behalf.
+
+---
+
+## A3 — End-to-end Decision capability
+
+Status: **PENDING**
+
+### Product outcome
+
+A realistic ordinary conversation can move into qualified decision support only when the user's actual need requires a decision.
+
+Reuse the existing Decision Engine. Do not generalize it speculatively.
+
+### Required path
+
+```text
+conversation
+  -> canonical intent
+  -> materially necessary clarification
+  -> evidence gathering / Knowledge
+  -> qualified DecisionPlan only when needed
+  -> Decision Engine
+  -> understandable trade-offs / recommendation within licensed boundary
+  -> Solandra presentation
+```
+
+### Required behavior
+
+- identify the actual decision objective without silently manufacturing criteria;
+- ask only material clarification;
+- gather evidence needed for the decision;
+- preserve USER priorities and hard requirements;
+- expose meaningful trade-offs;
+- avoid forcing a winner when the evidence/requirements do not support one;
+- preserve explicit bounded delegation where used;
+- keep truth distinct from decision and decision distinct from authorization.
+
+### A3 exit condition
+
+PASS when at least one realistic decision journey works completely through Solandra without making the user operate Decision Engine machinery.
+
+---
+
+## A4 — End-to-end Action Preparation
+
+Status: **PENDING**
+
+### Product outcome
+
+Solandra can transform established intent/knowledge into a useful bounded editable resource when requested, while preserving the distinction between preparation and execution.
+
+Alpha examples may include:
+
+- a checklist;
+- a message;
+- another already-licensed bounded editable resource.
+
+### Required behavior
+
+- Action Preparation is explicitly requested or otherwise valid under the existing boundary;
+- prepared material remains inspectable/editable;
+- nothing is represented as sent, executed, booked, submitted, or otherwise performed unless a separate authorized execution capability actually exists;
+- decision, authorization, execution, and verification remain distinct.
+
+### A4 exit condition
+
+PASS when Solandra can prepare genuinely useful material from the governed Product state without falsely claiming consequential execution.
+
+---
+
+## A5 — Continuity, interruption, failure, and recovery as one Product
+
+Status: **PENDING**
+
+### Product outcome
+
+Exercise the already-built continuity/runtime/privacy machinery through the complete Alpha experience rather than treating it as isolated infrastructure.
+
+### Black-box acceptance
+
+At minimum validate:
+
+- reload/reconnect during and after work;
+- conversation continuation;
+- preserved accepted intent;
+- explicit intent correction;
+- subject ownership/isolation;
+- capability/provider interruption;
+- research/acquisition failure;
+- partial uncertainty;
+- cancellation;
+- licensed retry/recovery;
+- unavailable or revoked capability;
+- blocked or unresolved outcomes.
+
+The user should receive meaningful Product state. Internal workers, epochs, retries, provider machinery, and proof-state internals should remain hidden unless a material trust/control boundary requires exposure.
+
+### A5 exit condition
+
+PASS when the Alpha Product spine survives ordinary interruption and failure without corrupting state, authority, provenance, or user understanding.
+
+---
+
+## A6 — Lattice 1.0 Alpha release candidate
+
+Status: **PENDING**
+
+Freeze one exact candidate and validate the Product as a whole.
+
+Alpha acceptance prioritizes user-observable capability over subsystem existence.
+
+### Required release evidence
+
+One exact candidate must establish:
+
+- A1 Trustworthy Knowledge spine: PASS;
+- A2 user-authorized model/service capability: PASS;
+- A3 end-to-end Decision capability: PASS;
+- A4 end-to-end Action Preparation: PASS;
+- A5 continuity/failure/recovery: PASS;
+- necessary privacy/security/authorization boundaries remain intact;
+- provenance and uncertainty remain inspectable where material;
+- model/provider output has not become truth or decision authority;
+- no Product-critical capability is represented as existing when it does not;
+- no Product-critical path requires the ordinary user to operate models, providers, workers, workflow stages, or proof-state machinery;
+- exact candidate validation is reproducible;
+- remaining Alpha limitations are explicit and qualified rather than simulated away.
+
+### A6 exit condition
+
+PASS when Lattice can be used as one coherent Solandra application demonstrating its major Product capabilities end to end.
+
+That candidate is **Lattice 1.0 Alpha**.
+
+---
+
+# Post-Alpha refinement
+
+Once the Alpha Product spine exists, use real black-box behavior to determine which machinery deserves further refinement.
+
+Potential post-Alpha work may include, only when justified by observed need:
+
+- broader provider/service support;
+- provider neutrality validation across a second genuinely supported route;
+- routing/fallback policy;
+- source breadth and domain-specific source quality;
+- performance/latency improvements;
+- richer model role qualification;
+- production operations and deployment hardening;
+- backup/rollback/SLO/security operational acceptance;
+- retention/purge policy completion;
+- additional recovery automation;
+- accessibility/usability polish;
+- expanded benchmarks driven by observed Product barriers;
+- selective architecture simplification where Alpha exposes unnecessary maintenance burden.
+
+Post-Alpha refinement must not retroactively excuse an incomplete Alpha capability.
+
+---
+
+# Historical milestone reconciliation
+
+The previous M0-M12 roadmap remains historical implementation and acceptance provenance, not the current forward execution staircase.
+
+## Retained accepted foundation
+
+The following prior milestone scopes remain useful accepted evidence within their exact qualified boundaries:
+
+- M0 Product baseline;
+- M1 external V7 simulation/prototype evidence;
+- M2 historical Solandra offline-prototype design provenance;
+- M3 durable Execution Runtime composition;
+- M4 durable V36 research continuation handshake;
+- M5 Intent Authority and exact Run binding;
+- M6 generalized Decision Engine;
+- M7 Conversation/progress/reconnect;
+- M8 authenticated ownership/privacy/explicit preference continuity.
+
+Do not rebuild these under new names without evidence of an Alpha blocker.
+
+## Partially useful later-stage machinery
+
+Historical M9/M10 work remains reusable evidence and implementation where it serves an Alpha vertical capability:
+
+- invocation provenance;
+- capability execution policy;
+- bounded external context projection;
+- local model qualification;
+- bounded live-provider qualification;
+- existing live research/model operation seams;
+- Solandra Conversation + Composer presentation;
+- PR #15 faithful single-finding simplification.
+
+Their historical milestone ordering no longer determines what is implemented next.
+
+M11/M12 production/stabilization concepts remain future evidence sources, but Alpha does not require company-scale or hypothetical future infrastructure. Production and release hardening will be scoped from the real Alpha Product and the Owner's actual deployment needs.
+
+---
+
+# Current open decisions and blockers
+
+Existing Owner decisions and open decisions retain only the authority they already had under the Core Philosophy.
+
+Do not treat unresolved historical roadmap decisions as automatic blockers to an Alpha vertical unless the relevant Alpha behavior actually depends on them.
+
+In particular:
+
+- provider routing/fallback policy is not required merely to prove one real Alpha-authorized provider route;
+- generalized model-assisted explanation policy must be resolved only to the extent required by the exact A1/A2 implementation boundary;
+- production topology/SLO/backup/operations decisions are not prerequisites for proving local/development Alpha Product capability unless the Owner explicitly makes hosted production Alpha the target.
+
+When a vertical encounters a genuine Product decision rather than an engineering choice, stop and return that bounded decision to the Owner.
+
+---
+
+# Roadmap operating rules
+
+For every substantial proposed work item, answer:
+
+1. **Which observable Alpha barrier does this remove?**
+2. **Which necessary trust/control boundary would fail without it?**
+
+At least one answer must be concrete.
+
+Also apply:
+
+- prefer a complete vertical capability over disconnected infrastructure;
+- prefer one real provider capability over several nominal adapters;
+- prefer direct black-box Product evidence over subsystem-local confidence;
+- preserve existing sound mechanisms rather than rebuilding for architectural taste;
+- do not special-case only the supplied discriminator wording;
+- do not weaken V36 or other authority boundaries to obtain fluent output;
+- do not treat a model as truth authority, decision authority, or authorization authority;
+- do not expose internal machinery merely because it exists;
+- do not build enterprise/team coordination machinery for this single-owner hobby project;
+- complexity must earn its one-person maintenance cost;
+- PASS, FAIL, BLOCKED, PARTIAL, UNKNOWN, and NOT ESTABLISHED remain distinct evidence outcomes.
+
+## Validation rule
+
+A subsystem test proves only the behavior it actually exercises.
+
+Green CI does not establish Product acceptance.
+
+A provider invocation does not establish Solandra integration.
+
+A type or adapter does not establish capability.
+
+A presentation does not establish authority.
+
+A historical acceptance does not automatically transfer to a changed candidate.
+
+For Alpha promotion, the strongest evidence is reproducible end-to-end behavior on the exact candidate through the ordinary Solandra path.
+
+---
+
+# Current Product frontier
+
+**A1 — Trustworthy Knowledge spine**
+
+This is the highest-value current objective because canonical black-box use has already established that Lattice possesses substantial truth/runtime machinery while ordinary users can still be forced to perform terminology translation, evidence synthesis, and proof-state interpretation themselves.
+
+The next implementation work should therefore make the existing governed Knowledge path complete enough to deliver useful understanding without sacrificing provenance, uncertainty, semantic authority, fail-closed behavior, or human control.
+
+Do not automatically resume M9-5 or another historical milestone simply because it was previously next in sequence.
+
+---
+
+# Supreme Product test
+
+Before accepting any roadmap item, implementation, retained mechanism, or Alpha promotion, ask:
+
+> **Does this use knowledge to remove a meaningful barrier for the user, preserve the boundaries required for trust and human control, keep authority where it belongs, and reduce rather than transfer unnecessary complexity?**
+
+For this single-owner project also ask:
+
+> **Would this still be worth its complexity if one person had to understand, operate, debug, and maintain it?**
+
+And for Alpha:
+
+> **Does this bring Lattice closer to a person opening Solandra, expressing ordinary intent, using genuinely authorized capability, and receiving a trustworthy useful outcome managed by Lattice rather than by the user operating its machinery?**
+
+If not, the work must protect a necessary boundary or enable a necessary prerequisite. Otherwise it is outside the Alpha critical path.
