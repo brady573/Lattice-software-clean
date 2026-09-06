@@ -17,6 +17,7 @@
     "android:model-worker": "node tools/android-model-worker.mjs",
     "benchmark:local-model": "node tools/local-model-ab-benchmark.mjs",
     "proof:knowledge:live": "npm run build && node tools/live-knowledge-consultation-proof.mjs",
+    "proof:investigation-planner:semantic": "npm run build && node tools/investigation-planner-semantic-proof.mjs",
     "qualify:live-provider": "node tools/live-provider-qualification.mjs",
     "qualify:live-provider:render": "node tools/render-live-provider-qualification.mjs",
     "db:migrate": "npm run build && node dist/src/migrate.js",

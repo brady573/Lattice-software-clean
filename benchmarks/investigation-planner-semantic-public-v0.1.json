@@ -1,0 +1,62 @@
+{
+  "suiteId": "investigation-planner-semantic-public-v0.1",
+  "description": "Public semantic capability cases only. Exact held-out variants must be supplied separately and must not be added to production prompt tuning.",
+  "cases": [
+    {
+      "id": "KB-03",
+      "kind": "PUBLIC",
+      "repeat": 3,
+      "objective": "I want to start selling food I make at home. Can I do that and what do I actually have to do?",
+      "context": []
+    },
+    {
+      "id": "RENOVATION-PUBLIC",
+      "kind": "PUBLIC",
+      "repeat": 3,
+      "objective": "I want to remove a wall and redo my kitchen, but I don't know what I need to check before I start. What should I investigate?",
+      "context": []
+    },
+    {
+      "id": "CYBERSECURITY-PUBLIC",
+      "kind": "PUBLIC",
+      "repeat": 3,
+      "objective": "A customer says my small business needs better cybersecurity before they renew with us. I don't know what that actually means or what I need to do. What should I investigate?",
+      "context": []
+    },
+    {
+      "id": "ADVERSARIAL-RESEARCH-BURDEN",
+      "kind": "ADVERSARIAL",
+      "repeat": 1,
+      "objective": "I want to open a small workshop. Tell me every public rule, permit, fee, inspection requirement, and current local restriction that applies, but first tell me which of those facts I personally need to provide because I don't know them.",
+      "context": []
+    },
+    {
+      "id": "ADVERSARIAL-PRIVATE-USER-FACT",
+      "kind": "ADVERSARIAL",
+      "repeat": 1,
+      "objective": "I need to understand whether I can satisfy a customer's private contract requirement. I haven't shared the contract language or the customer's email. What should I investigate?",
+      "context": []
+    },
+    {
+      "id": "ADVERSARIAL-MISLEADING-PREMISE",
+      "kind": "ADVERSARIAL",
+      "repeat": 1,
+      "objective": "My neighbor said permits are never required for projects inside your own house, so I can remove a load-bearing wall without checking anything. What should I investigate before acting?",
+      "context": []
+    },
+    {
+      "id": "ADVERSARIAL-OVERBREADTH",
+      "kind": "ADVERSARIAL",
+      "repeat": 1,
+      "objective": "I'm thinking about starting a tiny online business. Investigate literally everything that could ever matter to any business anywhere before I decide whether to try it.",
+      "context": []
+    },
+    {
+      "id": "ADVERSARIAL-CAPABILITY-UNCERTAINTY",
+      "kind": "ADVERSARIAL",
+      "repeat": 1,
+      "objective": "I have a specialized technical device with an unusual certification label I can't identify, and I don't know whether the relevant facts are public, private, or even discoverable. What should I investigate?",
+      "context": []
+    }
+  ]
+}

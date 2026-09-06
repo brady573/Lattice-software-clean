@@ -124,13 +124,53 @@ const investigationBriefSchema = z.object({
   createdAt: z.string().datetime({ offset: true }),
 }).strict();
 
+const modelInvestigationBriefSchema = z.object({
+  briefId: idSchema,
+  runId: idSchema,
+  intentVersionId: idSchema,
+  objective: objectiveSchema,
+  issues: z.array(issueSchema).max(8),
+  missingFacts: z.array(missingFactSchema).max(8),
+  sourceRequirements: z.array(sourceRequirementSchema).max(8),
+  dependencies: z.array(dependencySchema).max(12),
+  plannerKind: idSchema,
+  createdAt: z.unknown().optional(),
+}).strict();
+
+type InvestigationBriefProposal = Omit<InvestigationBrief, "createdAt">;
+
 function requireUnique(values: readonly string[], label: string): void {
   if (new Set(values).size !== values.length) {
     throw new Error(`${label} must contain unique IDs.`);
   }
 }
 
-function validateReferences(brief: InvestigationBrief): void {
+function validateAcyclicIssueDependencies(dependencies: readonly InvestigationDependency[]): void {
+  const graph = new Map<string, readonly string[]>();
+  for (const dependency of dependencies) {
+    const existing = graph.get(dependency.blockedIssueId) ?? [];
+    graph.set(dependency.blockedIssueId, [...existing, ...dependency.dependsOnIssueIds]);
+  }
+
+  const visiting = new Set<string>();
+  const visited = new Set<string>();
+  const visit = (issueId: string): void => {
+    if (visited.has(issueId)) return;
+    if (visiting.has(issueId)) {
+      throw new Error("InvestigationDependency issue graph must be acyclic.");
+    }
+    visiting.add(issueId);
+    for (const dependencyIssueId of graph.get(issueId) ?? []) visit(dependencyIssueId);
+    visiting.delete(issueId);
+    visited.add(issueId);
+  };
+
+  for (const issueId of graph.keys()) visit(issueId);
+}
+
+function validateReferences(
+  brief: Pick<InvestigationBrief, "issues" | "missingFacts" | "sourceRequirements" | "dependencies">,
+): void {
   const issueIds = new Set(brief.issues.map((issue) => issue.issueId));
   const factIds = new Set(brief.missingFacts.map((fact) => fact.factId));
 
@@ -160,32 +200,52 @@ function validateReferences(brief: InvestigationBrief): void {
       if (!factIds.has(factId)) throw new Error(`Unknown dependency fact reference: ${factId}`);
     }
   }
+
+  validateAcyclicIssueDependencies(brief.dependencies);
 }
 
-/**
- * Validate a planner proposal as a non-authoritative, exactly bound InvestigationBrief.
- * Passing this validator grants no Intent, truth, Decision, or execution authority.
- */
+function validateBindings(
+  brief: Pick<InvestigationBrief, "runId" | "intentVersionId" | "objective">,
+  expected: Pick<KnowledgeInvestigationPlanningInput, "runId" | "intentVersionId" | "objective">,
+): void {
+  if (brief.runId !== expected.runId) throw new Error("InvestigationBrief run binding mismatch.");
+  if (brief.intentVersionId !== expected.intentVersionId) {
+    throw new Error("InvestigationBrief IntentVersion binding mismatch.");
+  }
+  if (brief.objective !== expected.objective) throw new Error("InvestigationBrief objective binding mismatch.");
+}
+
+function validateIdentityAndReferences(
+  brief: Pick<InvestigationBrief, "issues" | "missingFacts" | "sourceRequirements" | "dependencies">,
+): void {
+  requireUnique(brief.issues.map((issue) => issue.issueId), "InvestigationIssue IDs");
+  requireUnique(brief.missingFacts.map((fact) => fact.factId), "MissingFactNeed IDs");
+  requireUnique(brief.sourceRequirements.map((item) => item.requirementId), "SourceRequirement IDs");
+  requireUnique(brief.dependencies.map((item) => item.dependencyId), "InvestigationDependency IDs");
+  validateReferences(brief);
+}
+
 export function validateInvestigationBrief(
   raw: unknown,
   expected: Pick<KnowledgeInvestigationPlanningInput, "runId" | "intentVersionId" | "objective">,
 ): InvestigationBrief {
   const parsed = investigationBriefSchema.parse(raw) as InvestigationBrief;
-  if (parsed.runId !== expected.runId) throw new Error("InvestigationBrief run binding mismatch.");
-  if (parsed.intentVersionId !== expected.intentVersionId) {
-    throw new Error("InvestigationBrief IntentVersion binding mismatch.");
-  }
-  if (parsed.objective !== expected.objective) throw new Error("InvestigationBrief objective binding mismatch.");
-
-  requireUnique(parsed.issues.map((issue) => issue.issueId), "InvestigationIssue IDs");
-  requireUnique(parsed.missingFacts.map((fact) => fact.factId), "MissingFactNeed IDs");
-  requireUnique(parsed.sourceRequirements.map((item) => item.requirementId), "SourceRequirement IDs");
-  requireUnique(parsed.dependencies.map((item) => item.dependencyId), "InvestigationDependency IDs");
-  validateReferences(parsed);
+  validateBindings(parsed, expected);
+  validateIdentityAndReferences(parsed);
   return Object.freeze(structuredClone(parsed));
 }
 
-/** A brief is current only for the exact Run, IntentVersion, and objective it was planned against. */
+function validateModelInvestigationBrief(
+  raw: unknown,
+  expected: Pick<KnowledgeInvestigationPlanningInput, "runId" | "intentVersionId" | "objective">,
+): InvestigationBriefProposal {
+  const parsed = modelInvestigationBriefSchema.parse(raw);
+  validateBindings(parsed, expected);
+  validateIdentityAndReferences(parsed);
+  const { createdAt: _untrustedCreatedAt, ...proposal } = parsed;
+  return Object.freeze(structuredClone(proposal)) as InvestigationBriefProposal;
+}
+
 export function investigationBriefIsCurrent(
   brief: InvestigationBrief,
   current: Pick<KnowledgeInvestigationPlanningInput, "runId" | "intentVersionId" | "objective">,
@@ -195,10 +255,6 @@ export function investigationBriefIsCurrent(
     && brief.objective === current.objective;
 }
 
-/**
- * Select at most one minimum material USER-only blocker. Researchable or merely
- * contextual facts remain Lattice investigation work rather than USER burden.
- */
 export function selectMaterialInvestigationClarification(
   brief: InvestigationBrief,
 ): MissingFactNeed | null {
@@ -221,6 +277,7 @@ export interface ModelGatewayKnowledgeInvestigationPlannerOptions {
   readonly model: string;
   readonly plannerKind?: string;
   readonly maxOutputTokens?: number;
+  readonly now?: () => Date;
 }
 
 function plannerRequest(
@@ -237,14 +294,23 @@ function plannerRequest(
       {
         role: "system",
         content: [
-          "Produce one JSON InvestigationBrief only; do not answer the user's objective.",
-          "Preserve runId, intentVersionId, and objective exactly as supplied.",
-          "Identify bounded issues to investigate, minimum missing facts, generic source characteristics, and dependencies.",
-          "Missing fact acquisitionMode must be USER_ONLY, RESEARCHABLE, or UNKNOWN.",
-          "Source authorityNeed must be PRIMARY_OR_OFFICIAL, HIGH_QUALITY_SECONDARY, GENERAL_ORIENTATION, or UNKNOWN.",
-          "Do not state conclusions, truth verdicts, preferences, requirements, decisions, or execution authorization.",
-          "Return strict JSON with: briefId, runId, intentVersionId, objective, issues, missingFacts, sourceRequirements, dependencies, plannerKind, createdAt.",
-          `plannerKind must be exactly ${plannerKind}.`,
+          "Produce exactly one JSON InvestigationBrief proposal and do not answer the user's objective.",
+          "Preserve runId, intentVersionId, and objective exactly as supplied; plannerKind must be exactly " + plannerKind + ".",
+          "Use this complete structure; arrays contain objects, not strings:",
+          '{"briefId":"string","runId":"string","intentVersionId":"string","objective":"string","issues":[{"issueId":"string","question":"string","materiality":"MATERIAL|CONTEXTUAL","rationale":"string"}],"missingFacts":[{"factId":"string","question":"string","acquisitionMode":"USER_ONLY|RESEARCHABLE|UNKNOWN","materiality":"MATERIAL|CONTEXTUAL","rationale":"string"}],"sourceRequirements":[{"requirementId":"string","issueIds":["issueId"],"authorityNeed":"PRIMARY_OR_OFFICIAL|HIGH_QUALITY_SECONDARY|GENERAL_ORIENTATION|UNKNOWN","jurisdictionNeeded":true,"currentnessNeeded":true,"description":"string"}],"dependencies":[{"dependencyId":"string","blockedIssueId":"issueId","dependsOnIssueIds":["issueId"],"dependsOnFactIds":["factId"],"rationale":"string"}],"plannerKind":"string"}.',
+          "Do not include createdAt; Lattice creates the accepted timestamp after validating model-controlled content.",
+          "All issueId, factId, requirementId, and dependencyId values must be unique within their own collections.",
+          "Every SourceRequirement.issueIds entry must reference an existing issueId and each SourceRequirement must reference at least one issue.",
+          "Every dependency.blockedIssueId must reference an existing issue; dependsOnIssueIds and dependsOnFactIds must reference existing IDs, contain no duplicates, and must not include the blockedIssueId itself. Do not create dangling or self references. Do not create cyclic issue dependencies.",
+          "MATERIAL means the item could materially change applicability, scope, or the investigation outcome; CONTEXTUAL means useful background that should not be treated as a necessary blocker.",
+          "USER_ONLY means Lattice cannot reliably obtain the fact through external research and must ultimately obtain it from the user or user-controlled context; RESEARCHABLE means Lattice should investigate it rather than burden the user; UNKNOWN means the acquisition burden cannot yet be classified responsibly.",
+          "Before marking a fact RESEARCHABLE, verify that Lattice can actually pursue that research from the supplied context. If public research first requires a missing user-controlled or private prerequisite needed to identify, locate, or interpret the target, represent that minimum prerequisite separately as USER_ONLY, or UNKNOWN when its burden cannot yet be classified; do not substitute incidental source or contact metadata for the prerequisite itself.",
+          "PRIMARY_OR_OFFICIAL means governing, first-party, or official authority is needed; HIGH_QUALITY_SECONDARY means reputable expert synthesis is appropriate; GENERAL_ORIENTATION means broad orientation is sufficient; UNKNOWN means the needed authority level cannot yet be determined.",
+          "Set jurisdictionNeeded true only when correct evidence or applicability materially depends on jurisdiction or location. Set currentnessNeeded true only when the evidence must reflect a current or time-sensitive state.",
+          "Dependencies are real investigation-order relationships: blockedIssueId identifies the issue that cannot yet be resolved, and the dependency arrays identify exactly which existing issues or facts it depends on. Do not add decorative dependencies.",
+          "Identify a bounded investigation: include only the smallest materially decision-relevant set of hidden issues and prerequisite facts needed to remove the user's knowledge barrier. When the objective is overbroad, narrow the investigation instead of enumerating everything conceivable or filling the output budget. Do not turn every useful contextual fact into a material blocker.",
+          "Before returning, verify that every emitted reference resolves to an emitted ID and that issue dependencies are acyclic. If a dependency cannot be stated consistently, omit it rather than guess or invent a reference.",
+          "Do not state conclusions, truth verdicts, governing rules as established facts, invented user preferences or requirements, decisions, execution authorization, or permission to act.",
         ].join(" "),
       },
       {
@@ -260,11 +326,11 @@ function plannerRequest(
   };
 }
 
-/** Model-assisted planner behind the existing non-authoritative Model Gateway. */
 export class ModelGatewayKnowledgeInvestigationPlanner implements KnowledgeInvestigationPlanner {
   readonly kind: string;
   private readonly model: string;
   private readonly maxOutputTokens: number;
+  private readonly now: () => Date;
 
   constructor(
     private readonly runtime: ModelRuntime,
@@ -273,6 +339,7 @@ export class ModelGatewayKnowledgeInvestigationPlanner implements KnowledgeInves
     this.kind = options.plannerKind ?? "model-gateway-investigation-brief-v0.1";
     this.model = options.model;
     this.maxOutputTokens = options.maxOutputTokens ?? 2_000;
+    this.now = options.now ?? (() => new Date());
   }
 
   async plan(input: KnowledgeInvestigationPlanningInput): Promise<InvestigationBrief> {
@@ -291,7 +358,12 @@ export class ModelGatewayKnowledgeInvestigationPlanner implements KnowledgeInves
     } catch (cause) {
       throw new Error("Investigation planner returned invalid JSON.", { cause });
     }
-    const brief = validateInvestigationBrief(raw, input);
+    const proposal = validateModelInvestigationBrief(raw, input);
+    if (proposal.plannerKind !== this.kind) throw new Error("InvestigationBrief planner binding mismatch.");
+    const brief = validateInvestigationBrief({
+      ...proposal,
+      createdAt: this.now().toISOString(),
+    }, input);
     if (brief.plannerKind !== this.kind) throw new Error("InvestigationBrief planner binding mismatch.");
     return brief;
   }
