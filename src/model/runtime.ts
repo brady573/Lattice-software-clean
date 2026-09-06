@@ -2,9 +2,9 @@ import {
   canonicalModelRequestIdentity,
   sanitizeProviderMetadata,
   stableModelJson,
-  validateCanonicalModelRequest,
   validateCanonicalModelResponse,
 } from "./canonical.js";
+import { validateCanonicalModelRequest } from "./structured-request.js";
 import {
   asModelProviderError,
   ModelProviderError,
@@ -301,6 +301,15 @@ export class ModelRuntime {
     const correlationId = requireNonEmpty(options.correlationId, "correlationId");
     const invocation = normalizeInvocationRoute(options.invocation);
     const request = validateCanonicalModelRequest(rawRequest);
+    if (
+      request.structuredOutput !== undefined
+      && this.provider.structuredOutputCapability !== "json_schema"
+    ) {
+      throw new ModelProviderError(
+        "unsupported_capability",
+        `Model provider ${this.provider.kind} does not support requested structured output.`,
+      );
+    }
     const requestBytes = Buffer.byteLength(stableModelJson(request), "utf8");
     if (requestBytes > this.maxRequestBytes) {
       throw new ModelProviderError(
