@@ -20,6 +20,8 @@ const PRESERVED_CASES = Object.freeze([
       "The semiconductor's depletion region widens under reverse bias because the applied potential increases the built-in electric field and drives majority carriers away from the junction.",
     raw:
       "When reverse bias is applied, the depletion region widens because the voltage increases the built‑in electric field and pushes majority carriers away from the junction.",
+    accepted:
+      "When reverse bias is applied, the depletion region widens because the voltage increases the built‑in electric field and pushes majority carriers away from the junction.",
   }),
   Object.freeze({
     id: "B",
@@ -27,12 +29,16 @@ const PRESERVED_CASES = Object.freeze([
       "The available measurements do not establish that additive Q causes the observed failure; they suggest only a possible association.",
     raw:
       "The measurements we have don’t show that additive Q causes the failure; they only suggest a possible association.",
+    accepted:
+      "The measurements we have don’t show that additive Q causes the failure; they only suggest a possible association.",
   }),
   Object.freeze({
     id: "C",
     canonical:
       "The reported efficiency gain applies only when the device operates below 40 °C under continuous load; performance under intermittent load was not evaluated.",
     raw:
+      "The efficiency gain is only valid when the device runs continuously at temperatures below 40 °C; performance under intermittent load was not evaluated.",
+    accepted:
       "The efficiency gain is only valid when the device runs continuously at temperatures below 40 °C; performance under intermittent load was not evaluated.",
   }),
 ]);
@@ -153,10 +159,10 @@ test("preserved live A/B/C outputs replay through the guard and final Solandra p
   for (const fixture of PRESERVED_CASES) {
     await t.test(`preserved Case ${fixture.id}`, async () => {
       const result = await replayPreservedLiveOutput(fixture);
-      assert.equal(result.guardResult, fixture.raw);
+      assert.equal(result.guardResult, fixture.accepted);
       assert.equal(
         result.presentation,
-        `Unresolved as a source report: ${fixture.raw} ${SOURCE_REPORT_SUFFIX}`,
+        `Unresolved as a source report: ${fixture.accepted} ${SOURCE_REPORT_SUFFIX}`,
       );
       assert.equal(result.canonicalUnchanged, true);
 
