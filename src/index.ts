@@ -1,3 +1,4 @@
+import { createAlphaDecisionRuntimeComposition } from "./decision/alpha-decision-composition.js";
 import { registerModelAssistanceApi } from "./model-assistance-api.js";
 import { createConfiguredModelAssistanceCapability } from "./model-assistance-composition.js";
 import { createRuntimeApp } from "./runtime-app.js";
@@ -16,9 +17,13 @@ try {
   }
 
   const modelAssistance = await createConfiguredModelAssistanceCapability(config);
+  const decisionCapability = createAlphaDecisionRuntimeComposition();
   let app;
   try {
-    app = await createRuntimeApp(config, { modelAssistanceService: modelAssistance });
+    app = await createRuntimeApp(config, {
+      ...decisionCapability,
+      modelAssistanceService: modelAssistance,
+    });
   } catch (error) {
     await modelAssistance.close();
     throw error;
