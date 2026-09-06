@@ -149,8 +149,10 @@ test("completed canonical Knowledge response adds downstream assistantMessage wi
     }>();
     assert.equal(body.outcome.kind, "KNOWLEDGE");
     assert.equal("decision" in body.outcome, false);
-    assert.ok(body.presentation.assistantMessage.length > 0);
-    assert.match(body.presentation.assistantMessage, /No validated external findings/u);
+    assert.equal(
+      body.presentation.assistantMessage,
+      "I couldn't establish enough relevant evidence to answer that reliably.",
+    );
     assert.doesNotMatch(body.presentation.assistantMessage, /I found \d+ supported source report/u);
   } finally {
     await app.close();

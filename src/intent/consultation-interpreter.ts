@@ -53,10 +53,46 @@ export interface ConsultationInterpreter {
   interpret(input: ConsultationInterpretationInput): Promise<ConsultationInterpretationProposal>;
 }
 
+const SHORT_FORM_PATTERN = /\b[A-Z]{3}\b/gu;
+
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+}
+
+/**
+ * Return a short form whose meaning is material to a non-definition request
+ * but is not supplied by the USER in the same turn. This never resolves the
+ * term itself; it only decides whether one concise clarification is required.
+ */
+function unresolvedShortForm(message: string): string | undefined {
+  const matches = [...message.matchAll(SHORT_FORM_PATTERN)]
+    .map((match) => match[0])
+    .filter((value, index, values) => values.indexOf(value) === index);
+
+  for (const shortForm of matches) {
+    const escaped = escapeRegex(shortForm);
+    const explicitDefinitionRequest = new RegExp(
+      `^(?:what\\s+(?:does|is)\\s+${escaped}\\b|define\\s+${escaped}\\b)`,
+      "iu",
+    ).test(message.trim());
+    if (explicitDefinitionRequest) continue;
+
+    const suppliedExpansion = new RegExp(
+      `(?:${escaped}\\s*(?:means|stands\\s+for|=)\\s+[^?.!]{2,}|[^?.!]{4,}\\(\\s*${escaped}\\s*\\)|${escaped}\\s*\\(\\s*[^)]{4,}\\))`,
+      "iu",
+    ).test(message);
+    if (suppliedExpansion) continue;
+
+    return shortForm;
+  }
+  return undefined;
+}
+
 /**
  * Conservative Product default. It preserves ordinary free-form USER language
- * verbatim and detects only an explicit, reversible preparation request. It
- * proposes no decision semantics and therefore cannot manufacture criteria,
+ * verbatim, asks for an unresolved material short-form meaning instead of
+ * guessing it, and detects only an explicit, reversible preparation request.
+ * It proposes no decision semantics and therefore cannot manufacture criteria,
  * constraints, priorities, candidates, or a qualified decision need.
  */
 export class ConservativeConsultationInterpreter implements ConsultationInterpreter {
@@ -85,6 +121,9 @@ export class ConservativeConsultationInterpreter implements ConsultationInterpre
     const normalized = message.toLocaleLowerCase("en-US");
     const missingReferent = !hasObjective
       && /^(?:is|was|will|would|could|can|should)\s+(?:this|that|it|these|those|they)\b/iu.test(message);
+    const ambiguousShortForm = !hasObjective && !missingReferent
+      ? unresolvedShortForm(message)
+      : undefined;
     const asksToPrepare = /\b(?:prepare|create|make|build|draft|write|compose)\b/u.test(normalized);
     const resourceNeed: ConsultationResourceNeed = asksToPrepare && /\b(?:checklist|check list)\b/u.test(normalized)
       ? "CHECKLIST"
@@ -106,7 +145,9 @@ export class ConservativeConsultationInterpreter implements ConsultationInterpre
       resourceNeed,
       ...(missingReferent
         ? { clarificationQuestion: "What does the referenced subject refer to? Please restate the question with that material context." }
-        : {}),
+        : ambiguousShortForm
+          ? { clarificationQuestion: `What does “${ambiguousShortForm}” mean in this question?` }
+          : {}),
     };
   }
 }

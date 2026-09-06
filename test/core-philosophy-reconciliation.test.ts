@@ -29,7 +29,11 @@ test("Core philosophy controls the current Product-design read order and 1.0 def
   assert.doesNotMatch(living, /weighted preference scoring using current fixture assumptions/u);
   assert.doesNotMatch(living, /Implement the approved offline-prototype UX/u);
   assert.match(foundational, /Knowledge and non-decision Action Preparation have no DecisionPlan/u);
-  assert.match(roadmap, /OD-001 — RESOLVED \/ SUPERSEDED BY CORE RECONCILIATION/u);
+  assert.match(roadmap, /OWNER-DIRECTED CURRENT EXECUTION ROADMAP — SUBORDINATE TO THE CORE LATTICE PHILOSOPHY/u);
+  assert.match(
+    roadmap,
+    /does not amend or supersede `docs\/design\/The-Core-Lattice-Philosophy\.md`, which remains the sole highest Product philosophy authority/u,
+  );
   assert.doesNotMatch(roadmap, /exactly Listen \/ Current understanding \/ Provide knowledge/u);
   assert.doesNotMatch(roadmap, /Lattice 1\.0 is a \*\*Trusted Decision Product\*\*/u);
   assert.match(integrity, /subordinate to `The-Core-Lattice-Philosophy\.md`/u);

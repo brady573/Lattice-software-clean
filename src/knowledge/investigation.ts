@@ -12,24 +12,26 @@ const MAX_RELEVANCE_TEXT_CHARS = 16_000;
 
 const STOP_WORDS = new Set([
   "about", "after", "again", "also", "and", "are", "before", "being", "can", "could", "does",
-  "from", "have", "how", "into", "its", "know", "more", "should", "that", "the", "their", "then", "there",
-  "these", "they", "this", "through", "understand", "using", "want", "what", "when", "where", "which",
-  "who", "why", "with", "would", "your",
+  "from", "have", "how", "into", "its", "know", "mean", "means", "meant", "more", "should", "stands",
+  "that", "the", "their", "then", "there", "these", "they", "this", "through", "understand", "using", "want",
+  "what", "when", "where", "which", "who", "why", "with", "would", "your",
 ]);
 
 const GENERIC_RELATION_TERMS = new Set([
   "cause", "causes", "caused", "causing", "direction", "directions", "east", "effect", "effects", "find",
   "happen", "happens", "happened", "happening", "location", "make", "makes", "made", "mechanism", "navigate",
   "navigation", "north", "occur", "occurs", "occurred", "occurring", "orient", "orientation", "sense", "sensing",
-  "south", "west",
+  "south", "west", "affect", "affects", "affected", "affecting",
 ]);
 
 const CAUSE_SEEKING_OBJECTIVE_PATTERN = /\b(?:why|cause|causes|caused|causing|mechanism)\b/iu;
+const CAUSE_SEEKING_FOLLOW_UP_PATTERN = /^(?:why\??|explain(?:\s+that)?(?:\s+more)?|tell\s+me\s+more)\.?$/iu;
 const LOCAL_CAUSAL_RELATION_PATTERN = /\b(?:because|cause|causes|caused|causing|due|affect|affects|affected|affecting|lead|leads|led|leading|result|results|resulted|resulting|require|requires|required|requiring|react|reacts|reacted|reacting|trigger|triggers|triggered|triggering|produce|produces|produced|producing|create|creates|created|creating|make|makes|made|making|drive|drives|drove|driven|driving)\b/iu;
 const EXPLANATION_FOLLOWS_PATTERN = /\b(?:because|due\s+to)\b/iu;
 const SUBJECT_ANCHORED_MECHANISM_PATTERN = /\b(?:require|requires|required|requiring|react|reacts|reacted|reacting)\b/iu;
 const EXPLAINED_SUBJECT_PATTERN = /\b(?:(?:is|are|was|were|be|been|being)\s+(?:caused|affected)\s+by|(?:result|results|resulted|resulting)\s+from)\b/iu;
 const EFFECT_FOLLOWS_PATTERN = /\b(?:cause|causes|caused|causing|affect|affects|affected|affecting|lead|leads|led|leading|result|results|resulted|resulting|trigger|triggers|triggered|triggering|produce|produces|produced|producing|create|creates|created|creating|make|makes|made|making|drive|drives|drove|driven|driving)\b/iu;
+const SHORT_FORM_PATTERN = /\b[A-Z]{3}\b/gu;
 
 function normalizedTokens(value: string): string[] {
   return value
@@ -65,6 +67,17 @@ function boundedQuery(parts: readonly string[]): string {
   return parts.join(" ").replace(/\s+/gu, " ").trim().slice(0, MAX_QUERY_CHARS);
 }
 
+function objectiveShortFormTerms(objective: string): string[] {
+  return unique([...objective.matchAll(SHORT_FORM_PATTERN)].map((match) => match[0]!.toLocaleLowerCase("en-US")));
+}
+
+function clarificationContextTerms(objective: string, latestContext: string): string[] {
+  if (objectiveShortFormTerms(objective).length === 0 || !latestContext) return [];
+  if (CAUSE_SEEKING_FOLLOW_UP_PATTERN.test(latestContext)) return [];
+  if (/\b(?:source|sources|citation|citations|evidence|simpler|simply|plain language)\b/iu.test(latestContext)) return [];
+  return unique(normalizedTokens(latestContext)).slice(0, 6);
+}
+
 export interface KnowledgeInvestigationQueryInput {
   readonly objective: string;
   readonly context: readonly string[];
@@ -90,12 +103,18 @@ export class DeterministicKnowledgeInvestigationQueryDeriver implements Knowledg
     const objectiveTerms = unique(normalizedTokens(objective)).slice(0, 8);
     const latestContext = input.context.at(-1)?.trim() ?? "";
     const contextTerms = unique(normalizedTokens(latestContext)).slice(0, 4);
+    const clarificationTerms = clarificationContextTerms(objective, latestContext);
+    const shortFormTerms = new Set(objectiveShortFormTerms(objective));
     const concepts = conceptExpansion(`${objective}\n${latestContext}`);
     const specificTerms = objectiveTerms.filter((term) => !GENERIC_RELATION_TERMS.has(term));
+    const specificWithoutShortForm = specificTerms.filter((term) => !shortFormTerms.has(term));
     const relationTerms = objectiveTerms.filter((term) => GENERIC_RELATION_TERMS.has(term));
     const anchor = specificTerms[0] ?? objectiveTerms[0];
 
     const candidates: string[] = [];
+    if (clarificationTerms.length > 0) {
+      candidates.push(boundedQuery([...clarificationTerms, ...specificWithoutShortForm, ...concepts]));
+    }
     if (anchor && concepts.length > 0) {
       candidates.push(boundedQuery([anchor, ...concepts]));
     }
@@ -153,11 +172,16 @@ function relevanceSegments(input: KnowledgeRelevanceQualificationInput): string[
   ));
 }
 
+function causeSeeking(input: KnowledgeRelevanceQualificationInput): boolean {
+  return CAUSE_SEEKING_OBJECTIVE_PATTERN.test(input.objective)
+    || CAUSE_SEEKING_FOLLOW_UP_PATTERN.test(input.context.at(-1)?.trim() ?? "");
+}
+
 function locallyAnswersCauseSeekingObjective(
   input: KnowledgeRelevanceQualificationInput,
   specificObjectiveTerms: readonly string[],
 ): boolean {
-  if (!CAUSE_SEEKING_OBJECTIVE_PATTERN.test(input.objective)) return true;
+  if (!causeSeeking(input)) return true;
   const minimumSpecificMatches = Math.min(2, specificObjectiveTerms.length);
   if (minimumSpecificMatches === 0) return false;
 
@@ -206,7 +230,13 @@ export class ObjectiveKnowledgeRelevanceQualifier implements KnowledgeRelevanceQ
     const objectiveTerms = unique(normalizedTokens(input.objective));
     const queryTerms = unique(input.queries.flatMap((query) => normalizedTokens(query)))
       .filter((term) => !objectiveTerms.includes(term));
-    const specificObjectiveTerms = objectiveTerms.filter((term) => !GENERIC_RELATION_TERMS.has(term));
+    const latestContext = input.context.at(-1)?.trim() ?? "";
+    const clarifiedShortFormTerms = clarificationContextTerms(input.objective, latestContext).length > 0
+      ? new Set(objectiveShortFormTerms(input.objective))
+      : new Set<string>();
+    const specificObjectiveTerms = objectiveTerms.filter(
+      (term) => !GENERIC_RELATION_TERMS.has(term) && !clarifiedShortFormTerms.has(term),
+    );
     const anchorTerms = specificObjectiveTerms.slice(0, 3);
     const candidateText = [
       input.source.title,
@@ -234,9 +264,11 @@ export class ObjectiveKnowledgeRelevanceQualifier implements KnowledgeRelevanceQ
       rationale: !existingRelevance
         ? "Retrieved material lacks enough objective-specific overlap to enter visible Knowledge."
         : answerRelevant
-          ? CAUSE_SEEKING_OBJECTIVE_PATTERN.test(input.objective)
+          ? causeSeeking(input)
             ? "Retrieved material locally links causal/mechanistic relation evidence with enough objective-specific terms and addresses the requested explanatory relationship."
-            : "Retrieved material overlaps the objective-specific or derived investigation concepts."
+            : clarifiedShortFormTerms.size > 0
+              ? "Retrieved material overlaps the objective-specific or USER-clarified investigation concepts."
+              : "Retrieved material overlaps the objective-specific or derived investigation concepts."
           : "Topic/concept overlap is insufficient because the causal relation is not locally addressed in the required direction for the requested explanatory relationship.",
       matchedTerms: unique([...objectiveMatches, ...queryMatches]),
     };
