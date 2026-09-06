@@ -1,0 +1,77 @@
+# Evidence-only diagnostic for PR #11 semantic repair.
+name: Evidence — NVIDIA Guided JSON Renovation
+
+on:
+  push:
+    branches:
+      - evidence/nvidia-guided-json-renovation-pr11-8e614a4
+
+permissions:
+  contents: read
+
+jobs:
+  discriminator:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      EXPECTED_HEAD: 63aa1c39e9e22c66f8374cc9f7d05ca1793249fd
+      EXPECTED_TREE: 8e614a4bcc8b31f118a8e206ad6c2897d7a789aa
+      NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
+    steps:
+      - name: Checkout evidence harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Checkout exact semantic-repair subject
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: 63aa1c39e9e22c66f8374cc9f7d05ca1793249fd
+          path: subject
+          persist-credentials: false
+
+      - name: Provision Node 24
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: subject/package-lock.json
+
+      - name: Verify exact frozen diagnostic subject
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C subject rev-parse HEAD)" = "$EXPECTED_HEAD"
+          test "$(git -C subject rev-parse HEAD^{tree})" = "$EXPECTED_TREE"
+          test -n "$NVIDIA_API_KEY"
+
+      - name: Install locked dependencies
+        working-directory: subject
+        run: npm ci
+
+      - name: Build exact subject
+        working-directory: subject
+        run: npm run build
+
+      - name: Run one renovation guided_json discriminator
+        run: |
+          node tools/evidence-nvidia-guided-json-renovation.mjs \
+            --subject-root subject \
+            --output evidence-output/guided-json-renovation.json
+
+      - name: Hash preserved evidence
+        if: always()
+        shell: bash
+        run: |
+          if [ -d evidence-output ]; then
+            sha256sum evidence-output/*.json | tee evidence-output/SHA256SUMS.txt
+          fi
+
+      - name: Upload complete preserved evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: investigation-planner-nvidia-guided-json-renovation
+          path: evidence-output/
+          if-no-files-found: error
+          retention-days: 7
