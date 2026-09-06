@@ -10,6 +10,7 @@ import type {
 import { registerModelAssistanceApi } from "../src/model-assistance-api.js";
 import { ModelAssistanceCapabilityService } from "../src/model-assistance-capability.js";
 import { MemoryModelAssistanceAuthorizationStore } from "../src/model-assistance-store.js";
+import type { ModelInvocationProvenance } from "../src/model/types.js";
 import type {
   KnowledgeSimplificationAttempt,
   KnowledgeSimplificationInput,
@@ -20,6 +21,18 @@ import { resolveRuntimeConfig } from "../src/runtime-config.js";
 
 const ORIGINAL = "C4 photosynthesis spatially separates initial carbon fixation from the Calvin cycle, which may reduce photorespiration under hot, dry conditions.";
 const SIMPLE = "In C4 photosynthesis, plants first capture carbon separately from the Calvin cycle. This may reduce photorespiration when conditions are hot and dry.";
+const PRODUCT_PROVENANCE: ModelInvocationProvenance = Object.freeze({
+  executionClass: "LIVE_DIRECT",
+  routeMode: "PINNED",
+  requestedProvider: "qualified-fixture",
+  requestedModel: "qualified-fixture-model",
+  actualProvider: "qualified-fixture",
+  actualModel: "qualified-fixture-model",
+  brokerIdentity: null,
+  brokerVersion: null,
+  upstreamRequestId: "a2-fixture-request",
+  routeProvenance: "COMPLETE",
+});
 
 class SourceProvider implements KnowledgeAcquisitionProvider {
   readonly kind = "a2-solandra-source";
@@ -51,22 +64,7 @@ class ProductDelegate implements KnowledgeSimplifier {
   async simplifyWithAudit(_input: KnowledgeSimplificationInput): Promise<KnowledgeSimplificationAttempt> {
     this.calls += 1;
     if (this.fail) return Object.freeze({ status: "PROVIDER_FAILURE", text: null, errorCode: "unavailable" });
-    return Object.freeze({
-      status: "SIMPLIFIED",
-      text: SIMPLE,
-      invocationProvenance: {
-        executionClass: "LIVE_DIRECT",
-        routeMode: "PINNED",
-        requestedProvider: "qualified-fixture",
-        requestedModel: "qualified-fixture-model",
-        actualProvider: "qualified-fixture",
-        actualModel: "qualified-fixture-model",
-        brokerIdentity: null,
-        brokerVersion: null,
-        upstreamRequestId: "a2-fixture-request",
-        routeProvenance: "COMPLETE",
-      },
-    });
+    return Object.freeze({ status: "SIMPLIFIED", text: SIMPLE, invocationProvenance: PRODUCT_PROVENANCE });
   }
   async simplify(input: KnowledgeSimplificationInput): Promise<string | null> {
     const result = await this.simplifyWithAudit(input);
