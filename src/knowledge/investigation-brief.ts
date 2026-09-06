@@ -362,7 +362,10 @@ const locatorTokens = new Set([
 ]);
 
 const jurisdictionPattern =
-  /\b(jurisdiction|location|located|state|province|city|county|country|municipality|municipal|region|district|zip(?:\s+code)?|postal\s+code)\b/iu;
+  /\b(jurisdiction|state|province|city|county|country|municipality|municipal|region|district|zip(?:\s+code)?|postal\s+code)\b/iu;
+
+const scopedLocationPattern =
+  /(?:\b(?:applicable|business|governing|home|operation|project|property|site)\b.{0,48}\b(?:location|located)\b|\b(?:location|located)\b.{0,48}\b(?:business|home|operation|project|property|site)\b)/iu;
 
 const publicRulePattern =
   /\b(building|code|compliance|law|legal|licen[cs](?:e|ing)|local|municipal|permit|regulation|regulatory|rule|tax|zoning)\b/iu;
@@ -630,7 +633,8 @@ function hasSuppliedJurisdictionHint(input: KnowledgeInvestigationPlanningInput)
 }
 
 function isJurisdictionFact(fact: MissingFactNeed): boolean {
-  return jurisdictionPattern.test(`${fact.question} ${fact.rationale}`);
+  const text = `${fact.question} ${fact.rationale}`;
+  return jurisdictionPattern.test(text) || scopedLocationPattern.test(text);
 }
 
 function normalizeJurisdictionResearchKeys(
