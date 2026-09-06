@@ -215,24 +215,27 @@ test("plain-language follow-up changes presentation only and preserves canonical
     assert.equal(simpler.accepted.intentVersionId, intentVersionId);
     assert.equal(simpler.accepted.acceptedUnderstanding, objective);
     assert.equal(simpler.body.outcome.findings.length, 1);
-    assert.equal(simpler.body.outcome.findings[0]?.claimId, "claim-c4");
-    assert.equal(simpler.body.outcome.findings[0]?.text, TECHNICAL_ORIGINAL);
-    assert.equal(simpler.body.outcome.findings[0]?.status, initial.body.outcome.findings[0]?.status);
-    assert.equal(simpler.body.outcome.findings[0]?.confidence, initial.body.outcome.findings[0]?.confidence);
-    assert.deepEqual(
-      simpler.body.outcome.findings[0]?.contradictoryEvidenceIds,
-      initial.body.outcome.findings[0]?.contradictoryEvidenceIds,
-    );
-    assert.equal(simpler.body.outcome.provenance[0]?.sourceId, "source-c4");
+    assert.equal(simplifier.inputs.length, 1);
+    const simplifierInput = simplifier.inputs[0];
+    assert.ok(simplifierInput);
+    const canonicalFinding = simpler.body.outcome.findings[0];
+    assert.ok(canonicalFinding);
+    assert.equal(canonicalFinding.claimId, simplifierInput.finding.claimId);
+    assert.equal(canonicalFinding.text, TECHNICAL_ORIGINAL);
+    assert.equal(canonicalFinding.text, simplifierInput.finding.text);
+    assert.equal(canonicalFinding.status, simplifierInput.finding.status);
+    assert.equal(canonicalFinding.confidence, simplifierInput.finding.confidence);
+    assert.deepEqual(canonicalFinding.evidenceIds, simplifierInput.finding.evidenceIds);
+    assert.deepEqual(canonicalFinding.contradictoryEvidenceIds, simplifierInput.finding.contradictoryEvidenceIds);
+    assert.deepEqual(canonicalFinding.temporalQualifiers, simplifierInput.finding.temporalQualifiers);
     assert.equal(simpler.body.outcome.provenance[0]?.canonicalUri, "https://knowledge.example/c4");
+    assert.ok(simpler.body.outcome.provenance[0]?.sourceId);
     assert.equal("decision" in simpler.body.outcome, false);
     assert.equal(
       simpler.body.outcome.uncertainties.some((item) => item.includes("does not perform genuine language simplification")),
       false,
     );
 
-    assert.equal(simplifier.inputs.length, 1);
-    assert.equal(simplifier.inputs[0]?.finding.text, TECHNICAL_ORIGINAL);
     assert.match(simpler.body.presentation.assistantMessage, /first capture carbon separately/u);
     assert.match(simpler.body.presentation.assistantMessage, /may reduce photorespiration/u);
     assert.match(simpler.body.presentation.assistantMessage, /hot and dry/u);
@@ -245,9 +248,14 @@ test("plain-language follow-up changes presentation only and preserves canonical
       url: `/api/v1/runs/${simpler.accepted.runId}`,
     });
     assert.equal(runResponse.statusCode, 200, runResponse.body);
-    const run = runResponse.json<{ decision: unknown; events: Array<{ type: string }> }>();
+    const run = runResponse.json<{
+      decision: unknown;
+      events: Array<{ type: string }>;
+      truthAssessmentIds: string[];
+    }>();
     assert.equal(run.decision, null);
     assert.equal(run.events.some((event) => event.type === "DECIDING"), false);
+    assert.deepEqual(simpler.body.outcome.truthAssessmentIds, run.truthAssessmentIds);
 
     assert.deepEqual(provider.requests.map((request) => request.context), [
       [],
