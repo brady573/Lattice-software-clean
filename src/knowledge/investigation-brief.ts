@@ -134,8 +134,6 @@ const modelInvestigationBriefSchema = z.object({
   sourceRequirements: z.array(sourceRequirementSchema).max(8),
   dependencies: z.array(dependencySchema).max(12),
   plannerKind: idSchema,
-  // createdAt is accepted only as untrusted model residue and is never propagated.
-  // The request explicitly tells the model to omit it; Lattice owns accepted creation time.
   createdAt: z.unknown().optional(),
 }).strict();
 
@@ -145,6 +143,29 @@ function requireUnique(values: readonly string[], label: string): void {
   if (new Set(values).size !== values.length) {
     throw new Error(`${label} must contain unique IDs.`);
   }
+}
+
+function validateAcyclicIssueDependencies(dependencies: readonly InvestigationDependency[]): void {
+  const graph = new Map<string, readonly string[]>();
+  for (const dependency of dependencies) {
+    const existing = graph.get(dependency.blockedIssueId) ?? [];
+    graph.set(dependency.blockedIssueId, [...existing, ...dependency.dependsOnIssueIds]);
+  }
+
+  const visiting = new Set<string>();
+  const visited = new Set<string>();
+  const visit = (issueId: string): void => {
+    if (visited.has(issueId)) return;
+    if (visiting.has(issueId)) {
+      throw new Error("InvestigationDependency issue graph must be acyclic.");
+    }
+    visiting.add(issueId);
+    for (const dependencyIssueId of graph.get(issueId) ?? []) visit(dependencyIssueId);
+    visiting.delete(issueId);
+    visited.add(issueId);
+  };
+
+  for (const issueId of graph.keys()) visit(issueId);
 }
 
 function validateReferences(
@@ -179,6 +200,8 @@ function validateReferences(
       if (!factIds.has(factId)) throw new Error(`Unknown dependency fact reference: ${factId}`);
     }
   }
+
+  validateAcyclicIssueDependencies(brief.dependencies);
 }
 
 function validateBindings(
@@ -202,10 +225,6 @@ function validateIdentityAndReferences(
   validateReferences(brief);
 }
 
-/**
- * Validate a planner proposal as a non-authoritative, exactly bound InvestigationBrief.
- * Passing this validator grants no Intent, truth, Decision, or execution authority.
- */
 export function validateInvestigationBrief(
   raw: unknown,
   expected: Pick<KnowledgeInvestigationPlanningInput, "runId" | "intentVersionId" | "objective">,
@@ -227,7 +246,6 @@ function validateModelInvestigationBrief(
   return Object.freeze(structuredClone(proposal)) as InvestigationBriefProposal;
 }
 
-/** A brief is current only for the exact Run, IntentVersion, and objective it was planned against. */
 export function investigationBriefIsCurrent(
   brief: InvestigationBrief,
   current: Pick<KnowledgeInvestigationPlanningInput, "runId" | "intentVersionId" | "objective">,
@@ -237,10 +255,6 @@ export function investigationBriefIsCurrent(
     && brief.objective === current.objective;
 }
 
-/**
- * Select at most one minimum material USER-only blocker. Researchable or merely
- * contextual facts remain Lattice investigation work rather than USER burden.
- */
 export function selectMaterialInvestigationClarification(
   brief: InvestigationBrief,
 ): MissingFactNeed | null {
@@ -287,13 +301,15 @@ function plannerRequest(
           "Do not include createdAt; Lattice creates the accepted timestamp after validating model-controlled content.",
           "All issueId, factId, requirementId, and dependencyId values must be unique within their own collections.",
           "Every SourceRequirement.issueIds entry must reference an existing issueId and each SourceRequirement must reference at least one issue.",
-          "Every dependency.blockedIssueId must reference an existing issue; dependsOnIssueIds and dependsOnFactIds must reference existing IDs, contain no duplicates, and must not include the blockedIssueId itself. Do not create dangling or self references.",
+          "Every dependency.blockedIssueId must reference an existing issue; dependsOnIssueIds and dependsOnFactIds must reference existing IDs, contain no duplicates, and must not include the blockedIssueId itself. Do not create dangling, self, or cyclic issue dependencies.",
           "MATERIAL means the item could materially change applicability, scope, or the investigation outcome; CONTEXTUAL means useful background that should not be treated as a necessary blocker.",
           "USER_ONLY means Lattice cannot reliably obtain the fact through external research and must ultimately obtain it from the user or user-controlled context; RESEARCHABLE means Lattice should investigate it rather than burden the user; UNKNOWN means the acquisition burden cannot yet be classified responsibly.",
+          "Before marking a fact RESEARCHABLE, verify that Lattice can actually pursue that research from the supplied context. If public research first requires a missing user-controlled or private prerequisite needed to identify, locate, or interpret the target, represent that minimum prerequisite separately as USER_ONLY, or UNKNOWN when its burden cannot yet be classified; do not substitute incidental source or contact metadata for the prerequisite itself.",
           "PRIMARY_OR_OFFICIAL means governing, first-party, or official authority is needed; HIGH_QUALITY_SECONDARY means reputable expert synthesis is appropriate; GENERAL_ORIENTATION means broad orientation is sufficient; UNKNOWN means the needed authority level cannot yet be determined.",
           "Set jurisdictionNeeded true only when correct evidence or applicability materially depends on jurisdiction or location. Set currentnessNeeded true only when the evidence must reflect a current or time-sensitive state.",
           "Dependencies are real investigation-order relationships: blockedIssueId identifies the issue that cannot yet be resolved, and the dependency arrays identify exactly which existing issues or facts it depends on. Do not add decorative dependencies.",
-          "Identify a bounded investigation: material hidden issues, minimum missing facts, useful source characteristics, and meaningful dependencies. Do not turn every useful contextual fact into a material blocker.",
+          "Identify a bounded investigation: include only the smallest materially decision-relevant set of hidden issues and prerequisite facts needed to remove the user's knowledge barrier. When the objective is overbroad, narrow the investigation instead of enumerating everything conceivable or filling the output budget. Do not turn every useful contextual fact into a material blocker.",
+          "Before returning, verify that every emitted reference resolves to an emitted ID and that issue dependencies are acyclic. If a dependency cannot be stated consistently, omit it rather than guess or invent a reference.",
           "Do not state conclusions, truth verdicts, governing rules as established facts, invented user preferences or requirements, decisions, execution authorization, or permission to act.",
         ].join(" "),
       },
@@ -310,7 +326,6 @@ function plannerRequest(
   };
 }
 
-/** Model-assisted planner behind the existing non-authoritative Model Gateway. */
 export class ModelGatewayKnowledgeInvestigationPlanner implements KnowledgeInvestigationPlanner {
   readonly kind: string;
   private readonly model: string;
