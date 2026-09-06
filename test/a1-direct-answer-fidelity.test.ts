@@ -7,28 +7,12 @@ import { renderKnowledgeResponseForRun } from "../src/presentation/solandra/know
 function run(objective: string): LatticeRun {
   return {
     id: "11111111-1111-4111-8111-111111111111",
-    conversationId: "a1-fidelity",
     request: {
       kind: "consultation",
       objective,
       context: [],
-      decisionNeed: "NONE",
-      resourceNeed: "NONE",
-      sourceMessageId: "source-message",
-      sourceMessageDigest: "a".repeat(64),
-      intentVersion: 1,
-      intentScopeId: "consultation:a1-fidelity",
-      intentVersionId: "22222222-2222-4222-8222-222222222222",
     },
-    status: "COMPLETED",
-    version: 1,
-    createdAt: "2026-09-06T17:00:00.000Z",
-    updatedAt: "2026-09-06T17:00:00.000Z",
-    events: [],
-    truth: null,
-    decision: null,
-    explanation: null,
-  };
+  } as unknown as LatticeRun;
 }
 
 function knowledge(objective: string, text: string): KnowledgeOutcome {
