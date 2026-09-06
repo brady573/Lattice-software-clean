@@ -13,6 +13,7 @@ export interface PinnedExternalResearchProviderOptions {
   readonly apiKey: string;
   readonly maxResponseBytes?: number;
   readonly fetchImpl?: typeof fetch;
+  readonly structuredOutputMode?: "nvidia-guided-json";
 }
 
 function nonEmpty(value: string, label: string): string {
@@ -78,17 +79,31 @@ async function readBoundedText(response: Response, maxBytes: number): Promise<st
   return new TextDecoder().decode(combined);
 }
 
+function normalizeUsage(value: unknown): unknown {
+  const usage = asRecord(value);
+  if (usage === null) return undefined;
+  const inputTokens = usage.prompt_tokens;
+  const outputTokens = usage.completion_tokens;
+  if (!Number.isSafeInteger(inputTokens) || !Number.isSafeInteger(outputTokens)) {
+    return undefined;
+  }
+  return { inputTokens, outputTokens };
+}
+
 /**
- * Narrow M9-5 live-model adapter. It supports one pinned external HTTPS route
- * and tool-call output only; it has no routing, fallback, or truth authority.
+ * Narrow pinned external HTTPS adapter. Existing tool-call research behavior is
+ * preserved; an explicitly configured adapter may additionally honor the
+ * provider-neutral json_schema structured-output request.
  */
 export class PinnedExternalResearchModelProvider implements ModelProvider {
   readonly kind: string;
+  readonly structuredOutputCapability?: "json_schema";
   private readonly baseUrl: string;
   private readonly providerId: string;
   private readonly apiKey: string;
   private readonly maxResponseBytes: number;
   private readonly fetchImpl: typeof fetch;
+  private readonly structuredOutputMode: "nvidia-guided-json" | undefined;
 
   constructor(options: PinnedExternalResearchProviderOptions) {
     const url = new URL(options.baseUrl);
@@ -107,12 +122,50 @@ export class PinnedExternalResearchModelProvider implements ModelProvider {
       throw new Error("maxResponseBytes must be a positive safe integer.");
     }
     this.fetchImpl = options.fetchImpl ?? fetch;
+    this.structuredOutputMode = options.structuredOutputMode;
+    if (this.structuredOutputMode !== undefined) {
+      this.structuredOutputCapability = "json_schema";
+    }
   }
 
   async generate(request: CanonicalModelRequest, context: ModelCallContext): Promise<ModelProviderResult> {
-    if (!request.tools || request.tools.length !== 1) {
+    const structured = request.structuredOutput !== undefined;
+    if (structured) {
+      if (this.structuredOutputMode !== "nvidia-guided-json") {
+        throw new ModelProviderError(
+          "unsupported_capability",
+          "Pinned external model is not configured for native structured output.",
+        );
+      }
+      if (request.tools !== undefined && request.tools.length > 0) {
+        throw new ModelProviderError(
+          "unsupported_capability",
+          "Structured output and tool calling cannot be combined by this adapter.",
+        );
+      }
+    } else if (!request.tools || request.tools.length !== 1) {
       throw new ModelProviderError("unsupported_capability", "Pinned external research model requires exactly one granted tool.");
     }
+
+    const body = structured
+      ? {
+          model: request.model,
+          messages: request.messages.map((message) => ({ role: message.role, content: message.content })),
+          temperature: request.temperature ?? 0,
+          ...(request.maxOutputTokens === undefined ? {} : { max_tokens: request.maxOutputTokens }),
+          chat_template_kwargs: { enable_thinking: false },
+          guided_json: request.structuredOutput?.schema,
+        }
+      : {
+          model: request.model,
+          messages: request.messages.map((message) => ({ role: message.role, content: message.content })),
+          tools: request.tools?.map(toOpenAiTool),
+          tool_choice: "required",
+          temperature: request.temperature ?? 0,
+          ...(request.maxOutputTokens === undefined ? {} : { max_tokens: request.maxOutputTokens }),
+          chat_template_kwargs: { enable_thinking: false },
+        };
+
     let response: Response;
     try {
       response = await this.fetchImpl(`${this.baseUrl}/chat/completions`, {
@@ -123,15 +176,7 @@ export class PinnedExternalResearchModelProvider implements ModelProvider {
           "authorization": `Bearer ${this.apiKey}`,
           "x-lattice-correlation-id": context.correlationId,
         },
-        body: JSON.stringify({
-          model: request.model,
-          messages: request.messages.map((message) => ({ role: message.role, content: message.content })),
-          tools: request.tools.map(toOpenAiTool),
-          tool_choice: "required",
-          temperature: request.temperature ?? 0,
-          ...(request.maxOutputTokens === undefined ? {} : { max_tokens: request.maxOutputTokens }),
-          chat_template_kwargs: { enable_thinking: false },
-        }),
+        body: JSON.stringify(body),
         signal: context.signal,
       });
     } catch (error) {
@@ -152,16 +197,44 @@ export class PinnedExternalResearchModelProvider implements ModelProvider {
       });
     }
 
-    let body: unknown;
+    let parsedBody: unknown;
     try {
-      body = JSON.parse(text);
+      parsedBody = JSON.parse(text);
     } catch (error) {
       throw new ModelProviderError("malformed_response", "Pinned external model returned malformed JSON.", { statusCode: 502, cause: error });
     }
-    const root = asRecord(body);
+    const root = asRecord(parsedBody);
     const choices = root?.choices;
     const choice = Array.isArray(choices) ? asRecord(choices[0]) : null;
     const message = choice === null ? null : asRecord(choice.message);
+    const actualModel = typeof root?.model === "string" && root.model.trim() ? root.model : undefined;
+    const upstreamRequestId = typeof root?.id === "string" && root.id.trim() ? root.id : undefined;
+
+    if (structured) {
+      if (message === null || typeof message.content !== "string" || message.content.trim().length === 0) {
+        throw new ModelProviderError(
+          "invalid_output",
+          "Pinned external structured model response did not contain text output.",
+          { statusCode: 502 },
+        );
+      }
+      const usage = normalizeUsage(root?.usage);
+      return {
+        response: {
+          id: upstreamRequestId ?? `model-${context.requestIdentity.slice(0, 16)}-${context.attempt}`,
+          model: actualModel ?? request.model,
+          output: [{ type: "text", text: message.content }],
+          ...(usage === undefined ? {} : { usage }),
+        },
+        metadata: { upstreamStatus: response.status, upstreamRequestId: upstreamRequestId ?? null },
+        route: {
+          actualProvider: this.providerId,
+          ...(actualModel === undefined ? {} : { actualModel }),
+          ...(upstreamRequestId === undefined ? {} : { upstreamRequestId }),
+        },
+      };
+    }
+
     const calls = message?.tool_calls;
     if (!Array.isArray(calls) || calls.length !== 1) {
       throw new ModelProviderError("invalid_output", "Pinned external research model must return exactly one tool call.", { statusCode: 502 });
@@ -177,8 +250,6 @@ export class PinnedExternalResearchModelProvider implements ModelProvider {
     } catch (error) {
       throw new ModelProviderError("invalid_output", "Pinned external research tool arguments were not valid JSON.", { statusCode: 502, cause: error });
     }
-    const actualModel = typeof root?.model === "string" && root.model.trim() ? root.model : undefined;
-    const upstreamRequestId = typeof root?.id === "string" && root.id.trim() ? root.id : undefined;
     return {
       response: {
         id: upstreamRequestId ?? `model-${context.requestIdentity.slice(0, 16)}-${context.attempt}`,
