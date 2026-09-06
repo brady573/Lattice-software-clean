@@ -83,7 +83,7 @@ test("runtime rejects structured output when provider does not declare support",
 });
 
 test("pinned external adapter maps provider-neutral schema to native guided_json", async () => {
-  let observedBody: Record<string, unknown> | null = null;
+  let observedBody: Record<string, unknown> = {};
   const provider = new PinnedExternalResearchModelProvider({
     baseUrl: "https://integrate.api.nvidia.com/v1",
     providerId: "nvidia",
@@ -108,15 +108,15 @@ test("pinned external adapter maps provider-neutral schema to native guided_json
       requestedProvider: "nvidia",
     },
   });
-  assert.deepEqual(observedBody?.guided_json, schema);
-  assert.equal(observedBody?.tools, undefined);
+  assert.deepEqual(observedBody.guided_json, schema);
+  assert.equal(observedBody.tools, undefined);
   assert.equal(result.response.output[0]?.type, "text");
   assert.deepEqual(result.response.usage, { inputTokens: 10, outputTokens: 8 });
   assert.equal(result.audit.invocationProvenance.actualProvider, "nvidia");
 });
 
 test("existing unconstrained pinned tool-call behavior remains unchanged", async () => {
-  let observedBody: Record<string, unknown> | null = null;
+  let observedBody: Record<string, unknown> = {};
   const provider = new PinnedExternalResearchModelProvider({
     baseUrl: "https://provider.example/v1",
     providerId: "fixture-provider",
@@ -149,7 +149,7 @@ test("existing unconstrained pinned tool-call behavior remains unchanged", async
     }],
     temperature: 0,
   }, { correlationId: "tool-path-unchanged" });
-  assert.equal(observedBody?.guided_json, undefined);
-  assert.equal(observedBody?.tool_choice, "required");
+  assert.equal(observedBody.guided_json, undefined);
+  assert.equal(observedBody.tool_choice, "required");
   assert.equal(result.response.output[0]?.type, "tool_call");
 });
