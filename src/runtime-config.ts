@@ -2,6 +2,7 @@ export type DeploymentMode = "development" | "durable";
 /** Runtime truth capability only; Product decision criteria are supplied by qualified adapters. */
 export type TruthMode = "v36-offline" | "v36-live";
 export type AuthenticationMode = "development-fixture" | "required";
+export type KnowledgeSimplifierRoute = "groq-gpt-oss-120b";
 
 export interface RuntimeConfig {
   port: number;
@@ -18,6 +19,10 @@ export interface RuntimeConfig {
   localModelProviderBaseUrl?: string | undefined;
   /** First-class local model identifier. Omitted only by older programmatic fixtures. */
   localModelProviderModel?: string;
+  /** Explicit Product configuration boundary for the one qualified simplification route. */
+  knowledgeSimplifierRoute?: KnowledgeSimplifierRoute;
+  /** Provider credential held only in runtime process configuration. */
+  knowledgeSimplifierApiKey?: string;
   /** @deprecated Compatibility alias for older development configuration. */
   modelSimulatorBaseUrl: string | undefined;
   /** @deprecated Compatibility alias for older development configuration. */
@@ -89,6 +94,29 @@ function resolveLocalModelProvider(
       modernConfigured ? "LATTICE_LOCAL_MODEL_PROVIDER_MODEL" : "LATTICE_MODEL_SIMULATOR_MODEL",
     ),
   };
+}
+
+function parseKnowledgeSimplifierRoute(value: string | undefined): KnowledgeSimplifierRoute | undefined {
+  if (value === undefined) return undefined;
+  const route = value.trim();
+  if (route !== "groq-gpt-oss-120b") {
+    throw new Error(`Unsupported LATTICE_KNOWLEDGE_SIMPLIFIER_ROUTE: ${route || "<blank>"}`);
+  }
+  return route;
+}
+
+function resolveKnowledgeSimplifierApiKey(
+  env: NodeJS.ProcessEnv,
+  route: KnowledgeSimplifierRoute | undefined,
+): string | undefined {
+  if (route === undefined) return undefined;
+  const value = env.GROQ_API_KEY;
+  if (value === undefined || !value.trim() || value.length < 16 || value.length > 512) {
+    throw new Error(
+      "LATTICE_KNOWLEDGE_SIMPLIFIER_ROUTE=groq-gpt-oss-120b requires GROQ_API_KEY containing between 16 and 512 characters.",
+    );
+  }
+  return value;
 }
 
 function parseAndroidRelayToken(value: string | undefined): string | undefined {
@@ -179,6 +207,18 @@ export function resolveRuntimeConfig(
     deploymentMode === "development",
   );
   const localModelProvider = resolveLocalModelProvider(env);
+  const knowledgeSimplifierRoute = parseKnowledgeSimplifierRoute(
+    env.LATTICE_KNOWLEDGE_SIMPLIFIER_ROUTE,
+  );
+  if (knowledgeSimplifierRoute !== undefined && localModelProvider.baseUrl !== undefined) {
+    throw new Error(
+      "Configure either the local Knowledge simplifier route or LATTICE_KNOWLEDGE_SIMPLIFIER_ROUTE, not both.",
+    );
+  }
+  const knowledgeSimplifierApiKey = resolveKnowledgeSimplifierApiKey(
+    env,
+    knowledgeSimplifierRoute,
+  );
   const androidModelRelayToken = parseAndroidRelayToken(env.LATTICE_ANDROID_MODEL_RELAY_TOKEN);
   if (localModelProvider.baseUrl !== undefined && androidModelRelayToken !== undefined) {
     throw new Error("Configure either the local model provider or the Android model relay, not both.");
@@ -201,6 +241,8 @@ export function resolveRuntimeConfig(
     autoMigrate,
     localModelProviderBaseUrl: localModelProvider.baseUrl,
     localModelProviderModel: localModelProvider.model,
+    ...(knowledgeSimplifierRoute === undefined ? {} : { knowledgeSimplifierRoute }),
+    ...(knowledgeSimplifierApiKey === undefined ? {} : { knowledgeSimplifierApiKey }),
     modelSimulatorBaseUrl: localModelProvider.baseUrl,
     modelSimulatorModel: localModelProvider.model,
     androidModelRelayToken,

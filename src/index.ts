@@ -1,3 +1,4 @@
+import { createConfiguredKnowledgeSimplifier } from "./knowledge-simplifier-composition.js";
 import { createRuntimeApp } from "./runtime-app.js";
 import { resolveRuntimeConfig } from "./runtime-config.js";
 import { assertDurableProcessSchemaReady } from "./runtime-schema-readiness.js";
@@ -13,7 +14,13 @@ try {
     await assertDurableProcessSchemaReady(config.databaseUrl, "api");
   }
 
-  const app = await createRuntimeApp(config);
+  const configuredKnowledgeSimplifier = createConfiguredKnowledgeSimplifier(config);
+  const app = await createRuntimeApp(
+    config,
+    configuredKnowledgeSimplifier === undefined
+      ? {}
+      : { knowledgeSimplifier: configuredKnowledgeSimplifier },
+  );
   try {
     await app.listen({ port: config.port, host: config.host });
   } catch (error) {
