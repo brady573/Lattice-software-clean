@@ -58,9 +58,7 @@ async function invokeDelegate(
   delegate: KnowledgeSimplifier,
   input: KnowledgeSimplificationInput,
 ): Promise<KnowledgeSimplificationAttempt> {
-  if (delegate.simplifyWithAudit !== undefined) {
-    return await delegate.simplifyWithAudit(input);
-  }
+  if (delegate.simplifyWithAudit !== undefined) return await delegate.simplifyWithAudit(input);
   const text = await delegate.simplify(input);
   return text === null
     ? Object.freeze({ status: "FIDELITY_REJECTED", text: null, invocationProvenance: null })
@@ -123,9 +121,8 @@ class SubjectAuthorizedKnowledgeSimplifier implements KnowledgeSimplifier {
   ) {}
 
   async simplifyWithAudit(input: KnowledgeSimplificationInput): Promise<KnowledgeSimplificationAttempt> {
-    if (this.delegate === undefined) {
-      return Object.freeze({ status: "CAPABILITY_UNAVAILABLE", text: null });
-    }
+    if (this.delegate === undefined) return Object.freeze({ status: "CAPABILITY_UNAVAILABLE", text: null });
+
     const before = await this.store.get(this.subjectId);
     if (before.status !== "CONNECTED") {
       return Object.freeze({ status: "CAPABILITY_NOT_AUTHORIZED", text: null });
@@ -177,5 +174,9 @@ export class ModelAssistanceCapabilityService {
 
   simplifierFor(subjectId: string): KnowledgeSimplifier {
     return new SubjectAuthorizedKnowledgeSimplifier(subjectId, this.store, this.delegate);
+  }
+
+  async close(): Promise<void> {
+    await this.store.close();
   }
 }
