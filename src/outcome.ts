@@ -98,11 +98,7 @@ function followUpCapabilityLimitations(run: LatticeRun): string[] {
 
   const limitations: string[] = [];
   const simplificationRequested = /\b(?:simpler|simply|plain language)\b/iu.test(latest);
-  if (simplificationRequested) {
-    limitations.push(
-      "This v0.1 Knowledge path does not perform genuine language simplification; it preserves source-grounded wording rather than treating truncation as simplification.",
-    );
-  } else if (/^why\??$/iu.test(latest) || /\b(?:explain|tell me more)\b/iu.test(latest)) {
+  if (!simplificationRequested && (/^why\??$/iu.test(latest) || /\b(?:explain|tell me more)\b/iu.test(latest))) {
     limitations.push(
       "This v0.1 follow-up uses additional source-grounded retrieval only; it does not produce a model-synthesized explanation.",
     );
