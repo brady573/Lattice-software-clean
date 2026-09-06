@@ -1,0 +1,79 @@
+# Evidence-only workflow for the provider-neutral structured-output boundary.
+name: Evidence — NVIDIA Product Structured Output
+
+on:
+  push:
+    branches:
+      - evidence/nvidia-structured-output-product-path-pr11-2c843cb
+
+permissions:
+  contents: read
+
+jobs:
+  discriminator:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    env:
+      EXPECTED_HEAD: 2c843cb1dc4ae6a4ca31bb54f7fb7de83d3a8fe5
+      EXPECTED_TREE: 93a60e93ddc10f02136ad4ef029c136fb789eb8c
+      NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
+    steps:
+      - name: Checkout evidence harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Checkout exact structured-output subject
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ env.EXPECTED_HEAD }}
+          path: subject
+          persist-credentials: false
+
+      - name: Provision Node 24
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: subject/package-lock.json
+
+      - name: Verify exact frozen implementation candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C subject rev-parse HEAD)" = "$EXPECTED_HEAD"
+          test "$(git -C subject rev-parse HEAD^{tree})" = "$EXPECTED_TREE"
+          test -n "$NVIDIA_API_KEY"
+
+      - name: Install locked dependencies
+        working-directory: subject
+        run: npm ci
+
+      - name: Build exact subject
+        working-directory: subject
+        run: npm run build
+
+      - name: Run one provider-neutral structured-output renovation discriminator
+        shell: bash
+        run: |
+          set -euo pipefail
+          node tools/evidence-nvidia-structured-output-product-path.mjs \
+            --subject-root subject \
+            --output evidence-output/product-structured-renovation.json
+
+      - name: Hash preserved evidence
+        if: always()
+        shell: bash
+        run: |
+          if [ -d evidence-output ]; then
+            sha256sum evidence-output/*.json | tee evidence-output/SHA256SUMS.txt
+          fi
+
+      - name: Upload complete preserved evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: investigation-planner-nvidia-product-structured-output
+          path: evidence-output/
+          if-no-files-found: error
+          retention-days: 7
