@@ -637,6 +637,12 @@ function isJurisdictionFact(fact: MissingFactNeed): boolean {
   return jurisdictionPattern.test(text) || scopedLocationPattern.test(text);
 }
 
+function inputEstablishesUserControlledJurisdiction(input: KnowledgeInvestigationPlanningInput): boolean {
+  return extractExplicitUserControlledUnavailableContent(input).some((candidate) =>
+    jurisdictionPattern.test(candidate) || scopedLocationPattern.test(candidate)
+  );
+}
+
 function normalizeJurisdictionResearchKeys(
   issues: InvestigationIssue[],
   missingFacts: MissingFactNeed[],
@@ -662,6 +668,7 @@ function normalizeJurisdictionResearchKeys(
   if (jurisdictionBoundIssueIds.size === 0) return;
 
   let jurisdictionFact = missingFacts.find(isJurisdictionFact);
+  const userControlledJurisdiction = inputEstablishesUserControlledJurisdiction(input);
   if (jurisdictionFact === undefined) {
     if (missingFacts.length >= 8) {
       throw new Error("Semantic normalization requires a jurisdiction key but the missing-fact budget is exhausted.");
@@ -669,12 +676,25 @@ function normalizeJurisdictionResearchKeys(
     jurisdictionFact = {
       factId: nextSyntheticId("fact-jurisdiction-scope", usedFactIds),
       question: "What jurisdiction or location governs the applicable public rules?",
-      acquisitionMode: "UNKNOWN",
+      acquisitionMode: userControlledJurisdiction ? "USER_ONLY" : "UNKNOWN",
       materiality: "MATERIAL",
-      rationale:
-        "The plan calls for jurisdiction-dependent public research, but the supplied context does not identify the governing jurisdiction or establish who can provide or discover it.",
+      rationale: userControlledJurisdiction
+        ? "The supplied context explicitly establishes the governing location as unavailable user-controlled information required before jurisdiction-dependent public research can proceed."
+        : "The plan calls for jurisdiction-dependent public research, but the supplied context does not identify the governing jurisdiction or establish who can provide or discover it.",
     };
     missingFacts.push(jurisdictionFact);
+  } else {
+    const jurisdictionIndex = missingFacts.findIndex((fact) => fact.factId === jurisdictionFact!.factId);
+    const normalizedJurisdiction: MissingFactNeed = {
+      ...jurisdictionFact,
+      acquisitionMode: userControlledJurisdiction ? "USER_ONLY" : "UNKNOWN",
+      materiality: "MATERIAL",
+      rationale: userControlledJurisdiction
+        ? "The supplied context explicitly establishes the governing location as unavailable user-controlled information required before jurisdiction-dependent public research can proceed."
+        : "Jurisdiction-dependent public research requires this scoping key, but the supplied context does not establish who can provide or discover it.",
+    };
+    missingFacts[jurisdictionIndex] = normalizedJurisdiction;
+    jurisdictionFact = normalizedJurisdiction;
   }
 
   for (const issueId of jurisdictionBoundIssueIds) {

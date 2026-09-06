@@ -264,3 +264,49 @@ test("canonical planner does not invent a missing jurisdiction key when location
     false,
   );
 });
+
+test("canonical planner preserves UNKNOWN when jurisdiction ownership is not established", async () => {
+  const input: KnowledgeInvestigationPlanningInput = {
+    runId: "unknown-jurisdiction-owner-run",
+    intentVersionId: "unknown-jurisdiction-owner-intent",
+    objective: "I plan to create a new doorway through an interior wall during a kitchen remodel. What should I investigate before starting?",
+    context: [],
+  };
+
+  const payload = baseProposal(input, {
+    issues: [{
+      issueId: "issue-local-rules",
+      question: "What local permits and building codes apply to the doorway project?",
+      materiality: "MATERIAL",
+      rationale: "Local approval requirements may govern the work.",
+    }],
+    missingFacts: [{
+      factId: "fact-property-location",
+      question: "What is the property location?",
+      acquisitionMode: "USER_ONLY",
+      materiality: "MATERIAL",
+      rationale: "The property location determines the local jurisdiction.",
+    }],
+    sourceRequirements: [{
+      requirementId: "source-local-rules",
+      issueIds: ["issue-local-rules"],
+      authorityNeed: "PRIMARY_OR_OFFICIAL",
+      jurisdictionNeeded: true,
+      currentnessNeeded: true,
+      description: "Use current local permit and building-code material.",
+    }],
+    dependencies: [{
+      dependencyId: "dependency-local-rules",
+      blockedIssueId: "issue-local-rules",
+      dependsOnIssueIds: [],
+      dependsOnFactIds: ["fact-property-location"],
+      rationale: "Local rules cannot be identified until the governing location is known.",
+    }],
+  });
+
+  const brief = await plannerFor(input, payload).plan(input);
+  const jurisdictionFact = brief.missingFacts.find((fact) => fact.factId === "fact-property-location");
+  assert.ok(jurisdictionFact);
+  assert.equal(jurisdictionFact.acquisitionMode, "UNKNOWN");
+  assert.equal(jurisdictionFact.materiality, "MATERIAL");
+});
