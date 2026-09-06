@@ -349,6 +349,432 @@ function validateModelInvestigationBrief(
   return Object.freeze(structuredClone(proposal)) as InvestigationBriefProposal;
 }
 
+const semanticStopWords = new Set([
+  "a", "an", "and", "are", "as", "at", "be", "before", "behind", "by", "can", "could",
+  "do", "does", "for", "from", "has", "have", "how", "in", "into", "is", "it", "of",
+  "on", "or", "relative", "run", "runs", "the", "this", "through", "to", "what", "where",
+  "which", "with", "within", "would",
+]);
+
+const locatorTokens = new Set([
+  "account", "contact", "email", "filename", "handle", "identifier", "link", "metadata",
+  "path", "reference", "source", "url",
+]);
+
+const jurisdictionPattern =
+  /\b(jurisdiction|location|located|state|province|city|county|country|municipality|municipal|region|district|zip(?:\s+code)?|postal\s+code)\b/iu;
+
+const publicRulePattern =
+  /\b(building|code|compliance|law|legal|licen[cs](?:e|ing)|local|municipal|permit|regulation|regulatory|rule|tax|zoning)\b/iu;
+
+const speculativeDependencyPattern = /\b(could|generally|likely|may|might|often|possibly|typically|usually)\b/iu;
+
+function normalizeSemanticToken(token: string): string {
+  if (token.endsWith("ies") && token.length > 4) return `${token.slice(0, -3)}y`;
+  if (token.endsWith("s") && !token.endsWith("ss") && token.length > 3) return token.slice(0, -1);
+  return token;
+}
+
+function semanticTokens(value: string): Set<string> {
+  const raw = value
+    .toLowerCase()
+    .replace(/[’']/gu, "")
+    .match(/[a-z0-9]+/gu) ?? [];
+  return new Set(
+    raw
+      .map(normalizeSemanticToken)
+      .filter((token) => token.length > 1 && !semanticStopWords.has(token)),
+  );
+}
+
+function overlapCount(left: Set<string>, right: Set<string>): number {
+  let count = 0;
+  for (const token of left) {
+    if (right.has(token)) count += 1;
+  }
+  return count;
+}
+
+function semanticJaccard(leftText: string, rightText: string): number {
+  const left = semanticTokens(leftText);
+  const right = semanticTokens(rightText);
+  if (left.size === 0 || right.size === 0) return 0;
+  const common = overlapCount(left, right);
+  const union = new Set([...left, ...right]).size;
+  return union === 0 ? 0 : common / union;
+}
+
+function candidateCoverage(text: string, candidate: string): number {
+  const textTokens = semanticTokens(text);
+  const candidateTokens = semanticTokens(candidate);
+  if (candidateTokens.size === 0) return 0;
+  return overlapCount(textTokens, candidateTokens) / candidateTokens.size;
+}
+
+function substantiallyRestates(left: string, right: string): boolean {
+  const leftTokens = semanticTokens(left);
+  const rightTokens = semanticTokens(right);
+  const common = overlapCount(leftTokens, rightTokens);
+  return common >= 2 && semanticJaccard(left, right) >= 0.72;
+}
+
+function cleanCandidateLabel(value: string): string {
+  return value
+    .trim()
+    .replace(/^[,;:\s]+|[,;:\s]+$/gu, "")
+    .replace(/^(?:the|a|an)\s+/iu, "")
+    .trim();
+}
+
+function splitUnavailableSpan(span: string): string[] {
+  return span
+    .split(/\s+(?:and|or)\s+/iu)
+    .map(cleanCandidateLabel)
+    .filter((item) => item.length > 1 && item.length <= 160);
+}
+
+function extractExplicitUserControlledUnavailableContent(input: KnowledgeInvestigationPlanningInput): string[] {
+  const text = [input.objective, ...input.context].join(" ");
+  const candidates: string[] = [];
+  const active =
+    /\b(?:i|we)\s+(?:have\s+not|haven['’]t|did\s+not|didn['’]t)\s+(?:shared?|provided?|supplied?|included?|attached?|given)\s+([^.!?]+)/giu;
+  const passive =
+    /\b((?:the|my|our)\s+[^.!?]{1,120}?)\s+(?:has|have|is|are|was|were)\s+not\s+(?:been\s+)?(?:shared|provided|supplied|included|attached|given)\b/giu;
+
+  for (const pattern of [active, passive]) {
+    for (const match of text.matchAll(pattern)) {
+      const span = match[1];
+      if (span === undefined) continue;
+      candidates.push(...splitUnavailableSpan(span));
+    }
+  }
+  return [...new Set(candidates)];
+}
+
+function nextSyntheticId(prefix: string, usedIds: Set<string>): string {
+  for (let index = 1; index <= 100; index += 1) {
+    const candidate = `${prefix}-${index}`;
+    if (!usedIds.has(candidate)) {
+      usedIds.add(candidate);
+      return candidate;
+    }
+  }
+  throw new Error(`Unable to allocate synthetic InvestigationBrief ID for ${prefix}.`);
+}
+
+function isLocatorFact(fact: MissingFactNeed): boolean {
+  const tokens = semanticTokens(`${fact.question} ${fact.rationale}`);
+  for (const token of locatorTokens) {
+    if (tokens.has(token)) return true;
+  }
+  return false;
+}
+
+function issueCandidateScore(issue: InvestigationIssue, candidate: string): number {
+  const issueText = `${issue.question} ${issue.rationale}`;
+  const issueTokens = semanticTokens(issueText);
+  const candidateTokens = semanticTokens(candidate);
+  const common = overlapCount(issueTokens, candidateTokens);
+  if (common === 0) return 0;
+  const coverage = common / Math.max(1, candidateTokens.size);
+  if (common < 2 && !(candidateTokens.size === 1 && coverage === 1)) return 0;
+  return common * 10 + coverage * 5 + semanticJaccard(issueText, candidate);
+}
+
+function ensureFactDependency(
+  dependencies: InvestigationDependency[],
+  blockedIssueId: string,
+  factId: string,
+  usedDependencyIds: Set<string>,
+  rationale: string,
+): void {
+  const existingIndex = dependencies.findIndex((dependency) => dependency.blockedIssueId === blockedIssueId);
+  if (existingIndex >= 0) {
+    const dependency = dependencies[existingIndex]!;
+    if (!dependency.dependsOnFactIds.includes(factId)) {
+      dependencies[existingIndex] = {
+        ...dependency,
+        dependsOnFactIds: [...dependency.dependsOnFactIds, factId],
+      };
+    }
+    return;
+  }
+  if (dependencies.length >= 12) {
+    throw new Error("Semantic normalization requires a blocking dependency but the dependency budget is exhausted.");
+  }
+  dependencies.push({
+    dependencyId: nextSyntheticId("dependency-semantic-prerequisite", usedDependencyIds),
+    blockedIssueId,
+    dependsOnIssueIds: [],
+    dependsOnFactIds: [factId],
+    rationale,
+  });
+}
+
+function normalizeExplicitPrivatePrerequisites(
+  issues: InvestigationIssue[],
+  missingFacts: MissingFactNeed[],
+  dependencies: InvestigationDependency[],
+  input: KnowledgeInvestigationPlanningInput,
+  usedFactIds: Set<string>,
+  usedDependencyIds: Set<string>,
+): void {
+  const candidates = extractExplicitUserControlledUnavailableContent(input);
+  if (candidates.length === 0) return;
+
+  for (let issueIndex = 0; issueIndex < issues.length; issueIndex += 1) {
+    const issue = issues[issueIndex]!;
+    if (issue.materiality !== "MATERIAL") continue;
+
+    let selected: string | null = null;
+    let selectedScore = 0;
+    for (const candidate of candidates) {
+      const score = issueCandidateScore(issue, candidate);
+      if (score > selectedScore) {
+        selected = candidate;
+        selectedScore = score;
+      }
+    }
+    if (selected === null || selectedScore === 0) continue;
+
+    const directExistingIndex = missingFacts.findIndex((fact) =>
+      !isLocatorFact(fact) && candidateCoverage(`${fact.question} ${fact.rationale}`, selected!) >= 0.75
+    );
+    let directFactId: string;
+    if (directExistingIndex >= 0) {
+      const direct = missingFacts[directExistingIndex]!;
+      directFactId = direct.factId;
+      missingFacts[directExistingIndex] = {
+        ...direct,
+        acquisitionMode: "USER_ONLY",
+        materiality: "MATERIAL",
+        rationale:
+          "The supplied context establishes that this private content has not been provided, and the material issue cannot be interpreted without the content itself.",
+      };
+    } else {
+      if (missingFacts.length >= 8) {
+        throw new Error("Semantic normalization requires a private prerequisite but the missing-fact budget is exhausted.");
+      }
+      directFactId = nextSyntheticId("fact-explicit-private-content", usedFactIds);
+      missingFacts.push({
+        factId: directFactId,
+        question: `What is the unavailable ${cleanCandidateLabel(selected)}?`,
+        acquisitionMode: "USER_ONLY",
+        materiality: "MATERIAL",
+        rationale:
+          "The supplied context establishes that this private content has not been provided, and the material issue cannot be interpreted without the content itself.",
+      });
+    }
+
+    const issueCoverage = candidateCoverage(issue.question, selected);
+    const issueTokenCount = semanticTokens(issue.question).size;
+    const candidateTokenCount = semanticTokens(selected).size;
+    if (issueCoverage >= 0.8 && issueTokenCount <= candidateTokenCount + 5) {
+      issues[issueIndex] = {
+        ...issue,
+        question: `What requirements or constraints in the unavailable ${cleanCandidateLabel(selected)} materially govern the objective?`,
+        rationale:
+          "The unavailable private content must be obtained before its material requirements or constraints can be interpreted.",
+      };
+    }
+
+    const locatorIds = new Set<string>();
+    for (let factIndex = 0; factIndex < missingFacts.length; factIndex += 1) {
+      const fact = missingFacts[factIndex]!;
+      if (
+        fact.factId !== directFactId
+        && fact.acquisitionMode === "USER_ONLY"
+        && fact.materiality === "MATERIAL"
+        && isLocatorFact(fact)
+        && candidateCoverage(`${fact.question} ${fact.rationale}`, selected) < 0.5
+      ) {
+        locatorIds.add(fact.factId);
+        missingFacts[factIndex] = {
+          ...fact,
+          materiality: "CONTEXTUAL",
+          rationale:
+            "This private locator may be useful for retrieval, but the supplied context does not establish it as the minimum blocker when the needed private content itself is unavailable.",
+        };
+      }
+    }
+
+    for (let dependencyIndex = 0; dependencyIndex < dependencies.length; dependencyIndex += 1) {
+      const dependency = dependencies[dependencyIndex]!;
+      if (dependency.blockedIssueId !== issue.issueId) continue;
+      dependencies[dependencyIndex] = {
+        ...dependency,
+        dependsOnFactIds: [
+          ...dependency.dependsOnFactIds.filter((factId) => !locatorIds.has(factId) && factId !== directFactId),
+          directFactId,
+        ],
+      };
+    }
+
+    ensureFactDependency(
+      dependencies,
+      issue.issueId,
+      directFactId,
+      usedDependencyIds,
+      "The material issue cannot be interpreted until the explicitly unavailable private content is supplied.",
+    );
+  }
+}
+
+function hasSuppliedJurisdictionHint(input: KnowledgeInvestigationPlanningInput): boolean {
+  const text = [input.objective, ...input.context].join(" ");
+  return (
+    /\b(?:jurisdiction|state|province|city|county|country|municipality|region)\s*(?::|is)\s*[A-Z0-9]/u.test(text)
+    || /\b(?:home|property|business|site|operation|project)\s+(?:is\s+)?(?:located|based)?\s*in\s+[A-Z][A-Za-z0-9 .,'-]{2,80}/u.test(text)
+    || /\b(?:located|based|operating)\s+in\s+[A-Z][A-Za-z0-9 .,'-]{2,80}/u.test(text)
+  );
+}
+
+function isJurisdictionFact(fact: MissingFactNeed): boolean {
+  return jurisdictionPattern.test(`${fact.question} ${fact.rationale}`);
+}
+
+function normalizeJurisdictionResearchKeys(
+  issues: InvestigationIssue[],
+  missingFacts: MissingFactNeed[],
+  sourceRequirements: SourceRequirement[],
+  dependencies: InvestigationDependency[],
+  input: KnowledgeInvestigationPlanningInput,
+  usedFactIds: Set<string>,
+  usedDependencyIds: Set<string>,
+): void {
+  if (hasSuppliedJurisdictionHint(input)) return;
+  const issueById = new Map(issues.map((issue) => [issue.issueId, issue]));
+  const jurisdictionBoundIssueIds = new Set<string>();
+
+  for (const requirement of sourceRequirements) {
+    if (!requirement.jurisdictionNeeded) continue;
+    for (const issueId of requirement.issueIds) {
+      const issue = issueById.get(issueId);
+      if (issue === undefined) continue;
+      const semanticText = `${issue.question} ${issue.rationale} ${requirement.description}`;
+      if (publicRulePattern.test(semanticText)) jurisdictionBoundIssueIds.add(issueId);
+    }
+  }
+  if (jurisdictionBoundIssueIds.size === 0) return;
+
+  let jurisdictionFact = missingFacts.find(isJurisdictionFact);
+  if (jurisdictionFact === undefined) {
+    if (missingFacts.length >= 8) {
+      throw new Error("Semantic normalization requires a jurisdiction key but the missing-fact budget is exhausted.");
+    }
+    jurisdictionFact = {
+      factId: nextSyntheticId("fact-jurisdiction-scope", usedFactIds),
+      question: "What jurisdiction or location governs the applicable public rules?",
+      acquisitionMode: "UNKNOWN",
+      materiality: "MATERIAL",
+      rationale:
+        "The plan calls for jurisdiction-dependent public research, but the supplied context does not identify the governing jurisdiction or establish who can provide or discover it.",
+    };
+    missingFacts.push(jurisdictionFact);
+  }
+
+  for (const issueId of jurisdictionBoundIssueIds) {
+    ensureFactDependency(
+      dependencies,
+      issueId,
+      jurisdictionFact.factId,
+      usedDependencyIds,
+      "Jurisdiction-dependent public research is not actionable until the governing jurisdiction is known.",
+    );
+  }
+}
+
+function pruneUnsupportedDependencies(
+  issues: InvestigationIssue[],
+  missingFacts: MissingFactNeed[],
+  dependencies: InvestigationDependency[],
+): InvestigationDependency[] {
+  const issueById = new Map(issues.map((issue) => [issue.issueId, issue]));
+  const factById = new Map(missingFacts.map((fact) => [fact.factId, fact]));
+  const pruned: InvestigationDependency[] = [];
+
+  for (const dependency of dependencies) {
+    const blockedIssue = issueById.get(dependency.blockedIssueId);
+    if (blockedIssue === undefined) continue;
+
+    const restatementFactIds = dependency.dependsOnFactIds.filter((factId) => {
+      const fact = factById.get(factId);
+      return fact !== undefined && substantiallyRestates(blockedIssue.question, fact.question);
+    });
+
+    const retainedFactIds = dependency.dependsOnFactIds.filter((factId) => !restatementFactIds.includes(factId));
+    let retainedIssueIds = dependency.dependsOnIssueIds.filter((issueId) => {
+      const prerequisiteIssue = issueById.get(issueId);
+      return prerequisiteIssue !== undefined && !substantiallyRestates(blockedIssue.question, prerequisiteIssue.question);
+    });
+
+    if (restatementFactIds.length > 0) {
+      retainedIssueIds = [];
+    } else if (
+      retainedFactIds.length === 0
+      && retainedIssueIds.length > 0
+      && speculativeDependencyPattern.test(dependency.rationale)
+    ) {
+      retainedIssueIds = [];
+    }
+
+    if (retainedFactIds.length === 0 && retainedIssueIds.length === 0) continue;
+    pruned.push({
+      ...dependency,
+      dependsOnIssueIds: retainedIssueIds,
+      dependsOnFactIds: retainedFactIds,
+    });
+  }
+
+  return pruned;
+}
+
+function normalizeInvestigationBriefProposal(
+  proposal: InvestigationBriefProposal,
+  input: KnowledgeInvestigationPlanningInput,
+): InvestigationBriefProposal {
+  const issues = proposal.issues.map((issue) => ({ ...issue }));
+  const missingFacts = proposal.missingFacts.map((fact) => ({ ...fact }));
+  const sourceRequirements = proposal.sourceRequirements.map((requirement) => ({
+    ...requirement,
+    issueIds: [...requirement.issueIds],
+  }));
+  let dependencies: InvestigationDependency[] = proposal.dependencies.map((dependency) => ({
+    ...dependency,
+    dependsOnIssueIds: [...dependency.dependsOnIssueIds],
+    dependsOnFactIds: [...dependency.dependsOnFactIds],
+  }));
+  const usedFactIds = new Set(missingFacts.map((fact) => fact.factId));
+  const usedDependencyIds = new Set(dependencies.map((dependency) => dependency.dependencyId));
+
+  normalizeExplicitPrivatePrerequisites(
+    issues,
+    missingFacts,
+    dependencies,
+    input,
+    usedFactIds,
+    usedDependencyIds,
+  );
+  normalizeJurisdictionResearchKeys(
+    issues,
+    missingFacts,
+    sourceRequirements,
+    dependencies,
+    input,
+    usedFactIds,
+    usedDependencyIds,
+  );
+  dependencies = pruneUnsupportedDependencies(issues, missingFacts, dependencies);
+
+  return Object.freeze(structuredClone({
+    ...proposal,
+    issues,
+    missingFacts,
+    sourceRequirements,
+    dependencies,
+  })) as InvestigationBriefProposal;
+}
+
 export function investigationBriefIsCurrent(
   brief: InvestigationBrief,
   current: Pick<KnowledgeInvestigationPlanningInput, "runId" | "intentVersionId" | "objective">,
@@ -470,8 +896,9 @@ export class ModelGatewayKnowledgeInvestigationPlanner implements KnowledgeInves
     }
     const proposal = validateModelInvestigationBrief(raw, input);
     if (proposal.plannerKind !== this.kind) throw new Error("InvestigationBrief planner binding mismatch.");
+    const normalizedProposal = normalizeInvestigationBriefProposal(proposal, input);
     const brief = validateInvestigationBrief({
-      ...proposal,
+      ...normalizedProposal,
       createdAt: this.now().toISOString(),
     }, input);
     if (brief.plannerKind !== this.kind) throw new Error("InvestigationBrief planner binding mismatch.");
