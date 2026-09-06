@@ -13,18 +13,18 @@ export interface ClaimCompilationInput {
   text: string;
   claimType: ClaimType;
   scope?: string | null | undefined;
-  effectiveAt?: string | null;
-  jurisdiction?: string | null;
-  unit?: string | null;
-  denominator?: string | null;
-  baseline?: string | null;
-  period?: string | null;
-  causalRelation?: string | null;
-  authenticityTarget?: string | null;
-  comparisonClass?: string | null;
-  quotedContext?: string | null;
-  qualifiers?: readonly ClaimQualifier[];
-  evidenceRisk?: EvidenceRisk;
+  effectiveAt?: string | null | undefined;
+  jurisdiction?: string | null | undefined;
+  unit?: string | null | undefined;
+  denominator?: string | null | undefined;
+  baseline?: string | null | undefined;
+  period?: string | null | undefined;
+  causalRelation?: string | null | undefined;
+  authenticityTarget?: string | null | undefined;
+  comparisonClass?: string | null | undefined;
+  quotedContext?: string | null | undefined;
+  qualifiers?: readonly ClaimQualifier[] | undefined;
+  evidenceRisk?: EvidenceRisk | undefined;
 }
 
 export interface CompiledClaimContract {
