@@ -103,7 +103,7 @@ export class PinnedExternalResearchModelProvider implements ModelProvider {
   private readonly apiKey: string;
   private readonly maxResponseBytes: number;
   private readonly fetchImpl: typeof fetch;
-  private readonly structuredOutputMode?: "nvidia-guided-json";
+  private readonly structuredOutputMode: "nvidia-guided-json" | undefined;
 
   constructor(options: PinnedExternalResearchProviderOptions) {
     const url = new URL(options.baseUrl);
