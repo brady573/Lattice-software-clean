@@ -1,0 +1,78 @@
+name: Evidence — NVIDIA Planner Semantic Repair v0.2
+
+on:
+  push:
+    branches:
+      - evidence/nvidia-planner-semantic-repair-pr13-82db9e4
+
+permissions:
+  contents: read
+
+jobs:
+  discriminator:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      EXPECTED_HEAD: 82db9e437fd5080bf3eb2e6536240043a96636d3
+      EXPECTED_TREE: 1cbc4d815506f9d89f7a7544aee9bf6ffeb28ad3
+      NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
+    steps:
+      - name: Checkout evidence harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Checkout exact semantic repair subject
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ env.EXPECTED_HEAD }}
+          path: subject
+          persist-credentials: false
+
+      - name: Provision Node 24
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: subject/package-lock.json
+
+      - name: Verify exact frozen candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C subject rev-parse HEAD)" = "$EXPECTED_HEAD"
+          test "$(git -C subject rev-parse HEAD^{tree})" = "$EXPECTED_TREE"
+          test -n "$NVIDIA_API_KEY"
+
+      - name: Install locked dependencies
+        working-directory: subject
+        run: npm ci
+
+      - name: Build exact subject
+        working-directory: subject
+        run: npm run build
+
+      - name: Run two-case semantic repair discriminator
+        shell: bash
+        run: |
+          set -euo pipefail
+          node tools/evidence-investigation-planner-semantic-repair-v0.2.mjs \
+            --subject-root subject \
+            --output evidence-output/semantic-repair-small-gate.json
+
+      - name: Hash preserved evidence
+        if: always()
+        shell: bash
+        run: |
+          if [ -d evidence-output ]; then
+            sha256sum evidence-output/*.json | tee evidence-output/SHA256SUMS.txt
+          fi
+
+      - name: Upload complete preserved evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: investigation-planner-semantic-repair-v0.2-small-gate
+          path: evidence-output/
+          if-no-files-found: error
+          retention-days: 7
