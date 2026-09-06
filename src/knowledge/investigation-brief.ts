@@ -586,7 +586,7 @@ function normalizeExplicitPrivatePrerequisites(
         && fact.acquisitionMode === "USER_ONLY"
         && fact.materiality === "MATERIAL"
         && isLocatorFact(fact)
-        && candidateCoverage(`${fact.question} ${fact.rationale}`, selected) < 0.5
+        && candidateCoverage(fact.question, selected) < 0.5
       ) {
         locatorIds.add(fact.factId);
         missingFacts[factIndex] = {
