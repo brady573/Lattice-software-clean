@@ -55,14 +55,20 @@ import {
 } from "./intent/decision-plan-store.js";
 import { migrateRunIntentBindings } from "./intent/postgres-run-binding-store.js";
 import { registerUserPreferenceControlsApi } from "./intent/user-preference-controls-api.js";
+import type { KnowledgeAcquisitionProvider } from "./knowledge/acquisition.js";
+import { LocalOfflineModelRuntime } from "./model/local-offline-runtime.js";
+import { OpenAiCompatibleModelProvider } from "./model/openai-compatible.js";
 import { PostgresApiRunControlStore } from "./postgres-api-control-store.js";
 import { PostgresOrchestrationStore } from "./postgres-orchestration-store.js";
 import { PostgresRunStore } from "./postgres-run-store.js";
+import {
+  ModelKnowledgeSimplifier,
+  type KnowledgeSimplifier,
+} from "./presentation/solandra/knowledge-simplification.js";
 import { registerRunEventStream } from "./progress/run-event-stream.js";
 import { executePersistedRun, type GeneralizedDecisionAdapter } from "./run-execution.js";
 import { MemoryRunStore, type RunStore } from "./run-store.js";
 import type { RuntimeConfig } from "./runtime-config.js";
-import type { KnowledgeAcquisitionProvider } from "./knowledge/acquisition.js";
 import { createConfiguredTruthPipeline } from "./truth/configured-pipeline.js";
 import type { TruthExecutionPipeline } from "./truth/execution-pipeline.js";
 import {
@@ -76,6 +82,7 @@ const DEFAULT_MEMORY_DISPATCH_DELAY_MS = 50;
 export interface RuntimeAppOptions {
   truthPipeline?: TruthExecutionPipeline;
   knowledgeAcquisitionProvider?: KnowledgeAcquisitionProvider;
+  knowledgeSimplifier?: KnowledgeSimplifier;
   memoryDispatchDelayMs?: number;
   authenticatedSubjectResolver?: AuthenticatedSubjectResolver;
   consultationInterpreter?: ConsultationInterpreter;
@@ -108,6 +115,21 @@ function resolveAuthenticatedSubjectResolver(
     );
   }
   return () => undefined;
+}
+
+function resolveKnowledgeSimplifier(
+  config: RuntimeConfig,
+  configured: KnowledgeSimplifier | undefined,
+): KnowledgeSimplifier | undefined {
+  if (configured !== undefined) return configured;
+  if (config.localModelProviderBaseUrl === undefined || config.localModelProviderModel === undefined) {
+    return undefined;
+  }
+  const provider = new OpenAiCompatibleModelProvider({ baseUrl: config.localModelProviderBaseUrl });
+  return new ModelKnowledgeSimplifier(
+    new LocalOfflineModelRuntime(provider),
+    config.localModelProviderModel,
+  );
 }
 
 class DeferredMemoryApiRunControlStore implements ApiRunControlStore {
@@ -349,6 +371,7 @@ export async function createRuntimeApp(
     truthPipeline,
     apiControlStore,
     apiSubject: authenticatedApiSubject,
+    knowledgeSimplifier: resolveKnowledgeSimplifier(config, options.knowledgeSimplifier),
   });
 
   registerAuthenticatedSubjectBoundary(app, {
