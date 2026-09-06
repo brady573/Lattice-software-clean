@@ -56,6 +56,8 @@ import {
 import { migrateRunIntentBindings } from "./intent/postgres-run-binding-store.js";
 import { registerUserPreferenceControlsApi } from "./intent/user-preference-controls-api.js";
 import type { KnowledgeAcquisitionProvider } from "./knowledge/acquisition.js";
+import type { ModelAssistanceCapabilityService } from "./model-assistance-capability.js";
+import { PostgresModelAssistanceAuthorizationStore } from "./model-assistance-store.js";
 import { LocalOfflineModelRuntime } from "./model/local-offline-runtime.js";
 import { OpenAiCompatibleModelProvider } from "./model/openai-compatible.js";
 import { PostgresApiRunControlStore } from "./postgres-api-control-store.js";
@@ -83,6 +85,7 @@ export interface RuntimeAppOptions {
   truthPipeline?: TruthExecutionPipeline;
   knowledgeAcquisitionProvider?: KnowledgeAcquisitionProvider;
   knowledgeSimplifier?: KnowledgeSimplifier;
+  modelAssistanceService?: ModelAssistanceCapabilityService;
   memoryDispatchDelayMs?: number;
   authenticatedSubjectResolver?: AuthenticatedSubjectResolver;
   consultationInterpreter?: ConsultationInterpreter;
@@ -183,7 +186,6 @@ class DeferredMemoryApiRunControlStore implements ApiRunControlStore {
   }
 
   async close(): Promise<void> {
-
     this.closed = true;
     await Promise.allSettled([...this.executions]);
     await this.base.close();
@@ -209,6 +211,7 @@ export async function migrateRuntimeDatabase(databaseUrl: string): Promise<void>
   await migrateRunIntentBindings(databaseUrl);
   await PostgresDecisionPlanStore.migrate(databaseUrl);
   await PostgresUserPreferenceStore.migrate(databaseUrl);
+  await PostgresModelAssistanceAuthorizationStore.migrate(databaseUrl);
 
   const apiControlStore = await PostgresApiRunControlStore.connect(databaseUrl, { migrate: true });
   await apiControlStore.close();
@@ -372,6 +375,7 @@ export async function createRuntimeApp(
     apiControlStore,
     apiSubject: authenticatedApiSubject,
     knowledgeSimplifier: resolveKnowledgeSimplifier(config, options.knowledgeSimplifier),
+    modelAssistanceService: options.modelAssistanceService,
   });
 
   registerAuthenticatedSubjectBoundary(app, {

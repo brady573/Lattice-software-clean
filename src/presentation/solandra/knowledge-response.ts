@@ -3,6 +3,7 @@ import type { KnowledgeFinding, KnowledgeOutcome } from "../../outcome.js";
 import {
   KNOWLEDGE_SIMPLIFICATION_FAILURE_MESSAGE,
   knowledgeSimplificationRequested,
+  type KnowledgeSimplificationAttempt,
   type KnowledgeSimplifier,
 } from "./knowledge-simplification.js";
 
@@ -30,14 +31,10 @@ function renderFinding(finding: KnowledgeFinding, text = finding.text): string {
   if (finding.basis === "SOURCE_REPORT") return renderSourceReportFinding(finding, text);
 
   switch (finding.status) {
-    case "SUPPORTED":
-      return `Supported: ${text}`;
-    case "REFUTED":
-      return `Refuted: ${text}`;
-    case "CONFLICTED":
-      return `Material conflict remains: ${text}`;
-    case "UNRESOLVED":
-      return `Qualified evidence did not establish this strongly enough: ${text}`;
+    case "SUPPORTED": return `Supported: ${text}`;
+    case "REFUTED": return `Refuted: ${text}`;
+    case "CONFLICTED": return `Material conflict remains: ${text}`;
+    case "UNRESOLVED": return `Qualified evidence did not establish this strongly enough: ${text}`;
   }
 }
 
@@ -159,26 +156,51 @@ function renderGovernedAnswer(knowledge: KnowledgeOutcome, context: readonly str
   return [answer, qualification, sourceLabel(knowledge)].filter(Boolean).join("\n\n");
 }
 
-/**
- * Project governed KnowledgeOutcome content into concise Solandra conversation text.
- * This compatibility renderer is deterministic and extractive; canonical runtime
- * responses use renderKnowledgeResponseForRun so current-turn context can be honored.
- */
+function simplificationLimitation(attempt: KnowledgeSimplificationAttempt): string {
+  switch (attempt.status) {
+    case "CAPABILITY_NOT_AUTHORIZED":
+      return "Model assistance isn't connected. Connect it in Solandra if you want me to simplify this wording.";
+    case "CAPABILITY_UNAVAILABLE":
+      return "Model assistance isn't available in this Lattice setup, so I kept the original wording.";
+    case "CAPABILITY_REVOKED":
+      return "Model assistance was disconnected before that result could be used, so I kept the original wording.";
+    case "PROVIDER_FAILURE":
+      return "Model assistance couldn't complete that request, so I kept the original wording.";
+    case "FIDELITY_REJECTED":
+      return KNOWLEDGE_SIMPLIFICATION_FAILURE_MESSAGE;
+    case "SIMPLIFIED":
+      return "";
+  }
+}
+
+async function attemptSimplification(
+  simplifier: KnowledgeSimplifier,
+  runId: string,
+  finding: KnowledgeFinding,
+): Promise<KnowledgeSimplificationAttempt> {
+  if (simplifier.simplifyWithAudit !== undefined) {
+    return await simplifier.simplifyWithAudit({ runId, finding });
+  }
+  const text = await simplifier.simplify({ runId, finding });
+  return text === null
+    ? Object.freeze({ status: "FIDELITY_REJECTED", text: null, invocationProvenance: null })
+    : Object.freeze({ status: "SIMPLIFIED", text, invocationProvenance: null });
+}
+
+/** Project governed KnowledgeOutcome content into concise Solandra conversation text. */
 export function renderKnowledgeResponse(knowledge: KnowledgeOutcome): string {
   if (knowledge.findings.length === 0) {
     if (CAUSE_SEEKING_OBJECTIVE_PATTERN.test(knowledge.objective)) return EMPTY_CAUSAL_KNOWLEDGE_MESSAGE;
     return knowledge.uncertainties.find((item) => item.includes("No validated external findings"))
       ?? EMPTY_KNOWLEDGE_MESSAGE;
   }
-
   return knowledge.findings.map((finding) => renderFinding(finding)).join("\n\n");
 }
 
 /**
- * Produce the Product-facing Knowledge response without changing canonical Knowledge.
- * Direct answers are extractive: only verbatim sentences from governed findings may
- * carry factual content. Source suitability, conflict, and insufficient fidelity fail closed.
- * PR #15 simplification remains a separate optional non-authoritative transform.
+ * Produce Product-facing Knowledge without changing canonical Knowledge. Direct
+ * answers remain extractive. Model assistance is optional, non-authoritative,
+ * subject-authorized by canonical composition, and failure/revocation fail closed.
  */
 export async function renderKnowledgeResponseForRun(
   knowledge: KnowledgeOutcome,
@@ -200,12 +222,11 @@ export async function renderKnowledgeResponseForRun(
   }
 
   const finding = knowledge.findings[0];
-  if (finding === undefined) {
-    return `${governed}\n\n${KNOWLEDGE_SIMPLIFICATION_FAILURE_MESSAGE}`;
+  if (finding === undefined) return `${governed}\n\n${KNOWLEDGE_SIMPLIFICATION_FAILURE_MESSAGE}`;
+
+  const attempt = await attemptSimplification(simplifier, run.id, finding);
+  if (attempt.status !== "SIMPLIFIED") {
+    return `${governed}\n\n${simplificationLimitation(attempt)}`;
   }
-  const simplified = await simplifier.simplify({ runId: run.id, finding });
-  if (simplified === null) {
-    return `${governed}\n\n${KNOWLEDGE_SIMPLIFICATION_FAILURE_MESSAGE}`;
-  }
-  return renderFinding(finding, simplified);
+  return renderFinding(finding, attempt.text);
 }

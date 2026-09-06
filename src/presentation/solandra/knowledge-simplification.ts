@@ -1,6 +1,10 @@
 import { isConsultationRunRequest, type LatticeRun } from "../../domain.js";
+import { asModelProviderError, type ModelErrorCode } from "../../model/errors.js";
 import { ModelRuntime } from "../../model/runtime.js";
-import type { CanonicalModelRequest } from "../../model/types.js";
+import type {
+  CanonicalModelRequest,
+  ModelInvocationProvenance,
+} from "../../model/types.js";
 import type { KnowledgeFinding } from "../../outcome.js";
 
 const SIMPLIFICATION_REQUEST_PATTERN = /\b(?:simpler|simply|plain language)\b/iu;
@@ -20,8 +24,29 @@ export interface KnowledgeSimplificationInput {
   finding: KnowledgeFinding;
 }
 
+export type KnowledgeSimplificationAttempt =
+  | Readonly<{
+    status: "SIMPLIFIED";
+    text: string;
+    invocationProvenance: ModelInvocationProvenance | null;
+  }>
+  | Readonly<{
+    status: "FIDELITY_REJECTED";
+    text: null;
+    invocationProvenance: ModelInvocationProvenance | null;
+  }>
+  | Readonly<{
+    status: "PROVIDER_FAILURE";
+    text: null;
+    errorCode: ModelErrorCode;
+  }>
+  | Readonly<{ status: "CAPABILITY_NOT_AUTHORIZED"; text: null }>
+  | Readonly<{ status: "CAPABILITY_UNAVAILABLE"; text: null }>
+  | Readonly<{ status: "CAPABILITY_REVOKED"; text: null }>;
+
 export interface KnowledgeSimplifier {
   simplify(input: KnowledgeSimplificationInput): Promise<string | null>;
+  simplifyWithAudit?(input: KnowledgeSimplificationInput): Promise<KnowledgeSimplificationAttempt>;
 }
 
 function normalizeWhitespace(value: string): string {
@@ -134,7 +159,7 @@ export class ModelKnowledgeSimplifier implements KnowledgeSimplifier {
     if (!model.trim()) throw new Error("Knowledge simplifier model must be non-empty.");
   }
 
-  async simplify(input: KnowledgeSimplificationInput): Promise<string | null> {
+  async simplifyWithAudit(input: KnowledgeSimplificationInput): Promise<KnowledgeSimplificationAttempt> {
     const request = buildKnowledgeSimplificationRequest(this.model, input.finding);
     try {
       const result = await this.runtime.call(request, {
@@ -142,12 +167,29 @@ export class ModelKnowledgeSimplifier implements KnowledgeSimplifier {
         idempotencyKey: `presentation:${input.finding.claimId}`,
         maxAttempts: 1,
       });
-      if (result.response.output.length !== 1) return null;
+      const invocationProvenance = result.audit.invocationProvenance;
+      if (result.response.output.length !== 1) {
+        return Object.freeze({ status: "FIDELITY_REJECTED", text: null, invocationProvenance });
+      }
       const output = result.response.output[0];
-      if (!output || output.type !== "text") return null;
-      return validateKnowledgeSimplification(input.finding.text, output.text);
-    } catch {
-      return null;
+      if (!output || output.type !== "text") {
+        return Object.freeze({ status: "FIDELITY_REJECTED", text: null, invocationProvenance });
+      }
+      const text = validateKnowledgeSimplification(input.finding.text, output.text);
+      return text === null
+        ? Object.freeze({ status: "FIDELITY_REJECTED", text: null, invocationProvenance })
+        : Object.freeze({ status: "SIMPLIFIED", text, invocationProvenance });
+    } catch (error) {
+      return Object.freeze({
+        status: "PROVIDER_FAILURE",
+        text: null,
+        errorCode: asModelProviderError(error).code,
+      });
     }
+  }
+
+  async simplify(input: KnowledgeSimplificationInput): Promise<string | null> {
+    const attempt = await this.simplifyWithAudit(input);
+    return attempt.status === "SIMPLIFIED" ? attempt.text : null;
   }
 }
