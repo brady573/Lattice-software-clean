@@ -1,4 +1,5 @@
-import { createConfiguredKnowledgeSimplifier } from "./knowledge-simplifier-composition.js";
+import { registerModelAssistanceApi } from "./model-assistance-api.js";
+import { createConfiguredModelAssistanceCapability } from "./model-assistance-composition.js";
 import { createRuntimeApp } from "./runtime-app.js";
 import { resolveRuntimeConfig } from "./runtime-config.js";
 import { assertDurableProcessSchemaReady } from "./runtime-schema-readiness.js";
@@ -14,13 +15,19 @@ try {
     await assertDurableProcessSchemaReady(config.databaseUrl, "api");
   }
 
-  const configuredKnowledgeSimplifier = createConfiguredKnowledgeSimplifier(config);
-  const app = await createRuntimeApp(
-    config,
-    configuredKnowledgeSimplifier === undefined
-      ? {}
-      : { knowledgeSimplifier: configuredKnowledgeSimplifier },
-  );
+  const modelAssistance = await createConfiguredModelAssistanceCapability(config);
+  let app;
+  try {
+    app = await createRuntimeApp(config, { modelAssistanceService: modelAssistance });
+  } catch (error) {
+    await modelAssistance.close();
+    throw error;
+  }
+  registerModelAssistanceApi(app, modelAssistance);
+  app.addHook("onClose", async () => {
+    await modelAssistance.close();
+  });
+
   try {
     await app.listen({ port: config.port, host: config.host });
   } catch (error) {
