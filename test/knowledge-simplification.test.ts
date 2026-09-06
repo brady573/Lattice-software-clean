@@ -204,7 +204,7 @@ test("plain-language follow-up changes presentation only and preserves canonical
 
   try {
     const conversationId = await createConversation(app);
-    const objective = "Explain how C4 photosynthesis works.";
+    const objective = "Explain carbon fixation in C4 photosynthesis.";
     const initial = await ask(app, conversationId, "initial", objective);
     const intentVersionId = initial.accepted.intentVersionId;
 
