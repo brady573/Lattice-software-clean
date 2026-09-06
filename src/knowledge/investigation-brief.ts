@@ -137,6 +137,109 @@ const modelInvestigationBriefSchema = z.object({
   createdAt: z.unknown().optional(),
 }).strict();
 
+const investigationBriefStructuredOutputSchema = {
+  type: "object",
+  properties: {
+    briefId: { type: "string" },
+    runId: { type: "string" },
+    intentVersionId: { type: "string" },
+    objective: { type: "string" },
+    issues: {
+      type: "array",
+      maxItems: 8,
+      items: {
+        type: "object",
+        properties: {
+          issueId: { type: "string" },
+          question: { type: "string" },
+          materiality: { type: "string", enum: ["MATERIAL", "CONTEXTUAL"] },
+          rationale: { type: "string" },
+        },
+        required: ["issueId", "question", "materiality", "rationale"],
+        additionalProperties: false,
+      },
+    },
+    missingFacts: {
+      type: "array",
+      maxItems: 8,
+      items: {
+        type: "object",
+        properties: {
+          factId: { type: "string" },
+          question: { type: "string" },
+          acquisitionMode: { type: "string", enum: ["USER_ONLY", "RESEARCHABLE", "UNKNOWN"] },
+          materiality: { type: "string", enum: ["MATERIAL", "CONTEXTUAL"] },
+          rationale: { type: "string" },
+        },
+        required: ["factId", "question", "acquisitionMode", "materiality", "rationale"],
+        additionalProperties: false,
+      },
+    },
+    sourceRequirements: {
+      type: "array",
+      maxItems: 8,
+      items: {
+        type: "object",
+        properties: {
+          requirementId: { type: "string" },
+          issueIds: { type: "array", maxItems: 8, items: { type: "string" } },
+          authorityNeed: {
+            type: "string",
+            enum: ["PRIMARY_OR_OFFICIAL", "HIGH_QUALITY_SECONDARY", "GENERAL_ORIENTATION", "UNKNOWN"],
+          },
+          jurisdictionNeeded: { type: "boolean" },
+          currentnessNeeded: { type: "boolean" },
+          description: { type: "string" },
+        },
+        required: [
+          "requirementId",
+          "issueIds",
+          "authorityNeed",
+          "jurisdictionNeeded",
+          "currentnessNeeded",
+          "description",
+        ],
+        additionalProperties: false,
+      },
+    },
+    dependencies: {
+      type: "array",
+      maxItems: 12,
+      items: {
+        type: "object",
+        properties: {
+          dependencyId: { type: "string" },
+          blockedIssueId: { type: "string" },
+          dependsOnIssueIds: { type: "array", maxItems: 8, items: { type: "string" } },
+          dependsOnFactIds: { type: "array", maxItems: 8, items: { type: "string" } },
+          rationale: { type: "string" },
+        },
+        required: [
+          "dependencyId",
+          "blockedIssueId",
+          "dependsOnIssueIds",
+          "dependsOnFactIds",
+          "rationale",
+        ],
+        additionalProperties: false,
+      },
+    },
+    plannerKind: { type: "string" },
+  },
+  required: [
+    "briefId",
+    "runId",
+    "intentVersionId",
+    "objective",
+    "issues",
+    "missingFacts",
+    "sourceRequirements",
+    "dependencies",
+    "plannerKind",
+  ],
+  additionalProperties: false,
+} as const;
+
 type InvestigationBriefProposal = Omit<InvestigationBrief, "createdAt">;
 
 function requireUnique(values: readonly string[], label: string): void {
@@ -290,6 +393,10 @@ function plannerRequest(
     model,
     temperature: 0,
     maxOutputTokens,
+    structuredOutput: {
+      type: "json_schema",
+      schema: investigationBriefStructuredOutputSchema,
+    },
     messages: [
       {
         role: "system",
@@ -304,12 +411,15 @@ function plannerRequest(
           "Every dependency.blockedIssueId must reference an existing issue; dependsOnIssueIds and dependsOnFactIds must reference existing IDs, contain no duplicates, and must not include the blockedIssueId itself. Do not create dangling or self references. Do not create cyclic issue dependencies.",
           "MATERIAL means the item could materially change applicability, scope, or the investigation outcome; CONTEXTUAL means useful background that should not be treated as a necessary blocker.",
           "USER_ONLY means Lattice cannot reliably obtain the fact through external research and must ultimately obtain it from the user or user-controlled context; RESEARCHABLE means Lattice should investigate it rather than burden the user; UNKNOWN means the acquisition burden cannot yet be classified responsibly.",
-          "Before marking a fact RESEARCHABLE, verify that Lattice can actually pursue that research from the supplied context. If public research first requires a missing user-controlled or private prerequisite needed to identify, locate, or interpret the target, represent that minimum prerequisite separately as USER_ONLY, or UNKNOWN when its burden cannot yet be classified; do not substitute incidental source or contact metadata for the prerequisite itself.",
+          "Classify acquisition burden independently from materiality. If a missing user-controlled or private prerequisite is the minimum fact required before a MATERIAL public issue can be identified, located, scoped, or interpreted, mark that prerequisite USER_ONLY and MATERIAL when that blocking burden is established. If responsibility, availability, or user control cannot be established, use UNKNOWN rather than guessing.",
+          "Do not mark a fact USER_ONLY merely because asking the user would be convenient. A fact that is publicly discoverable from the supplied context is RESEARCHABLE and remains Lattice's research burden.",
+          "Before marking a fact RESEARCHABLE, verify that Lattice can actually pursue that research from the supplied context. If public research first requires a missing user-controlled or private prerequisite needed to identify, locate, scope, or interpret the target, represent only that minimum prerequisite separately as USER_ONLY and MATERIAL when established, or UNKNOWN when acquisition responsibility cannot yet be classified; do not substitute downstream research questions, incidental source metadata, or contact details for the prerequisite itself.",
           "PRIMARY_OR_OFFICIAL means governing, first-party, or official authority is needed; HIGH_QUALITY_SECONDARY means reputable expert synthesis is appropriate; GENERAL_ORIENTATION means broad orientation is sufficient; UNKNOWN means the needed authority level cannot yet be determined.",
           "Set jurisdictionNeeded true only when correct evidence or applicability materially depends on jurisdiction or location. Set currentnessNeeded true only when the evidence must reflect a current or time-sensitive state.",
-          "Dependencies are real investigation-order relationships: blockedIssueId identifies the issue that cannot yet be resolved, and the dependency arrays identify exactly which existing issues or facts it depends on. Do not add decorative dependencies.",
+          "Dependencies express one-way blocking, not relevance, topical association, or merely useful investigation order. Emit an issue dependency only when the blocked issue cannot be scoped or resolved until the prerequisite issue is resolved; emit a fact dependency only when the blocked issue cannot be scoped or resolved until that fact is known.",
+          "Never encode mutual informational relevance as reciprocal dependencies. For any pair of issues, choose a single defensible blocking direction only when one genuinely blocks the other; if neither blocks the other, omit the edge. Keep dependencies minimal and omit decorative, speculative, or redundant edges.",
           "Identify a bounded investigation: include only the smallest materially decision-relevant set of hidden issues and prerequisite facts needed to remove the user's knowledge barrier. When the objective is overbroad, narrow the investigation instead of enumerating everything conceivable or filling the output budget. Do not turn every useful contextual fact into a material blocker.",
-          "Before returning, verify that every emitted reference resolves to an emitted ID and that issue dependencies are acyclic. If a dependency cannot be stated consistently, omit it rather than guess or invent a reference.",
+          "Before returning, verify that every emitted reference resolves to an emitted ID and that issue dependencies are acyclic and minimal. Remove reciprocal, decorative, and unsupported edges; if a blocking direction cannot be defended, omit the dependency rather than guess or invent a reference.",
           "Do not state conclusions, truth verdicts, governing rules as established facts, invented user preferences or requirements, decisions, execution authorization, or permission to act.",
         ].join(" "),
       },

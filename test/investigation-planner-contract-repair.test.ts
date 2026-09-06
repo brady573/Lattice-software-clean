@@ -15,6 +15,7 @@ import type {
 
 class StaticJsonModelProvider implements ModelProvider {
   readonly kind = "deterministic-investigation-contract-repair";
+  readonly structuredOutputCapability = "json_schema" as const;
   readonly requests: CanonicalModelRequest[] = [];
 
   constructor(private readonly payload: unknown) {}
@@ -114,7 +115,8 @@ const input: KnowledgeInvestigationPlanningInput = {
 test("planner request communicates the complete nested generic InvestigationBrief contract", async () => {
   const { planner, provider } = plannerFor(proposalFixture(input));
   await planner.plan(input);
-  const prompt = provider.requests[0]?.messages[0]?.content ?? "";
+  const request = provider.requests[0];
+  const prompt = request?.messages[0]?.content ?? "";
 
   for (const requiredField of [
     "issueId",
@@ -142,6 +144,11 @@ test("planner request communicates the complete nested generic InvestigationBrie
   assert.match(prompt, /reference an existing issueId/iu);
   assert.match(prompt, /Do not create dangling or self references/iu);
   assert.match(prompt, /Do not include createdAt/iu);
+  assert.equal(request?.structuredOutput?.type, "json_schema");
+  const structuredSchema = JSON.stringify(request?.structuredOutput?.schema);
+  assert.match(structuredSchema, /"missingFacts"/u);
+  assert.match(structuredSchema, /"dependencies"/u);
+  assert.doesNotMatch(structuredSchema, /createdAt/u);
 });
 
 test("planner request communicates semantic materiality, acquisition, source, and dependency distinctions", async () => {
@@ -159,7 +166,7 @@ test("planner request communicates semantic materiality, acquisition, source, an
   assert.match(prompt, /GENERAL_ORIENTATION means broad orientation is sufficient/iu);
   assert.match(prompt, /jurisdictionNeeded true only when .* depends on jurisdiction or location/iu);
   assert.match(prompt, /currentnessNeeded true only when .* current or time-sensitive state/iu);
-  assert.match(prompt, /blockedIssueId identifies the issue that cannot yet be resolved/iu);
+  assert.match(prompt, /one-way blocking, not relevance/iu);
 });
 
 test("valid deterministic model content is accepted and createdAt is Lattice-owned", async () => {

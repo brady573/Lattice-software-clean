@@ -14,6 +14,7 @@ import type {
 
 class StaticProvider implements ModelProvider {
   readonly kind = "semantic-repair-test";
+  readonly structuredOutputCapability = "json_schema" as const;
   readonly requests: CanonicalModelRequest[] = [];
 
   constructor(private readonly payload: unknown) {}
@@ -97,18 +98,42 @@ function plannerFor(payload: unknown): { planner: ModelGatewayKnowledgeInvestiga
   };
 }
 
-test("planner prompt requires minimum research keys, bounded scope, and self-consistent references", async () => {
+test("planner prompt distinguishes minimum user prerequisites from Lattice research burden", async () => {
   const { planner, provider } = plannerFor(baseProposal());
   await planner.plan(input);
   const prompt = provider.requests[0]?.messages[0]?.content ?? "";
 
-  assert.match(prompt, /Before marking a fact RESEARCHABLE, verify that Lattice can actually pursue that research from the supplied context/iu);
-  assert.match(prompt, /missing user-controlled or private prerequisite/iu);
-  assert.match(prompt, /do not substitute incidental source or contact metadata/iu);
-  assert.match(prompt, /smallest materially decision-relevant set/iu);
-  assert.match(prompt, /overbroad, narrow the investigation instead of enumerating everything conceivable/iu);
-  assert.match(prompt, /verify that every emitted reference resolves to an emitted ID/iu);
-  assert.match(prompt, /issue dependencies are acyclic/iu);
+  assert.match(prompt, /Classify acquisition burden independently from materiality/iu);
+  assert.match(prompt, /minimum fact required before a MATERIAL public issue/iu);
+  assert.match(prompt, /mark that prerequisite USER_ONLY and MATERIAL/iu);
+  assert.match(prompt, /use UNKNOWN rather than guessing/iu);
+  assert.match(prompt, /publicly discoverable from the supplied context is RESEARCHABLE/iu);
+  assert.match(prompt, /remains Lattice's research burden/iu);
+  assert.match(prompt, /represent only that minimum prerequisite separately/iu);
+  assert.match(prompt, /do not substitute downstream research questions, incidental source metadata, or contact details/iu);
+});
+
+test("planner prompt requires genuine one-way blocking dependencies", async () => {
+  const { planner, provider } = plannerFor(baseProposal());
+  await planner.plan(input);
+  const prompt = provider.requests[0]?.messages[0]?.content ?? "";
+
+  assert.match(prompt, /Dependencies express one-way blocking, not relevance/iu);
+  assert.match(prompt, /Never encode mutual informational relevance as reciprocal dependencies/iu);
+  assert.match(prompt, /single defensible blocking direction/iu);
+  assert.match(prompt, /if neither blocks the other, omit the edge/iu);
+  assert.match(prompt, /Keep dependencies minimal/iu);
+  assert.match(prompt, /omit decorative, speculative, or redundant edges/iu);
+  assert.match(prompt, /issue dependencies are acyclic and minimal/iu);
+});
+
+test("planner requests provider-neutral structured output for the proposal contract", async () => {
+  const { planner, provider } = plannerFor(baseProposal());
+  await planner.plan(input);
+  const request = provider.requests[0];
+  assert.equal(request?.structuredOutput?.type, "json_schema");
+  assert.match(JSON.stringify(request?.structuredOutput?.schema), /"acquisitionMode"/u);
+  assert.match(JSON.stringify(request?.structuredOutput?.schema), /"dependsOnIssueIds"/u);
 });
 
 test("cyclic issue dependencies are rejected fail-closed", async () => {

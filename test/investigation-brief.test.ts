@@ -63,6 +63,7 @@ function briefFixture(
 
 class StaticJsonModelProvider implements ModelProvider {
   readonly kind = "deterministic-investigation-planner-fixture";
+  readonly structuredOutputCapability = "json_schema" as const;
   readonly requests: CanonicalModelRequest[] = [];
 
   constructor(private readonly payload: unknown) {}
@@ -363,6 +364,7 @@ test("Model Gateway planner accepts valid deterministic provider output and fail
   const brief = await validPlanner.plan(input);
   assert.equal(brief.briefId, "brief-1");
   assert.equal(validProvider.requests.length, 1);
+  assert.equal(validProvider.requests[0]?.structuredOutput?.type, "json_schema");
   assert.match(validProvider.requests[0]?.messages[0]?.content ?? "", /do not answer the user's objective/iu);
 
   const invalidProvider = new StaticJsonModelProvider({ ...validPayload, truthVerdict: "TRUE" });

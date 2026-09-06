@@ -3,10 +3,8 @@ import { basename, resolve } from "node:path";
 import {
   ModelGatewayKnowledgeInvestigationPlanner,
 } from "../dist/src/knowledge/investigation-brief.js";
-import {
-  ModelRuntime,
-  OpenAiCompatibleModelProvider,
-} from "../dist/src/model/index.js";
+import { ModelRuntime } from "../dist/src/model/index.js";
+import { PinnedExternalResearchModelProvider } from "../dist/src/model/pinned-external-research-provider.js";
 
 function fail(message) {
   throw new Error(message);
@@ -40,6 +38,16 @@ function optionalInteger(values, name, fallback, min, max) {
   return value;
 }
 
+function optionalIdList(values, name) {
+  const raw = values.get(name);
+  if (raw === undefined) return null;
+  const ids = raw.split(",").map((value) => value.trim()).filter(Boolean);
+  if (ids.length === 0 || new Set(ids).size !== ids.length) {
+    fail(`--${name} must contain one or more unique comma-separated case IDs.`);
+  }
+  return ids;
+}
+
 function normalizeCases(raw) {
   if (raw === null || typeof raw !== "object" || Array.isArray(raw)) fail("Case suite must be an object.");
   if (typeof raw.suiteId !== "string" || raw.suiteId.trim().length === 0) fail("Case suite requires suiteId.");
@@ -71,6 +79,16 @@ function normalizeCases(raw) {
   return { suiteId: raw.suiteId.trim(), cases };
 }
 
+function selectCases(suite, requestedIds) {
+  if (requestedIds === null) return suite.cases;
+  const byId = new Map(suite.cases.map((item) => [item.id, item]));
+  return requestedIds.map((id) => {
+    const evaluationCase = byId.get(id);
+    if (evaluationCase === undefined) fail(`Unknown case ID requested by --case-ids: ${id}.`);
+    return evaluationCase;
+  });
+}
+
 function getApiKey(values) {
   const name = values.get("api-key-env")?.trim();
   if (!name) return undefined;
@@ -95,6 +113,7 @@ class RecordingProvider {
   constructor(inner) {
     this.inner = inner;
     this.kind = inner.kind;
+    this.structuredOutputCapability = inner.structuredOutputCapability;
     this.calls = [];
   }
 
@@ -160,15 +179,27 @@ async function main() {
   const values = parseArgs(process.argv.slice(2));
   const baseUrl = required(values, "base-url");
   const model = required(values, "model");
+  const providerId = values.get("provider-id")?.trim() || "nvidia";
   const casesPath = resolve(values.get("cases") ?? "benchmarks/investigation-planner-semantic-public-v0.1.json");
   const outputPath = resolve(required(values, "output"));
   const defaultRepeat = optionalInteger(values, "repeat", 1, 1, 10);
+  const repeatOverride = values.has("repeat-override")
+    ? optionalInteger(values, "repeat-override", 1, 1, 10)
+    : null;
+  const requestedCaseIds = optionalIdList(values, "case-ids");
   const maxOutputTokens = optionalInteger(values, "max-output-tokens", 2000, 256, 8000);
   const plannerKind = values.get("planner-kind")?.trim() || "model-gateway-investigation-brief-v0.1";
   const apiKey = getApiKey(values);
+  if (apiKey === undefined) fail("--api-key-env is required for the pinned structured-output provider path.");
   const suite = normalizeCases(JSON.parse(await readFile(casesPath, "utf8")));
+  const selectedCases = selectCases(suite, requestedCaseIds);
 
-  const recordingProvider = new RecordingProvider(new OpenAiCompatibleModelProvider({ baseUrl, apiKey }));
+  const recordingProvider = new RecordingProvider(new PinnedExternalResearchModelProvider({
+    baseUrl,
+    providerId,
+    apiKey,
+    structuredOutputMode: "nvidia-guided-json",
+  }));
   const runtime = new ModelRuntime(recordingProvider);
   const planner = new ModelGatewayKnowledgeInvestigationPlanner(runtime, {
     model,
@@ -180,8 +211,8 @@ async function main() {
   const runs = [];
   let ordinal = 0;
 
-  for (const evaluationCase of suite.cases) {
-    const repeat = evaluationCase.repeat ?? defaultRepeat;
+  for (const evaluationCase of selectedCases) {
+    const repeat = repeatOverride ?? evaluationCase.repeat ?? defaultRepeat;
     for (let iteration = 1; iteration <= repeat; iteration += 1) {
       ordinal += 1;
       const runId = `semantic-proof-${evaluationCase.id.toLowerCase()}-${iteration}`;
@@ -232,16 +263,20 @@ async function main() {
     workItem: "Investigation Planner Semantic Capability Proof v0.1",
     suiteId: suite.suiteId,
     suitePath: basename(casesPath),
+    selectedCaseIds: selectedCases.map((item) => item.id),
+    repeatOverride,
     startedAt,
     completedAt,
     runtime: {
       providerKind: recordingProvider.kind,
+      providerId,
       baseUrl,
-      authentication: apiKey === undefined ? "NONE" : "BEARER_ENV",
+      authentication: "BEARER_ENV",
       requestedModel: model,
       plannerKind,
       temperature: 0,
       maxOutputTokens,
+      structuredOutput: "json_schema",
       nodeVersion: process.version,
       platform: process.platform,
       architecture: process.arch,
@@ -254,12 +289,13 @@ async function main() {
       note: "Schema acceptance is not semantic capability proof. Every run requires independent rubric review; critical failures cannot be averaged away.",
     },
     runs,
-    evaluationBoundary: "This harness records the actual ModelGatewayKnowledgeInvestigationPlanner path and raw planner text. It does not self-certify semantic quality, source authority, truth, Decision, Authorization, acquisition integration, or Expert-Knowledge Bridge completion.",
+    evaluationBoundary: "This harness records the actual ModelGatewayKnowledgeInvestigationPlanner path and raw planner text through the canonical provider-neutral structured-output request. It does not self-certify semantic quality, source authority, truth, Decision, Authorization, acquisition integration, or Expert-Knowledge Bridge completion.",
   };
 
   await writeFile(outputPath, `${JSON.stringify(report, null, 2)}\n`, "utf8");
   console.log(JSON.stringify({
     suiteId: suite.suiteId,
+    selectedCaseIds: report.selectedCaseIds,
     attempts: report.summary.attempts,
     schemaAccepted: report.summary.schemaAccepted,
     schemaRejected: report.summary.schemaRejected,
