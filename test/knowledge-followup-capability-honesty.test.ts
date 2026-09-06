@@ -95,7 +95,11 @@ async function ask(app: FastifyInstance, conversationId: string, turnId: string,
   await waitForCompletedRun(app, accepted.runId);
   const outcomeResponse = await app.inject({ method: "GET", url: `/api/v1/runs/${accepted.runId}/outcome` });
   assert.equal(outcomeResponse.statusCode, 200, outcomeResponse.body);
-  return { accepted, outcome: outcomeResponse.json().outcome };
+  const body = outcomeResponse.json<{
+    outcome: { uncertainties: string[] };
+    presentation: { assistantMessage: string };
+  }>();
+  return { accepted, outcome: body.outcome, presentation: body.presentation };
 }
 
 test("simplification follow-up does not simulate simplification by truncating source text", async () => {
@@ -167,7 +171,11 @@ test("limited follow-ups preserve intent and expose exact v0.1 capability bounda
     const simpler = await ask(app, conversationId, "simpler", "Explain the second point more simply.");
     assert.equal(simpler.accepted.intentVersionId, intentVersionId);
     assert.equal(simpler.accepted.acceptedUnderstanding, objective);
-    assert.ok(simpler.outcome.uncertainties.some((item: string) => item.includes("does not perform genuine language simplification")));
+    assert.equal(
+      simpler.outcome.uncertainties.some((item: string) => item.includes("does not perform genuine language simplification")),
+      false,
+    );
+    assert.match(simpler.presentation.assistantMessage, /couldn't simplify this faithfully/u);
 
     const disagreement = await ask(app, conversationId, "disagreement", "Is there evidence that disagrees?");
     assert.equal(disagreement.accepted.intentVersionId, intentVersionId);
