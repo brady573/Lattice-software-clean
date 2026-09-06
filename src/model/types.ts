@@ -28,25 +28,10 @@ export interface CanonicalModelToolDefinition {
   readonly inputSchema: CanonicalModelToolInputSchema;
 }
 
-export type CanonicalJsonPrimitive = string | number | boolean | null;
-export type CanonicalJsonValue =
-  | CanonicalJsonPrimitive
-  | readonly CanonicalJsonValue[]
-  | CanonicalJsonObject;
-export interface CanonicalJsonObject {
-  readonly [key: string]: CanonicalJsonValue;
-}
-
-export interface CanonicalModelStructuredOutput {
-  readonly type: "json_schema";
-  readonly schema: CanonicalJsonObject;
-}
-
 export interface CanonicalModelRequest {
   readonly model: string;
   readonly messages: readonly CanonicalModelMessage[];
   readonly tools?: readonly CanonicalModelToolDefinition[];
-  readonly structuredOutput?: CanonicalModelStructuredOutput;
   readonly temperature?: number;
   readonly maxOutputTokens?: number;
   readonly seed?: number;
