@@ -57,6 +57,7 @@ import { migrateRunIntentBindings } from "./intent/postgres-run-binding-store.js
 import { registerUserPreferenceControlsApi } from "./intent/user-preference-controls-api.js";
 import type { KnowledgeAcquisitionProvider } from "./knowledge/acquisition.js";
 import type { ModelAssistanceCapabilityService } from "./model-assistance-capability.js";
+import { PostgresModelAssistanceAuthorizationStore } from "./model-assistance-store.js";
 import { LocalOfflineModelRuntime } from "./model/local-offline-runtime.js";
 import { OpenAiCompatibleModelProvider } from "./model/openai-compatible.js";
 import { PostgresApiRunControlStore } from "./postgres-api-control-store.js";
@@ -210,6 +211,7 @@ export async function migrateRuntimeDatabase(databaseUrl: string): Promise<void>
   await migrateRunIntentBindings(databaseUrl);
   await PostgresDecisionPlanStore.migrate(databaseUrl);
   await PostgresUserPreferenceStore.migrate(databaseUrl);
+  await PostgresModelAssistanceAuthorizationStore.migrate(databaseUrl);
 
   const apiControlStore = await PostgresApiRunControlStore.connect(databaseUrl, { migrate: true });
   await apiControlStore.close();
