@@ -4,38 +4,55 @@ import { registerModelAssistanceApi } from "../dist/src/model-assistance-api.js"
 import { createConfiguredModelAssistanceCapability } from "../dist/src/model-assistance-composition.js";
 import { createRuntimeApp } from "../dist/src/runtime-app.js";
 import { resolveRuntimeConfig } from "../dist/src/runtime-config.js";
+import { requiredProofObligations } from "../dist/src/truth/contracts.js";
+import { OfflineFixtureTruthPipeline } from "../dist/src/truth/execution-pipeline.js";
 
 const original = "C4 photosynthesis spatially separates initial carbon fixation from the Calvin cycle, which may reduce photorespiration under hot, dry conditions.";
+const subjectId = "a2-live-user";
 const config = resolveRuntimeConfig({
   ...process.env,
   LATTICE_DEPLOYMENT_MODE: "development",
   LATTICE_TRUTH_MODE: "v36-live",
+  LATTICE_AUTHENTICATION_MODE: "development-fixture",
+  LATTICE_DEVELOPMENT_FIXTURE_SUBJECT_ID: subjectId,
   LATTICE_KNOWLEDGE_SIMPLIFIER_ROUTE: "groq-gpt-oss-120b",
 });
 
-const sourceProvider = {
-  kind: "a2-live-proof-source",
-  async acquire() {
-    return {
-      sources: [{
-        sourceId: "a2-live-c4",
-        canonicalUri: "https://knowledge.example/a2-live-c4",
-        title: "A2 live C4 source",
-        publisher: "A2 qualification fixture",
-        retrievedAt: new Date().toISOString(),
-        publishedAt: null,
-        contentType: "text/plain",
-        content: original,
-      }],
-      claims: [{
-        claimId: "a2-live-c4-report",
-        text: original,
-        claimType: "INTERPRETIVE",
-        evidence: [{ sourceId: "a2-live-c4", relation: "SUPPORTS", excerpt: original }],
-      }],
-    };
-  },
-};
+function passedChecks(claimType) {
+  return Object.fromEntries(requiredProofObligations(claimType).map((kind) => [kind, "PASSED"]));
+}
+
+const evidenceId = "a2-live-evidence";
+const claimId = "a2-live-claim";
+const sourceId = "a2-live-governed-source";
+const truthPipeline = new OfflineFixtureTruthPipeline({
+  evidence: [{
+    id: evidenceId,
+    value: original,
+    sourceId,
+    sourceLabel: "A2 governed Knowledge fixture",
+    admitted: true,
+  }],
+  truthClaims: [{
+    id: claimId,
+    text: original,
+    claimType: "FACTUAL",
+    evidenceIds: [evidenceId],
+    scope: "consultation",
+    checks: passedChecks("FACTUAL"),
+    materiallyMisleading: false,
+  }],
+  truthEvidence: [{
+    evidenceId,
+    claimId,
+    provenanceComponentKey: sourceId,
+    provenanceConfidence: "HIGH",
+    relation: "SUPPORTS",
+    sourceAccepted: true,
+    authoritativePrimary: true,
+    verification: "VERIFIED",
+  }],
+});
 
 async function request(app, options) {
   const response = await app.inject(options);
@@ -69,7 +86,7 @@ async function turn(app, conversationId, message) {
 const service = await createConfiguredModelAssistanceCapability(config);
 const app = await createRuntimeApp(config, {
   memoryDispatchDelayMs: 1,
-  knowledgeAcquisitionProvider: sourceProvider,
+  truthPipeline,
   modelAssistanceService: service,
 });
 registerModelAssistanceApi(app, service);
@@ -89,6 +106,7 @@ try {
   const created = await request(app, { method: "POST", url: "/api/v1/conversations" });
   const conversationId = created.conversation.id;
   const initial = await turn(app, conversationId, "Explain C4 photosynthesis.");
+  assert.equal(initial.outcome.findings.length, 1);
   assert.equal(initial.outcome.findings[0]?.text, original);
 
   const blocked = await turn(app, conversationId, "Put that in plain language.");
@@ -137,10 +155,18 @@ try {
   })).capability;
   assert.equal(finalCapability.status, "DISCONNECTED");
   assert.equal(finalCapability.lastInvocation?.runId, assisted.accepted.runId);
+  assert.equal(
+    finalCapability.lastInvocation?.provenance?.upstreamRequestId,
+    afterUse.lastInvocation?.provenance?.upstreamRequestId,
+  );
 
   process.stdout.write(`${JSON.stringify({
     status: "PASS",
     capability: "plain-language-model-assistance",
+    authenticatedSubject: {
+      mode: "development-fixture",
+      subjectId,
+    },
     authorization: {
       initial: initialCapability.status,
       connected: connected.status,
@@ -148,10 +174,16 @@ try {
     },
     productPath: {
       objective: initial.accepted.acceptedUnderstanding,
+      governedKnowledgeSetup: "deterministic-v36-fixture",
       blockedBeforeAuthorization: true,
       canonicalFindingPreserved: assisted.outcome.findings[0]?.text === original,
       assistantMessage: assisted.presentation.assistantMessage,
+      fidelityOutcome: afterUse.lastInvocation?.outcome,
       postRevocationBlocked: true,
+      postRevocationInvocationUnchanged:
+        finalCapability.lastInvocation?.provenance?.upstreamRequestId
+          === afterUse.lastInvocation?.provenance?.upstreamRequestId,
+      silentFallback: false,
     },
     invocation: afterUse.lastInvocation,
   }, null, 2)}\n`);
