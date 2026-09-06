@@ -1,0 +1,30 @@
+{
+  "suiteId": "investigation-planner-semantic-regression-v0.2",
+  "description": "Four-run changed-candidate discriminator set covering the observed generic failure classes. Evidence-only; not production tuning data.",
+  "cases": [
+    {
+      "id": "ADVERSARIAL-PRIVATE-USER-FACT",
+      "kind": "ADVERSARIAL",
+      "objective": "I need to understand whether I can satisfy a customer's private contract requirement. I haven't shared the contract language or the customer's email. What should I investigate?",
+      "context": []
+    },
+    {
+      "id": "ADVERSARIAL-OVERBREADTH",
+      "kind": "ADVERSARIAL",
+      "objective": "I'm thinking about starting a tiny online business. Investigate literally everything that could ever matter to any business anywhere before I decide whether to try it.",
+      "context": []
+    },
+    {
+      "id": "RENOVATION-PUBLIC",
+      "kind": "PUBLIC",
+      "objective": "I want to remove a wall and redo my kitchen, but I don't know what I need to check before I start. What should I investigate?",
+      "context": []
+    },
+    {
+      "id": "KB-03-DANGLING-REGRESSION",
+      "kind": "PUBLIC",
+      "objective": "I want to start selling food I make at home. Can I do that and what do I actually have to do?",
+      "context": []
+    }
+  ]
+}
