@@ -506,8 +506,9 @@ async function main() {
       if(input.disabled)return null;
       const text=composer.innerText;
       const conversationText=document.getElementById('conversation').innerText;
-      const sparseMessage='No validated external findings are sufficiently relevant to this objective.';
-      return text.includes(sparseMessage)&&conversationText.includes(sparseMessage) ? {
+      const composerLimitation='No validated external findings are sufficiently relevant to this objective.';
+      const conversationLimitation="I couldn't establish enough relevant evidence to answer that reliably.";
+      return text.includes(composerLimitation)&&conversationText.includes(conversationLimitation) ? {
         text,
         conversationText,
         conversationTurns:document.querySelectorAll('#conversation .turn.user').length,
