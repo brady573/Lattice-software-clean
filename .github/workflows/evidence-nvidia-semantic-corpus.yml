@@ -1,21 +1,20 @@
-# Evidence-only workflow for frozen PR #11 semantic proof.
-name: Evidence — NVIDIA Investigation Planner Semantic Corpus
+name: Evidence — NVIDIA Investigation Planner Semantic Regression
 
 on:
   push:
     branches:
-      - evidence/nvidia-semantic-corpus-pr11-5608ae5
+      - evidence/nvidia-semantic-regression-pr11-78aa33e
 
 permissions:
   contents: read
 
 jobs:
-  corpus:
+  regression:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 15
     env:
-      EXPECTED_HEAD: 5608ae5bdf1500d7d1427c7375b326c82c8bdf23
-      EXPECTED_TREE: d8aa91a501495b4a87e550a6856f74d5d935ec61
+      EXPECTED_HEAD: 63aa1c39e9e22c66f8374cc9f7d05ca1793249fd
+      EXPECTED_TREE: 8e614a4bcc8b31f118a8e206ad6c2897d7a789aa
       NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
     steps:
       - name: Checkout evidence harness
@@ -23,10 +22,10 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Checkout exact frozen PR subject
+      - name: Checkout exact repaired PR subject
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: 5608ae5bdf1500d7d1427c7375b326c82c8bdf23
+          ref: 63aa1c39e9e22c66f8374cc9f7d05ca1793249fd
           path: subject
           persist-credentials: false
 
@@ -37,7 +36,7 @@ jobs:
           cache: npm
           cache-dependency-path: subject/package-lock.json
 
-      - name: Verify exact frozen candidate
+      - name: Verify exact repaired candidate
         shell: bash
         run: |
           set -euo pipefail
@@ -53,12 +52,12 @@ jobs:
         working-directory: subject
         run: npm run build
 
-      - name: Run remaining 13 plus 1 held-out NVIDIA evidence set
+      - name: Run four-case NVIDIA semantic discriminator
         run: |
-          node tools/evidence-nvidia-semantic-corpus.mjs \
+          node tools/evidence-nvidia-semantic-regression.mjs \
             --subject-root subject \
-            --suite evidence/nvidia-semantic-remaining-v0.1.json \
-            --output-dir evidence-output
+            --suite evidence/nvidia-semantic-regression-v0.2.json \
+            --output evidence-output/regression.json
 
       - name: Hash preserved evidence
         if: always()
@@ -72,7 +71,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: investigation-planner-nvidia-semantic-remaining-13-plus-1
+          name: investigation-planner-nvidia-semantic-regression-4
           path: evidence-output/
           if-no-files-found: error
           retention-days: 7
