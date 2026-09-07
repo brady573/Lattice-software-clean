@@ -346,7 +346,22 @@ test("M2 general advisory spine preserves Intent/V36 authority and durable Recom
     }]);
     assert.equal(recommendationRecord.factualBasis.length, 1);
     assert.deepEqual(recommendationRecord.factualBasis[0]?.claimIds, firstBody.recommendationReference.claimIds);
-    assert.deepEqual(recommendationRecord.factualBasis[0]?.sourceIds, ["m2-first-source"]);
+    const establishedKnowledge = await app.inject({
+      method: "GET",
+      url: `/api/v1/knowledge/${firstBody.knowledgeReference.knowledgeId}`,
+    });
+    assert.equal(establishedKnowledge.statusCode, 200, establishedKnowledge.body);
+    const establishedKnowledgeBody = establishedKnowledge.json<{
+      outcome: { provenance: Array<{ sourceId: string; canonicalUri: string }> };
+    }>();
+    const usedSourceId = establishedKnowledgeBody.outcome.provenance
+      .find((source) => source.canonicalUri === "https://m2.example/first")?.sourceId;
+    const unrelatedSourceId = establishedKnowledgeBody.outcome.provenance
+      .find((source) => source.canonicalUri === "https://m2.example/first-extra")?.sourceId;
+    assert.ok(usedSourceId);
+    assert.ok(unrelatedSourceId);
+    assert.deepEqual(recommendationRecord.factualBasis[0]?.sourceIds, [usedSourceId]);
+    assert.ok(!recommendationRecord.factualBasis[0]?.sourceIds.includes(unrelatedSourceId));
     assert.equal(recommendationRecord.factualBasis[0]?.evidenceIds.length, 1);
     for (const uncertainty of advisory.inputs[0]!.knowledge[0]!.uncertainties) {
       assert.ok(recommendationRecord.uncertainties.includes(uncertainty));
