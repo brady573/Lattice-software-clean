@@ -20,11 +20,16 @@ export const alphaDecisionCriterionCatalog = new QualifiedCriterionCatalog(1, [
   },
 ]);
 
-const npmPackageToken = "(?:@[a-z0-9][a-z0-9._-]*\\/[a-z0-9][a-z0-9._-]*|[a-z0-9][a-z0-9._-]*)";
+// This deliberately uses a conservative package-name subset whose final
+// character must be alphanumeric. That prevents ordinary sentence punctuation
+// from silently becoming part of a USER-named candidate.
+const npmPackageSegment = "[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?";
+const npmPackageToken = `(?:@${npmPackageSegment}\\/${npmPackageSegment}|${npmPackageSegment})`;
 const candidatePairPattern = new RegExp(
   `\\bbetween\\s+(?:the\\s+)?(?:npm\\s+)?packages?\\s+(${npmPackageToken})\\s+(?:and|or)\\s+(${npmPackageToken})(?=\\s|[.,;!?]|$)`,
   "iu",
 );
+const exactNpmPackageNamePattern = new RegExp(`^(?:@${npmPackageSegment}\\/${npmPackageSegment}|${npmPackageSegment})$`, "u");
 const decisionVerbPattern = /\b(?:choose|decide|pick|select|recommend)\b/iu;
 const npmPackageContextPattern = /\bnpm\b[^.!?\n]{0,80}\bpackages?\b|\bpackages?\b[^.!?\n]{0,80}\bnpm\b/iu;
 
@@ -33,7 +38,7 @@ function normalized(value: string): string {
 }
 
 function validNpmPackageName(value: string): boolean {
-  return /^(?:@[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._-]*|[a-z0-9][a-z0-9._-]*)$/u.test(value);
+  return exactNpmPackageNamePattern.test(value);
 }
 
 function packagePair(value: string): readonly [string, string] | null {
