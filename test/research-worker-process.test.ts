@@ -346,6 +346,14 @@ test(
       assert.equal(run?.status, "INVESTIGATING");
       assert.equal(run?.version, 4);
 
+      await waitFor(async () => {
+        const result = await pool.query<{ dispatched_at: Date | null }>(
+          "SELECT dispatched_at FROM dispatch_outbox WHERE run_id=$1 AND queue_name='lattice.research'",
+          [runId],
+        );
+        return result.rowCount === 1 && Boolean(result.rows[0]?.dispatched_at);
+      }, 10_000);
+
       const researchDispatch = await pool.query<{ dispatched_at: Date | null }>(
         "SELECT dispatched_at FROM dispatch_outbox WHERE run_id=$1 AND queue_name='lattice.research'",
         [runId],
