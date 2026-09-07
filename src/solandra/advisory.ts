@@ -117,8 +117,8 @@ function buildAdvisoryRequest(model: string, input: SolandraAdvisoryInput): Cano
       `Uncertainties: ${item.uncertainties.join(" | ") || "none"}`,
     ].join("\n")).join("\n\n");
 
-  const contract = JSON.stringify({
-    recommendation: {
+  const contract = JSON.stringify([
+    {
       status: "RECOMMENDATION",
       recommendation: "string",
       basis: [{ knowledgeId: "one supplied Knowledge ID", claimIds: ["supplied claim IDs from that Knowledge"] }],
@@ -129,10 +129,10 @@ function buildAdvisoryRequest(model: string, input: SolandraAdvisoryInput): Cano
       preservedUncertainties: ["copy each material supplied uncertainty used by the recommendation verbatim"],
       alternatives: ["relevant alternative"],
     },
-    needsKnowledge: { status: "NEEDS_KNOWLEDGE", knowledgeNeeds: ["external fact needed"], reason: "why it is required" },
-    needsClarification: { status: "NEEDS_CLARIFICATION", question: "material USER clarification", reason: "why it changes the advice" },
-    insufficientBasis: { status: "INSUFFICIENT_BASIS", reason: "why no responsible recommendation is supported", uncertainties: ["material uncertainty"] },
-  });
+    { status: "NEEDS_KNOWLEDGE", knowledgeNeeds: ["external fact needed"], reason: "why it is required" },
+    { status: "NEEDS_CLARIFICATION", question: "material USER clarification", reason: "why it changes the advice" },
+    { status: "INSUFFICIENT_BASIS", reason: "why no responsible recommendation is supported", uncertainties: ["material uncertainty"] },
+  ]);
 
   return {
     model,
@@ -145,7 +145,10 @@ function buildAdvisoryRequest(model: string, input: SolandraAdvisoryInput): Cano
           "Do not create or modify canonical USER intent. Do not establish new factual Knowledge. Do not authorize a selection or action. Do not claim execution occurred.",
           "Every factual basis reference must use only supplied Knowledge IDs and claim IDs. If an external fact is required but not supplied, return NEEDS_KNOWLEDGE instead of inventing it.",
           "Do not make supplied uncertainty disappear. For RECOMMENDATION, copy every material supplied uncertainty that affects the recommendation verbatim into preservedUncertainties, and explain it naturally in uncertainties when useful.",
-          "Return one JSON object and no prose. Use exactly one of these shapes:",
+          "Return exactly one top-level JSON object and no prose.",
+          "The top-level object itself must contain status with exactly one of: RECOMMENDATION, NEEDS_KNOWLEDGE, NEEDS_CLARIFICATION, INSUFFICIENT_BASIS.",
+          "Do not wrap the result in a named property such as recommendation, needsKnowledge, needsClarification, or insufficientBasis.",
+          "Choose exactly one of these top-level object shapes:",
           contract,
         ].join("\n"),
       },

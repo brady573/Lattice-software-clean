@@ -623,7 +623,12 @@ class GroundedInferenceAdvisoryProvider implements ModelProvider {
   async generate(request: CanonicalModelRequest, _context: ModelCallContext): Promise<ModelProviderResult> {
     this.calls += 1;
     const system = request.messages[0]?.content ?? "";
-    const text = system.includes("bounded grounding verifier")
+    const isGroundingAudit = system.includes("bounded grounding verifier");
+    if (!isGroundingAudit) {
+      assert.match(system, /top-level object itself must contain status/iu);
+      assert.match(system, /Do not wrap the result in a named property/iu);
+    }
+    const text = isGroundingAudit
       ? JSON.stringify({ status: "GROUNDED", unsupportedExternalPremises: [], knowledgeNeeds: [] })
       : JSON.stringify({
         status: "RECOMMENDATION",
