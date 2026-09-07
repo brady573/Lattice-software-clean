@@ -46,19 +46,19 @@ export interface RetrievedKnowledgeClaim {
   readonly claimId: string;
   readonly text: string;
   readonly claimType: ClaimType;
-  readonly scope?: string | null;
-  readonly effectiveAt?: string | null;
-  readonly jurisdiction?: string | null;
-  readonly unit?: string | null;
-  readonly denominator?: string | null;
-  readonly baseline?: string | null;
-  readonly period?: string | null;
-  readonly causalRelation?: string | null;
-  readonly authenticityTarget?: string | null;
-  readonly comparisonClass?: string | null;
-  readonly quotedContext?: string | null;
-  readonly qualifiers?: readonly ClaimQualifier[];
-  readonly evidenceRisk?: EvidenceRisk;
+  readonly scope?: string | null | undefined;
+  readonly effectiveAt?: string | null | undefined;
+  readonly jurisdiction?: string | null | undefined;
+  readonly unit?: string | null | undefined;
+  readonly denominator?: string | null | undefined;
+  readonly baseline?: string | null | undefined;
+  readonly period?: string | null | undefined;
+  readonly causalRelation?: string | null | undefined;
+  readonly authenticityTarget?: string | null | undefined;
+  readonly comparisonClass?: string | null | undefined;
+  readonly quotedContext?: string | null | undefined;
+  readonly qualifiers?: readonly ClaimQualifier[] | undefined;
+  readonly evidenceRisk?: EvidenceRisk | undefined;
   readonly evidence: readonly RetrievedKnowledgeEvidence[];
 }
 
