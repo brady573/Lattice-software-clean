@@ -47,6 +47,13 @@ function assertRecordIntegrity(loaded: LoadedKnowledge): void {
   if (!equalSet([...new Set(evidenceIds)], record.evidenceIds)) {
     throw new Error("Knowledge record evidence references no longer match V36-backed Knowledge.");
   }
+  const usedEvidence = new Set(record.evidenceIds);
+  const sourceIds = [...new Set((knowledge.evidence ?? [])
+    .filter((item) => usedEvidence.has(item.evidenceId))
+    .map((item) => item.sourceId))];
+  if (!equalSet(sourceIds, record.sourceIds)) {
+    throw new Error("Knowledge record source references no longer match V36-backed Knowledge.");
+  }
 }
 
 export async function loadKnowledge(
@@ -72,13 +79,37 @@ export async function establishKnowledge(
   truth: TruthBundle,
   knowledge: KnowledgeOutcome,
 ): Promise<{ record: KnowledgeRecord; reference: ConversationKnowledgeReference }> {
-  const existing = await store.getKnowledgeByRunId(run.id);
-  const record = existing ?? await store.putKnowledge(buildKnowledgeRecord(run, truth, knowledge));
-  const latest = await store.latestReference(run.conversationId);
+  let record = await store.getKnowledgeByRunId(run.id);
+  if (!record) {
+    const candidate = buildKnowledgeRecord(run, truth, knowledge);
+    try {
+      record = await store.putKnowledge(candidate);
+    } catch (error) {
+      // Concurrent outcome reads may race while establishing the same durable
+      // Knowledge identity. Reuse only a winner that still proves the exact
+      // Run/Intent/V36 bindings; any genuine rebind remains a hard failure.
+      const raced = await store.getKnowledgeByRunId(run.id);
+      if (!raced) throw error;
+      assertRecordIntegrity({ record: raced, run, truth, knowledge });
+      record = raced;
+    }
+  }
+  assertRecordIntegrity({ record, run, truth, knowledge });
+
+  const references = await store.listReferences(run.conversationId);
+  const responseId = `run:${run.id}:outcome`;
+  const existingReference = references.find((reference) =>
+    reference.referenceKind === "ESTABLISHED"
+    && reference.userMessageId === record.sourceMessageId
+    && reference.responseId === responseId
+    && reference.knowledgeId === record.knowledgeId);
+  if (existingReference) return { record, reference: existingReference };
+
+  const latest = references.at(-1);
   const reference = await store.putReference(buildConversationKnowledgeReference({
     conversationId: run.conversationId,
     userMessageId: record.sourceMessageId,
-    responseId: `run:${run.id}:outcome`,
+    responseId,
     intentVersionId: record.intentVersionId,
     knowledgeId: record.knowledgeId,
     referenceKind: "ESTABLISHED",
