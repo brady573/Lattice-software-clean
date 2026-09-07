@@ -1,0 +1,49 @@
+name: M1 Live Proof Evidence
+
+on:
+  push:
+    branches:
+      - evidence/m1-live-proof-fc0f987
+
+permissions:
+  contents: read
+
+jobs:
+  live-proof:
+    name: Frozen M1 live Product proof
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout evidence harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          path: evidence
+          persist-credentials: false
+
+      - name: Checkout frozen candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: fc0f987f277ab174aa0d3dd6c6d09e89266af138
+          path: candidate
+          persist-credentials: false
+
+      - name: Provision Node 24
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '24'
+
+      - name: Install frozen candidate dependencies
+        working-directory: candidate
+        run: npm ci --no-audit --no-fund
+
+      - name: Build frozen candidate
+        working-directory: candidate
+        run: npm run build
+
+      - name: Execute real Solandra cognition proof
+        env:
+          CANDIDATE_ROOT: ${{ github.workspace }}/candidate
+          FROZEN_SHA: fc0f987f277ab174aa0d3dd6c6d09e89266af138
+          FROZEN_TREE: 7a7da5aac09368ae864dbff0c3e3446aad129f90
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+        run: node evidence/evidence/m1-live-proof.mjs
