@@ -258,7 +258,22 @@ test("M2 PostgreSQL restart preserves exact Recommendation identity, claim prove
     assert.equal(before.basis.length, 1);
     assert.deepEqual(before.basis[0]?.claimIds, before.claimIds);
     assert.deepEqual(before.factualBasis[0]?.claimIds, before.claimIds);
-    assert.deepEqual(before.factualBasis[0]?.sourceIds, ["m2-postgres-source"]);
+    const establishedKnowledge = await first.inject({
+      method: "GET",
+      url: `/api/v1/knowledge/${before.basis[0]!.knowledgeId}`,
+    });
+    assert.equal(establishedKnowledge.statusCode, 200, establishedKnowledge.body);
+    const establishedKnowledgeBody = establishedKnowledge.json<{
+      outcome: { provenance: Array<{ sourceId: string; canonicalUri: string }> };
+    }>();
+    const usedSourceId = establishedKnowledgeBody.outcome.provenance
+      .find((source) => source.canonicalUri === "https://m2-postgres.example/maintenance")?.sourceId;
+    const unrelatedSourceId = establishedKnowledgeBody.outcome.provenance
+      .find((source) => source.canonicalUri === "https://m2-postgres.example/unrelated")?.sourceId;
+    assert.ok(usedSourceId);
+    assert.ok(unrelatedSourceId);
+    assert.deepEqual(before.factualBasis[0]?.sourceIds, [usedSourceId]);
+    assert.ok(!before.factualBasis[0]?.sourceIds.includes(unrelatedSourceId));
     assert.equal(before.factualBasis[0]?.evidenceIds.length, 1);
 
     const continuityBefore = await first.inject({ method: "GET", url: `/api/v1/conversations/${conversationId}/continuity` });
