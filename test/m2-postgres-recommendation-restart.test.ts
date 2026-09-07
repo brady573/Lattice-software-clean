@@ -143,7 +143,7 @@ class RacingAdvisory implements SolandraAdvisoryRuntime {
     await new Promise((resolve) => setTimeout(resolve, call === 1 ? 30 : 5));
     const knowledge = input.knowledge[0];
     assert.ok(knowledge);
-    const claim = knowledge.findings[0];
+    const claim = knowledge.findings.find((finding) => finding.text === FINDING);
     assert.ok(claim);
     return {
       result: {
