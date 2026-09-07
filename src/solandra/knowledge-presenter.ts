@@ -137,7 +137,7 @@ export class ModelSolandraKnowledgePresenter implements SolandraKnowledgePresent
           brokerIdentity: null,
           brokerVersion: null,
           upstreamRequestId: null,
-          routeProvenance: "MISSING",
+          routeProvenance: "MISSING" as const,
         },
       });
     }
