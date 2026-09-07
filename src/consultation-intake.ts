@@ -143,6 +143,7 @@ function qualifiedDecisionNeed(
 function consultationRequest(input: {
   objective: string;
   context: readonly string[];
+  investigationQueries?: readonly string[];
   decisionNeed: "NONE" | "UNRESOLVED" | "QUALIFIED";
   resourceNeed: ConsultationResourceNeed;
   sourceMessageId: string;
@@ -155,6 +156,7 @@ function consultationRequest(input: {
     kind: "consultation",
     objective: input.objective,
     context: [...input.context],
+    investigationQueries: [...(input.investigationQueries ?? [])],
     decisionNeed: input.decisionNeed,
     resourceNeed: input.resourceNeed,
     sourceMessageId: input.sourceMessageId,
@@ -603,9 +605,14 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
           message: `Current-turn work context is limited to ${MAX_RUN_CONTEXT_ITEMS} items.`,
         });
       }
+      const investigationQueries = cognition
+        && (cognition.proposal.requestedHelp === "KNOWLEDGE" || cognition.proposal.requestedHelp === "FRESH_RESEARCH")
+        ? cognition.proposal.knowledgeNeeds
+        : [];
       const requestBody = consultationRequest({
         objective: authoritativeObjective(version),
         context: runContext,
+        investigationQueries,
         decisionNeed: qualification.decisionNeed,
         resourceNeed: interpretation.resourceNeed,
         sourceMessageId: sourceMessage.messageId,
@@ -629,6 +636,7 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
           messageId: sourceMessage.messageId,
           contentDigest: sourceMessage.contentDigest,
           context: requestBody.context,
+          investigationQueries: requestBody.investigationQueries,
           decisionNeed: requestBody.decisionNeed,
           resourceNeed: requestBody.resourceNeed,
         },
@@ -742,6 +750,7 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
       const requestBody = consultationRequest({
         objective,
         context: [],
+        investigationQueries: [],
         decisionNeed,
         resourceNeed: "NONE",
         sourceMessageId: sourceMessage.messageId,
