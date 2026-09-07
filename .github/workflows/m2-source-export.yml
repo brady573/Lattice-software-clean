@@ -1,4 +1,4 @@
-name: Temporary frozen M2 Render Blueprint validation
+name: Temporary frozen M2 live Solandra Product proof
 
 on:
   push:
@@ -9,70 +9,50 @@ permissions:
   contents: read
 
 jobs:
-  validate-render-blueprint:
-    name: Render blueprint validation
+  live-product-proof:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
+      - name: Checkout qualification proof
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: qualification/m2-source-export
+          path: qualification
+          persist-credentials: false
+          fetch-depth: 1
+
       - name: Checkout exact frozen candidate
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: 716728c2312265ea9e67038b485e435d0d4915d9
+          path: product
           persist-credentials: false
+          fetch-depth: 1
 
       - name: Provision Node 24
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '24'
 
-      - name: Validate zero-cost Render blueprint contract
-        env:
-          SUBJECT_SOURCE_SHA: 716728c2312265ea9e67038b485e435d0d4915d9
+      - name: Verify exact frozen candidate and proof artifact
+        shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "$SUBJECT_SOURCE_SHA"
+          cd product
+          test "$(git rev-parse HEAD)" = "716728c2312265ea9e67038b485e435d0d4915d9"
           test "$(git rev-parse 'HEAD^{tree}')" = "93443ec2a90f11158debc056d8881be9e2e52950"
-          node --input-type=module <<'NODE'
-          import { readFileSync } from 'node:fs';
+          cd ..
+          test "$(git -C qualification hash-object .m2/m2-live-product-proof.ts)" = "aed607990b1527016a8ad9dc3bfacbc6f9b3afea"
 
-          const expected = `databases:
-            - name: lattice-v36-postgres
-              plan: free
+      - name: Install locked dependencies
+        working-directory: product
+        run: npm ci --no-audit --no-fund
 
-          services:
-            - type: web
-              name: lattice-v36
-              runtime: node
-              plan: free
-              buildCommand: npm ci --no-audit --no-fund && npm run build
-              startCommand: npm start
-              healthCheckPath: /health
-              envVars:
-                - key: HOST
-                  value: 0.0.0.0
-                - key: LATTICE_DEPLOYMENT_MODE
-                  value: durable
-                - key: LATTICE_TRUTH_MODE
-                  value: v36-offline
-                - key: LATTICE_AUTO_MIGRATE
-                  value: "false"
-                - key: DATABASE_URL
-                  fromDatabase:
-                    name: lattice-v36-postgres
-                    property: connectionString`;
-
-          const normalize = (value) => value.replace(/\r\n/gu, '\n').trimEnd();
-          const actual = normalize(readFileSync('render.yaml', 'utf8'));
-          if (actual !== normalize(expected)) {
-            throw new Error('RENDER_BLUEPRINT_CONTRACT_FAILURE: render.yaml differs from the approved zero-cost blueprint');
-          }
-          if (/plan:\s*(starter|standard|pro|enterprise|basic)/u.test(actual)) {
-            throw new Error('RENDER_BLUEPRINT_CONTRACT_FAILURE: paid plan token present');
-          }
-          if (/preDeployCommand|LATTICE_AUTO_MIGRATE:\s*true/u.test(actual)) {
-            throw new Error('RENDER_BLUEPRINT_CONTRACT_FAILURE: unapproved migration automation present');
-          }
-          console.log('RENDER_BLUEPRINT_CONTRACT_VALIDATION=PASS');
-          console.log('RENDER_ACCOUNT_VALIDATION=NOT_CLAIMED_BY_THIS_LANE');
-          console.log('DEPLOYMENT_RUNTIME=NOT_CLAIMED_BY_THIS_LANE');
-          NODE
+      - name: Run real configured Solandra advisory Product proof
+        working-directory: product
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$GROQ_API_KEY"
+          node --import tsx ../qualification/.m2/m2-live-product-proof.ts
