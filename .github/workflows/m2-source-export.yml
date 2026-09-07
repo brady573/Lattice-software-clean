@@ -1,4 +1,4 @@
-name: Temporary frozen M2 live Solandra Product proof
+name: Temporary frozen M2 advisory raw-output diagnosis
 
 on:
   push:
@@ -9,11 +9,11 @@ permissions:
   contents: read
 
 jobs:
-  live-product-proof:
+  diagnose-live-advisory:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - name: Checkout qualification proof
+      - name: Checkout qualification diagnosis
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: qualification/m2-source-export
@@ -34,37 +34,32 @@ jobs:
         with:
           node-version: '24'
 
-      - name: Verify exact frozen candidate and proof artifact
+      - name: Verify exact candidate and diagnostic artifacts
         shell: bash
         run: |
           set -euo pipefail
-          cd product
-          test "$(git rev-parse HEAD)" = "716728c2312265ea9e67038b485e435d0d4915d9"
-          test "$(git rev-parse 'HEAD^{tree}')" = "93443ec2a90f11158debc056d8881be9e2e52950"
-          cd ..
+          test "$(git -C product rev-parse HEAD)" = "716728c2312265ea9e67038b485e435d0d4915d9"
+          test "$(git -C product rev-parse 'HEAD^{tree}')" = "93443ec2a90f11158debc056d8881be9e2e52950"
           test "$(git -C qualification hash-object .m2/m2-live-product-proof.ts)" = "aed607990b1527016a8ad9dc3bfacbc6f9b3afea"
+          test "$(git -C qualification hash-object .m2/capture-groq-output.ts)" = "0f44ca7c2e270b57935691b7bcfbb45b5b6371f7"
 
-      - name: Correct qualification-only cognition assumption
+      - name: Apply qualification-only cognition correction
         shell: bash
         run: |
           set -euo pipefail
           target="qualification/.m2/m2-live-product-proof.ts"
           grep -Fq 'assert.ok(accepted.interpretation.knowledgeNeeds.length > 0);' "$target"
           sed -i '/assert\.ok(accepted\.interpretation\.knowledgeNeeds\.length > 0);/d' "$target"
-          if grep -Fq 'assert.ok(accepted.interpretation.knowledgeNeeds.length > 0);' "$target"; then
-            echo "QUALIFICATION_HARNESS_CORRECTION_FAILED" >&2
-            exit 1
-          fi
 
       - name: Install locked dependencies
         working-directory: product
         run: npm ci --no-audit --no-fund
 
-      - name: Run real configured Solandra advisory Product proof
+      - name: Capture exact configured Groq advisory output
         working-directory: product
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
         run: |
           set -euo pipefail
           test -n "$GROQ_API_KEY"
-          node --import tsx ../qualification/.m2/m2-live-product-proof.ts
+          node --import tsx --import ../qualification/.m2/capture-groq-output.ts ../qualification/.m2/m2-live-product-proof.ts
