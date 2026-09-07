@@ -257,7 +257,8 @@ test("A3 preserves a confirmed USER priority and lets existing decision semantic
     assert.equal(outcome.selectionAuthorized, false);
     assert.equal(outcome.decision.outcome, "RECOMMENDATION");
     assert.equal(outcome.decision.winnerCandidateId, "fastify");
-    assert.match(outcome.explanation ?? "", /qualified priorities/iu);
+    assert.match(outcome.explanation ?? "", /requirements and priorities you confirmed/iu);
+    assert.match(outcome.explanation ?? "", /qualified preference comparison favors fastify/iu);
     assert.doesNotMatch(outcome.explanation ?? "", /weighted preference score/iu);
 
     const presentation = await app.inject({ method: "GET", url: `/api/v1/conversations/${conversationId}/presentation` });
