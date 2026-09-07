@@ -39,6 +39,7 @@ import type { V36RuntimeExecutionResult } from "./runtime-handoff.js";
 const MAX_SOURCES = 12;
 const MAX_CLAIMS = 24;
 const MAX_EVIDENCE_PER_CLAIM = 12;
+const MAX_CLAIM_QUALIFIERS = 16;
 const MAX_SOURCE_CONTENT_CHARS = 64_000;
 const MAX_CLAIM_CHARS = 4_000;
 const MAX_EXCERPT_CHARS = 8_000;
@@ -128,6 +129,16 @@ function nonBlank(value: unknown, label: string, max: number): string {
   return value.trim();
 }
 
+function optionalText(
+  value: string | null | undefined,
+  label: string,
+  max = 2_000,
+): string | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  return nonBlank(value, label, max);
+}
+
 function sanitizeSource(value: RetrievedKnowledgeSource): RetrievedKnowledgeSource {
   const canonicalUri = nonBlank(value.canonicalUri, "Retrieved source canonicalUri", 8_000);
   const canonical = new URL(canonicalUri);
@@ -171,10 +182,37 @@ function sanitizeClaim(value: RetrievedKnowledgeClaim): RetrievedKnowledgeClaim 
   if (!Array.isArray(value.evidence) || value.evidence.length > MAX_EVIDENCE_PER_CLAIM) {
     throw new Error("Retrieved claim evidence exceeds its bound.");
   }
+  const qualifiers = value.qualifiers ?? [];
+  if (!Array.isArray(qualifiers) || qualifiers.length > MAX_CLAIM_QUALIFIERS) {
+    throw new Error("Retrieved claim qualifiers exceed their bound.");
+  }
+  if (value.evidenceRisk !== undefined && value.evidenceRisk !== "ORDINARY" && value.evidenceRisk !== "HIGH") {
+    throw new Error("Retrieved claim evidenceRisk is invalid.");
+  }
+  const effectiveAt = optionalText(value.effectiveAt, "Retrieved claim effectiveAt", 128);
+  if (effectiveAt !== undefined && effectiveAt !== null && !Number.isFinite(Date.parse(effectiveAt))) {
+    throw new Error("Retrieved claim effectiveAt is invalid.");
+  }
   return {
     claimId: nonBlank(value.claimId, "Retrieved claim claimId", 512),
     text: nonBlank(value.text, "Retrieved claim text", MAX_CLAIM_CHARS),
     claimType: value.claimType,
+    ...(value.scope === undefined ? {} : { scope: optionalText(value.scope, "Retrieved claim scope") }),
+    ...(effectiveAt === undefined ? {} : { effectiveAt: effectiveAt === null ? null : new Date(effectiveAt).toISOString() }),
+    ...(value.jurisdiction === undefined ? {} : { jurisdiction: optionalText(value.jurisdiction, "Retrieved claim jurisdiction") }),
+    ...(value.unit === undefined ? {} : { unit: optionalText(value.unit, "Retrieved claim unit") }),
+    ...(value.denominator === undefined ? {} : { denominator: optionalText(value.denominator, "Retrieved claim denominator") }),
+    ...(value.baseline === undefined ? {} : { baseline: optionalText(value.baseline, "Retrieved claim baseline") }),
+    ...(value.period === undefined ? {} : { period: optionalText(value.period, "Retrieved claim period") }),
+    ...(value.causalRelation === undefined ? {} : { causalRelation: optionalText(value.causalRelation, "Retrieved claim causalRelation") }),
+    ...(value.authenticityTarget === undefined ? {} : { authenticityTarget: optionalText(value.authenticityTarget, "Retrieved claim authenticityTarget") }),
+    ...(value.comparisonClass === undefined ? {} : { comparisonClass: optionalText(value.comparisonClass, "Retrieved claim comparisonClass") }),
+    ...(value.quotedContext === undefined ? {} : { quotedContext: optionalText(value.quotedContext, "Retrieved claim quotedContext", MAX_CLAIM_CHARS) }),
+    qualifiers: qualifiers.map((item, index) => ({
+      key: nonBlank(item.key, `Retrieved claim qualifier[${index}].key`, 256),
+      value: nonBlank(item.value, `Retrieved claim qualifier[${index}].value`, 2_000),
+    })),
+    ...(value.evidenceRisk === undefined ? {} : { evidenceRisk: value.evidenceRisk }),
     evidence: value.evidence.map((item) => ({
       sourceId: nonBlank(item.sourceId, "Retrieved evidence sourceId", 512),
       relation: item.relation === "SUPPORTS" || item.relation === "CONTRADICTS"
@@ -324,7 +362,22 @@ function investigatedBundle(
       sourceClaimId: proposed.claimId,
       text: proposed.text,
       claimType: proposed.claimType,
-      qualifiers: singleSource ? [{ key: "source-report", value: singleSource.id }] : [],
+      scope: proposed.scope,
+      effectiveAt: proposed.effectiveAt,
+      jurisdiction: proposed.jurisdiction,
+      unit: proposed.unit,
+      denominator: proposed.denominator,
+      baseline: proposed.baseline,
+      period: proposed.period,
+      causalRelation: proposed.causalRelation,
+      authenticityTarget: proposed.authenticityTarget,
+      comparisonClass: proposed.comparisonClass,
+      quotedContext: proposed.quotedContext,
+      qualifiers: [
+        ...(proposed.qualifiers ?? []),
+        ...(singleSource ? [{ key: "source-report", value: singleSource.id }] : []),
+      ],
+      evidenceRisk: proposed.evidenceRisk,
     });
     claims.push(compilation.claim);
     const questionId = stableTruthUuid(`${runId}:research:${proposed.claimId}`);

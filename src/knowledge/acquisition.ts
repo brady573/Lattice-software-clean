@@ -1,4 +1,4 @@
-import type { ClaimType, EvidenceRelation } from "../truth/types.js";
+import type { ClaimQualifier, ClaimType, EvidenceRelation, EvidenceRisk } from "../truth/types.js";
 
 /** Exact current work supplied to a replaceable information-acquisition adapter. */
 export interface KnowledgeAcquisitionRequest {
@@ -26,18 +26,39 @@ export interface RetrievedKnowledgeSource {
   readonly metadata?: Readonly<Record<string, string | number | boolean | null>>;
 }
 
-/** A proposed relationship that remains untrusted until V36 qualifies it. */
+/**
+ * A proposed relationship that remains untrusted until V36 qualifies it.
+ * The excerpt is source-bound material, not an admission or truth verdict.
+ */
 export interface RetrievedKnowledgeEvidence {
   readonly sourceId: string;
   readonly relation: EvidenceRelation;
   readonly excerpt: string;
 }
 
-/** A provider-proposed claim. Provider output never supplies a verdict. */
+/**
+ * A provider-proposed claim. Optional typed fields only preserve material
+ * semantics the provider reports; they remain untrusted until V36 validates
+ * the claim and its evidence. Existing simple source-report providers need not
+ * supply them.
+ */
 export interface RetrievedKnowledgeClaim {
   readonly claimId: string;
   readonly text: string;
   readonly claimType: ClaimType;
+  readonly scope?: string | null | undefined;
+  readonly effectiveAt?: string | null | undefined;
+  readonly jurisdiction?: string | null | undefined;
+  readonly unit?: string | null | undefined;
+  readonly denominator?: string | null | undefined;
+  readonly baseline?: string | null | undefined;
+  readonly period?: string | null | undefined;
+  readonly causalRelation?: string | null | undefined;
+  readonly authenticityTarget?: string | null | undefined;
+  readonly comparisonClass?: string | null | undefined;
+  readonly quotedContext?: string | null | undefined;
+  readonly qualifiers?: readonly ClaimQualifier[] | undefined;
+  readonly evidenceRisk?: EvidenceRisk | undefined;
   readonly evidence: readonly RetrievedKnowledgeEvidence[];
 }
 

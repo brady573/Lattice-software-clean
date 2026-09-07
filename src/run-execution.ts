@@ -232,8 +232,11 @@ export async function executePersistedRunTick(
       if (!decisionEvidenceProvider) {
         throw new Error("Decision work requires an explicit decision evidence projection provider.");
       }
-      const decisionInputs = await decisionEvidenceProvider.projectDecisionEvidence(persistedSnapshot);
       const decisionState = await refresh();
+      const decisionInputs = await decisionEvidenceProvider.projectDecisionEvidence(
+        persistedSnapshot,
+        decisionState.request,
+      );
       if (!decisionState.decision) {
         const decisionEvidence = materializeDecisionEvidence(
           decisionInputs.evidence,

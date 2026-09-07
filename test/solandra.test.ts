@@ -42,7 +42,7 @@ test("Solandra preserves the current deterministic canonical explanation", () =>
   const { plan } = authoritativeState();
   assert.equal(
     renderCanonicalExplanation(plan),
-    "Solandra recommends Nova Air. It satisfies every hard constraint and has the strongest weighted preference score among the remaining eligible candidates. 2 candidate(s) were excluded because admitted evidence did not satisfy every hard constraint.",
+    "Solandra recommends Nova Air. The admitted evidence supports that recommendation under the requirements and priorities you confirmed. Atlas Pro, Forge 15 were excluded because admitted evidence did not satisfy every confirmed hard requirement.",
   );
 });
 
@@ -128,12 +128,13 @@ test("Solandra explanation plan preserves non-winner authoritative decision outc
     frontierCandidateIds: string[];
     tiedCandidateIds: string[];
     materialUnknowns: string[];
+    expected: RegExp;
   }> = [
-    { outcome: "FRONTIER", frontierCandidateIds: ["nova-air", "atlas-pro"], tiedCandidateIds: [], materialUnknowns: [] },
-    { outcome: "TIE", frontierCandidateIds: ["nova-air", "forge-15"], tiedCandidateIds: ["nova-air", "forge-15"], materialUnknowns: [] },
-    { outcome: "INSUFFICIENT_EVIDENCE", frontierCandidateIds: [], tiedCandidateIds: [], materialUnknowns: [] },
-    { outcome: "UNRESOLVED", frontierCandidateIds: [], tiedCandidateIds: [], materialUnknowns: ["nova-air:batteryHours"] },
-    { outcome: "NO_ELIGIBLE_CANDIDATE", frontierCandidateIds: [], tiedCandidateIds: [], materialUnknowns: [] },
+    { outcome: "FRONTIER", frontierCandidateIds: ["nova-air", "atlas-pro"], tiedCandidateIds: [], materialUnknowns: [], expected: /^I can't justify a unique recommendation from the confirmed priorities\./ },
+    { outcome: "TIE", frontierCandidateIds: ["nova-air", "forge-15"], tiedCandidateIds: ["nova-air", "forge-15"], materialUnknowns: [], expected: /^I can't justify a unique recommendation because the qualified comparison found no meaningful difference\./ },
+    { outcome: "INSUFFICIENT_EVIDENCE", frontierCandidateIds: [], tiedCandidateIds: [], materialUnknowns: [], expected: /^I can't justify a unique recommendation yet because required admitted evidence is missing\./ },
+    { outcome: "UNRESOLVED", frontierCandidateIds: [], tiedCandidateIds: [], materialUnknowns: ["nova-air:batteryHours"], expected: /^I can't justify a unique recommendation because a material qualified comparison remains unresolved\./ },
+    { outcome: "NO_ELIGIBLE_CANDIDATE", frontierCandidateIds: [], tiedCandidateIds: [], materialUnknowns: [], expected: /^I can't recommend an alternative because none is known to satisfy all confirmed hard requirements\./ },
   ];
 
   for (const scenario of scenarios) {
@@ -165,14 +166,12 @@ test("Solandra explanation plan preserves non-winner authoritative decision outc
     assert.deepEqual(plan.materialUnknowns, scenario.materialUnknowns);
 
     const explanation = renderCanonicalExplanation(plan);
-    const expectedOutcomeText = (scenario.outcome as string).toLowerCase().replaceAll("_", " ");
-    assert.match(explanation, new RegExp(`^Solandra reports ${expectedOutcomeText}\\.`));
+    assert.match(explanation, scenario.expected);
     if (scenario.frontierCandidateIds.length > 0) {
-      assert.match(explanation, new RegExp(`Authoritative frontier: ${scenario.frontierCandidateIds.join(", ")}\\.`));
+      const labels = scenario.frontierCandidateIds.map((id) => laptopFixture.candidates.find((candidate) => candidate.id === id)?.label);
+      assert.match(explanation, new RegExp(`Alternatives still under consideration: ${labels.join(", ")}\\.`));
     }
-    for (const unknown of scenario.materialUnknowns) {
-      assert.match(explanation, new RegExp(`Unresolved: ${unknown}\\.`));
-    }
+    assert.doesNotMatch(explanation, /Authoritative frontier|Unresolved:|material dominance/iu);
     assert.doesNotThrow(() =>
       assertSolandraExplanationFidelity(explanation, plan, decision, laptopFixture.candidates, truth));
   }
