@@ -10,6 +10,7 @@ import type { IntentAuthorityStore } from "../intent/store.js";
 import type { IntentVersion } from "../intent/types.js";
 import type { IntentUserMessageStore } from "../intent/source-message-store.js";
 import type { KnowledgeRecordStore } from "../knowledge/knowledge-record-store.js";
+import type { RecommendationStore } from "../recommendation/recommendation-store.js";
 import { buildRunOutcome, type RunOutcome } from "../outcome.js";
 import {
   composeSolandraPresentation,
@@ -31,6 +32,7 @@ export interface ConversationContinuityApiOptions {
   decisionPlanStore: DecisionPlanStore;
   intentStore?: IntentAuthorityStore;
   knowledgeStore?: KnowledgeRecordStore;
+  recommendationStore?: RecommendationStore;
 }
 
 function validBoundedId(value: string, maxChars: number): string | undefined {
@@ -86,11 +88,12 @@ export function registerConversationContinuityApi(
       const conversation = await options.conversationStore.getOwned(conversationId, subjectId);
       if (!conversation) return reply.status(404).send({ error: "CONVERSATION_NOT_FOUND" });
 
-      const [messages, runIds, knowledge, references] = await Promise.all([
+      const [messages, runIds, knowledge, references, recommendations] = await Promise.all([
         options.userMessageStore.listByConversation(conversationId),
         options.runIndexStore.listRunIds(conversationId),
         options.knowledgeStore?.listKnowledgeByConversation(conversationId) ?? Promise.resolve([]),
         options.knowledgeStore?.listReferences(conversationId) ?? Promise.resolve([]),
+        options.recommendationStore?.listRecommendationsByConversation(conversationId) ?? Promise.resolve([]),
       ]);
 
       const runs = await Promise.all(runIds.map(async (runId) => {
@@ -163,6 +166,23 @@ export function registerConversationContinuityApi(
           referenceKind: reference.referenceKind,
           parentReferenceId: reference.parentReferenceId,
           createdAt: reference.createdAt,
+        })),
+        recommendations: recommendations.map((record) => ({
+          recommendationId: record.recommendationId,
+          runId: record.runId,
+          intentVersionId: record.intentVersionId,
+          sourceMessageId: record.sourceMessageId,
+          knowledgeIds: record.knowledgeIds,
+          claimIds: record.claimIds,
+          recommendation: record.recommendation,
+          rationale: record.rationale,
+          tradeoffs: record.tradeoffs,
+          assumptions: record.assumptions,
+          uncertainties: record.uncertainties,
+          alternatives: record.alternatives,
+          selectionAuthorized: record.selectionAuthorized,
+          createdAt: record.createdAt,
+          link: `/api/v1/recommendations/${encodeURIComponent(record.recommendationId)}`,
         })),
       });
     },

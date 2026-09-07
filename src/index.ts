@@ -27,6 +27,7 @@ try {
       modelAssistanceService: modelAssistance,
       ...(solandra === undefined ? {} : {
         solandraCognition: solandra.cognition,
+        solandraAdvisory: solandra.advisory,
         solandraKnowledgePresenter: solandra.knowledgePresenter,
       }),
     });

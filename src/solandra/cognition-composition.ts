@@ -7,11 +7,13 @@ import { LocalOfflineModelRuntime } from "../model/local-offline-runtime.js";
 import { OpenAiCompatibleModelProvider } from "../model/openai-compatible.js";
 import type { ModelRuntime } from "../model/runtime.js";
 import type { RuntimeConfig } from "../runtime-config.js";
+import { ModelSolandraAdvisoryRuntime, type SolandraAdvisoryRuntime } from "./advisory.js";
 import { ModelSolandraCognitiveRuntime, type SolandraCognitiveRuntime } from "./cognition.js";
 import { ModelSolandraKnowledgePresenter, type SolandraKnowledgePresenter } from "./knowledge-presenter.js";
 
 export interface SolandraCognitionComposition {
   cognition: SolandraCognitiveRuntime;
+  advisory: SolandraAdvisoryRuntime;
   knowledgePresenter: SolandraKnowledgePresenter;
   model: string;
 }
@@ -19,6 +21,7 @@ export interface SolandraCognitionComposition {
 function composition(runtime: ModelRuntime, model: string): SolandraCognitionComposition {
   return Object.freeze({
     cognition: new ModelSolandraCognitiveRuntime(runtime, model),
+    advisory: new ModelSolandraAdvisoryRuntime(runtime, model),
     knowledgePresenter: new ModelSolandraKnowledgePresenter(runtime, model),
     model,
   });

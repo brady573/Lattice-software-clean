@@ -29,6 +29,8 @@ export const consultationRunRequestSchema = z.object({
   context: z.array(z.string().min(1).max(4_000)).max(32).default([]),
   /** Non-authoritative operational investigation proposals; never USER intent or truth. */
   investigationQueries: z.array(z.string().min(1).max(1_000)).max(16).default([]),
+  /** General advisory reasoning is separate from the legacy qualified Decision Engine. */
+  advisoryRequested: z.boolean().default(false),
   decisionNeed: z.enum(["NONE", "UNRESOLVED", "QUALIFIED"]).default("NONE"),
   resourceNeed: z.enum(["NONE", "CHECKLIST", "PREPARED_MESSAGE"]).default("NONE"),
   sourceMessageId: z.string().min(1).max(200),
@@ -56,10 +58,12 @@ export const consultationRunRequestSchema = z.object({
 
 export type RunRequest = z.infer<typeof runRequestSchema>;
 type ConsultationRequestData = z.infer<typeof consultationRunRequestSchema>;
-export type ConsultationRunRequest = Omit<ConsultationRequestData, "decisionNeed" | "resourceNeed" | "context" | "investigationQueries"> & {
+export type ConsultationRunRequest = Omit<ConsultationRequestData, "decisionNeed" | "resourceNeed" | "context" | "investigationQueries" | "advisoryRequested"> & {
   context: string[];
   /** Compatibility may omit this; canonical M1 intake always materializes it. */
   investigationQueries?: string[];
+  /** Compatibility may omit this; canonical M2 advisory intake materializes it. */
+  advisoryRequested?: boolean;
   decisionNeed: "NONE" | "UNRESOLVED" | "QUALIFIED";
   resourceNeed: "NONE" | "CHECKLIST" | "PREPARED_MESSAGE";
   /** Compatibility-only absent fields; consultations never require them. */

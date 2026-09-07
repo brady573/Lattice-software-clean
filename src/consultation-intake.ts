@@ -7,6 +7,7 @@ import type { QualifiedCriterionCatalog } from "./decision/criterion-catalog.js"
 import type { DecisionInputSnapshot } from "./decision/decision-input-snapshot.js";
 import {
   consultationRunRequestSchema,
+  isConsultationRunRequest,
   type ConsultationRunRequest,
 } from "./domain.js";
 import {
@@ -36,8 +37,20 @@ import {
 } from "./knowledge/knowledge-continuity.js";
 import type { KnowledgeRecordStore } from "./knowledge/knowledge-record-store.js";
 import { buildRunOutcome } from "./outcome.js";
+import {
+  advisoryKnowledge,
+  establishRecommendation,
+  loadRecommendation,
+  loadRecommendationByRunId,
+  recommendationContext,
+  renderHistoricalRecommendationExplanation,
+  renderHistoricalRecommendationSources,
+  renderRecommendation,
+} from "./recommendation/recommendation-continuity.js";
+import type { RecommendationStore } from "./recommendation/recommendation-store.js";
 import { createPendingRun } from "./run-execution.js";
 import type { RunStore } from "./run-store.js";
+import type { SolandraAdvisoryRuntime } from "./solandra/advisory.js";
 import type {
   SolandraCognitionResult,
   SolandraCognitiveRuntime,
@@ -75,7 +88,9 @@ export interface ConsultationIntakeOptions {
   interpreter?: ConsultationInterpreter;
   criterionCatalog?: QualifiedCriterionCatalog;
   knowledgeStore?: KnowledgeRecordStore;
+  recommendationStore?: RecommendationStore;
   solandraCognition?: SolandraCognitiveRuntime;
+  solandraAdvisory?: SolandraAdvisoryRuntime;
   solandraKnowledgePresenter?: SolandraKnowledgePresenter;
   apiSubject?: string | ((request: FastifyRequest) => string);
 }
@@ -144,6 +159,7 @@ function consultationRequest(input: {
   objective: string;
   context: readonly string[];
   investigationQueries?: readonly string[];
+  advisoryRequested?: boolean;
   decisionNeed: "NONE" | "UNRESOLVED" | "QUALIFIED";
   resourceNeed: ConsultationResourceNeed;
   sourceMessageId: string;
@@ -157,6 +173,7 @@ function consultationRequest(input: {
     objective: input.objective,
     context: [...input.context],
     investigationQueries: [...(input.investigationQueries ?? [])],
+    advisoryRequested: input.advisoryRequested ?? false,
     decisionNeed: input.decisionNeed,
     resourceNeed: input.resourceNeed,
     sourceMessageId: input.sourceMessageId,
@@ -190,6 +207,7 @@ function publicCognition(result: SolandraCognitionResult | undefined): unknown {
     knowledgeNeeds: result.proposal.knowledgeNeeds,
     materialAmbiguity: result.proposal.materialAmbiguity,
     referencedKnowledgeId: result.proposal.referencedKnowledgeId,
+    referencedRecommendationId: result.proposal.referencedRecommendationId ?? null,
     proposedNextStep: result.proposal.proposedNextStep,
   };
 }
@@ -198,6 +216,10 @@ function isReferenceHelp(help: SolandraRequestedHelp): boolean {
   return help === "SOURCES_REFERENCE"
     || help === "EXPLAIN_REFERENCE"
     || help === "SIMPLIFY_REFERENCE";
+}
+
+function isRecommendationReferenceHelp(help: SolandraRequestedHelp): boolean {
+  return help === "EXPLAIN_RECOMMENDATION" || help === "SOURCES_RECOMMENDATION";
 }
 
 function cognitiveInterpretation(
@@ -373,6 +395,9 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
           const governed = options.knowledgeStore
             ? await recentGovernedKnowledge(options.knowledgeStore, options.runStore, conversationId)
             : [];
+          const recommendations = options.recommendationStore
+            ? await options.recommendationStore.listRecommendationsByConversation(conversationId)
+            : [];
           const recentMessages = [...history.map((message) => message.content)];
           if (!recentMessages.includes(sourceMessage.content)) recentMessages.push(sourceMessage.content);
           cognition = await options.solandraCognition.interpret({
@@ -382,22 +407,14 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
             ...(currentVersion ? { currentObjective: authoritativeObjective(currentVersion) } : {}),
             recentUserMessages: recentMessages.slice(-MAX_COGNITIVE_HISTORY_ITEMS),
             governedKnowledge: governed.map(governedKnowledgeContext),
+            governedRecommendations: recommendations.slice(-4).map(recommendationContext),
           });
-          if (cognition.proposal.requestedHelp === "DECISION") {
-            interpretation = await interpreter.interpret({
-              message: sourceMessage.content,
-              context: parsed.data.context ?? [],
-              ...(currentVersion ? { currentIntentVersion: currentVersion } : {}),
-              ...(parsed.data.prepare ? { explicitResourceNeed: parsed.data.prepare } : {}),
-            });
-          } else {
-            interpretation = cognitiveInterpretation(
-              sourceMessage,
-              currentVersion,
-              cognition,
-              parsed.data.prepare,
-            );
-          }
+          interpretation = cognitiveInterpretation(
+            sourceMessage,
+            currentVersion,
+            cognition,
+            parsed.data.prepare,
+          );
         } else {
           interpretation = await interpreter.interpret({
             message: sourceMessage.content,
@@ -409,6 +426,45 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
       } catch (error) {
         const message = error instanceof Error ? error.message : "Consultation interpretation failed.";
         return reply.status(422).send({ error: "CONSULTATION_INTERPRETATION_FAILED", message });
+      }
+
+      if (
+        cognition
+        && isRecommendationReferenceHelp(cognition.proposal.requestedHelp)
+        && cognition.proposal.materialAmbiguity === null
+        && (cognition.proposal.referencedRecommendationId ?? null) !== null
+      ) {
+        if (!options.recommendationStore || !options.knowledgeStore || !currentVersion) {
+          return reply.status(409).send({
+            error: "GOVERNED_RECOMMENDATION_REFERENCE_UNAVAILABLE",
+            message: "The referenced governed Recommendation is not available in this conversation state.",
+          });
+        }
+        const recommendationId = cognition.proposal.referencedRecommendationId!;
+        const loaded = await loadRecommendation(
+          options.recommendationStore,
+          options.knowledgeStore,
+          options.runStore,
+          recommendationId,
+        );
+        if (!loaded || loaded.record.conversationId !== conversationId) {
+          return reply.status(404).send({ error: "RECOMMENDATION_NOT_FOUND" });
+        }
+        const assistantMessage = cognition.proposal.requestedHelp === "SOURCES_RECOMMENDATION"
+          ? renderHistoricalRecommendationSources(loaded)
+          : renderHistoricalRecommendationExplanation(loaded);
+        return reply.status(200).send({
+          status: "RECOMMENDATION_REFERENCE_RESOLVED",
+          acceptedUnderstanding: authoritativeObjective(currentVersion),
+          intentScopeId,
+          intentVersionId: currentVersion.intentVersionId,
+          recommendationReference: {
+            recommendationId: loaded.record.recommendationId,
+            knowledgeIds: loaded.record.knowledgeIds,
+          },
+          presentation: { assistantMessage },
+          interpretation: publicCognition(cognition),
+        });
       }
 
       if (
@@ -605,14 +661,20 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
           message: `Current-turn work context is limited to ${MAX_RUN_CONTEXT_ITEMS} items.`,
         });
       }
+      const advisoryRequested = cognition?.proposal.requestedHelp === "DECISION";
       const investigationQueries = cognition
-        && (cognition.proposal.requestedHelp === "KNOWLEDGE" || cognition.proposal.requestedHelp === "FRESH_RESEARCH")
+        && (
+          cognition.proposal.requestedHelp === "KNOWLEDGE"
+          || cognition.proposal.requestedHelp === "FRESH_RESEARCH"
+          || cognition.proposal.requestedHelp === "DECISION"
+        )
         ? cognition.proposal.knowledgeNeeds
         : [];
       const requestBody = consultationRequest({
         objective: authoritativeObjective(version),
         context: runContext,
         investigationQueries,
+        advisoryRequested,
         decisionNeed: qualification.decisionNeed,
         resourceNeed: interpretation.resourceNeed,
         sourceMessageId: sourceMessage.messageId,
@@ -637,6 +699,7 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
           contentDigest: sourceMessage.contentDigest,
           context: requestBody.context,
           investigationQueries: requestBody.investigationQueries,
+          advisoryRequested: requestBody.advisoryRequested,
           decisionNeed: requestBody.decisionNeed,
           resourceNeed: requestBody.resourceNeed,
         },
@@ -807,15 +870,108 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
       return reply.send({ runId: run.id, status: run.status, outcome });
     }
     const established = await establishKnowledge(options.knowledgeStore, run, truth, outcome);
+    const knowledgeReference = {
+      knowledgeId: established.record.knowledgeId,
+      referenceId: established.reference.referenceId,
+      responseId: established.reference.responseId,
+    };
+
+    if (isConsultationRunRequest(run.request) && run.request.advisoryRequested) {
+      if (!options.recommendationStore || !options.solandraAdvisory) {
+        return reply.status(503).send({ error: "SOLANDRA_ADVISORY_UNAVAILABLE" });
+      }
+      const existing = await loadRecommendationByRunId(
+        options.recommendationStore,
+        options.knowledgeStore,
+        options.runStore,
+        run.id,
+      );
+      if (existing) {
+        return reply.send({
+          runId: run.id,
+          status: run.status,
+          outcome,
+          knowledgeReference,
+          recommendationReference: {
+            recommendationId: existing.record.recommendationId,
+            intentVersionId: existing.record.intentVersionId,
+            knowledgeIds: existing.record.knowledgeIds,
+            claimIds: existing.record.claimIds,
+            selectionAuthorized: existing.record.selectionAuthorized,
+          },
+          presentation: { assistantMessage: renderRecommendation(existing.record) },
+        });
+      }
+
+      const intentVersionId = run.request.intentVersionId;
+      const intentVersion = intentVersionId ? await options.intentStore.getVersion(intentVersionId) : undefined;
+      if (!intentVersion) return reply.status(409).send({ error: "ADVISORY_INTENT_VERSION_UNAVAILABLE" });
+      const loadedKnowledge = await loadKnowledge(options.knowledgeStore, options.runStore, established.record.knowledgeId);
+      if (!loadedKnowledge) return reply.status(409).send({ error: "ADVISORY_KNOWLEDGE_UNAVAILABLE" });
+      const sourceMessage = await options.userMessageStore.get(run.request.sourceMessageId);
+      if (!sourceMessage || sourceMessage.conversationId !== run.conversationId) {
+        return reply.status(409).send({ error: "ADVISORY_USER_SOURCE_UNAVAILABLE" });
+      }
+
+      let advisory;
+      try {
+        advisory = await options.solandraAdvisory.advise({
+          conversationId: run.conversationId,
+          userMessageId: sourceMessage.messageId,
+          authoritativeIntent: intentVersion,
+          authoritativeObjective: authoritativeObjective(intentVersion),
+          userContext: [sourceMessage.content],
+          knowledge: [advisoryKnowledge(loadedKnowledge)],
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Solandra advisory reasoning failed.";
+        return reply.status(422).send({ error: "SOLANDRA_ADVISORY_FAILED", message });
+      }
+
+      if (advisory.result.status !== "RECOMMENDATION") {
+        const assistantMessage = advisory.result.status === "NEEDS_KNOWLEDGE"
+          ? `I need more governed Knowledge before I can recommend responsibly: ${advisory.result.knowledgeNeeds.join("; ")}.`
+          : advisory.result.status === "NEEDS_CLARIFICATION"
+            ? advisory.result.question
+            : `I don't have a sufficient governed basis for a responsible recommendation. ${advisory.result.reason}`;
+        return reply.send({
+          runId: run.id,
+          status: run.status,
+          outcome,
+          knowledgeReference,
+          advisory: advisory.result,
+          presentation: { assistantMessage },
+        });
+      }
+
+      const recommendation = await establishRecommendation({
+        store: options.recommendationStore,
+        run,
+        intentVersion,
+        knowledge: [loadedKnowledge],
+        advisory: advisory.result,
+      });
+      return reply.send({
+        runId: run.id,
+        status: run.status,
+        outcome,
+        knowledgeReference,
+        recommendationReference: {
+          recommendationId: recommendation.recommendationId,
+          intentVersionId: recommendation.intentVersionId,
+          knowledgeIds: recommendation.knowledgeIds,
+          claimIds: recommendation.claimIds,
+          selectionAuthorized: recommendation.selectionAuthorized,
+        },
+        presentation: { assistantMessage: renderRecommendation(recommendation) },
+      });
+    }
+
     return reply.send({
       runId: run.id,
       status: run.status,
       outcome,
-      knowledgeReference: {
-        knowledgeId: established.record.knowledgeId,
-        referenceId: established.reference.referenceId,
-        responseId: established.reference.responseId,
-      },
+      knowledgeReference,
     });
   });
 
@@ -837,6 +993,29 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
       evidenceIds: loaded.record.evidenceIds,
       truthAssessmentIds: loaded.record.truthAssessmentIds,
       outcome: loaded.knowledge,
+    });
+  });
+
+
+  app.get<{ Params: { recommendationId: string } }>("/api/v1/recommendations/:recommendationId", async (request, reply) => {
+    if (!options.recommendationStore || !options.knowledgeStore) {
+      return reply.status(404).send({ error: "RECOMMENDATION_NOT_FOUND" });
+    }
+    const loaded = await loadRecommendation(
+      options.recommendationStore,
+      options.knowledgeStore,
+      options.runStore,
+      request.params.recommendationId.trim(),
+    );
+    if (!loaded || !await options.conversationStore.getOwned(loaded.record.conversationId, apiSubjectForRequest(request))) {
+      return reply.status(404).send({ error: "RECOMMENDATION_NOT_FOUND" });
+    }
+    return reply.status(200).send({
+      ...loaded.record,
+      factualBasis: loaded.knowledge.map((item) => ({
+        knowledgeId: item.record.knowledgeId,
+        claimIds: item.record.claimIds.filter((claimId) => loaded.record.claimIds.includes(claimId)),
+      })),
     });
   });
 }

@@ -227,6 +227,14 @@ export function renderSolandraConversationPage(): string {
             renderOutcome(body.knowledge, body.presentation);
             return;
           }
+          if (body.status === "RECOMMENDATION_REFERENCE_RESOLVED") {
+            const assistantMessage = typeof body.presentation?.assistantMessage === "string"
+              ? body.presentation.assistantMessage.trim()
+              : "";
+            if (!assistantMessage) throw new Error("Recommendation response presentation is unavailable.");
+            appendSolandraTurn(assistantMessage);
+            return;
+          }
           if (body.status === "NEEDS_NEW_KNOWLEDGE") {
             appendSolandraTurn(body.question || "That requires new external Knowledge before I can answer it reliably.");
             return;
