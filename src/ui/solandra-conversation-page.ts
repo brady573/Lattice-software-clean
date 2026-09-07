@@ -223,6 +223,15 @@ export function renderSolandraConversationPage(): string {
             return;
           }
           pendingClarification = null;
+          if (body.status === "REFERENCE_RESOLVED") {
+            renderOutcome(body.knowledge, body.presentation);
+            return;
+          }
+          if (body.status === "NEEDS_NEW_KNOWLEDGE") {
+            appendSolandraTurn(body.question || "That requires new external Knowledge before I can answer it reliably.");
+            return;
+          }
+          if (!body.runId) throw new Error("Consultation response did not identify a Run.");
           await pollOutcome(body.runId);
         } catch (error) {
           input.value = draft;
