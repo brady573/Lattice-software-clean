@@ -58,7 +58,8 @@ export type RunRequest = z.infer<typeof runRequestSchema>;
 type ConsultationRequestData = z.infer<typeof consultationRunRequestSchema>;
 export type ConsultationRunRequest = Omit<ConsultationRequestData, "decisionNeed" | "resourceNeed" | "context" | "investigationQueries"> & {
   context: string[];
-  investigationQueries: string[];
+  /** Compatibility may omit this; canonical M1 intake always materializes it. */
+  investigationQueries?: string[];
   decisionNeed: "NONE" | "UNRESOLVED" | "QUALIFIED";
   resourceNeed: "NONE" | "CHECKLIST" | "PREPARED_MESSAGE";
   /** Compatibility-only absent fields; consultations never require them. */
