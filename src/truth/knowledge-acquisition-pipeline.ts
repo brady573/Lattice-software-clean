@@ -589,6 +589,7 @@ export class KnowledgeAcquisitionTruthPipeline implements TruthExecutionPipeline
         runId,
         objective: request.objective,
         context: request.context,
+        investigationQueries: request.investigationQueries,
       }));
       bundle = investigatedBundle(runId, request, acquired);
     } catch {
