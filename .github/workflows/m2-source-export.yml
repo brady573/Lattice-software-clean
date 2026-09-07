@@ -1,4 +1,4 @@
-name: Temporary M2 corrective focused validation
+name: Temporary M2 PostgreSQL fixture-order correction publisher
 
 on:
   push:
@@ -6,73 +6,54 @@ on:
       - qualification/m2-source-export
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  validate:
+  publish:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
-    env:
-      DATABASE_URL: postgresql://lattice:lattice@127.0.0.1:55433/lattice_test
-    services:
-      postgres:
-        image: postgres:18.6
-        env:
-          POSTGRES_USER: lattice
-          POSTGRES_PASSWORD: lattice
-          POSTGRES_DB: lattice_test
-        ports:
-          - 55433:5432
-        options: >-
-          --health-cmd "pg_isready -U lattice -d lattice_test"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
+    timeout-minutes: 5
     steps:
-      - name: Checkout exact corrective candidate
+      - name: Checkout qualification correction
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: 79be399bd989e31652d62854a551d0bde6470fbd
+          ref: qualification/m2-source-export
+          path: qualification
           persist-credentials: false
           fetch-depth: 1
 
-      - name: Provision Node 24
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - name: Checkout exact M2 candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          node-version: '24'
+          ref: feature/m2-solandra-advisory-reasoning
+          path: product
+          persist-credentials: true
+          fetch-depth: 1
 
-      - name: Verify exact candidate
+      - name: Verify and apply fixture-order correction
         shell: bash
         run: |
           set -euo pipefail
+          test "$(git hash-object qualification/.m2/postgres-fixture-order.patch)" = "312334353697d0276a265318664abfb481792058"
+          cd product
           test "$(git rev-parse HEAD)" = "79be399bd989e31652d62854a551d0bde6470fbd"
           test "$(git rev-parse 'HEAD^{tree}')" = "9c8c687c1f61b51e1cde713b4cd70d0c013db292"
-          test "$(node -p "process.versions.node.split('.')[0]")" = "24"
-          test "$(npm --version | cut -d. -f1)" = "11"
+          git apply --check ../qualification/.m2/postgres-fixture-order.patch
+          git apply ../qualification/.m2/postgres-fixture-order.patch
+          git diff --check
+          git add -A
+          test "$(git write-tree)" = "93443ec2a90f11158debc056d8881be9e2e52950"
 
-      - name: Install locked dependencies
-        run: npm ci --no-audit --no-fund
-
-      - name: TypeScript build
-        run: npm run build
-
-      - name: Focused M2 structural acceptance
-        run: node --import tsx --test test/m2-solandra-advisory-spine.test.ts
-
-      - name: Reset PostgreSQL test schema
+      - name: Commit and push fixture-order correction
+        shell: bash
         run: |
-          node --input-type=module <<'NODE'
-          import pg from 'pg';
-          const { Client } = pg;
-          const client = new Client({ connectionString: process.env.DATABASE_URL });
-          await client.connect();
-          await client.query('DROP SCHEMA public CASCADE; CREATE SCHEMA public;');
-          await client.end();
-          NODE
-
-      - name: M2 PostgreSQL Recommendation reconstruction acceptance
-        run: node --import tsx --test --test-concurrency=1 test/m2-postgres-recommendation-restart.test.ts
-
-      - name: Record exact validation
-        run: |
-          echo "M2_CORRECTIVE_FOCUSED=PASS sha=$(git rev-parse HEAD) tree=$(git rev-parse 'HEAD^{tree}')"
+          set -euo pipefail
+          cd product
+          test "$(git write-tree)" = "93443ec2a90f11158debc056d8881be9e2e52950"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "M2: make PostgreSQL provenance fixture selection deterministic"
+          test "$(git rev-parse HEAD^)" = "79be399bd989e31652d62854a551d0bde6470fbd"
+          test "$(git rev-parse 'HEAD^{tree}')" = "93443ec2a90f11158debc056d8881be9e2e52950"
+          echo "CANDIDATE_SHA=$(git rev-parse HEAD)"
+          echo "CANDIDATE_TREE=$(git rev-parse 'HEAD^{tree}')"
+          git push origin HEAD:refs/heads/feature/m2-solandra-advisory-reasoning

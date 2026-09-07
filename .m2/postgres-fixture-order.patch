@@ -1,0 +1,13 @@
+diff --git a/test/m2-postgres-recommendation-restart.test.ts b/test/m2-postgres-recommendation-restart.test.ts
+index 5b87f01..b815e92 100644
+--- a/test/m2-postgres-recommendation-restart.test.ts
++++ b/test/m2-postgres-recommendation-restart.test.ts
+@@ -143,7 +143,7 @@ class RacingAdvisory implements SolandraAdvisoryRuntime {
+     await new Promise((resolve) => setTimeout(resolve, call === 1 ? 30 : 5));
+     const knowledge = input.knowledge[0];
+     assert.ok(knowledge);
+-    const claim = knowledge.findings[0];
++    const claim = knowledge.findings.find((finding) => finding.text === FINDING);
+     assert.ok(claim);
+     return {
+       result: {
