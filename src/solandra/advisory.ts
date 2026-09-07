@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { z } from "zod";
 import type { IntentVersion } from "../intent/types.js";
 import { ModelProviderError } from "../model/errors.js";
@@ -49,6 +50,21 @@ export const solandraAdvisoryResultSchema = z.discriminatedUnion("status", [
 export type SolandraAdvisoryResult = z.infer<typeof solandraAdvisoryResultSchema>;
 export type SolandraRecommendationResult = Extract<SolandraAdvisoryResult, { status: "RECOMMENDATION" }>;
 
+const groundingAuditSchema = z.object({
+  status: z.enum(["GROUNDED", "NEEDS_KNOWLEDGE"]),
+  unsupportedExternalPremises: z.array(z.string().min(1).max(1_000)).max(16),
+  knowledgeNeeds: z.array(z.string().min(1).max(1_000)).max(16),
+}).strict().superRefine((value, context) => {
+  if (value.status === "GROUNDED" && (value.unsupportedExternalPremises.length > 0 || value.knowledgeNeeds.length > 0)) {
+    context.addIssue({ code: "custom", message: "A grounded advisory audit cannot report unsupported external premises." });
+  }
+  if (value.status === "NEEDS_KNOWLEDGE" && value.knowledgeNeeds.length === 0) {
+    context.addIssue({ code: "custom", path: ["knowledgeNeeds"], message: "Unsupported factual premises require a concrete Knowledge need." });
+  }
+});
+
+type GroundingAudit = z.infer<typeof groundingAuditSchema>;
+
 export interface SolandraAdvisoryKnowledge {
   readonly knowledgeId: string;
   readonly objective: string;
@@ -80,13 +96,13 @@ export interface SolandraAdvisoryRuntime {
   advise(input: SolandraAdvisoryInput): Promise<SolandraAdvisoryRuntimeResult>;
 }
 
-function parseJsonObject(text: string): unknown {
+function parseJsonObject(text: string, label = "Solandra advisory reasoning"): unknown {
   const trimmed = text.trim();
   const unfenced = /^```(?:json)?\s*([\s\S]*?)\s*```$/iu.exec(trimmed)?.[1] ?? trimmed;
   try {
     return JSON.parse(unfenced);
   } catch (error) {
-    throw new ModelProviderError("invalid_output", "Solandra advisory reasoning returned malformed JSON.", { cause: error });
+    throw new ModelProviderError("invalid_output", `${label} returned malformed JSON.`, { cause: error });
   }
 }
 
@@ -152,6 +168,57 @@ function buildAdvisoryRequest(model: string, input: SolandraAdvisoryInput): Cano
   };
 }
 
+function buildGroundingAuditRequest(
+  model: string,
+  input: SolandraAdvisoryInput,
+  recommendation: SolandraRecommendationResult,
+): CanonicalModelRequest {
+  const governedFindings = input.knowledge.flatMap((knowledge) =>
+    knowledge.findings.map((finding) => ({
+      knowledgeId: knowledge.knowledgeId,
+      claimId: finding.claimId,
+      text: finding.text,
+      status: finding.status,
+      confidence: finding.confidence,
+    })));
+  return {
+    model,
+    messages: [
+      {
+        role: "system",
+        content: [
+          "You are a bounded grounding verifier for Solandra advisory output. Do not redo the recommendation and do not expose hidden reasoning.",
+          "Distinguish externally factual premises from advisory judgment, comparison, preference-sensitive inference, conditional advice, and explicit USER-authored context.",
+          "An externally factual premise is permitted only when it is materially supported by the supplied governed findings. USER objectives/preferences are authoritative USER context, not external factual Knowledge.",
+          "If any advisory field introduces an externally factual premise that is not materially supported by the supplied governed findings, return NEEDS_KNOWLEDGE and identify the missing factual information needed. Do not repair or rewrite the advisory text.",
+          "If every externally factual premise is grounded, return GROUNDED. Advisory inference does not need to be a literal restatement of a finding.",
+          "Return exactly JSON with keys status, unsupportedExternalPremises, knowledgeNeeds and no prose.",
+        ].join("\n"),
+      },
+      {
+        role: "user",
+        content: JSON.stringify({
+          authoritativeObjective: input.authoritativeObjective,
+          authoritativeIntent: input.authoritativeIntent.state,
+          userContext: input.userContext,
+          governedFindings,
+          advisory: {
+            recommendation: recommendation.recommendation,
+            rationale: recommendation.rationale,
+            tradeoffs: recommendation.tradeoffs,
+            assumptions: recommendation.assumptions,
+            uncertainties: recommendation.uncertainties,
+            alternatives: recommendation.alternatives,
+          },
+        }),
+      },
+    ],
+    temperature: 0,
+    maxOutputTokens: 1_200,
+    seed: 0,
+  };
+}
+
 function validateRecommendationBasis(input: SolandraAdvisoryInput, result: SolandraRecommendationResult): void {
   const supplied = new Map(input.knowledge.map((knowledge) => [
     knowledge.knowledgeId,
@@ -188,6 +255,31 @@ function validateRecommendationBasis(input: SolandraAdvisoryInput, result: Solan
   }
 }
 
+function advisoryBasisDigest(input: SolandraAdvisoryInput): string {
+  return createHash("sha256")
+    .update([
+      input.authoritativeIntent.intentVersionId,
+      ...input.knowledge.map((item) => item.knowledgeId).sort(),
+    ].join("\u001f"))
+    .digest("hex")
+    .slice(0, 24);
+}
+
+function needsKnowledgeFromAudit(audit: GroundingAudit): Extract<SolandraAdvisoryResult, { status: "NEEDS_KNOWLEDGE" }> | undefined {
+  if (audit.status === "GROUNDED") return undefined;
+  const knowledgeNeeds = [...new Set(audit.knowledgeNeeds.map((item) => item.trim()).filter(Boolean))];
+  if (knowledgeNeeds.length === 0) {
+    throw new ModelProviderError("invalid_output", "Advisory grounding audit reported unsupported factual premises without a Knowledge need.");
+  }
+  return {
+    status: "NEEDS_KNOWLEDGE",
+    knowledgeNeeds,
+    reason: audit.unsupportedExternalPremises.length > 0
+      ? `The draft recommendation relied on external factual premises that are not established by governed Knowledge: ${audit.unsupportedExternalPremises.join("; ")}`
+      : "The draft recommendation requires additional governed factual Knowledge before it can be presented responsibly.",
+  };
+}
+
 export class ModelSolandraAdvisoryRuntime implements SolandraAdvisoryRuntime {
   constructor(
     private readonly runtime: ModelRuntime,
@@ -197,16 +289,37 @@ export class ModelSolandraAdvisoryRuntime implements SolandraAdvisoryRuntime {
   }
 
   async advise(input: SolandraAdvisoryInput): Promise<SolandraAdvisoryRuntimeResult> {
+    const basisDigest = advisoryBasisDigest(input);
     const response = await this.runtime.call(buildAdvisoryRequest(this.model, input), {
       correlationId: `solandra-advisory:${input.conversationId}:${input.userMessageId}`,
-      idempotencyKey: input.userMessageId,
+      idempotencyKey: `advise:${input.userMessageId}:${basisDigest}`,
       maxAttempts: 1,
     });
     if (response.response.output.length !== 1 || response.response.output[0]?.type !== "text") {
       throw new ModelProviderError("invalid_output", "Solandra advisory reasoning requires exactly one text output.");
     }
     const result = solandraAdvisoryResultSchema.parse(parseJsonObject(response.response.output[0].text));
-    if (result.status === "RECOMMENDATION") validateRecommendationBasis(input, result);
-    return Object.freeze({ result, invocationProvenance: response.audit.invocationProvenance });
+    if (result.status !== "RECOMMENDATION") {
+      return Object.freeze({ result, invocationProvenance: response.audit.invocationProvenance });
+    }
+
+    validateRecommendationBasis(input, result);
+    const auditResponse = await this.runtime.call(buildGroundingAuditRequest(this.model, input, result), {
+      correlationId: `solandra-advisory-grounding:${input.conversationId}:${input.userMessageId}`,
+      idempotencyKey: `grounding:${input.userMessageId}:${basisDigest}`,
+      maxAttempts: 1,
+    });
+    if (auditResponse.response.output.length !== 1 || auditResponse.response.output[0]?.type !== "text") {
+      throw new ModelProviderError("invalid_output", "Solandra advisory grounding verification requires exactly one text output.");
+    }
+    const audit = groundingAuditSchema.parse(parseJsonObject(
+      auditResponse.response.output[0].text,
+      "Solandra advisory grounding verification",
+    ));
+    const needsKnowledge = needsKnowledgeFromAudit(audit);
+    return Object.freeze({
+      result: needsKnowledge ?? result,
+      invocationProvenance: response.audit.invocationProvenance,
+    });
   }
 }

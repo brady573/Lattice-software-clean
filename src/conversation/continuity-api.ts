@@ -172,6 +172,7 @@ export function registerConversationContinuityApi(
           runId: record.runId,
           intentVersionId: record.intentVersionId,
           sourceMessageId: record.sourceMessageId,
+          basis: record.basis,
           knowledgeIds: record.knowledgeIds,
           claimIds: record.claimIds,
           recommendation: record.recommendation,

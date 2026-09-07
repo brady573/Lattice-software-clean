@@ -39,6 +39,7 @@ const FIRST_NEED = "maintenance burden and reversibility evidence for the availa
 const SECOND_NEED = "reversibility evidence for the available implementation approaches";
 const FINDING = "A smaller maintenance surface can reduce the amount of ongoing work required to keep an implementation usable.";
 const SECOND_FINDING = "An implementation with fewer irreversible dependencies is generally easier to replace or unwind later.";
+const EXTRA_FINDING = "A broader dependency surface can increase the number of components that need ongoing maintenance.";
 const FIXED_TIME = "2026-09-07T13:30:00.000Z";
 
 const PROVENANCE: ModelInvocationProvenance = Object.freeze({
@@ -132,13 +133,27 @@ class RecordingAcquisition implements KnowledgeAcquisitionProvider {
         publishedAt: null,
         contentType: "text/plain",
         content: text,
-      }],
+      }, ...(!changed ? [{
+        sourceId: "m2-first-extra-source",
+        canonicalUri: "https://m2.example/first-extra",
+        title: "M2 unrelated claim-basis source",
+        publisher: "M2 Fixture",
+        retrievedAt: FIXED_TIME,
+        publishedAt: null,
+        contentType: "text/plain",
+        content: EXTRA_FINDING,
+      }] : [])],
       claims: [{
         claimId: `m2-${suffix}-claim`,
         text,
         claimType: "INTERPRETIVE",
         evidence: [{ sourceId: `m2-${suffix}-source`, relation: "SUPPORTS", excerpt: text }],
-      }],
+      }, ...(!changed ? [{
+        claimId: "m2-first-extra-claim",
+        text: EXTRA_FINDING,
+        claimType: "INTERPRETIVE" as const,
+        evidence: [{ sourceId: "m2-first-extra-source", relation: "SUPPORTS" as const, excerpt: EXTRA_FINDING }],
+      }] : [])],
     };
   }
 }
@@ -227,7 +242,16 @@ async function advisoryTurn(app: FastifyInstance, conversationId: string, messag
   }>();
   assert.equal(accepted.status, "RUN_ACCEPTED");
   await waitForCompleted(app, accepted.runId);
-  const outcome = await app.inject({ method: "GET", url: `/api/v1/runs/${accepted.runId}/outcome` });
+  let outcome;
+  for (let attempt = 0; attempt < 240; attempt += 1) {
+    outcome = await app.inject({ method: "GET", url: `/api/v1/runs/${accepted.runId}/outcome` });
+    if (outcome.statusCode === 202) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      continue;
+    }
+    break;
+  }
+  assert.ok(outcome);
   assert.equal(outcome.statusCode, 200, outcome.body);
   return { accepted, outcome };
 }
@@ -303,8 +327,10 @@ test("M2 general advisory spine preserves Intent/V36 authority and durable Recom
       runId: string;
       intentVersionId: string;
       sourceMessageId: string;
+      basis: Array<{ knowledgeId: string; claimIds: string[] }>;
       knowledgeIds: string[];
       claimIds: string[];
+      factualBasis: Array<{ knowledgeId: string; claimIds: string[]; evidenceIds: string[]; sourceIds: string[] }>;
       uncertainties: string[];
       selectionAuthorized: boolean;
     }>();
@@ -314,6 +340,14 @@ test("M2 general advisory spine preserves Intent/V36 authority and durable Recom
     assert.equal(recommendationRecord.selectionAuthorized, false);
     assert.deepEqual(recommendationRecord.knowledgeIds, firstBody.recommendationReference.knowledgeIds);
     assert.deepEqual(recommendationRecord.claimIds, firstBody.recommendationReference.claimIds);
+    assert.deepEqual(recommendationRecord.basis, [{
+      knowledgeId: firstBody.knowledgeReference.knowledgeId,
+      claimIds: firstBody.recommendationReference.claimIds,
+    }]);
+    assert.equal(recommendationRecord.factualBasis.length, 1);
+    assert.deepEqual(recommendationRecord.factualBasis[0]?.claimIds, firstBody.recommendationReference.claimIds);
+    assert.deepEqual(recommendationRecord.factualBasis[0]?.sourceIds, ["m2-first-source"]);
+    assert.equal(recommendationRecord.factualBasis[0]?.evidenceIds.length, 1);
     for (const uncertainty of advisory.inputs[0]!.knowledge[0]!.uncertainties) {
       assert.ok(recommendationRecord.uncertainties.includes(uncertainty));
     }
@@ -356,7 +390,8 @@ test("M2 general advisory spine preserves Intent/V36 authority and durable Recom
     }>();
     assert.equal(sourceBody.status, "RECOMMENDATION_REFERENCE_RESOLVED");
     assert.equal(sourceBody.recommendationReference.recommendationId, firstBody.recommendationReference.recommendationId);
-    assert.match(sourceBody.presentation.assistantMessage, /https:\/\/m2\.example\/first/iu);
+    assert.match(sourceBody.presentation.assistantMessage, /https:\/\/m2\.example\/first(?:\s|$)/iu);
+    assert.doesNotMatch(sourceBody.presentation.assistantMessage, /first-extra/iu);
     assert.equal(advisory.inputs.length, 1);
     assert.equal(acquisition.requests.length, 1);
 
@@ -420,6 +455,179 @@ test("M2 insufficient governed basis does not silently become a Recommendation",
   }
 });
 
+class NeedsKnowledgeThenRecommendationAdvisory implements SolandraAdvisoryRuntime {
+  readonly inputs: SolandraAdvisoryInput[] = [];
+
+  async advise(input: SolandraAdvisoryInput): Promise<SolandraAdvisoryRuntimeResult> {
+    this.inputs.push(structuredClone(input));
+    if (input.knowledge.length === 1) {
+      return {
+        result: {
+          status: "NEEDS_KNOWLEDGE",
+          knowledgeNeeds: [SECOND_NEED],
+          reason: "A second governed comparison fact is required before recommending.",
+        },
+        invocationProvenance: PROVENANCE,
+      };
+    }
+    const basis = input.knowledge.map((knowledge) => {
+      const claim = knowledge.findings[0];
+      assert.ok(claim);
+      return { knowledgeId: knowledge.knowledgeId, claimIds: [claim.claimId] };
+    });
+    const preserved = input.knowledge.flatMap((knowledge) => [...knowledge.uncertainties]);
+    return {
+      result: {
+        status: "RECOMMENDATION",
+        recommendation: "Prefer the option that best fits the USER's stated maintenance and reversibility objective.",
+        basis,
+        rationale: ["The governed findings together provide the factual comparison basis; the preference-sensitive conclusion is advisory."],
+        tradeoffs: ["The recommendation is conditional on the USER's stated objective."],
+        assumptions: ["The stated objective remains the controlling preference."],
+        uncertainties: [...preserved],
+        preservedUncertainties: [...preserved],
+        alternatives: ["Keep the alternatives open if the remaining uncertainty is material."],
+      },
+      invocationProvenance: PROVENANCE,
+    };
+  }
+}
+
+class AlwaysNeedsKnowledgeAdvisory implements SolandraAdvisoryRuntime {
+  calls = 0;
+  async advise(): Promise<SolandraAdvisoryRuntimeResult> {
+    this.calls += 1;
+    return {
+      result: {
+        status: "NEEDS_KNOWLEDGE",
+        knowledgeNeeds: [SECOND_NEED],
+        reason: "A material external comparison remains unestablished.",
+      },
+      invocationProvenance: PROVENANCE,
+    };
+  }
+}
+
+test("M2 NEEDS_KNOWLEDGE automatically re-enters the governed M1 investigation seam before recommending", async () => {
+  const acquisition = new RecordingAcquisition();
+  const advisory = new NeedsKnowledgeThenRecommendationAdvisory();
+  const app = await createRuntimeApp(config, {
+    memoryDispatchDelayMs: 1,
+    truthPipeline: new KnowledgeAcquisitionTruthPipeline(acquisition),
+    solandraCognition: new AdvisoryCognition(),
+    solandraAdvisory: advisory,
+  });
+  try {
+    const conversationId = await createConversation(app);
+    const result = await advisoryTurn(app, conversationId, FIRST_USER);
+    const body = result.outcome.json<{
+      recommendationReference: { recommendationId: string; knowledgeIds: string[]; claimIds: string[] };
+    }>();
+    assert.equal(acquisition.requests.length, 2);
+    assert.deepEqual(acquisition.requests[0]?.investigationQueries, [FIRST_NEED]);
+    assert.deepEqual(acquisition.requests[1]?.investigationQueries, [SECOND_NEED]);
+    assert.equal(advisory.inputs.length, 2);
+    assert.equal(advisory.inputs[0]?.knowledge.length, 1);
+    assert.equal(advisory.inputs[1]?.knowledge.length, 2);
+    assert.equal(new Set(body.recommendationReference.knowledgeIds).size, 2);
+    assert.equal(body.recommendationReference.knowledgeIds.length, 2);
+
+    const continuity = await app.inject({ method: "GET", url: `/api/v1/conversations/${conversationId}/continuity` });
+    assert.equal(continuity.statusCode, 200, continuity.body);
+    const knowledge = continuity.json<{ knowledge: Array<{ knowledgeId: string; runId: string }> }>().knowledge;
+    assert.equal(knowledge.length, 2);
+    assert.equal(new Set(knowledge.map((item) => item.knowledgeId)).size, 2);
+    assert.equal(new Set(knowledge.map((item) => item.runId)).size, 2);
+  } finally {
+    await app.close();
+  }
+});
+
+test("M2 advisory Knowledge continuation is hard-bounded and fails honestly when additional governed facts remain unavailable", async () => {
+  const acquisition = new RecordingAcquisition();
+  const advisory = new AlwaysNeedsKnowledgeAdvisory();
+  const app = await createRuntimeApp(config, {
+    memoryDispatchDelayMs: 1,
+    truthPipeline: new KnowledgeAcquisitionTruthPipeline(acquisition),
+    solandraCognition: new AdvisoryCognition(),
+    solandraAdvisory: advisory,
+  });
+  try {
+    const conversationId = await createConversation(app);
+    const result = await advisoryTurn(app, conversationId, FIRST_USER);
+    const body = result.outcome.json<{
+      advisory: { status: string; reason: string };
+      recommendationReference?: unknown;
+      presentation: { assistantMessage: string };
+    }>();
+    assert.equal(body.advisory.status, "INSUFFICIENT_BASIS");
+    assert.equal(body.recommendationReference, undefined);
+    assert.match(body.presentation.assistantMessage, /can't recommend responsibly/iu);
+    assert.equal(acquisition.requests.length, 3, "Initial Knowledge plus exactly two bounded advisory Knowledge rounds are permitted.");
+    assert.equal(advisory.calls, 3);
+  } finally {
+    await app.close();
+  }
+});
+
+class UnsupportedFactAdvisoryProvider implements ModelProvider {
+  readonly kind = "m2-unsupported-fact-advisory-provider";
+  calls = 0;
+
+  async generate(request: CanonicalModelRequest, _context: ModelCallContext): Promise<ModelProviderResult> {
+    this.calls += 1;
+    const system = request.messages[0]?.content ?? "";
+    const text = system.includes("bounded grounding verifier")
+      ? JSON.stringify({
+        status: "NEEDS_KNOWLEDGE",
+        unsupportedExternalPremises: ["The option guarantees a 99% reduction in operating cost."],
+        knowledgeNeeds: ["governed evidence about operating-cost reduction"],
+      })
+      : JSON.stringify({
+        status: "RECOMMENDATION",
+        recommendation: "Prefer this option because it guarantees a 99% reduction in operating cost.",
+        basis: [{ knowledgeId: "knowledge-supplied", claimIds: ["claim-supplied"] }],
+        rationale: [FINDING],
+        tradeoffs: [],
+        assumptions: [],
+        uncertainties: ["Material uncertainty remains."],
+        preservedUncertainties: ["Material uncertainty remains."],
+        alternatives: [],
+      });
+    return {
+      response: { id: `m2-unsupported-${this.calls}`, model: request.model, output: [{ type: "text", text }] },
+      route: { actualProvider: this.kind, actualModel: request.model, upstreamRequestId: `m2-unsupported-${this.calls}` },
+    };
+  }
+}
+
+class GroundedInferenceAdvisoryProvider implements ModelProvider {
+  readonly kind = "m2-grounded-inference-advisory-provider";
+  calls = 0;
+
+  async generate(request: CanonicalModelRequest, _context: ModelCallContext): Promise<ModelProviderResult> {
+    this.calls += 1;
+    const system = request.messages[0]?.content ?? "";
+    const text = system.includes("bounded grounding verifier")
+      ? JSON.stringify({ status: "GROUNDED", unsupportedExternalPremises: [], knowledgeNeeds: [] })
+      : JSON.stringify({
+        status: "RECOMMENDATION",
+        recommendation: "Prefer the approach that best aligns with the USER's stated maintenance preference.",
+        basis: [{ knowledgeId: "knowledge-supplied", claimIds: ["claim-supplied"] }],
+        rationale: ["Given the governed finding and the USER's stated preference, I judge the lower-maintenance path to be the better fit."],
+        tradeoffs: ["That judgment is preference-sensitive rather than an additional factual claim."],
+        assumptions: ["The USER's stated maintenance preference remains controlling."],
+        uncertainties: ["Material uncertainty remains."],
+        preservedUncertainties: ["Material uncertainty remains."],
+        alternatives: [],
+      });
+    return {
+      response: { id: `m2-grounded-${this.calls}`, model: request.model, output: [{ type: "text", text }] },
+      route: { actualProvider: this.kind, actualModel: request.model, upstreamRequestId: `m2-grounded-${this.calls}` },
+    };
+  }
+}
+
 class FabricatedBasisProvider implements ModelProvider {
   readonly kind = "m2-fabricated-basis-provider";
   async generate(request: CanonicalModelRequest, _context: ModelCallContext): Promise<ModelProviderResult> {
@@ -475,26 +683,52 @@ const INTENT: IntentVersion = {
   createdAt: FIXED_TIME,
 };
 
+function contractAdvisoryInput(): SolandraAdvisoryInput {
+  return {
+    conversationId: "m2-contract",
+    userMessageId: "message-m2-contract",
+    authoritativeIntent: INTENT,
+    authoritativeObjective: FIRST_USER,
+    userContext: [FIRST_USER],
+    knowledge: [{
+      knowledgeId: "knowledge-supplied",
+      objective: FIRST_USER,
+      findings: [{ claimId: "claim-supplied", text: FINDING, status: "SUPPORTED", confidence: "HIGH" }],
+      uncertainties: ["Material uncertainty remains."],
+      asOf: FIXED_TIME,
+    }],
+  };
+}
+
+test("ModelSolandraAdvisoryRuntime turns an unsupported external factual premise into NEEDS_KNOWLEDGE despite valid basis IDs", async () => {
+  const provider = new UnsupportedFactAdvisoryProvider();
+  const runtime = new ModelSolandraAdvisoryRuntime(new ModelRuntime(provider), "m2-grounding-model");
+  const result = await runtime.advise(contractAdvisoryInput());
+  assert.equal(provider.calls, 2);
+  assert.equal(result.result.status, "NEEDS_KNOWLEDGE");
+  if (result.result.status !== "NEEDS_KNOWLEDGE") return;
+  assert.deepEqual(result.result.knowledgeNeeds, ["governed evidence about operating-cost reduction"]);
+  assert.match(result.result.reason, /not established by governed Knowledge/iu);
+});
+
+test("ModelSolandraAdvisoryRuntime preserves preference-sensitive advisory inference when its external premises are grounded", async () => {
+  const provider = new GroundedInferenceAdvisoryProvider();
+  const runtime = new ModelSolandraAdvisoryRuntime(new ModelRuntime(provider), "m2-grounding-model");
+  const result = await runtime.advise(contractAdvisoryInput());
+  assert.equal(provider.calls, 2);
+  assert.equal(result.result.status, "RECOMMENDATION");
+  if (result.result.status !== "RECOMMENDATION") return;
+  assert.match(result.result.recommendation, /USER's stated maintenance preference/iu);
+  assert.match(result.result.rationale[0] ?? "", /I judge/iu);
+});
+
 test("ModelSolandraAdvisoryRuntime rejects fabricated Knowledge/claim references", async () => {
   const runtime = new ModelSolandraAdvisoryRuntime(
     new ModelRuntime(new FabricatedBasisProvider()),
     "m2-contract-model",
   );
   await assert.rejects(
-    runtime.advise({
-      conversationId: "m2-contract",
-      userMessageId: "message-m2-contract",
-      authoritativeIntent: INTENT,
-      authoritativeObjective: FIRST_USER,
-      userContext: [FIRST_USER],
-      knowledge: [{
-        knowledgeId: "knowledge-supplied",
-        objective: FIRST_USER,
-        findings: [{ claimId: "claim-supplied", text: FINDING, status: "SUPPORTED", confidence: "HIGH" }],
-        uncertainties: ["Material uncertainty remains."],
-        asOf: FIXED_TIME,
-      }],
-    }),
+    runtime.advise(contractAdvisoryInput()),
     /referenced Knowledge that Lattice did not supply/iu,
   );
 });

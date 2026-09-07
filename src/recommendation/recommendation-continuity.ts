@@ -2,7 +2,6 @@ import { isConsultationRunRequest, type LatticeRun } from "../domain.js";
 import type { IntentVersion } from "../intent/types.js";
 import {
   loadKnowledge,
-  renderHistoricalSources,
   type LoadedKnowledge,
 } from "../knowledge/knowledge-continuity.js";
 import type { KnowledgeRecordStore } from "../knowledge/knowledge-record-store.js";
@@ -13,6 +12,7 @@ import type {
 } from "../solandra/advisory.js";
 import {
   buildRecommendationRecord,
+  type RecommendationBasis,
   type RecommendationRecord,
   type RecommendationStore,
 } from "./recommendation-store.js";
@@ -22,11 +22,28 @@ export interface LoadedRecommendation {
   knowledge: LoadedKnowledge[];
 }
 
+export interface RecommendationBasisTrace {
+  knowledgeId: string;
+  claimIds: string[];
+  evidenceIds: string[];
+  sourceIds: string[];
+}
+
 function equalSet(left: readonly string[], right: readonly string[]): boolean {
   if (left.length !== right.length) return false;
   const l = [...left].sort();
   const r = [...right].sort();
   return l.every((value, index) => value === r[index]);
+}
+
+function latestKnowledgeCreationTime(knowledge: readonly LoadedKnowledge[]): string {
+  const dates = knowledge
+    .map((item) => new Date(item.record.createdAt))
+    .filter((date) => !Number.isNaN(date.valueOf()))
+    .sort((left, right) => right.valueOf() - left.valueOf());
+  const latest = dates[0];
+  if (!latest) throw new Error("Recommendation basis has no valid governed Knowledge creation time.");
+  return latest.toISOString();
 }
 
 export function advisoryKnowledge(loaded: LoadedKnowledge): SolandraAdvisoryKnowledge {
@@ -62,16 +79,22 @@ export async function establishRecommendation(input: {
   ) {
     throw new Error("Recommendation authoritative IntentVersion binding changed.");
   }
+
+  const existing = await input.store.getRecommendationByRunId(input.run.id);
+  if (existing) return existing;
+
   const loadedById = new Map(input.knowledge.map((item) => [item.record.knowledgeId, item]));
-  const knowledgeIds = input.advisory.basis.map((item) => item.knowledgeId);
-  const claimIds = input.advisory.basis.flatMap((item) => item.claimIds);
-  for (const basis of input.advisory.basis) {
-    const loaded = loadedById.get(basis.knowledgeId);
+  const basis: RecommendationBasis[] = input.advisory.basis.map((item) => ({
+    knowledgeId: item.knowledgeId,
+    claimIds: [...item.claimIds],
+  }));
+  for (const basisItem of basis) {
+    const loaded = loadedById.get(basisItem.knowledgeId);
     if (!loaded || loaded.record.conversationId !== input.run.conversationId) {
       throw new Error("Recommendation basis must reference governed Knowledge supplied for the same conversation.");
     }
     const allowedClaims = new Set(loaded.record.claimIds);
-    if (basis.claimIds.some((claimId) => !allowedClaims.has(claimId))) {
+    if (basisItem.claimIds.some((claimId) => !allowedClaims.has(claimId))) {
       throw new Error("Recommendation basis contains a claim outside its governed Knowledge.");
     }
   }
@@ -81,15 +104,17 @@ export async function establishRecommendation(input: {
     intentScopeId: input.intentVersion.intentScopeId,
     intentVersionId: input.intentVersion.intentVersionId,
     sourceMessageId: input.run.request.sourceMessageId,
-    knowledgeIds,
-    claimIds,
+    basis,
     recommendation: input.advisory.recommendation,
     rationale: input.advisory.rationale,
     tradeoffs: input.advisory.tradeoffs,
     assumptions: input.advisory.assumptions,
     uncertainties: [...new Set([...input.advisory.preservedUncertainties, ...input.advisory.uncertainties])],
     alternatives: input.advisory.alternatives,
-    createdAt: input.createdAt ?? new Date().toISOString(),
+    // The latest immutable Knowledge establishment time is a deterministic
+    // recommendation-establishment timestamp. Concurrent first reads therefore
+    // construct byte-identical records instead of racing on wall-clock time.
+    createdAt: input.createdAt ?? latestKnowledgeCreationTime(input.knowledge),
   });
   try {
     return await input.store.putRecommendation(draft);
@@ -111,16 +136,27 @@ export async function loadRecommendation(
 ): Promise<LoadedRecommendation | undefined> {
   const record = await store.getRecommendation(recommendationId);
   if (!record) return undefined;
-  const knowledge = await Promise.all(record.knowledgeIds.map((knowledgeId) => loadKnowledge(knowledgeStore, runStore, knowledgeId)));
+
+  const basisKnowledgeIds = [...new Set(record.basis.map((item) => item.knowledgeId))];
+  const basisClaimIds = [...new Set(record.basis.flatMap((item) => item.claimIds))];
+  if (!equalSet(record.knowledgeIds, basisKnowledgeIds) || !equalSet(record.claimIds, basisClaimIds)) {
+    throw new Error("Recommendation flattened basis no longer matches its exact Knowledge/claim relationship.");
+  }
+
+  const knowledge = await Promise.all(basisKnowledgeIds.map((knowledgeId) => loadKnowledge(knowledgeStore, runStore, knowledgeId)));
   if (knowledge.some((item) => item === undefined)) throw new Error("Recommendation governed Knowledge could not be reconstructed.");
   const loaded = knowledge as LoadedKnowledge[];
   if (loaded.some((item) => item.record.conversationId !== record.conversationId)) {
     throw new Error("Recommendation Knowledge conversation binding changed.");
   }
-  const availableClaims = [...new Set(loaded.flatMap((item) => item.record.claimIds))];
-  if (!record.claimIds.every((claimId) => availableClaims.includes(claimId))) {
-    throw new Error("Recommendation claim binding no longer resolves through its governed Knowledge.");
+  const loadedById = new Map(loaded.map((item) => [item.record.knowledgeId, item]));
+  for (const basis of record.basis) {
+    const item = loadedById.get(basis.knowledgeId);
+    if (!item || basis.claimIds.some((claimId) => !item.record.claimIds.includes(claimId))) {
+      throw new Error("Recommendation exact claim basis no longer resolves through its governed Knowledge.");
+    }
   }
+
   const run = await runStore.get(record.runId);
   if (!run || !isConsultationRunRequest(run.request) || run.status !== "COMPLETED") {
     throw new Error("Recommendation source Run could not be reconstructed.");
@@ -146,6 +182,30 @@ export async function loadRecommendationByRunId(
   return record ? await loadRecommendation(store, knowledgeStore, runStore, record.recommendationId) : undefined;
 }
 
+export function recommendationBasisTrace(loaded: LoadedRecommendation): RecommendationBasisTrace[] {
+  const byId = new Map(loaded.knowledge.map((item) => [item.record.knowledgeId, item]));
+  return loaded.record.basis.map((basis) => {
+    const knowledge = byId.get(basis.knowledgeId);
+    if (!knowledge) throw new Error("Recommendation basis Knowledge is unavailable for provenance traversal.");
+    const claims = new Set(basis.claimIds);
+    const evidenceIds = [...new Set(knowledge.knowledge.findings
+      .filter((finding) => claims.has(finding.claimId))
+      .flatMap((finding) => [...finding.evidenceIds, ...finding.contradictoryEvidenceIds]))];
+    const admittedEvidenceIds = new Set((knowledge.knowledge.evidence ?? [])
+      .filter((evidence) => evidence.admitted && evidenceIds.includes(evidence.evidenceId))
+      .map((evidence) => evidence.evidenceId));
+    const sourceIds = [...new Set((knowledge.knowledge.evidence ?? [])
+      .filter((evidence) => admittedEvidenceIds.has(evidence.evidenceId))
+      .map((evidence) => evidence.sourceId))];
+    return {
+      knowledgeId: basis.knowledgeId,
+      claimIds: [...basis.claimIds],
+      evidenceIds: [...admittedEvidenceIds],
+      sourceIds,
+    };
+  });
+}
+
 export function renderRecommendation(record: RecommendationRecord): string {
   const sections = [record.recommendation];
   if (record.rationale.length > 0) sections.push(`Why:\n${record.rationale.map((item) => `- ${item}`).join("\n")}`);
@@ -168,9 +228,19 @@ export function renderHistoricalRecommendationExplanation(loaded: LoadedRecommen
 }
 
 export function renderHistoricalRecommendationSources(loaded: LoadedRecommendation): string {
-  const uniqueKnowledge = loaded.knowledge.filter((item, index, values) =>
-    values.findIndex((candidate) => candidate.record.knowledgeId === item.record.knowledgeId) === index);
-  return uniqueKnowledge.map(renderHistoricalSources).join("\n\n");
+  const traces = recommendationBasisTrace(loaded);
+  const sourceKeys = new Set(traces.flatMap((trace) => trace.sourceIds.map((sourceId) => `${trace.knowledgeId}\u001f${sourceId}`)));
+  const sources = loaded.knowledge.flatMap((knowledge) => knowledge.knowledge.provenance
+    .filter((source) => sourceKeys.has(`${knowledge.record.knowledgeId}\u001f${source.sourceId}`)));
+  if (sources.length === 0) return "I don't have admitted evidence/source provenance linked to the exact claims used by that recommendation.";
+  const unique = sources.filter((source, index, values) =>
+    values.findIndex((candidate) => candidate.sourceId === source.sourceId && candidate.canonicalUri === source.canonicalUri) === index);
+  const lines = unique.map((source) => {
+    const title = source.title?.trim() || source.canonicalUri;
+    const publisher = source.publisher ? ` — ${source.publisher}` : "";
+    return `- ${title}${publisher}\n  ${source.canonicalUri}`;
+  });
+  return `Sources for the exact governed claim basis used by that recommendation:\n${lines.join("\n")}`;
 }
 
 export function recommendationContext(record: RecommendationRecord): Readonly<{
