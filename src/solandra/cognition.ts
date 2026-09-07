@@ -38,13 +38,12 @@ export const solandraSemanticProposalSchema = z.object({
   knowledgeNeeds: z.array(z.string().min(1).max(1_000)).max(16),
   materialAmbiguity: materialAmbiguitySchema.nullable(),
   referencedKnowledgeId: z.string().min(1).max(128).nullable(),
-  proposedNextStep: z.enum([
-    "INVESTIGATE",
-    "REFERENCE_EXISTING_KNOWLEDGE",
-    "ASK_USER",
-    "DECISION_SUPPORT",
-    "PREPARE_RESOURCE",
-  ]),
+  /**
+   * Compatibility-only inert metadata from early M1 proposals. Product behavior
+   * is classified by requestedHelp; this value has no intent, truth, routing,
+   * decision, or authorization authority and is no longer requested from models.
+   */
+  proposedNextStep: z.string().min(1).max(100).optional(),
 }).strict();
 export type SolandraSemanticProposal = z.infer<typeof solandraSemanticProposalSchema>;
 
@@ -115,7 +114,6 @@ function buildCognitionRequest(model: string, input: SolandraCognitionInput): Ca
     knowledgeNeeds: ["string"],
     materialAmbiguity: { question: "string", couldChangeObjective: true },
     referencedKnowledgeId: "one supplied Knowledge ID or null",
-    proposedNextStep: "INVESTIGATE|REFERENCE_EXISTING_KNOWLEDGE|ASK_USER|DECISION_SUPPORT|PREPARE_RESOURCE",
   });
 
   return {
@@ -131,6 +129,7 @@ function buildCognitionRequest(model: string, input: SolandraCognitionInput): Ca
           "Use SOURCES_REFERENCE, EXPLAIN_REFERENCE, or SIMPLIFY_REFERENCE when the user clearly refers to an existing supplied Knowledge object. referencedKnowledgeId must be exactly one supplied Knowledge ID or null.",
           "Use FRESH_RESEARCH only when the user asks for new, updated, additional, or otherwise external Knowledge beyond the supplied object. A historical provenance request is not fresh research.",
           "Use DECISION only when the user is actually asking for help choosing/deciding, not merely asking for differences or information.",
+          "requestedHelp is the sole classification of the requested work. Do not add a separate next-step or workflow field.",
           "Return exactly one JSON object and no prose. The required shape is:",
           schemaExample,
           "When materialAmbiguity is absent, return null for it. Use empty arrays when a list has no items.",
