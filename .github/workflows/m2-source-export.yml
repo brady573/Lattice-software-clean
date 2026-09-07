@@ -1,4 +1,4 @@
-name: Temporary frozen M2 advisory raw-output diagnosis
+name: Temporary M2 advisory contract repair publisher
 
 on:
   push:
@@ -6,14 +6,14 @@ on:
       - qualification/m2-source-export
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  diagnose-live-advisory:
+  publish:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 5
     steps:
-      - name: Checkout qualification diagnosis
+      - name: Checkout qualification repair
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: qualification/m2-source-export
@@ -21,45 +21,39 @@ jobs:
           persist-credentials: false
           fetch-depth: 1
 
-      - name: Checkout exact frozen candidate
+      - name: Checkout exact M2 candidate
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: 716728c2312265ea9e67038b485e435d0d4915d9
+          ref: feature/m2-solandra-advisory-reasoning
           path: product
-          persist-credentials: false
+          persist-credentials: true
           fetch-depth: 1
 
-      - name: Provision Node 24
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: '24'
-
-      - name: Verify exact candidate and diagnostic artifacts
+      - name: Verify and apply advisory contract repair
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git -C product rev-parse HEAD)" = "716728c2312265ea9e67038b485e435d0d4915d9"
-          test "$(git -C product rev-parse 'HEAD^{tree}')" = "93443ec2a90f11158debc056d8881be9e2e52950"
-          test "$(git -C qualification hash-object .m2/m2-live-product-proof.ts)" = "aed607990b1527016a8ad9dc3bfacbc6f9b3afea"
-          test "$(git -C qualification hash-object .m2/capture-groq-output.ts)" = "0f44ca7c2e270b57935691b7bcfbb45b5b6371f7"
+          test "$(git -C qualification hash-object .m2/advisory-contract-fix.patch)" = "7f6037b0ecb56e54f698610d8674808e976f07f3"
+          cd product
+          test "$(git rev-parse HEAD)" = "716728c2312265ea9e67038b485e435d0d4915d9"
+          test "$(git rev-parse 'HEAD^{tree}')" = "93443ec2a90f11158debc056d8881be9e2e52950"
+          git apply --check ../qualification/.m2/advisory-contract-fix.patch
+          git apply ../qualification/.m2/advisory-contract-fix.patch
+          git diff --check
+          git add -A
+          test "$(git write-tree)" = "629ec724e481a198fd36e86a65ebf88746e08d43"
 
-      - name: Apply qualification-only cognition correction
+      - name: Commit and push advisory contract repair
         shell: bash
         run: |
           set -euo pipefail
-          target="qualification/.m2/m2-live-product-proof.ts"
-          grep -Fq 'assert.ok(accepted.interpretation.knowledgeNeeds.length > 0);' "$target"
-          sed -i '/assert\.ok(accepted\.interpretation\.knowledgeNeeds\.length > 0);/d' "$target"
-
-      - name: Install locked dependencies
-        working-directory: product
-        run: npm ci --no-audit --no-fund
-
-      - name: Capture exact configured Groq advisory output
-        working-directory: product
-        env:
-          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-        run: |
-          set -euo pipefail
-          test -n "$GROQ_API_KEY"
-          node --import tsx --import ../qualification/.m2/capture-groq-output.ts ../qualification/.m2/m2-live-product-proof.ts
+          cd product
+          test "$(git write-tree)" = "629ec724e481a198fd36e86a65ebf88746e08d43"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "M2: make advisory result contract unambiguously top-level"
+          test "$(git rev-parse HEAD^)" = "716728c2312265ea9e67038b485e435d0d4915d9"
+          test "$(git rev-parse 'HEAD^{tree}')" = "629ec724e481a198fd36e86a65ebf88746e08d43"
+          echo "CANDIDATE_SHA=$(git rev-parse HEAD)"
+          echo "CANDIDATE_TREE=$(git rev-parse 'HEAD^{tree}')"
+          git push origin HEAD:refs/heads/feature/m2-solandra-advisory-reasoning
