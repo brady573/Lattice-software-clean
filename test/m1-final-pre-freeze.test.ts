@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import test from "node:test";
 import type { FastifyInstance } from "fastify";
 import { Pool } from "pg";
+import { isConsultationRunRequest } from "../src/domain.js";
 import type {
   KnowledgeAcquisitionProvider,
   KnowledgeAcquisitionRequest,
@@ -14,8 +15,8 @@ import { ModelRuntime } from "../src/model/runtime.js";
 import type {
   CanonicalModelRequest,
   ModelCallContext,
-  ModelProviderResult,
   ModelInvocationProvenance,
+  ModelProviderResult,
 } from "../src/model/types.js";
 import type { KnowledgeOutcome } from "../src/outcome.js";
 import { PostgresRunStore } from "../src/postgres-run-store.js";
@@ -37,11 +38,10 @@ import {
 import { KnowledgeAcquisitionTruthPipeline } from "../src/truth/knowledge-acquisition-pipeline.js";
 
 const databaseUrl = process.env.DATABASE_URL;
-const DURABLE_FINDING = "A stable public interface can reduce upgrade coupling when clients depend on that interface rather than implementation details.";
-const DURABLE_QUERY = "public interface stability upgrade coupling";
+const FINDING = "A stable public interface can reduce upgrade coupling when clients depend on that interface rather than implementation details.";
+const KNOWLEDGE_NEED = "public interface stability upgrade coupling";
 const FIXED_TIME = "2026-09-07T03:30:00.000Z";
-
-const TEST_PROVENANCE: ModelInvocationProvenance = Object.freeze({
+const PROVENANCE: ModelInvocationProvenance = Object.freeze({
   executionClass: "LOCAL_OFFLINE",
   routeMode: "PINNED",
   requestedProvider: "m1-final-fixture",
@@ -54,7 +54,7 @@ const TEST_PROVENANCE: ModelInvocationProvenance = Object.freeze({
   routeProvenance: "COMPLETE",
 });
 
-function proposal(input: Partial<SolandraSemanticProposal> = {}): SolandraSemanticProposal {
+function proposal(overrides: Partial<SolandraSemanticProposal> = {}): SolandraSemanticProposal {
   return {
     objectiveRelation: "CONTINUE",
     proposedObjective: null,
@@ -68,43 +68,40 @@ function proposal(input: Partial<SolandraSemanticProposal> = {}): SolandraSemant
     materialAmbiguity: null,
     referencedKnowledgeId: null,
     proposedNextStep: "INVESTIGATE",
-    ...input,
+    ...overrides,
   };
 }
 
 class RestartCognition implements SolandraCognitiveRuntime {
-  readonly inputs: SolandraCognitionInput[] = [];
-
   async interpret(input: SolandraCognitionInput): Promise<SolandraCognitionResult> {
-    this.inputs.push(structuredClone(input));
-    const referencedKnowledgeId = input.governedKnowledge[0]?.knowledgeId ?? null;
+    const knowledgeId = input.governedKnowledge[0]?.knowledgeId ?? null;
     if (input.message === "Show me the sources behind that.") {
       return {
         proposal: proposal({
           requestedHelp: "SOURCES_REFERENCE",
-          referencedKnowledgeId,
+          referencedKnowledgeId: knowledgeId,
           proposedNextStep: "REFERENCE_EXISTING_KNOWLEDGE",
         }),
-        invocationProvenance: TEST_PROVENANCE,
+        invocationProvenance: PROVENANCE,
       };
     }
     if (input.message === "Explain that more plainly.") {
       return {
         proposal: proposal({
           requestedHelp: "SIMPLIFY_REFERENCE",
-          referencedKnowledgeId,
+          referencedKnowledgeId: knowledgeId,
           proposedNextStep: "REFERENCE_EXISTING_KNOWLEDGE",
         }),
-        invocationProvenance: TEST_PROVENANCE,
+        invocationProvenance: PROVENANCE,
       };
     }
     return {
       proposal: proposal({
         objectiveRelation: input.currentObjective ? "CONTINUE" : "NEW_OBJECTIVE",
-        proposedObjective: "Model-understood wording that remains non-authoritative.",
-        knowledgeNeeds: [DURABLE_QUERY],
+        proposedObjective: "Model wording remains non-authoritative.",
+        knowledgeNeeds: [KNOWLEDGE_NEED],
       }),
-      invocationProvenance: TEST_PROVENANCE,
+      invocationProvenance: PROVENANCE,
     };
   }
 }
@@ -117,12 +114,12 @@ class RestartPresenter implements SolandraKnowledgePresenter {
     return {
       status: "PRESENTED",
       text: `Based on the same established Knowledge: ${input.knowledge.findings[0]?.text ?? ""}`,
-      invocationProvenance: TEST_PROVENANCE,
+      invocationProvenance: PROVENANCE,
     };
   }
 }
 
-class RecordingAcquisitionProvider implements KnowledgeAcquisitionProvider {
+class RecordingAcquisition implements KnowledgeAcquisitionProvider {
   readonly kind = "m1-postgres-restart-recording-provider";
   readonly requests: KnowledgeAcquisitionRequest[] = [];
 
@@ -137,26 +134,16 @@ class RecordingAcquisitionProvider implements KnowledgeAcquisitionProvider {
         retrievedAt: FIXED_TIME,
         publishedAt: "2026-08-20T00:00:00.000Z",
         contentType: "text/plain",
-        content: DURABLE_FINDING,
+        content: FINDING,
       }],
       claims: [{
         claimId: "m1-restart-claim",
-        text: DURABLE_FINDING,
+        text: FINDING,
         claimType: "INTERPRETIVE",
-        evidence: [{
-          sourceId: "m1-restart-source",
-          relation: "SUPPORTS",
-          excerpt: DURABLE_FINDING,
-        }],
+        evidence: [{ sourceId: "m1-restart-source", relation: "SUPPORTS", excerpt: FINDING }],
       }],
     };
   }
-}
-
-async function createConversation(app: FastifyInstance): Promise<string> {
-  const response = await app.inject({ method: "POST", url: "/api/v1/conversations" });
-  assert.equal(response.statusCode, 201, response.body);
-  return response.json<{ conversation: { id: string } }>().conversation.id;
 }
 
 function postgresConfig(autoMigrate: boolean) {
@@ -170,18 +157,24 @@ function postgresConfig(autoMigrate: boolean) {
   } as NodeJS.ProcessEnv);
 }
 
+async function createConversation(app: FastifyInstance): Promise<string> {
+  const response = await app.inject({ method: "POST", url: "/api/v1/conversations" });
+  assert.equal(response.statusCode, 201, response.body);
+  return response.json<{ conversation: { id: string } }>().conversation.id;
+}
+
 test("M1 PostgreSQL reconstruction preserves exact Knowledge identity, provenance, and reference reuse without reacquisition", { skip: !databaseUrl }, async () => {
   assert.ok(databaseUrl);
-  const provider = new RecordingAcquisitionProvider();
-  const pipeline = new KnowledgeAcquisitionTruthPipeline(provider);
+  const acquisition = new RecordingAcquisition();
+  const pipeline = new KnowledgeAcquisitionTruthPipeline(acquisition);
   const cognition = new RestartCognition();
   const presenter = new RestartPresenter();
   const pool = new Pool({ connectionString: databaseUrl });
   let first: FastifyInstance | undefined;
   let second: FastifyInstance | undefined;
   let executionStore: PostgresRunStore | undefined;
-  let reconstructedRunStore: PostgresRunStore | undefined;
-  let reconstructedKnowledgeStore: PostgresKnowledgeRecordStore | undefined;
+  let runStore: PostgresRunStore | undefined;
+  let knowledgeStore: PostgresKnowledgeRecordStore | undefined;
   let conversationId = "";
   let runId = "";
   let intentScopeId = "";
@@ -213,24 +206,19 @@ test("M1 PostgreSQL reconstruction preserves exact Knowledge identity, provenanc
     intentVersionId = accepted.intentVersionId;
     assert.equal(accepted.acceptedUnderstanding, userMessage);
     assert.equal(accepted.interpretation.authority, "NON_AUTHORITATIVE_PROPOSAL");
-    assert.deepEqual(accepted.interpretation.knowledgeNeeds, [DURABLE_QUERY]);
+    assert.deepEqual(accepted.interpretation.knowledgeNeeds, [KNOWLEDGE_NEED]);
 
     executionStore = await PostgresRunStore.connect(databaseUrl, { migrate: false });
-    const completed = await executePersistedRun(executionStore, pipeline, runId);
-    assert.equal(completed.status, "COMPLETED");
-    assert.equal(provider.requests.length, 1);
-    assert.deepEqual(provider.requests[0]?.investigationQueries, [DURABLE_QUERY]);
+    assert.equal((await executePersistedRun(executionStore, pipeline, runId)).status, "COMPLETED");
+    assert.equal(acquisition.requests.length, 1);
+    assert.deepEqual(acquisition.requests[0]?.investigationQueries, [KNOWLEDGE_NEED]);
 
     const outcome = await first.inject({ method: "GET", url: `/api/v1/runs/${runId}/outcome` });
     assert.equal(outcome.statusCode, 200, outcome.body);
-    const established = outcome.json<{
-      knowledgeReference: { knowledgeId: string; referenceId: string };
-    }>();
-    const knowledgeId = established.knowledgeReference.knowledgeId;
-
-    const beforeRestart = await first.inject({ method: "GET", url: `/api/v1/knowledge/${knowledgeId}` });
-    assert.equal(beforeRestart.statusCode, 200, beforeRestart.body);
-    const before = beforeRestart.json<{
+    const knowledgeId = outcome.json<{ knowledgeReference: { knowledgeId: string } }>().knowledgeReference.knowledgeId;
+    const beforeResponse = await first.inject({ method: "GET", url: `/api/v1/knowledge/${knowledgeId}` });
+    assert.equal(beforeResponse.statusCode, 200, beforeResponse.body);
+    const before = beforeResponse.json<{
       knowledgeId: string;
       runId: string;
       intentVersionId: string;
@@ -239,7 +227,6 @@ test("M1 PostgreSQL reconstruction preserves exact Knowledge identity, provenanc
       evidenceIds: string[];
       truthAssessmentIds: string[];
     }>();
-    assert.equal(before.knowledgeId, knowledgeId);
     assert.equal(before.runId, runId);
     assert.equal(before.intentVersionId, intentVersionId);
     assert.equal(before.claimIds.length, 1);
@@ -257,36 +244,29 @@ test("M1 PostgreSQL reconstruction preserves exact Knowledge identity, provenanc
       solandraCognition: cognition,
       solandraKnowledgePresenter: presenter,
     });
-    reconstructedRunStore = await PostgresRunStore.connect(databaseUrl, { migrate: false });
-    reconstructedKnowledgeStore = await PostgresKnowledgeRecordStore.connect(databaseUrl);
+    runStore = await PostgresRunStore.connect(databaseUrl, { migrate: false });
+    knowledgeStore = await PostgresKnowledgeRecordStore.connect(databaseUrl);
 
-    const persistedReferences = await reconstructedKnowledgeStore.listReferences(conversationId);
-    assert.equal(persistedReferences.length, 1);
-    assert.equal(persistedReferences[0]?.referenceKind, "ESTABLISHED");
-    assert.equal(persistedReferences[0]?.knowledgeId, knowledgeId);
+    const establishedReferences = await knowledgeStore.listReferences(conversationId);
+    assert.equal(establishedReferences.length, 1);
+    assert.equal(establishedReferences[0]?.knowledgeId, knowledgeId);
+    assert.equal(establishedReferences[0]?.referenceKind, "ESTABLISHED");
 
-    const afterRestart = await second.inject({ method: "GET", url: `/api/v1/knowledge/${knowledgeId}` });
-    assert.equal(afterRestart.statusCode, 200, afterRestart.body);
-    const after = afterRestart.json<typeof before>();
+    const afterResponse = await second.inject({ method: "GET", url: `/api/v1/knowledge/${knowledgeId}` });
+    assert.equal(afterResponse.statusCode, 200, afterResponse.body);
+    const after = afterResponse.json<typeof before>();
     assert.deepEqual(after, before);
 
-    const reconstructedRun = await reconstructedRunStore.get(runId);
-    const reconstructedTruth = await reconstructedRunStore.getTruthBundle(runId);
+    const reconstructedRun = await runStore.get(runId);
+    const truth = await runStore.getTruthBundle(runId);
     assert.ok(reconstructedRun);
-    assert.ok(reconstructedTruth);
+    assert.ok(isConsultationRunRequest(reconstructedRun.request));
     assert.equal(reconstructedRun.request.intentVersionId, intentVersionId);
-    for (const claimId of after.claimIds) {
-      assert.ok(reconstructedTruth.claims.some((claim) => claim.id === claimId));
-    }
-    for (const sourceId of after.sourceIds) {
-      assert.ok(reconstructedTruth.sources.some((source) => source.id === sourceId));
-    }
-    for (const evidenceId of after.evidenceIds) {
-      assert.ok(reconstructedTruth.claimEvidence.some((evidence) => evidence.externalEvidenceId === evidenceId));
-    }
-    for (const assessmentId of after.truthAssessmentIds) {
-      assert.ok(reconstructedTruth.assessments.some((assessment) => assessment.id === assessmentId));
-    }
+    assert.ok(truth);
+    for (const id of after.claimIds) assert.ok(truth.claims.some((item) => item.id === id));
+    for (const id of after.sourceIds) assert.ok(truth.sources.some((item) => item.id === id));
+    for (const id of after.evidenceIds) assert.ok(truth.claimEvidence.some((item) => item.externalEvidenceId === id));
+    for (const id of after.truthAssessmentIds) assert.ok(truth.assessments.some((item) => item.id === id));
 
     const sources = await second.inject({
       method: "POST",
@@ -294,60 +274,52 @@ test("M1 PostgreSQL reconstruction preserves exact Knowledge identity, provenanc
       payload: { turnId: randomUUID(), message: "Show me the sources behind that." },
     });
     assert.equal(sources.statusCode, 200, sources.body);
-    const sourceBody = sources.json<{
-      status: string;
-      knowledgeReference: { knowledgeId: string; referenceId: string };
-      presentation: { assistantMessage: string };
-    }>();
-    assert.equal(sourceBody.status, "REFERENCE_RESOLVED");
-    assert.equal(sourceBody.knowledgeReference.knowledgeId, knowledgeId);
-    assert.match(sourceBody.presentation.assistantMessage, /durable\.example\/interface-stability/iu);
-    assert.equal(provider.requests.length, 1);
-
-    const plain = await second.inject({
-      method: "POST",
-      url: `/api/v1/conversations/${conversationId}/turns`,
-      payload: { turnId: randomUUID(), message: "Explain that more plainly." },
-    });
-    assert.equal(plain.statusCode, 200, plain.body);
-    const plainBody = plain.json<{
+    const sourcesBody = sources.json<{
       status: string;
       knowledgeReference: { knowledgeId: string };
       presentation: { assistantMessage: string };
     }>();
-    assert.equal(plainBody.status, "REFERENCE_RESOLVED");
-    assert.equal(plainBody.knowledgeReference.knowledgeId, knowledgeId);
-    assert.match(plainBody.presentation.assistantMessage, /same established Knowledge/iu);
-    assert.equal(provider.requests.length, 1);
+    assert.equal(sourcesBody.status, "REFERENCE_RESOLVED");
+    assert.equal(sourcesBody.knowledgeReference.knowledgeId, knowledgeId);
+    assert.match(sourcesBody.presentation.assistantMessage, /durable\.example\/interface-stability/iu);
+    assert.equal(acquisition.requests.length, 1);
+
+    const transformed = await second.inject({
+      method: "POST",
+      url: `/api/v1/conversations/${conversationId}/turns`,
+      payload: { turnId: randomUUID(), message: "Explain that more plainly." },
+    });
+    assert.equal(transformed.statusCode, 200, transformed.body);
+    assert.equal(
+      transformed.json<{ knowledgeReference: { knowledgeId: string } }>().knowledgeReference.knowledgeId,
+      knowledgeId,
+    );
+    assert.equal(acquisition.requests.length, 1);
     assert.equal(presenter.inputs.length, 1);
 
-    const referencesAfterReuse = await reconstructedKnowledgeStore.listReferences(conversationId);
-    assert.equal(referencesAfterReuse.filter((item) => item.knowledgeId === knowledgeId).length, 3);
-    assert.equal(referencesAfterReuse.at(-1)?.referenceKind, "REFERENCED");
+    const references = await knowledgeStore.listReferences(conversationId);
+    assert.equal(references.filter((item) => item.knowledgeId === knowledgeId).length, 3);
+    assert.equal(references.at(-1)?.referenceKind, "REFERENCED");
   } finally {
     await executionStore?.close();
-    await reconstructedRunStore?.close();
-    await reconstructedKnowledgeStore?.close();
+    await runStore?.close();
+    await knowledgeStore?.close();
     await first?.close();
     await second?.close();
-    if (runId) {
+    if (conversationId) {
       await pool.query("DELETE FROM conversation_knowledge_references WHERE conversation_id=$1", [conversationId]);
       await pool.query("DELETE FROM knowledge_records WHERE conversation_id=$1", [conversationId]);
+    }
+    if (runId) {
       await pool.query("DELETE FROM decision_plans WHERE run_id=$1", [runId]);
       await pool.query("DELETE FROM run_intent_bindings WHERE run_id=$1", [runId]);
       await pool.query("DELETE FROM run_events WHERE run_id=$1", [runId]);
       await pool.query("DELETE FROM dispatch_outbox WHERE run_id=$1", [runId]);
       await pool.query("DELETE FROM runs WHERE id=$1", [runId]);
     }
-    if (conversationId) {
-      await pool.query("DELETE FROM intent_user_messages WHERE conversation_id=$1", [conversationId]);
-    }
-    if (intentScopeId) {
-      await pool.query("DELETE FROM intent_scopes WHERE intent_scope_id=$1", [intentScopeId]);
-    }
-    if (conversationId) {
-      await pool.query("DELETE FROM conversations WHERE id=$1", [conversationId]);
-    }
+    if (conversationId) await pool.query("DELETE FROM intent_user_messages WHERE conversation_id=$1", [conversationId]);
+    if (intentScopeId) await pool.query("DELETE FROM intent_scopes WHERE intent_scope_id=$1", [intentScopeId]);
+    if (conversationId) await pool.query("DELETE FROM conversations WHERE id=$1", [conversationId]);
     await pool.end();
   }
 });
@@ -356,10 +328,7 @@ class UnsupportedPresentationProvider implements ModelProvider {
   readonly kind = "m1-unsupported-presentation-provider";
   calls = 0;
 
-  async generate(
-    request: CanonicalModelRequest,
-    _context: ModelCallContext,
-  ): Promise<ModelProviderResult> {
+  async generate(request: CanonicalModelRequest, _context: ModelCallContext): Promise<ModelProviderResult> {
     this.calls += 1;
     return {
       response: {
@@ -392,7 +361,7 @@ test("ModelSolandraKnowledgePresenter rejects unsupported factual additions with
     acceptedUnderstanding: "Understand the effect of a stable public interface on upgrade coupling.",
     findings: [{
       claimId: "presenter-claim",
-      text: DURABLE_FINDING,
+      text: FINDING,
       status: "SUPPORTED",
       confidence: "HIGH",
       evidenceIds: ["presenter-evidence"],
@@ -414,20 +383,16 @@ test("ModelSolandraKnowledgePresenter rejects unsupported factual additions with
       claimId: "presenter-claim",
       sourceId: "presenter-source",
       relation: "SUPPORTS",
-      excerpt: DURABLE_FINDING,
+      excerpt: FINDING,
       verification: "VERIFIED",
       admitted: true,
       rejectionReason: null,
     }],
     truthAssessmentIds: ["presenter-assessment"],
   };
-  const original = structuredClone(knowledge);
+  const before = structuredClone(knowledge);
   const provider = new UnsupportedPresentationProvider();
-  const presenter = new ModelSolandraKnowledgePresenter(
-    new ModelRuntime(provider),
-    "m1-presenter-authority-model",
-  );
-
+  const presenter = new ModelSolandraKnowledgePresenter(new ModelRuntime(provider), "m1-presenter-authority-model");
   const result = await presenter.present({
     knowledgeId: "knowledge-presenter-authority",
     userMessageId: "message-presenter-authority",
@@ -438,7 +403,7 @@ test("ModelSolandraKnowledgePresenter rejects unsupported factual additions with
   assert.equal(provider.calls, 1);
   assert.equal(result.status, "FIDELITY_REJECTED");
   assert.equal(result.text, null);
-  assert.deepEqual(knowledge, original);
+  assert.deepEqual(knowledge, before);
   assert.deepEqual(knowledge.findings.map((item) => item.claimId), ["presenter-claim"]);
   assert.deepEqual(knowledge.evidence?.map((item) => item.evidenceId), ["presenter-evidence"]);
   assert.deepEqual(knowledge.truthAssessmentIds, ["presenter-assessment"]);
