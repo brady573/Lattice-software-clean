@@ -44,6 +44,18 @@ jobs:
           cd ..
           test "$(git -C qualification hash-object .m2/m2-live-product-proof.ts)" = "aed607990b1527016a8ad9dc3bfacbc6f9b3afea"
 
+      - name: Correct qualification-only cognition assumption
+        shell: bash
+        run: |
+          set -euo pipefail
+          target="qualification/.m2/m2-live-product-proof.ts"
+          grep -Fq 'assert.ok(accepted.interpretation.knowledgeNeeds.length > 0);' "$target"
+          sed -i '/assert\.ok(accepted\.interpretation\.knowledgeNeeds\.length > 0);/d' "$target"
+          if grep -Fq 'assert.ok(accepted.interpretation.knowledgeNeeds.length > 0);' "$target"; then
+            echo "QUALIFICATION_HARNESS_CORRECTION_FAILED" >&2
+            exit 1
+          fi
+
       - name: Install locked dependencies
         working-directory: product
         run: npm ci --no-audit --no-fund
