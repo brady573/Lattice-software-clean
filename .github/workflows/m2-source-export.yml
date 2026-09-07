@@ -1,4 +1,4 @@
-name: Temporary M2 focused-test correction publisher
+name: Temporary M2 corrective focused validation
 
 on:
   push:
@@ -6,57 +6,73 @@ on:
       - qualification/m2-source-export
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  publish:
+  validate:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 20
+    env:
+      DATABASE_URL: postgresql://lattice:lattice@127.0.0.1:55433/lattice_test
+    services:
+      postgres:
+        image: postgres:18.6
+        env:
+          POSTGRES_USER: lattice
+          POSTGRES_PASSWORD: lattice
+          POSTGRES_DB: lattice_test
+        ports:
+          - 55433:5432
+        options: >-
+          --health-cmd "pg_isready -U lattice -d lattice_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
-      - name: Checkout qualification correction
+      - name: Checkout exact corrective candidate
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: qualification/m2-source-export
-          path: qualification
+          ref: 3f498ade44f3d82531a67dd7866ad79249151a0a
           persist-credentials: false
           fetch-depth: 1
 
-      - name: Checkout exact M2 candidate
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Provision Node 24
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          ref: feature/m2-solandra-advisory-reasoning
-          path: product
-          persist-credentials: true
-          fetch-depth: 1
+          node-version: '24'
 
-      - name: Verify and apply focused-test correction
+      - name: Verify exact candidate
         shell: bash
         run: |
           set -euo pipefail
-          test "$(stat -c%s qualification/.m2/test-fix.patch)" -eq 1818
-          test "$(git hash-object qualification/.m2/test-fix.patch)" = "fe6dbc5e7287b5b44c626ae8550e9a4b11c198e9"
-          cd product
-          test "$(git rev-parse HEAD)" = "a274f9f326772fa72b3afe1df2e30168c5d9f90e"
-          test "$(git rev-parse 'HEAD^{tree}')" = "3841fd870618751c52384825f8220e60a70d210b"
-          git apply --check ../qualification/.m2/test-fix.patch
-          git apply ../qualification/.m2/test-fix.patch
-          git diff --check
-          git add -A
-          actual_tree="$(git write-tree)"
-          echo "ACTUAL_TREE=$actual_tree"
-          test "$actual_tree" = "bd57948fbc636d8878dc03f13aa7aba66f1f4666"
-
-      - name: Commit and push focused-test correction
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd product
-          test "$(git write-tree)" = "bd57948fbc636d8878dc03f13aa7aba66f1f4666"
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -m "M2: assert governed source identities in provenance test"
-          test "$(git rev-parse HEAD^)" = "a274f9f326772fa72b3afe1df2e30168c5d9f90e"
+          test "$(git rev-parse HEAD)" = "3f498ade44f3d82531a67dd7866ad79249151a0a"
           test "$(git rev-parse 'HEAD^{tree}')" = "bd57948fbc636d8878dc03f13aa7aba66f1f4666"
-          echo "CANDIDATE_SHA=$(git rev-parse HEAD)"
-          echo "CANDIDATE_TREE=$(git rev-parse 'HEAD^{tree}')"
-          git push origin HEAD:refs/heads/feature/m2-solandra-advisory-reasoning
+          test "$(node -p "process.versions.node.split('.')[0]")" = "24"
+          test "$(npm --version | cut -d. -f1)" = "11"
+
+      - name: Install locked dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: TypeScript build
+        run: npm run build
+
+      - name: Focused M2 structural acceptance
+        run: node --import tsx --test test/m2-solandra-advisory-spine.test.ts
+
+      - name: Reset PostgreSQL test schema
+        run: |
+          node --input-type=module <<'NODE'
+          import pg from 'pg';
+          const { Client } = pg;
+          const client = new Client({ connectionString: process.env.DATABASE_URL });
+          await client.connect();
+          await client.query('DROP SCHEMA public CASCADE; CREATE SCHEMA public;');
+          await client.end();
+          NODE
+
+      - name: M2 PostgreSQL Recommendation reconstruction acceptance
+        run: node --import tsx --test --test-concurrency=1 test/m2-postgres-recommendation-restart.test.ts
+
+      - name: Record exact validation
+        run: |
+          echo "M2_CORRECTIVE_FOCUSED=PASS sha=$(git rev-parse HEAD) tree=$(git rev-parse 'HEAD^{tree}')"
