@@ -1,0 +1,35 @@
+name: Temporary M2 source export
+
+on:
+  push:
+    branches:
+      - qualification/m2-source-export
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout exact M2 base
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: 5ecbfed9a9a7693571ccbbdcfc03be02536f2532
+          persist-credentials: false
+      - name: Verify exact base
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "5ecbfed9a9a7693571ccbbdcfc03be02536f2532"
+          test "$(git rev-parse 'HEAD^{tree}')" = "c30cce49a76c4fadbc1505b8a2c3374bfbe3e2ee"
+      - name: Export source tree
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: m2-source-5ecbfed9
+          path: |
+            .
+            !.git/**
+          include-hidden-files: true
+          retention-days: 1
