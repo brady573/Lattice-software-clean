@@ -1,4 +1,4 @@
-name: Temporary M2 exact chunk publisher
+name: Temporary M2 corrective focused validation
 
 on:
   push:
@@ -6,84 +6,73 @@ on:
       - qualification/m2-source-export
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  publish:
+  validate:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 20
+    env:
+      DATABASE_URL: postgresql://lattice:lattice@127.0.0.1:55433/lattice_test
+    services:
+      postgres:
+        image: postgres:18.6
+        env:
+          POSTGRES_USER: lattice
+          POSTGRES_PASSWORD: lattice
+          POSTGRES_DB: lattice_test
+        ports:
+          - 55433:5432
+        options: >-
+          --health-cmd "pg_isready -U lattice -d lattice_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
-      - name: Checkout qualification transport
+      - name: Checkout exact corrective candidate
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: qualification/m2-source-export
-          path: qualification
+          ref: 71ad489d90b729bc5e1dc0ae852446936a59a1cb
           persist-credentials: false
           fetch-depth: 1
 
-      - name: Checkout exact M2 feature base
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Provision Node 24
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          ref: feature/m2-solandra-advisory-reasoning
-          path: product
-          persist-credentials: true
-          fetch-depth: 1
+          node-version: '24'
 
-      - name: Verify chunks and reconstruct patch
+      - name: Verify exact candidate
         shell: bash
         run: |
           set -euo pipefail
-          expected_shas=(
-            e1d21fc22593b20d0df77122345f4bcd7236e3f2
-            338f79a5d513d1150420f7ecf22e864835068e19
-            ad273eafa58747c94c703e145cd354fff2bc23ae
-            24eb3358b4cb02f4f20dcfa6e7c7e144e3be32f3
-            95e134f2f33c130a81426477f20a7ef1021f3059
-            12667c957ffa1cb146927faba1bf9287842e802b
-            a1ce4ca95ba43cb87fc9456f08ac71f65d5ad6ec
-          )
-          expected_sizes=(3024 3024 3024 3024 3024 3024 3032)
-          for i in 0 1 2 3 4 5 6; do
-            file="$(printf 'qualification/.m2/chunk%02d' "$i")"
-            test "$(stat -c%s "$file")" = "${expected_sizes[$i]}"
-            test "$(git hash-object "$file")" = "${expected_shas[$i]}"
-          done
-
-          cat qualification/.m2/chunk00 qualification/.m2/chunk01 qualification/.m2/chunk02 qualification/.m2/chunk03 qualification/.m2/chunk04 qualification/.m2/chunk05 qualification/.m2/chunk06 > "$RUNNER_TEMP/m2.patch.gz.b64"
-          test "$(wc -c < "$RUNNER_TEMP/m2.patch.gz.b64")" -eq 21176
-          base64 -d "$RUNNER_TEMP/m2.patch.gz.b64" > "$RUNNER_TEMP/m2.patch.gz"
-          test "$(stat -c%s "$RUNNER_TEMP/m2.patch.gz")" -eq 15882
-          echo "55ac7bde264da9f40f240cba6a2d5ec0674da62b109eedd7b09f8fd8bb4db7ff  $RUNNER_TEMP/m2.patch.gz" | sha256sum -c -
-          gzip -t "$RUNNER_TEMP/m2.patch.gz"
-          gzip -dc "$RUNNER_TEMP/m2.patch.gz" > "$RUNNER_TEMP/m2.patch"
-          test "$(stat -c%s "$RUNNER_TEMP/m2.patch")" -eq 70989
-
-      - name: Verify exact base and apply patch
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd product
-          test "$(git rev-parse HEAD)" = "fb9ff8a75bbaa4f8979c539ff050e5f24711d97b"
-          test "$(git rev-parse 'HEAD^{tree}')" = "9311d395c59f5d8b1a53be1de84c52300dde9e31"
-          git apply --check "$RUNNER_TEMP/m2.patch"
-          git apply "$RUNNER_TEMP/m2.patch"
-          git diff --check
-          git add -A
-          actual_tree="$(git write-tree)"
-          echo "ACTUAL_TREE=$actual_tree"
-          test "$actual_tree" = "d1667b180c26d46b560655d1ea2624fb4bdbe96d"
-
-      - name: Commit and push exact M2 corrective candidate
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd product
-          test "$(git write-tree)" = "d1667b180c26d46b560655d1ea2624fb4bdbe96d"
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -m "M2: close advisory governance gaps"
-          test "$(git rev-parse HEAD^)" = "fb9ff8a75bbaa4f8979c539ff050e5f24711d97b"
+          test "$(git rev-parse HEAD)" = "71ad489d90b729bc5e1dc0ae852446936a59a1cb"
           test "$(git rev-parse 'HEAD^{tree}')" = "d1667b180c26d46b560655d1ea2624fb4bdbe96d"
-          echo "CANDIDATE_SHA=$(git rev-parse HEAD)"
-          echo "CANDIDATE_TREE=$(git rev-parse 'HEAD^{tree}')"
-          git push origin HEAD:refs/heads/feature/m2-solandra-advisory-reasoning
+          test "$(node -p "process.versions.node.split('.')[0]")" = "24"
+          test "$(npm --version | cut -d. -f1)" = "11"
+
+      - name: Install locked dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: TypeScript build
+        run: npm run build
+
+      - name: Focused M2 structural acceptance
+        run: node --import tsx --test test/m2-solandra-advisory-spine.test.ts
+
+      - name: Reset PostgreSQL test schema
+        run: |
+          node --input-type=module <<'NODE'
+          import pg from 'pg';
+          const { Client } = pg;
+          const client = new Client({ connectionString: process.env.DATABASE_URL });
+          await client.connect();
+          await client.query('DROP SCHEMA public CASCADE; CREATE SCHEMA public;');
+          await client.end();
+          NODE
+
+      - name: M2 PostgreSQL Recommendation reconstruction acceptance
+        run: node --import tsx --test --test-concurrency=1 test/m2-postgres-recommendation-restart.test.ts
+
+      - name: Record exact validation
+        run: |
+          echo "M2_CORRECTIVE_FOCUSED=PASS sha=$(git rev-parse HEAD) tree=$(git rev-parse 'HEAD^{tree}')"
