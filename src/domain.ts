@@ -27,6 +27,8 @@ export const consultationRunRequestSchema = z.object({
   objective: z.string().min(1).max(8_000),
   /** Non-authoritative conversational/work context for this exact Run. */
   context: z.array(z.string().min(1).max(4_000)).max(32).default([]),
+  /** Non-authoritative operational investigation proposals; never USER intent or truth. */
+  investigationQueries: z.array(z.string().min(1).max(1_000)).max(16).default([]),
   decisionNeed: z.enum(["NONE", "UNRESOLVED", "QUALIFIED"]).default("NONE"),
   resourceNeed: z.enum(["NONE", "CHECKLIST", "PREPARED_MESSAGE"]).default("NONE"),
   sourceMessageId: z.string().min(1).max(200),
@@ -54,8 +56,9 @@ export const consultationRunRequestSchema = z.object({
 
 export type RunRequest = z.infer<typeof runRequestSchema>;
 type ConsultationRequestData = z.infer<typeof consultationRunRequestSchema>;
-export type ConsultationRunRequest = Omit<ConsultationRequestData, "decisionNeed" | "resourceNeed" | "context"> & {
+export type ConsultationRunRequest = Omit<ConsultationRequestData, "decisionNeed" | "resourceNeed" | "context" | "investigationQueries"> & {
   context: string[];
+  investigationQueries: string[];
   decisionNeed: "NONE" | "UNRESOLVED" | "QUALIFIED";
   resourceNeed: "NONE" | "CHECKLIST" | "PREPARED_MESSAGE";
   /** Compatibility-only absent fields; consultations never require them. */
