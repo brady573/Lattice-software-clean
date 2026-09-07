@@ -1,0 +1,17 @@
+diff --git a/src/consultation-intake.ts b/src/consultation-intake.ts
+index 4f4c3a6..9435037 100644
+--- a/src/consultation-intake.ts
++++ b/src/consultation-intake.ts
+@@ -312,7 +312,11 @@ async function submitConsultationRun(input: {
+   return { outcome: submission.outcome, runId: submission.response.runId };
+ }
+ 
+-function advisoryKnowledgeRunId(rootRunId: string, intentVersionId: string, round: number): string {
++function advisoryKnowledgeRunId(
++  rootRunId: string,
++  intentVersionId: string,
++  round: number,
++): `${string}-${string}-${string}-${string}-${string}` {
+   return stableUuid("advisory-knowledge-run", rootRunId, intentVersionId, String(round));
+ }
+ 
