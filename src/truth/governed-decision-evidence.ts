@@ -65,7 +65,6 @@ export class GovernedKnowledgeDecisionEvidenceProvider implements DecisionEviden
     const candidates: Candidate[] = semantics.candidates.map((packageName) => ({
       id: packageName,
       label: packageName,
-      attributes: {},
     }));
     const evidence: Evidence[] = [];
 
@@ -103,7 +102,6 @@ export class GovernedKnowledgeDecisionEvidenceProvider implements DecisionEviden
         sourceId: source.id,
         sourceLabel: typeof source.metadata.title === "string" ? source.metadata.title : source.canonicalUri,
         admitted: false,
-        rejectionReason: null,
       });
     }
 
