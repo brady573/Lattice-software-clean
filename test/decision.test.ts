@@ -143,7 +143,7 @@ test("API persists a non-winner UNRESOLVED decision as authoritative Run storage
     assert.equal(run.decision.outcome, "UNRESOLVED");
     assert.equal(run.decision.winnerCandidateId, undefined);
     assert.ok(run.decision.materialUnknowns.length > 0);
-    assert.equal(run.explanation, "Solandra reports unresolved. Unresolved: nova-air:batteryHours.");
+    assert.equal(run.explanation, "I can't justify a unique recommendation because a material qualified comparison remains unresolved.");
 
     const retrieve = await app.inject({ method: "GET", url: `/runs/${run.id}` });
     assert.equal(retrieve.statusCode, 200);
