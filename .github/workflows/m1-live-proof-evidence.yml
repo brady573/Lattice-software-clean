@@ -40,10 +40,10 @@ jobs:
         working-directory: candidate
         run: npm run build
 
-      - name: Execute real Solandra cognition proof
+      - name: Diagnose real Solandra cognition output
         env:
           CANDIDATE_ROOT: ${{ github.workspace }}/candidate
           FROZEN_SHA: fc0f987f277ab174aa0d3dd6c6d09e89266af138
           FROZEN_TREE: 7a7da5aac09368ae864dbff0c3e3446aad129f90
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-        run: node evidence/evidence/m1-live-proof.mjs
+        run: node evidence/evidence/m1-live-diagnostic.mjs
