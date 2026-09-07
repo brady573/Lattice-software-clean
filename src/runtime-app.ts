@@ -56,6 +56,11 @@ import {
 import { migrateRunIntentBindings } from "./intent/postgres-run-binding-store.js";
 import { registerUserPreferenceControlsApi } from "./intent/user-preference-controls-api.js";
 import type { KnowledgeAcquisitionProvider } from "./knowledge/acquisition.js";
+import {
+  MemoryKnowledgeRecordStore,
+  PostgresKnowledgeRecordStore,
+  type KnowledgeRecordStore,
+} from "./knowledge/knowledge-record-store.js";
 import type { ModelAssistanceCapabilityService } from "./model-assistance-capability.js";
 import { PostgresModelAssistanceAuthorizationStore } from "./model-assistance-store.js";
 import { LocalOfflineModelRuntime } from "./model/local-offline-runtime.js";
@@ -71,6 +76,8 @@ import { registerRunEventStream } from "./progress/run-event-stream.js";
 import { executePersistedRun, type GeneralizedDecisionAdapter } from "./run-execution.js";
 import { MemoryRunStore, type RunStore } from "./run-store.js";
 import type { RuntimeConfig } from "./runtime-config.js";
+import type { SolandraCognitiveRuntime } from "./solandra/cognition.js";
+import type { SolandraKnowledgePresenter } from "./solandra/knowledge-presenter.js";
 import { createConfiguredTruthPipeline } from "./truth/configured-pipeline.js";
 import type { TruthExecutionPipeline } from "./truth/execution-pipeline.js";
 import {
@@ -91,6 +98,9 @@ export interface RuntimeAppOptions {
   consultationInterpreter?: ConsultationInterpreter;
   criterionCatalog?: QualifiedCriterionCatalog;
   decisionEvidenceProvider?: DecisionEvidenceProvider;
+  knowledgeStore?: KnowledgeRecordStore;
+  solandraCognition?: SolandraCognitiveRuntime;
+  solandraKnowledgePresenter?: SolandraKnowledgePresenter;
 }
 
 function nonNegativeDelay(value: number | undefined, fallback: number, name: string): number {
@@ -212,6 +222,7 @@ export async function migrateRuntimeDatabase(databaseUrl: string): Promise<void>
   await PostgresDecisionPlanStore.migrate(databaseUrl);
   await PostgresUserPreferenceStore.migrate(databaseUrl);
   await PostgresModelAssistanceAuthorizationStore.migrate(databaseUrl);
+  await PostgresKnowledgeRecordStore.migrate(databaseUrl);
 
   const apiControlStore = await PostgresApiRunControlStore.connect(databaseUrl, { migrate: true });
   await apiControlStore.close();
@@ -235,6 +246,7 @@ export async function connectPostgresRuntimeStores(
   conversationStore: ConversationStore;
   decisionPlanStore: DecisionPlanStore;
   runIndexStore: ConversationRunIndexStore;
+  knowledgeStore: KnowledgeRecordStore;
 }> {
   if (autoMigrate) await migrateRuntimeDatabase(databaseUrl);
 
@@ -256,18 +268,25 @@ export async function connectPostgresRuntimeStores(
               });
               try {
                 const runIndexStore = await PostgresConversationRunIndexStore.connect(databaseUrl);
-                const decisionPlanControl = new DecisionPlanRecordingApiRunControlStore(baseApiControlStore, decisionPlanStore);
-                const apiControlStore = new ConversationRunIndexRecordingApiRunControlStore(decisionPlanControl, runIndexStore);
-                return {
-                  runStore,
-                  apiControlStore,
-                  intentStore,
-                  userMessageStore,
-                  userPreferenceStore,
-                  conversationStore,
-                  decisionPlanStore,
-                  runIndexStore,
-                };
+                try {
+                  const knowledgeStore = await PostgresKnowledgeRecordStore.connect(databaseUrl);
+                  const decisionPlanControl = new DecisionPlanRecordingApiRunControlStore(baseApiControlStore, decisionPlanStore);
+                  const apiControlStore = new ConversationRunIndexRecordingApiRunControlStore(decisionPlanControl, runIndexStore);
+                  return {
+                    runStore,
+                    apiControlStore,
+                    intentStore,
+                    userMessageStore,
+                    userPreferenceStore,
+                    conversationStore,
+                    decisionPlanStore,
+                    runIndexStore,
+                    knowledgeStore,
+                  };
+                } catch (error) {
+                  await runIndexStore.close();
+                  throw error;
+                }
               } catch (error) {
                 await decisionPlanStore.close();
                 throw error;
@@ -319,6 +338,7 @@ export async function createRuntimeApp(
   let conversationStore: ConversationStore;
   let decisionPlanStore: DecisionPlanStore;
   let runIndexStore: ConversationRunIndexStore;
+  let knowledgeStore: KnowledgeRecordStore;
 
   if (config.databaseUrl) {
     ({
@@ -330,6 +350,7 @@ export async function createRuntimeApp(
       conversationStore,
       decisionPlanStore,
       runIndexStore,
+      knowledgeStore,
     } = await connectPostgresRuntimeStores(config.databaseUrl, config.autoMigrate));
   } else {
     const memoryRunStore = new MemoryRunStore();
@@ -339,6 +360,7 @@ export async function createRuntimeApp(
     const memoryConversationStore = new MemoryConversationStore();
     const memoryDecisionPlanStore = new MemoryDecisionPlanStore(memoryIntentStore);
     const memoryRunIndexStore = new MemoryConversationRunIndexStore();
+    const memoryKnowledgeStore = options.knowledgeStore ?? new MemoryKnowledgeRecordStore();
     const intentBoundRuns = new MemoryIntentBoundRunStore(memoryRunStore, memoryIntentStore);
     runStore = memoryRunStore;
     intentStore = memoryIntentStore;
@@ -347,6 +369,7 @@ export async function createRuntimeApp(
     conversationStore = memoryConversationStore;
     decisionPlanStore = memoryDecisionPlanStore;
     runIndexStore = memoryRunIndexStore;
+    knowledgeStore = memoryKnowledgeStore;
     const decisionPlanControl = new DecisionPlanRecordingApiRunControlStore(
       new DeferredMemoryApiRunControlStore(
         new MemoryApiRunControlStore(memoryRunStore, intentBoundRuns),
@@ -393,8 +416,11 @@ export async function createRuntimeApp(
     userMessageStore,
     apiControlStore,
     runStore,
+    knowledgeStore,
     ...(options.consultationInterpreter ? { interpreter: options.consultationInterpreter } : {}),
     ...(options.criterionCatalog ? { criterionCatalog: options.criterionCatalog } : {}),
+    ...(options.solandraCognition ? { solandraCognition: options.solandraCognition } : {}),
+    ...(options.solandraKnowledgePresenter ? { solandraKnowledgePresenter: options.solandraKnowledgePresenter } : {}),
     apiSubject: authenticatedApiSubject,
   });
   registerRunEventStream(app, { runStore });
@@ -406,6 +432,7 @@ export async function createRuntimeApp(
     runIndexStore,
     decisionPlanStore,
     intentStore,
+    knowledgeStore,
   });
   registerUserPreferenceControlsApi(app, {
     preferenceStore: userPreferenceStore,
@@ -413,6 +440,7 @@ export async function createRuntimeApp(
     userMessageStore,
   });
   app.addHook("onClose", async () => {
+    await knowledgeStore.close();
     await conversationStore.close();
     await userMessageStore.close();
     await userPreferenceStore.close();
