@@ -312,7 +312,11 @@ async function submitConsultationRun(input: {
   return { outcome: submission.outcome, runId: submission.response.runId };
 }
 
-function advisoryKnowledgeRunId(rootRunId: string, intentVersionId: string, round: number): string {
+function advisoryKnowledgeRunId(
+  rootRunId: string,
+  intentVersionId: string,
+  round: number,
+): `${string}-${string}-${string}-${string}-${string}` {
   return stableUuid("advisory-knowledge-run", rootRunId, intentVersionId, String(round));
 }
 
