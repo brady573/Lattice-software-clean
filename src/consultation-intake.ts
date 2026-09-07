@@ -26,12 +26,28 @@ import type {
   IntentVersion,
   PendingIntentProposal,
 } from "./intent/types.js";
+import {
+  establishKnowledge,
+  governedKnowledgeContext,
+  loadKnowledge,
+  recentGovernedKnowledge,
+  referenceKnowledge,
+  renderHistoricalSources,
+} from "./knowledge/knowledge-continuity.js";
+import type { KnowledgeRecordStore } from "./knowledge/knowledge-record-store.js";
 import { buildRunOutcome } from "./outcome.js";
 import { createPendingRun } from "./run-execution.js";
 import type { RunStore } from "./run-store.js";
+import type {
+  SolandraCognitionResult,
+  SolandraCognitiveRuntime,
+  SolandraRequestedHelp,
+} from "./solandra/cognition.js";
+import type { SolandraKnowledgePresenter } from "./solandra/knowledge-presenter.js";
 
 const IDEMPOTENCY_RETENTION_MS = 24 * 60 * 60 * 1_000;
 const MAX_RUN_CONTEXT_ITEMS = 32;
+const MAX_COGNITIVE_HISTORY_ITEMS = 8;
 
 const consultationTurnSchema = z.object({
   turnId: z.string().min(1).max(200),
@@ -58,6 +74,9 @@ export interface ConsultationIntakeOptions {
   runStore: RunStore;
   interpreter?: ConsultationInterpreter;
   criterionCatalog?: QualifiedCriterionCatalog;
+  knowledgeStore?: KnowledgeRecordStore;
+  solandraCognition?: SolandraCognitiveRuntime;
+  solandraKnowledgePresenter?: SolandraKnowledgePresenter;
   apiSubject?: string | ((request: FastifyRequest) => string);
 }
 
@@ -82,8 +101,18 @@ function validateProposedOperations(
     throw new Error("Material clarification must propose at least one semantic operation.");
   }
   const validated = operations.map((operation) => {
-    if (operation.op === "NO_CHANGE" || operation.path.kind === "OBJECTIVE") {
-      throw new Error("Interpretation proposals may only contain material requirement or preference changes.");
+    if (operation.op === "NO_CHANGE") {
+      throw new Error("Material interpretation proposals cannot contain NO_CHANGE operations.");
+    }
+    if (operation.path.kind === "OBJECTIVE") {
+      if (
+        operation.op !== "SET"
+        || operation.value.state !== "VALUE"
+        || typeof operation.value.value !== "string"
+        || operation.value.value.trim().length === 0
+      ) {
+        throw new Error("A material objective proposal must SET one non-empty objective string.");
+      }
     }
     return structuredClone(operation);
   });
@@ -114,6 +143,7 @@ function qualifiedDecisionNeed(
 function consultationRequest(input: {
   objective: string;
   context: readonly string[];
+  investigationQueries?: readonly string[];
   decisionNeed: "NONE" | "UNRESOLVED" | "QUALIFIED";
   resourceNeed: ConsultationResourceNeed;
   sourceMessageId: string;
@@ -126,6 +156,7 @@ function consultationRequest(input: {
     kind: "consultation",
     objective: input.objective,
     context: [...input.context],
+    investigationQueries: [...(input.investigationQueries ?? [])],
     decisionNeed: input.decisionNeed,
     resourceNeed: input.resourceNeed,
     sourceMessageId: input.sourceMessageId,
@@ -143,6 +174,75 @@ function authoritativeObjective(version: IntentVersion): string {
     throw new Error("Authoritative consultation objective is missing.");
   }
   return field.value.value;
+}
+
+function publicCognition(result: SolandraCognitionResult | undefined): unknown {
+  if (!result) return undefined;
+  return {
+    authority: "NON_AUTHORITATIVE_PROPOSAL",
+    objectiveRelation: result.proposal.objectiveRelation,
+    proposedObjective: result.proposal.proposedObjective,
+    requestedHelp: result.proposal.requestedHelp,
+    entities: result.proposal.entities,
+    referents: result.proposal.referents,
+    constraints: result.proposal.constraints,
+    preferences: result.proposal.preferences,
+    knowledgeNeeds: result.proposal.knowledgeNeeds,
+    materialAmbiguity: result.proposal.materialAmbiguity,
+    referencedKnowledgeId: result.proposal.referencedKnowledgeId,
+    proposedNextStep: result.proposal.proposedNextStep,
+  };
+}
+
+function isReferenceHelp(help: SolandraRequestedHelp): boolean {
+  return help === "SOURCES_REFERENCE"
+    || help === "EXPLAIN_REFERENCE"
+    || help === "SIMPLIFY_REFERENCE";
+}
+
+function cognitiveInterpretation(
+  sourceMessage: IntentUserMessage,
+  currentVersion: IntentVersion | undefined,
+  result: SolandraCognitionResult,
+  explicitResourceNeed: ConsultationResourceNeed | undefined,
+): ConsultationInterpretationProposal {
+  const proposal = result.proposal;
+  const exactUserMessage = sourceMessage.content.trim();
+  const objectiveEffect: ConsultationInterpretationProposal["objectiveEffect"] = currentVersion === undefined
+    ? { kind: "ESTABLISH", value: exactUserMessage }
+    : proposal.objectiveRelation === "NEW_OBJECTIVE"
+      ? { kind: "REPLACE_EXPLICIT", value: exactUserMessage }
+      : proposal.objectiveRelation === "CORRECTION"
+        && proposal.proposedObjective !== null
+        && proposal.proposedObjective.trim() === exactUserMessage
+        ? { kind: "REPLACE_EXPLICIT", value: exactUserMessage }
+        : { kind: "PRESERVE" };
+
+  const materialObjectiveProposal = currentVersion !== undefined
+    && proposal.objectiveRelation === "CORRECTION"
+    && proposal.proposedObjective !== null
+    && proposal.proposedObjective.trim() !== exactUserMessage
+    ? {
+      operations: [{
+        op: "SET" as const,
+        path: { kind: "OBJECTIVE" as const },
+        value: { state: "VALUE" as const, value: proposal.proposedObjective.trim() },
+      }],
+      question: `I understand your correction as: “${proposal.proposedObjective.trim()}” Is that what you mean?`,
+      confirmationExample: "Yes, that's correct.",
+    }
+    : undefined;
+
+  return {
+    objectiveEffect,
+    meaningKind: proposal.materialAmbiguity || materialObjectiveProposal ? "MATERIAL_INFERENCE" : "ORDINARY_CONTEXT",
+    decisionRequested: false,
+    resourceNeed: explicitResourceNeed ?? "NONE",
+    ...(materialObjectiveProposal ? { materialClarification: materialObjectiveProposal } : {}),
+    ...(proposal.materialAmbiguity && !materialObjectiveProposal
+      ? { clarificationQuestion: proposal.materialAmbiguity.question }
+      : {}),
+  };
 }
 
 async function submitConsultationRun(input: {
@@ -239,7 +339,7 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
       const intentScopeId = `consultation:${conversationId}`;
       const messageId = stableUuid("consultation-message", conversationId, parsed.data.turnId);
       const existing = await options.userMessageStore.get(messageId);
-      const history = existing ? [] : await options.userMessageStore.listByConversation(conversationId);
+      const history = await options.userMessageStore.listByConversation(conversationId);
       const messageHorizon = existing?.messageHorizon
         ?? Math.max(0, ...history.map((message) => message.messageHorizon)) + 1;
 
@@ -266,18 +366,123 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
         return reply.status(500).send({ error: "AUTHORITATIVE_INTENT_VERSION_MISSING" });
       }
 
+      let cognition: SolandraCognitionResult | undefined;
       let interpretation: ConsultationInterpretationProposal;
       try {
-        interpretation = await interpreter.interpret({
-          message: sourceMessage.content,
-          context: parsed.data.context ?? [],
-          ...(currentVersion ? { currentIntentVersion: currentVersion } : {}),
-          ...(parsed.data.prepare ? { explicitResourceNeed: parsed.data.prepare } : {}),
-        });
+        if (options.solandraCognition) {
+          const governed = options.knowledgeStore
+            ? await recentGovernedKnowledge(options.knowledgeStore, options.runStore, conversationId)
+            : [];
+          const recentMessages = [...history.map((message) => message.content)];
+          if (!recentMessages.includes(sourceMessage.content)) recentMessages.push(sourceMessage.content);
+          cognition = await options.solandraCognition.interpret({
+            conversationId,
+            messageId: sourceMessage.messageId,
+            message: sourceMessage.content,
+            ...(currentVersion ? { currentObjective: authoritativeObjective(currentVersion) } : {}),
+            recentUserMessages: recentMessages.slice(-MAX_COGNITIVE_HISTORY_ITEMS),
+            governedKnowledge: governed.map(governedKnowledgeContext),
+          });
+          if (cognition.proposal.requestedHelp === "DECISION") {
+            interpretation = await interpreter.interpret({
+              message: sourceMessage.content,
+              context: parsed.data.context ?? [],
+              ...(currentVersion ? { currentIntentVersion: currentVersion } : {}),
+              ...(parsed.data.prepare ? { explicitResourceNeed: parsed.data.prepare } : {}),
+            });
+          } else {
+            interpretation = cognitiveInterpretation(
+              sourceMessage,
+              currentVersion,
+              cognition,
+              parsed.data.prepare,
+            );
+          }
+        } else {
+          interpretation = await interpreter.interpret({
+            message: sourceMessage.content,
+            context: parsed.data.context ?? [],
+            ...(currentVersion ? { currentIntentVersion: currentVersion } : {}),
+            ...(parsed.data.prepare ? { explicitResourceNeed: parsed.data.prepare } : {}),
+          });
+        }
       } catch (error) {
         const message = error instanceof Error ? error.message : "Consultation interpretation failed.";
         return reply.status(422).send({ error: "CONSULTATION_INTERPRETATION_FAILED", message });
       }
+
+      if (
+        cognition
+        && isReferenceHelp(cognition.proposal.requestedHelp)
+        && cognition.proposal.materialAmbiguity === null
+        && cognition.proposal.referencedKnowledgeId !== null
+      ) {
+        if (!options.knowledgeStore || !currentVersion) {
+          return reply.status(409).send({
+            error: "GOVERNED_KNOWLEDGE_REFERENCE_UNAVAILABLE",
+            message: "The referenced governed Knowledge is not available in this conversation state.",
+          });
+        }
+        const loaded = await loadKnowledge(
+          options.knowledgeStore,
+          options.runStore,
+          cognition.proposal.referencedKnowledgeId,
+        );
+        if (!loaded || loaded.record.conversationId !== conversationId) {
+          return reply.status(404).send({ error: "KNOWLEDGE_NOT_FOUND" });
+        }
+
+        let assistantMessage: string;
+        if (cognition.proposal.requestedHelp === "SOURCES_REFERENCE") {
+          assistantMessage = renderHistoricalSources(loaded);
+        } else {
+          if (!options.solandraKnowledgePresenter) {
+            return reply.status(503).send({ error: "SOLANDRA_KNOWLEDGE_PRESENTATION_UNAVAILABLE" });
+          }
+          const presented = await options.solandraKnowledgePresenter.present({
+            knowledgeId: loaded.record.knowledgeId,
+            userMessageId: sourceMessage.messageId,
+            mode: cognition.proposal.requestedHelp === "SIMPLIFY_REFERENCE" ? "SIMPLIFY" : "EXPLAIN",
+            knowledge: loaded.knowledge,
+          });
+          if (presented.status === "NEEDS_NEW_KNOWLEDGE") {
+            return reply.status(202).send({
+              status: "NEEDS_NEW_KNOWLEDGE",
+              acceptedUnderstanding: authoritativeObjective(currentVersion),
+              intentScopeId,
+              intentVersionId: currentVersion.intentVersionId,
+              knowledgeId: loaded.record.knowledgeId,
+              question: "That would require factual Knowledge beyond what I previously established. Ask me to investigate it as new Knowledge.",
+              interpretation: publicCognition(cognition),
+            });
+          }
+          assistantMessage = presented.status === "PRESENTED"
+            ? presented.text
+            : "I couldn't transform that faithfully, so I kept the established Knowledge unchanged.";
+        }
+
+        const reference = await referenceKnowledge(options.knowledgeStore, {
+          knowledge: loaded.record,
+          userMessageId: sourceMessage.messageId,
+          intentVersionId: currentVersion.intentVersionId,
+          createdAt: sourceMessage.createdAt,
+        });
+        return reply.status(200).send({
+          status: "REFERENCE_RESOLVED",
+          acceptedUnderstanding: authoritativeObjective(currentVersion),
+          intentScopeId,
+          intentVersionId: currentVersion.intentVersionId,
+          knowledge: loaded.knowledge,
+          knowledgeReference: {
+            knowledgeId: loaded.record.knowledgeId,
+            referenceId: reference.referenceId,
+            responseId: reference.responseId,
+          },
+          presentation: { assistantMessage },
+          interpretation: publicCognition(cognition),
+        });
+      }
+
       if (
         interpretation.objectiveEffect.kind !== "PRESERVE"
         && interpretation.objectiveEffect.value.trim().length === 0
@@ -285,12 +490,6 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
         return reply.status(422).send({
           error: "INVALID_OBJECTIVE_EFFECT",
           message: "An explicit objective effect must contain non-empty USER meaning.",
-        });
-      }
-      if (interpretation.materialClarification && !interpretation.decisionRequested) {
-        return reply.status(422).send({
-          error: "INCONSISTENT_INTERPRETATION_PROPOSAL",
-          message: "Material decision semantics require an unresolved decision need.",
         });
       }
 
@@ -340,8 +539,6 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
         interpretation.objectiveEffect.kind === "PRESERVE"
         || currentVersion?.transitionId === transition.transitionId
       ) {
-        // An exact replay of the turn that authored the current IntentVersion
-        // must reuse that version rather than manufacture a successor.
         intentVersionId = existingScope.currentIntentVersionId;
       } else {
         const applied = await options.intentStore.applyTransition(transition);
@@ -362,6 +559,7 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
           intentVersionId: version.intentVersionId,
           question: interpretation.clarificationQuestion,
           confirmationExample: null,
+          interpretation: publicCognition(cognition),
         });
       }
 
@@ -382,7 +580,7 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
         }
         return reply.status(202).send({
           status: "NEEDS_CLARIFICATION",
-          decisionNeed: "UNRESOLVED",
+          decisionNeed: interpretation.decisionRequested ? "UNRESOLVED" : "NONE",
           acceptedUnderstanding: authoritativeObjective(version),
           intentScopeId,
           intentVersionId: version.intentVersionId,
@@ -390,6 +588,7 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
           proposalDigest: proposal.proposalDigest,
           question: interpretation.materialClarification.question,
           confirmationExample: interpretation.materialClarification.confirmationExample,
+          interpretation: publicCognition(cognition),
         });
       }
 
@@ -406,9 +605,14 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
           message: `Current-turn work context is limited to ${MAX_RUN_CONTEXT_ITEMS} items.`,
         });
       }
+      const investigationQueries = cognition
+        && (cognition.proposal.requestedHelp === "KNOWLEDGE" || cognition.proposal.requestedHelp === "FRESH_RESEARCH")
+        ? cognition.proposal.knowledgeNeeds
+        : [];
       const requestBody = consultationRequest({
         objective: authoritativeObjective(version),
         context: runContext,
+        investigationQueries,
         decisionNeed: qualification.decisionNeed,
         resourceNeed: interpretation.resourceNeed,
         sourceMessageId: sourceMessage.messageId,
@@ -432,6 +636,7 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
           messageId: sourceMessage.messageId,
           contentDigest: sourceMessage.contentDigest,
           context: requestBody.context,
+          investigationQueries: requestBody.investigationQueries,
           decisionNeed: requestBody.decisionNeed,
           resourceNeed: requestBody.resourceNeed,
         },
@@ -453,6 +658,7 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
         },
         intentScopeId,
         intentVersionId: version.intentVersionId,
+        interpretation: publicCognition(cognition),
       });
     },
   );
@@ -526,7 +732,11 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
       const version = await options.intentStore.getVersion(confirmation.resultingIntentVersionId);
       if (!version) return reply.status(500).send({ error: "CONFIRMED_INTENT_VERSION_MISSING" });
 
-      const qualification = qualifiedDecisionNeed(version, options.criterionCatalog);
+      const includesDecisionSemantics = proposal.operations.some((operation) =>
+        operation.path.kind === "REQUIREMENT" || operation.path.kind === "PREFERENCE");
+      const qualification = includesDecisionSemantics
+        ? qualifiedDecisionNeed(version, options.criterionCatalog)
+        : { decisionNeed: "NONE" as const };
       const decisionNeed = qualification.decisionNeed;
       const objectiveField = version.state.objective;
       if (
@@ -540,6 +750,7 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
       const requestBody = consultationRequest({
         objective,
         context: [],
+        investigationQueries: [],
         decisionNeed,
         resourceNeed: "NONE",
         sourceMessageId: sourceMessage.messageId,
@@ -591,6 +802,41 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
     if (run.status !== "COMPLETED") return reply.status(202).send({ status: run.status });
     const truth = await options.runStore.getTruthBundle(run.id);
     if (!truth) return reply.status(409).send({ error: "VALIDATED_TRUTH_NOT_AVAILABLE" });
-    return reply.send({ runId: run.id, status: run.status, outcome: buildRunOutcome(run, truth) });
+    const outcome = buildRunOutcome(run, truth);
+    if (outcome.kind !== "KNOWLEDGE" || !options.knowledgeStore) {
+      return reply.send({ runId: run.id, status: run.status, outcome });
+    }
+    const established = await establishKnowledge(options.knowledgeStore, run, truth, outcome);
+    return reply.send({
+      runId: run.id,
+      status: run.status,
+      outcome,
+      knowledgeReference: {
+        knowledgeId: established.record.knowledgeId,
+        referenceId: established.reference.referenceId,
+        responseId: established.reference.responseId,
+      },
+    });
+  });
+
+  app.get<{ Params: { knowledgeId: string } }>("/api/v1/knowledge/:knowledgeId", async (request, reply) => {
+    if (!options.knowledgeStore) return reply.status(404).send({ error: "KNOWLEDGE_NOT_FOUND" });
+    const loaded = await loadKnowledge(options.knowledgeStore, options.runStore, request.params.knowledgeId.trim());
+    if (!loaded) return reply.status(404).send({ error: "KNOWLEDGE_NOT_FOUND" });
+    if (!await options.conversationStore.getOwned(loaded.record.conversationId, apiSubjectForRequest(request))) {
+      return reply.status(404).send({ error: "KNOWLEDGE_NOT_FOUND" });
+    }
+    return reply.status(200).send({
+      knowledgeId: loaded.record.knowledgeId,
+      intentScopeId: loaded.record.intentScopeId,
+      intentVersionId: loaded.record.intentVersionId,
+      runId: loaded.record.runId,
+      asOf: loaded.record.asOf,
+      claimIds: loaded.record.claimIds,
+      sourceIds: loaded.record.sourceIds,
+      evidenceIds: loaded.record.evidenceIds,
+      truthAssessmentIds: loaded.record.truthAssessmentIds,
+      outcome: loaded.knowledge,
+    });
   });
 }

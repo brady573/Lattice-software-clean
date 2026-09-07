@@ -3,6 +3,7 @@ export type DeploymentMode = "development" | "durable";
 export type TruthMode = "v36-offline" | "v36-live";
 export type AuthenticationMode = "development-fixture" | "required";
 export type KnowledgeSimplifierRoute = "groq-gpt-oss-120b";
+export type SolandraCognitionRoute = "groq-gpt-oss-120b";
 
 export interface RuntimeConfig {
   port: number;
@@ -23,6 +24,10 @@ export interface RuntimeConfig {
   knowledgeSimplifierRoute?: KnowledgeSimplifierRoute;
   /** Provider credential held only in runtime process configuration. */
   knowledgeSimplifierApiKey?: string;
+  /** Solandra's cognition role is Product cognition, not the A2 user-authorized assistance capability. */
+  solandraCognitionRoute?: SolandraCognitionRoute;
+  /** Provider credential held only in runtime process configuration for Solandra cognition. */
+  solandraCognitionApiKey?: string;
   /** @deprecated Compatibility alias for older development configuration. */
   modelSimulatorBaseUrl: string | undefined;
   /** @deprecated Compatibility alias for older development configuration. */
@@ -105,15 +110,25 @@ function parseKnowledgeSimplifierRoute(value: string | undefined): KnowledgeSimp
   return route;
 }
 
-function resolveKnowledgeSimplifierApiKey(
+function parseSolandraCognitionRoute(value: string | undefined): SolandraCognitionRoute | undefined {
+  if (value === undefined) return undefined;
+  const route = value.trim();
+  if (route !== "groq-gpt-oss-120b") {
+    throw new Error(`Unsupported LATTICE_SOLANDRA_COGNITION_ROUTE: ${route || "<blank>"}`);
+  }
+  return route;
+}
+
+function resolveGroqApiKey(
   env: NodeJS.ProcessEnv,
-  route: KnowledgeSimplifierRoute | undefined,
+  required: boolean,
+  role: string,
 ): string | undefined {
-  if (route === undefined) return undefined;
+  if (!required) return undefined;
   const value = env.GROQ_API_KEY;
   if (value === undefined || !value.trim() || value.length < 16 || value.length > 512) {
     throw new Error(
-      "LATTICE_KNOWLEDGE_SIMPLIFIER_ROUTE=groq-gpt-oss-120b requires GROQ_API_KEY containing between 16 and 512 characters.",
+      `${role} requires GROQ_API_KEY containing between 16 and 512 characters.`,
     );
   }
   return value;
@@ -210,14 +225,23 @@ export function resolveRuntimeConfig(
   const knowledgeSimplifierRoute = parseKnowledgeSimplifierRoute(
     env.LATTICE_KNOWLEDGE_SIMPLIFIER_ROUTE,
   );
+  const solandraCognitionRoute = parseSolandraCognitionRoute(
+    env.LATTICE_SOLANDRA_COGNITION_ROUTE,
+  );
   if (knowledgeSimplifierRoute !== undefined && localModelProvider.baseUrl !== undefined) {
     throw new Error(
       "Configure either the local Knowledge simplifier route or LATTICE_KNOWLEDGE_SIMPLIFIER_ROUTE, not both.",
     );
   }
-  const knowledgeSimplifierApiKey = resolveKnowledgeSimplifierApiKey(
+  const knowledgeSimplifierApiKey = resolveGroqApiKey(
     env,
-    knowledgeSimplifierRoute,
+    knowledgeSimplifierRoute !== undefined,
+    "LATTICE_KNOWLEDGE_SIMPLIFIER_ROUTE=groq-gpt-oss-120b",
+  );
+  const solandraCognitionApiKey = resolveGroqApiKey(
+    env,
+    solandraCognitionRoute !== undefined,
+    "LATTICE_SOLANDRA_COGNITION_ROUTE=groq-gpt-oss-120b",
   );
   const androidModelRelayToken = parseAndroidRelayToken(env.LATTICE_ANDROID_MODEL_RELAY_TOKEN);
   if (localModelProvider.baseUrl !== undefined && androidModelRelayToken !== undefined) {
@@ -243,6 +267,8 @@ export function resolveRuntimeConfig(
     localModelProviderModel: localModelProvider.model,
     ...(knowledgeSimplifierRoute === undefined ? {} : { knowledgeSimplifierRoute }),
     ...(knowledgeSimplifierApiKey === undefined ? {} : { knowledgeSimplifierApiKey }),
+    ...(solandraCognitionRoute === undefined ? {} : { solandraCognitionRoute }),
+    ...(solandraCognitionApiKey === undefined ? {} : { solandraCognitionApiKey }),
     modelSimulatorBaseUrl: localModelProvider.baseUrl,
     modelSimulatorModel: localModelProvider.model,
     androidModelRelayToken,

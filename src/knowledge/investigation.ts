@@ -276,8 +276,10 @@ export class ObjectiveKnowledgeRelevanceQualifier implements KnowledgeRelevanceQ
 }
 
 /**
- * Provider-neutral operational wrapper: derive where to look, retrieve, then exclude material
- * that is not relevant enough to the current objective before V36 truth qualification.
+ * Provider-neutral operational wrapper: use an explicit non-authoritative
+ * investigation proposal when supplied; otherwise derive where to look. It
+ * retrieves, then excludes material that is not relevant enough to the
+ * authoritative objective before V36 truth qualification.
  */
 export class RelevantKnowledgeAcquisitionProvider implements KnowledgeAcquisitionProvider {
   readonly kind: string;
@@ -294,7 +296,13 @@ export class RelevantKnowledgeAcquisitionProvider implements KnowledgeAcquisitio
   }
 
   async acquire(request: KnowledgeAcquisitionRequest): Promise<KnowledgeAcquisitionResult> {
-    const queries = this.queryDeriver.derive({ objective: request.objective, context: request.context });
+    const proposedQueries = unique((request.investigationQueries ?? [])
+      .map((query) => query.trim())
+      .filter(Boolean))
+      .slice(0, MAX_QUERIES);
+    const queries = proposedQueries.length > 0
+      ? proposedQueries
+      : this.queryDeriver.derive({ objective: request.objective, context: request.context });
     const acquired = await this.provider.acquire({ ...request, investigationQueries: queries });
     const sourceById = new Map(acquired.sources.map((source) => [source.sourceId, source]));
     const relevantSourceIds = new Set<string>();

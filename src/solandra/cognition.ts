@@ -1,0 +1,200 @@
+import { z } from "zod";
+import { ModelProviderError } from "../model/errors.js";
+import { ModelRuntime } from "../model/runtime.js";
+import type { CanonicalModelRequest, ModelInvocationProvenance } from "../model/types.js";
+
+export const solandraRequestedHelpSchema = z.enum([
+  "KNOWLEDGE",
+  "EXPLAIN_REFERENCE",
+  "SIMPLIFY_REFERENCE",
+  "SOURCES_REFERENCE",
+  "FRESH_RESEARCH",
+  "DECISION",
+  "RESOURCE",
+]);
+export type SolandraRequestedHelp = z.infer<typeof solandraRequestedHelpSchema>;
+
+export const solandraObjectiveRelationSchema = z.enum([
+  "NEW_OBJECTIVE",
+  "CONTINUE",
+  "CORRECTION",
+]);
+export type SolandraObjectiveRelation = z.infer<typeof solandraObjectiveRelationSchema>;
+
+const materialAmbiguitySchema = z.object({
+  question: z.string().min(1).max(1_000),
+  couldChangeObjective: z.boolean(),
+}).strict();
+
+export const solandraSemanticProposalSchema = z.object({
+  objectiveRelation: solandraObjectiveRelationSchema,
+  proposedObjective: z.string().min(1).max(8_000).nullable(),
+  requestedHelp: solandraRequestedHelpSchema,
+  relevantContext: z.array(z.string().min(1).max(1_000)).max(16),
+  entities: z.array(z.string().min(1).max(300)).max(24),
+  referents: z.array(z.string().min(1).max(300)).max(16),
+  constraints: z.array(z.string().min(1).max(500)).max(16),
+  preferences: z.array(z.string().min(1).max(500)).max(16),
+  knowledgeNeeds: z.array(z.string().min(1).max(1_000)).max(16),
+  materialAmbiguity: materialAmbiguitySchema.nullable(),
+  referencedKnowledgeId: z.string().min(1).max(128).nullable(),
+  /**
+   * Compatibility-only inert metadata from early M1 proposals. Product behavior
+   * is classified by requestedHelp; this value has no intent, truth, routing,
+   * decision, or authorization authority and is no longer requested from models.
+   */
+  proposedNextStep: z.string().min(1).max(100).optional(),
+}).strict();
+export type SolandraSemanticProposal = z.infer<typeof solandraSemanticProposalSchema>;
+
+export interface SolandraGovernedKnowledgeContext {
+  readonly knowledgeId: string;
+  readonly objective: string;
+  readonly findings: readonly Readonly<{
+    claimId: string;
+    text: string;
+    status: string;
+  }>[];
+  readonly sourceCount: number;
+  readonly uncertainties: readonly string[];
+}
+
+export interface SolandraCognitionInput {
+  readonly conversationId: string;
+  readonly messageId: string;
+  readonly message: string;
+  readonly currentObjective?: string;
+  readonly recentUserMessages: readonly string[];
+  readonly governedKnowledge: readonly SolandraGovernedKnowledgeContext[];
+}
+
+export interface SolandraCognitionResult {
+  readonly proposal: SolandraSemanticProposal;
+  readonly invocationProvenance: ModelInvocationProvenance;
+}
+
+export interface SolandraCognitiveRuntime {
+  interpret(input: SolandraCognitionInput): Promise<SolandraCognitionResult>;
+}
+
+function parseJsonObject(text: string): unknown {
+  const trimmed = text.trim();
+  const unfenced = /^```(?:json)?\s*([\s\S]*?)\s*```$/iu.exec(trimmed)?.[1] ?? trimmed;
+  try {
+    return JSON.parse(unfenced);
+  } catch (error) {
+    throw new ModelProviderError(
+      "invalid_output",
+      "Solandra cognition returned malformed semantic JSON.",
+      { cause: error },
+    );
+  }
+}
+
+function buildCognitionRequest(model: string, input: SolandraCognitionInput): CanonicalModelRequest {
+  const knowledge = input.governedKnowledge.length === 0
+    ? "No prior governed Knowledge is addressable in this conversation."
+    : input.governedKnowledge.map((item) => [
+      `Knowledge ID: ${item.knowledgeId}`,
+      `Objective: ${item.objective}`,
+      `Findings: ${item.findings.map((finding) => `[${finding.claimId}] ${finding.status}: ${finding.text}`).join(" | ") || "none"}`,
+      `Source count: ${item.sourceCount}`,
+      `Uncertainties: ${item.uncertainties.join(" | ") || "none"}`,
+    ].join("\n")).join("\n\n");
+
+  const schemaExample = JSON.stringify({
+    objectiveRelation: "NEW_OBJECTIVE|CONTINUE|CORRECTION",
+    proposedObjective: "string or null",
+    requestedHelp: "KNOWLEDGE|EXPLAIN_REFERENCE|SIMPLIFY_REFERENCE|SOURCES_REFERENCE|FRESH_RESEARCH|DECISION|RESOURCE",
+    relevantContext: ["string"],
+    entities: ["string"],
+    referents: ["string"],
+    constraints: ["string"],
+    preferences: ["string"],
+    knowledgeNeeds: ["string"],
+    materialAmbiguity: { question: "string", couldChangeObjective: true },
+    referencedKnowledgeId: "one supplied Knowledge ID or null",
+  });
+
+  return {
+    model,
+    messages: [
+      {
+        role: "system",
+        content: [
+          "You are Solandra's semantic cognition boundary. Understand the user's conversational request and return a non-authoritative proposal only.",
+          "Do not answer the factual question. Do not establish truth, canonical intent, a recommendation, authorization, or action.",
+          "Canonical USER intent is written elsewhere. Your proposedObjective is advisory and must never be treated as USER-authored merely because you generated it.",
+          "Use materialAmbiguity only when uncertainty could materially change the objective or requested work. Do not treat acronyms, technical tokens, or unfamiliar terms as ambiguous merely because of their surface form when context makes the request clear.",
+          "Use SOURCES_REFERENCE, EXPLAIN_REFERENCE, or SIMPLIFY_REFERENCE when the user clearly refers to an existing supplied Knowledge object. referencedKnowledgeId must be exactly one supplied Knowledge ID or null.",
+          "Use FRESH_RESEARCH only when the user asks for new, updated, additional, or otherwise external Knowledge beyond the supplied object. A historical provenance request is not fresh research.",
+          "Use DECISION only when the user is actually asking for help choosing/deciding, not merely asking for differences or information.",
+          "requestedHelp is the sole classification of the requested work. Do not add a separate next-step or workflow field.",
+          "Return exactly one JSON object and no prose. The required shape is:",
+          schemaExample,
+          "When materialAmbiguity is absent, return null for it. Use empty arrays when a list has no items.",
+        ].join("\n"),
+      },
+      {
+        role: "user",
+        content: [
+          `Conversation ID: ${input.conversationId}`,
+          `Current canonical objective: ${input.currentObjective ?? "none"}`,
+          `Recent USER messages: ${input.recentUserMessages.join(" | ") || "none"}`,
+          "Addressable governed Knowledge:",
+          knowledge,
+          "",
+          `Current USER message: ${input.message}`,
+        ].join("\n"),
+      },
+    ],
+    temperature: 0,
+    maxOutputTokens: 1_200,
+    seed: 0,
+  };
+}
+
+function referenceHelp(help: SolandraRequestedHelp): boolean {
+  return help === "SOURCES_REFERENCE"
+    || help === "EXPLAIN_REFERENCE"
+    || help === "SIMPLIFY_REFERENCE";
+}
+
+export class ModelSolandraCognitiveRuntime implements SolandraCognitiveRuntime {
+  constructor(
+    private readonly runtime: ModelRuntime,
+    private readonly model: string,
+  ) {
+    if (!model.trim()) throw new Error("Solandra cognition model must be non-empty.");
+  }
+
+  async interpret(input: SolandraCognitionInput): Promise<SolandraCognitionResult> {
+    const request = buildCognitionRequest(this.model, input);
+    const result = await this.runtime.call(request, {
+      correlationId: `solandra-cognition:${input.conversationId}:${input.messageId}`,
+      idempotencyKey: input.messageId,
+      maxAttempts: 1,
+    });
+    if (result.response.output.length !== 1 || result.response.output[0]?.type !== "text") {
+      throw new ModelProviderError("invalid_output", "Solandra cognition requires exactly one semantic text output.");
+    }
+    const proposal = solandraSemanticProposalSchema.parse(parseJsonObject(result.response.output[0].text));
+    const allowedKnowledgeIds = new Set(input.governedKnowledge.map((item) => item.knowledgeId));
+    if (proposal.referencedKnowledgeId !== null && !allowedKnowledgeIds.has(proposal.referencedKnowledgeId)) {
+      throw new ModelProviderError(
+        "invalid_output",
+        "Solandra cognition referenced Knowledge that was not supplied by Lattice.",
+      );
+    }
+    if (referenceHelp(proposal.requestedHelp) && proposal.referencedKnowledgeId === null && proposal.materialAmbiguity === null) {
+      throw new ModelProviderError(
+        "invalid_output",
+        "A referential Solandra proposal must identify supplied Knowledge or surface ambiguity.",
+      );
+    }
+    return Object.freeze({
+      proposal,
+      invocationProvenance: result.audit.invocationProvenance,
+    });
+  }
+}

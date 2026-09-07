@@ -4,6 +4,7 @@ import { createConfiguredModelAssistanceCapability } from "./model-assistance-co
 import { createRuntimeApp } from "./runtime-app.js";
 import { resolveRuntimeConfig } from "./runtime-config.js";
 import { assertDurableProcessSchemaReady } from "./runtime-schema-readiness.js";
+import { createConfiguredSolandraCognition } from "./solandra/cognition-composition.js";
 
 try {
   const config = resolveRuntimeConfig();
@@ -18,11 +19,16 @@ try {
 
   const modelAssistance = await createConfiguredModelAssistanceCapability(config);
   const decisionCapability = createAlphaDecisionRuntimeComposition();
+  const solandra = createConfiguredSolandraCognition(config);
   let app;
   try {
     app = await createRuntimeApp(config, {
       ...decisionCapability,
       modelAssistanceService: modelAssistance,
+      ...(solandra === undefined ? {} : {
+        solandraCognition: solandra.cognition,
+        solandraKnowledgePresenter: solandra.knowledgePresenter,
+      }),
     });
   } catch (error) {
     await modelAssistance.close();

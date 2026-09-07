@@ -9,6 +9,7 @@ import type {
 import type { IntentAuthorityStore } from "../intent/store.js";
 import type { IntentVersion } from "../intent/types.js";
 import type { IntentUserMessageStore } from "../intent/source-message-store.js";
+import type { KnowledgeRecordStore } from "../knowledge/knowledge-record-store.js";
 import { buildRunOutcome, type RunOutcome } from "../outcome.js";
 import {
   composeSolandraPresentation,
@@ -29,6 +30,7 @@ export interface ConversationContinuityApiOptions {
   runIndexStore: ConversationRunIndexStore;
   decisionPlanStore: DecisionPlanStore;
   intentStore?: IntentAuthorityStore;
+  knowledgeStore?: KnowledgeRecordStore;
 }
 
 function validBoundedId(value: string, maxChars: number): string | undefined {
@@ -84,9 +86,11 @@ export function registerConversationContinuityApi(
       const conversation = await options.conversationStore.getOwned(conversationId, subjectId);
       if (!conversation) return reply.status(404).send({ error: "CONVERSATION_NOT_FOUND" });
 
-      const [messages, runIds] = await Promise.all([
+      const [messages, runIds, knowledge, references] = await Promise.all([
         options.userMessageStore.listByConversation(conversationId),
         options.runIndexStore.listRunIds(conversationId),
+        options.knowledgeStore?.listKnowledgeByConversation(conversationId) ?? Promise.resolve([]),
+        options.knowledgeStore?.listReferences(conversationId) ?? Promise.resolve([]),
       ]);
 
       const runs = await Promise.all(runIds.map(async (runId) => {
@@ -137,6 +141,29 @@ export function registerConversationContinuityApi(
           createdAt: message.createdAt,
         })),
         runs: runs.filter((run) => run !== undefined),
+        knowledge: knowledge.map((record) => ({
+          knowledgeId: record.knowledgeId,
+          runId: record.runId,
+          intentVersionId: record.intentVersionId,
+          objective: record.objective,
+          claimIds: record.claimIds,
+          sourceIds: record.sourceIds,
+          evidenceIds: record.evidenceIds,
+          truthAssessmentIds: record.truthAssessmentIds,
+          asOf: record.asOf,
+          createdAt: record.createdAt,
+          link: `/api/v1/knowledge/${encodeURIComponent(record.knowledgeId)}`,
+        })),
+        references: references.map((reference) => ({
+          referenceId: reference.referenceId,
+          userMessageId: reference.userMessageId,
+          responseId: reference.responseId,
+          intentVersionId: reference.intentVersionId,
+          knowledgeId: reference.knowledgeId,
+          referenceKind: reference.referenceKind,
+          parentReferenceId: reference.parentReferenceId,
+          createdAt: reference.createdAt,
+        })),
       });
     },
   );
