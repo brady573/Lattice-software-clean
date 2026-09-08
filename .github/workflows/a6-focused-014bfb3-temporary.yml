@@ -32,21 +32,36 @@ jobs:
       - name: Validate source and runtime contract
         env:
           SUBJECT_SOURCE_SHA: d753f7b4d70d05b358c8c81100ea219cbf41d848
-          SUBJECT_TREE_SHA: 2379a2615f4c1fc96ea05d55933b21cc08d8520e
         run: |
           @echo off
           setlocal EnableExtensions
           for /f %%I in ('git rev-parse HEAD') do set "ACTUAL_SOURCE_SHA=%%I"
-          if /I not "%ACTUAL_SOURCE_SHA%"=="%SUBJECT_SOURCE_SHA%" exit /b 1
-          for /f %%I in ('git rev-parse HEAD^^{tree}') do set "ACTUAL_TREE_SHA=%%I"
-          if /I not "%ACTUAL_TREE_SHA%"=="%SUBJECT_TREE_SHA%" exit /b 1
-          if /I not "%RUNNER_OS%"=="Windows" exit /b 1
-          if /I not "%RUNNER_ARCH%"=="X64" exit /b 1
+          if /I not "%ACTUAL_SOURCE_SHA%"=="%SUBJECT_SOURCE_SHA%" (
+            echo SOURCE_PROVENANCE_FAILURE: checkout does not match subject source 1>&2
+            exit /b 1
+          )
+          if /I not "%RUNNER_OS%"=="Windows" (
+            echo EXECUTION_SURFACE_FAILURE: expected RUNNER_OS=Windows, got "%RUNNER_OS%" 1>&2
+            exit /b 1
+          )
+          if /I not "%RUNNER_ARCH%"=="X64" (
+            echo EXECUTION_SURFACE_FAILURE: expected RUNNER_ARCH=X64, got "%RUNNER_ARCH%" 1>&2
+            exit /b 1
+          )
           for /f %%I in ('node -p "process.versions.node.split('.')[0]"') do set "NODE_MAJOR=%%I"
-          if not "%NODE_MAJOR%"=="24" exit /b 1
+          if not "%NODE_MAJOR%"=="24" (
+            echo EXECUTION_SURFACE_FAILURE: expected Node 24 1>&2
+            exit /b 1
+          )
           for /f "tokens=1 delims=." %%I in ('npm --version') do set "NPM_MAJOR=%%I"
-          if not "%NPM_MAJOR%"=="11" exit /b 1
-          if not exist package-lock.json exit /b 1
+          if not "%NPM_MAJOR%"=="11" (
+            echo EXECUTION_SURFACE_FAILURE: expected npm 11 1>&2
+            exit /b 1
+          )
+          if not exist package-lock.json (
+            echo DEPENDENCY_PROVENANCE_FAILURE: committed package-lock.json is required 1>&2
+            exit /b 1
+          )
       - name: Install locked dependencies
         run: npm ci --no-audit --no-fund
       - name: Run repository check
