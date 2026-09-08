@@ -26,8 +26,11 @@ export function renderSolandraConversationPage(): string {
     .input-box { display: flex; gap: 9px; align-items: flex-end; border: 1px solid #c8c4b8; border-radius: 18px; background: #fffefa; padding: 10px; box-shadow: 0 8px 24px rgba(30,29,24,.05); }
     textarea { width: 100%; min-height: 48px; max-height: 180px; resize: vertical; border: 0; outline: 0; background: transparent; color: inherit; line-height: 1.42; padding: 4px 5px; }
     textarea::placeholder { color: #8a877d; }
-    .send { flex: 0 0 auto; border: 0; border-radius: 12px; background: #22211c; color: #fff; padding: 10px 14px; cursor: pointer; }
-    .send:disabled { opacity: .42; cursor: default; }
+    .send, .stop { flex: 0 0 auto; border-radius: 12px; padding: 10px 14px; cursor: pointer; }
+    .send { border: 0; background: #22211c; color: #fff; }
+    .stop { border: 1px solid #b8b4a7; background: #fffefa; color: #282722; }
+    .send:disabled, .stop:disabled { opacity: .42; cursor: default; }
+    .stop[hidden] { display: none; }
     #composer { flex: 1; min-height: 390px; border: 1px solid #d9d6ca; border-radius: 24px; background: #fffefa; padding: clamp(18px, 4vw, 34px); box-shadow: 0 14px 42px rgba(30,29,24,.045); }
     #composer h1 { margin: 0 0 8px; font-size: clamp(1.35rem, 4vw, 2rem); letter-spacing: -0.035em; }
     #composer h2 { margin: 26px 0 9px; font-size: 1rem; }
@@ -45,14 +48,14 @@ export function renderSolandraConversationPage(): string {
     .source-meta { color: #6b6960; font-size: .8rem; margin-top: 4px; }
     .resource { margin-top: 24px; padding: 17px; border: 1px solid #cbc7ba; border-radius: 17px; background: #f8f7f2; }
     .resource textarea { min-height: 170px; margin-top: 9px; border: 1px solid #d9d6ca; border-radius: 12px; background: #fffefa; padding: 12px; }
-    .error { color: #7d271f; }
     @media (max-width: 620px) {
       .shell { padding: 10px 10px 18px; }
       header { padding: 4px 4px 10px; }
       #conversation { min-height: 48px; }
       .turn { max-width: 84vw; }
       #composer { min-height: 330px; border-radius: 20px; padding: 20px 17px; }
-      .input-box { border-radius: 16px; }
+      .input-box { border-radius: 16px; flex-wrap: wrap; }
+      .input-box textarea { flex-basis: 100%; }
     }
   </style>
 </head>
@@ -65,6 +68,7 @@ export function renderSolandraConversationPage(): string {
     <form id="conversationForm" class="input-wrap">
       <div class="input-box">
         <textarea id="conversationInput" aria-label="Conversation input" placeholder="What do you need to figure out?" rows="2"></textarea>
+        <button id="stopButton" class="stop" type="button" hidden>Stop</button>
         <button id="sendButton" class="send" type="submit">Send</button>
       </div>
     </form>
@@ -79,12 +83,24 @@ export function renderSolandraConversationPage(): string {
       const form = document.getElementById("conversationForm");
       const input = document.getElementById("conversationInput");
       const sendButton = document.getElementById("sendButton");
+      const stopButton = document.getElementById("stopButton");
       const composer = document.getElementById("composer");
+      const STORAGE = Object.freeze({
+        conversation: "lattice.solandra.conversation.v1",
+        pendingTurn: "lattice.solandra.pending-turn.v1",
+        activeWork: "lattice.solandra.active-work.v1",
+        clarification: "lattice.solandra.clarification.v1",
+        draft: "lattice.solandra.draft.v1",
+      });
+      const ACTIVE_RUN_STATUSES = new Set(["CREATED", "UNDERSTANDING", "PLANNING", "INVESTIGATING", "VALIDATING", "DECIDING"]);
       let conversationId = null;
       let pending = false;
       let composing = false;
+      let recovering = false;
       let pendingClarification = null;
       let composerHasProductContent = false;
+      let activeWork = null;
+      let pollGeneration = 0;
 
       const escapeHtml = (value) => String(value)
         .replaceAll("&", "&amp;")
@@ -93,6 +109,29 @@ export function renderSolandraConversationPage(): string {
         .replaceAll('"', "&quot;")
         .replaceAll("'", "&#039;");
       const normalizedText = (value) => String(value).trim().replace(/\\s+/gu, " ");
+      const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+      const storageGet = (key) => {
+        try { return window.localStorage.getItem(key); } catch { return null; }
+      };
+      const storageSet = (key, value) => {
+        try { window.localStorage.setItem(key, value); } catch {}
+      };
+      const storageRemove = (key) => {
+        try { window.localStorage.removeItem(key); } catch {}
+      };
+      const readRecord = (key) => {
+        const raw = storageGet(key);
+        if (!raw) return null;
+        try {
+          const parsed = JSON.parse(raw);
+          return parsed && typeof parsed === "object" ? parsed : null;
+        } catch {
+          storageRemove(key);
+          return null;
+        }
+      };
+      const writeRecord = (key, value) => storageSet(key, JSON.stringify(value));
 
       const appendTurn = (text, role) => {
         const node = document.createElement("div");
@@ -102,9 +141,84 @@ export function renderSolandraConversationPage(): string {
         conversation.appendChild(node);
         conversation.scrollLeft = conversation.scrollWidth;
       };
-
       const appendUserTurn = (text) => appendTurn(text, "user");
       const appendSolandraTurn = (text) => appendTurn(text, "solandra");
+
+      const readDraft = () => {
+        const record = readRecord(STORAGE.draft);
+        return record
+          && typeof record.conversationId === "string"
+          && typeof record.value === "string"
+          ? record
+          : null;
+      };
+      const persistDraft = (value) => {
+        const id = conversationId || storageGet(STORAGE.conversation);
+        if (value.length > 0 && id) writeRecord(STORAGE.draft, { conversationId: id, value });
+        else if (value.length === 0) storageRemove(STORAGE.draft);
+      };
+      const restoreDraftForConversation = (id) => {
+        const draft = readDraft();
+        if (draft?.conversationId === id && !input.value) input.value = draft.value;
+      };
+      const clearDraftIfSame = (value) => {
+        if (input.value === value) input.value = "";
+        const draft = readDraft();
+        if (draft?.conversationId === conversationId && draft.value === value) storageRemove(STORAGE.draft);
+      };
+
+      const setConversation = (id) => {
+        conversationId = id;
+        if (id) storageSet(STORAGE.conversation, id);
+        else storageRemove(STORAGE.conversation);
+      };
+
+      const readPendingTurn = () => {
+        const record = readRecord(STORAGE.pendingTurn);
+        return record
+          && typeof record.conversationId === "string"
+          && typeof record.turnId === "string"
+          && typeof record.message === "string"
+          ? record
+          : null;
+      };
+      const storePendingTurn = (record) => writeRecord(STORAGE.pendingTurn, record);
+      const clearPendingTurn = (turnId) => {
+        const current = readPendingTurn();
+        if (!turnId || current?.turnId === turnId) storageRemove(STORAGE.pendingTurn);
+      };
+
+      const readActiveWork = () => {
+        const record = readRecord(STORAGE.activeWork);
+        return record
+          && typeof record.conversationId === "string"
+          && typeof record.runId === "string"
+          && typeof record.message === "string"
+          ? record
+          : null;
+      };
+      const setActiveWork = (record, cancellable) => {
+        activeWork = record;
+        if (record) writeRecord(STORAGE.activeWork, record);
+        else storageRemove(STORAGE.activeWork);
+        stopButton.hidden = !record || !cancellable;
+        stopButton.disabled = !record || !cancellable;
+      };
+      const clearActiveWork = () => setActiveWork(null, false);
+
+      const readClarification = () => {
+        const record = readRecord(STORAGE.clarification);
+        return record
+          && typeof record.conversationId === "string"
+          && typeof record.proposalId === "string"
+          ? record
+          : null;
+      };
+      const setClarification = (record) => {
+        pendingClarification = record;
+        if (record) writeRecord(STORAGE.clarification, record);
+        else storageRemove(STORAGE.clarification);
+      };
 
       const setPending = (value) => {
         pending = value;
@@ -119,9 +233,9 @@ export function renderSolandraConversationPage(): string {
       const ensureConversation = async () => {
         if (conversationId) return conversationId;
         const response = await fetch("/api/v1/conversations", { method: "POST" });
-        if (!response.ok) throw new Error("Could not start the conversation.");
+        if (!response.ok) throw new Error("I couldn't start a conversation right now. Please try again.");
         const body = await response.json();
-        conversationId = body.conversation.id;
+        setConversation(body.conversation.id);
         return conversationId;
       };
 
@@ -159,93 +273,417 @@ export function renderSolandraConversationPage(): string {
         return findings + uncertainties + provenance;
       };
 
-      const renderOutcome = (outcome, presentation) => {
+      const renderPreparedResource = (title, body) => {
+        composerHasProductContent = true;
+        composer.innerHTML = '<div class="resource"><h1>' + escapeHtml(title) + '</h1><p>Review and edit this before using it.</p><textarea aria-label="Prepared resource">' + escapeHtml(body) + '</textarea></div>';
+      };
+
+      const renderOutcome = (outcome, presentation, options = {}) => {
         composerHasProductContent = true;
         if (outcome.kind === "KNOWLEDGE") {
           composer.innerHTML = renderKnowledge(outcome);
           const assistantMessage = typeof presentation?.assistantMessage === "string"
             ? presentation.assistantMessage.trim()
             : "";
-          if (!assistantMessage) throw new Error("Knowledge response presentation is unavailable.");
-          appendSolandraTurn(assistantMessage);
+          if (assistantMessage) appendSolandraTurn(assistantMessage);
+          else if (options.recovered) appendSolandraTurn("I restored the latest established Knowledge in the Composer.");
+          else throw new Error("Knowledge response presentation is unavailable.");
           return;
         }
         if (outcome.kind === "ACTION_PREPARATION") {
-          composer.innerHTML = '<div class="resource"><h1>' + escapeHtml(outcome.resource.title) + '</h1><p>Review and edit this before using it.</p><textarea aria-label="Prepared resource">' + escapeHtml(outcome.resource.body) + '</textarea></div>';
-          appendSolandraTurn("I prepared editable material in the Composer. Nothing has been sent or executed.");
+          renderPreparedResource(outcome.resource.title, options.preparedBody ?? outcome.resource.body);
+          appendSolandraTurn(options.recovered
+            ? "I restored your editable prepared material. Nothing has been sent or executed."
+            : "I prepared editable material in the Composer. Nothing has been sent or executed.");
           return;
         }
         composer.innerHTML = renderKnowledge(outcome.knowledge);
-        appendSolandraTurn(outcome.explanation || "I’ve put the available decision support in the Composer. No selection or action has been authorized.");
+        appendSolandraTurn(outcome.explanation || presentation?.assistantMessage || (options.recovered
+          ? "I restored the latest established decision support. No selection or action has been authorized."
+          : "I’ve put the available decision support in the Composer. No selection or action has been authorized."));
       };
 
-      const pollOutcome = async (runId) => {
+      const productFailureMessage = (status, body) => {
+        if (body?.error === "RESOURCE_SCOPE_UNSUPPORTED" && typeof body.message === "string") return body.message;
+        if (status === 401 || status === 403 || status === 404) return "I can't recover that conversation for this signed-in user.";
+        if (status === 409) return "That work changed before I could finish. I kept the last trustworthy result so you can revise your request and try again.";
+        if (status === 422) return "I couldn't complete that request as written. Your draft is still here so you can revise it and try again.";
+        return "I couldn't complete that request. Your earlier established result is still available, and you can try again.";
+      };
+
+      const responseJson = async (response) => {
+        try { return await response.json(); } catch { return {}; }
+      };
+
+      const hydrateRecoveredPreparedResource = async (expectedBody) => {
+        const presentationResponse = await fetch("/api/v1/conversations/" + encodeURIComponent(conversationId) + "/presentation");
+        if (!presentationResponse.ok) throw new Error("I couldn't restore the latest prepared material safely.");
+        const snapshot = (await presentationResponse.json()).presentation;
+        const descriptor = [...(snapshot.resources || [])].reverse().find((resource) =>
+          resource.kind === "generated_artifact"
+          && resource.editable === true
+          && resource.executionAuthorized === false);
+        if (!descriptor) throw new Error("I couldn't restore the latest prepared material safely.");
+        const hydratedResponse = await fetch(
+          "/api/v1/conversations/" + encodeURIComponent(conversationId)
+          + "/presentation/resources/" + encodeURIComponent(descriptor.id)
+          + "?presentationRevision=" + encodeURIComponent(snapshot.presentationRevision),
+        );
+        if (!hydratedResponse.ok) throw new Error("I couldn't restore the latest prepared material safely.");
+        const hydrated = (await hydratedResponse.json()).resource;
+        if (
+          hydrated?.descriptor?.editable !== true
+          || hydrated?.descriptor?.executionAuthorized !== false
+          || hydrated?.payload?.kind !== "generated_artifact"
+          || hydrated.payload.text !== expectedBody
+        ) {
+          throw new Error("I couldn't restore the latest prepared material safely.");
+        }
+        return hydrated.payload.text;
+      };
+
+      const renderRecoveredRun = async (runId, isLatestRun) => {
+        const response = await fetch("/api/v1/runs/" + encodeURIComponent(runId) + "/outcome");
+        const body = await responseJson(response);
+        if (!response.ok || !body.outcome) return false;
+        if (body.outcome.kind === "ACTION_PREPARATION" && isLatestRun) {
+          if (
+            body.outcome.resource.editable !== true
+            || body.outcome.resource.executionAuthorized !== false
+            || body.preparationReference?.editable !== true
+            || body.preparationReference?.executionAuthorized !== false
+          ) {
+            throw new Error("I couldn't restore the latest prepared material safely.");
+          }
+          const hydratedBody = await hydrateRecoveredPreparedResource(body.outcome.resource.body);
+          renderOutcome(body.outcome, body.presentation, { recovered: true, preparedBody: hydratedBody });
+          return true;
+        }
+        renderOutcome(body.outcome, body.presentation, { recovered: true });
+        return true;
+      };
+
+      const restoreLatestUsefulState = async (continuity) => {
+        const runs = Array.isArray(continuity?.runs) ? continuity.runs : [];
+        const latest = runs.at(-1) ?? null;
+        const completed = [...runs].reverse().find((run) => run.status === "COMPLETED" && run.outcomeAvailable === true);
+        if (!completed) return false;
+        return await renderRecoveredRun(completed.runId, latest?.runId === completed.runId);
+      };
+
+      const rebuildConversation = (continuity) => {
+        conversation.replaceChildren();
+        for (const message of continuity.messages || []) {
+          if (message.role === "USER" && typeof message.content === "string") appendUserTurn(message.content);
+        }
+      };
+
+      const syncCancellationControl = async (work) => {
+        const response = await fetch("/api/v1/runs/" + encodeURIComponent(work.runId));
+        if (!response.ok) {
+          setActiveWork(work, false);
+          return null;
+        }
+        const run = await response.json();
+        const cancellable = ACTIVE_RUN_STATUSES.has(run.status);
+        setActiveWork(work, cancellable);
+        return run;
+      };
+
+      const terminalProductMessage = (status) => status === "CANCELLED"
+        ? "I stopped that work. Your last trustworthy result is still here."
+        : "I couldn't complete that work. I kept the last trustworthy result. Your request is restored so you can revise it and try again.";
+
+      const handleTerminalWork = (status, message, restoreMessage) => {
+        clearActiveWork();
+        if (status === "FAILED" && restoreMessage) {
+          input.value = message;
+          persistDraft(message);
+        }
+        appendSolandraTurn(terminalProductMessage(status));
+      };
+
+      const pollOutcome = async (work) => {
+        const generation = ++pollGeneration;
+        setActiveWork(work, true);
         for (;;) {
-          const response = await fetch("/api/v1/runs/" + encodeURIComponent(runId) + "/outcome");
-          const body = await response.json();
+          let response;
+          try {
+            response = await fetch("/api/v1/runs/" + encodeURIComponent(work.runId) + "/outcome");
+          } catch {
+            if (generation !== pollGeneration) return;
+            setActiveWork(work, false);
+            appendSolandraTurn("I lost the connection while that work was underway. I’ll resume the same work when the connection is available.");
+            const error = new Error("Connection interrupted while work was underway.");
+            error.transportUncertain = true;
+            error.preserveActiveWork = true;
+            throw error;
+          }
+          const body = await responseJson(response);
+          if (generation !== pollGeneration) return;
           if (response.status === 202) {
-            await new Promise((resolve) => setTimeout(resolve, 120));
+            await syncCancellationControl(work);
+            await sleep(120);
             continue;
           }
-          if (!response.ok) throw new Error(body.message || body.error || "Consultation failed.");
+          if (response.status === 409 && (body.status === "FAILED" || body.status === "CANCELLED")) {
+            handleTerminalWork(body.status, work.message, body.status === "FAILED");
+            return;
+          }
+          if (!response.ok) {
+            clearActiveWork();
+            input.value = work.message;
+            persistDraft(work.message);
+            appendSolandraTurn(productFailureMessage(response.status, body));
+            return;
+          }
+          clearDraftIfSame(work.message);
+          clearActiveWork();
           renderOutcome(body.outcome, body.presentation);
           return;
         }
       };
 
+      const handleTurnResponse = async (body, record) => {
+        if (body.status === "NEEDS_CLARIFICATION") {
+          const clarification = body.proposalId ? {
+            conversationId: record.conversationId,
+            proposalId: body.proposalId,
+            question: body.question,
+            confirmationExample: body.confirmationExample,
+          } : null;
+          setClarification(clarification);
+          appendSolandraTurn(body.proposalId
+            ? body.question + "\\n\\nReply with “" + body.confirmationExample + "” to confirm, or state a correction normally."
+            : body.question);
+          return;
+        }
+        setClarification(null);
+        if (body.status === "REFERENCE_RESOLVED") {
+          renderOutcome(body.knowledge, body.presentation);
+          return;
+        }
+        if (body.status === "RECOMMENDATION_REFERENCE_RESOLVED") {
+          const assistantMessage = typeof body.presentation?.assistantMessage === "string"
+            ? body.presentation.assistantMessage.trim()
+            : "";
+          appendSolandraTurn(assistantMessage || "I restored the referenced recommendation without changing its authority.");
+          return;
+        }
+        if (body.status === "NEEDS_NEW_KNOWLEDGE") {
+          appendSolandraTurn(body.question || "That needs additional external Knowledge before I can answer it reliably.");
+          return;
+        }
+        if (!body.runId) throw new Error("I couldn't establish the requested work safely.");
+        const work = { conversationId: record.conversationId, runId: body.runId, message: record.message };
+        setActiveWork(work, true);
+        await pollOutcome(work);
+      };
+
+      const postTurnRecord = async (record) => {
+        const route = record.clarificationProposalId
+          ? "/api/v1/conversations/" + encodeURIComponent(record.conversationId) + "/clarifications/" + encodeURIComponent(record.clarificationProposalId) + "/confirm"
+          : "/api/v1/conversations/" + encodeURIComponent(record.conversationId) + "/turns";
+        let response;
+        try {
+          response = await fetch(route, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ turnId: record.turnId, message: record.message }),
+          });
+        } catch {
+          const error = new Error("I couldn't confirm whether that request reached Lattice. I'll check that same request before starting anything new. Your draft is restored.");
+          error.transportUncertain = true;
+          throw error;
+        }
+        const body = await responseJson(response);
+        if (!response.ok) {
+          clearPendingTurn(record.turnId);
+          const error = new Error(productFailureMessage(response.status, body));
+          error.transportUncertain = false;
+          throw error;
+        }
+        clearDraftIfSame(record.message);
+        await handleTurnResponse(body, record);
+        clearPendingTurn(record.turnId);
+      };
+
+      const recoverPendingTurn = async (record) => {
+        appendSolandraTurn("I’m checking the request you already sent before starting anything new.");
+        await postTurnRecord(record);
+      };
+
+      const recoverActiveWork = async (work, continuity) => {
+        const response = await fetch("/api/v1/runs/" + encodeURIComponent(work.runId));
+        if (response.status === 404) {
+          clearActiveWork();
+          return false;
+        }
+        if (!response.ok) throw new Error("I couldn't reconnect to the work already in progress.");
+        const run = await response.json();
+        if (run.status === "FAILED" || run.status === "CANCELLED") {
+          await restoreLatestUsefulState(continuity);
+          handleTerminalWork(run.status, work.message, run.status === "FAILED");
+          return true;
+        }
+        appendSolandraTurn(ACTIVE_RUN_STATUSES.has(run.status)
+          ? "I’m continuing the work you already started."
+          : "I’m restoring the result from the work you already started.");
+        setActiveWork(work, ACTIVE_RUN_STATUSES.has(run.status));
+        await pollOutcome(work);
+        return true;
+      };
+
+      const clearStoredConversationState = (id) => {
+        if (storageGet(STORAGE.conversation) === id) storageRemove(STORAGE.conversation);
+        const pendingTurn = readPendingTurn();
+        if (pendingTurn?.conversationId === id) storageRemove(STORAGE.pendingTurn);
+        const work = readActiveWork();
+        if (work?.conversationId === id) storageRemove(STORAGE.activeWork);
+        const clarification = readClarification();
+        if (clarification?.conversationId === id) storageRemove(STORAGE.clarification);
+        const draft = readDraft();
+        if (draft?.conversationId === id) storageRemove(STORAGE.draft);
+        if (conversationId === id) conversationId = null;
+      };
+
+      const recoverSession = async () => {
+        if (recovering) return;
+        recovering = true;
+        try {
+          const storedId = storageGet(STORAGE.conversation);
+          if (!storedId) return;
+          let continuityResponse;
+          try {
+            continuityResponse = await fetch("/api/v1/conversations/" + encodeURIComponent(storedId) + "/continuity");
+          } catch {
+            appendSolandraTurn("I couldn't reconnect to your saved conversation yet. I won't start duplicate work while recovery is uncertain.");
+            return;
+          }
+          if (continuityResponse.status === 404) {
+            clearStoredConversationState(storedId);
+            appendSolandraTurn("I couldn't recover that saved conversation for this signed-in user.");
+            return;
+          }
+          if (!continuityResponse.ok) {
+            appendSolandraTurn("I couldn't reconnect to your saved conversation yet. I won't start duplicate work while recovery is uncertain.");
+            return;
+          }
+          const continuity = await continuityResponse.json();
+          setConversation(storedId);
+          rebuildConversation(continuity);
+          restoreDraftForConversation(storedId);
+
+          const clarification = readClarification();
+          if (clarification?.conversationId === storedId) {
+            pendingClarification = clarification;
+            if (typeof clarification.question === "string" && clarification.question.trim()) {
+              appendSolandraTurn(clarification.question + (clarification.confirmationExample
+                ? "\\n\\nReply with “" + clarification.confirmationExample + "” to confirm, or state a correction normally."
+                : ""));
+            }
+          }
+
+          const pendingTurn = readPendingTurn();
+          if (pendingTurn?.conversationId === storedId) {
+            await restoreLatestUsefulState(continuity);
+            await recoverPendingTurn(pendingTurn);
+            return;
+          }
+
+          const work = readActiveWork();
+          if (work?.conversationId === storedId) {
+            if (await recoverActiveWork(work, continuity)) return;
+          }
+
+          await restoreLatestUsefulState(continuity);
+          const latest = Array.isArray(continuity.runs) ? continuity.runs.at(-1) : null;
+          if (latest?.status === "CANCELLED" || latest?.status === "FAILED") {
+            appendSolandraTurn(terminalProductMessage(latest.status));
+          } else if ((continuity.messages || []).length > 0) {
+            appendSolandraTurn("I restored this conversation from its saved Product state.");
+          }
+        } finally {
+          recovering = false;
+        }
+      };
+
+      const stopActiveWork = async () => {
+        const work = activeWork;
+        if (!work || stopButton.hidden) return;
+        stopButton.disabled = true;
+        try {
+          const response = await fetch("/api/v1/runs/" + encodeURIComponent(work.runId) + "/cancel", { method: "POST" });
+          const body = await responseJson(response);
+          if (response.status === 202 && body.status === "CANCELLED") {
+            pollGeneration += 1;
+            clearActiveWork();
+            appendSolandraTurn("I stopped that work. Your last trustworthy result is still here.");
+            setPending(false);
+            input.focus();
+            return;
+          }
+          if (response.status === 409 && body.status === "COMPLETED") {
+            setActiveWork(work, false);
+            appendSolandraTurn("That work had already finished, so I kept its completed result.");
+            return;
+          }
+          if (response.status === 409 && body.status === "FAILED") {
+            pollGeneration += 1;
+            handleTerminalWork("FAILED", work.message, true);
+            setPending(false);
+            input.focus();
+            return;
+          }
+          appendSolandraTurn("I couldn't confirm the stop request, so I’m still watching the existing work rather than starting anything new.");
+        } catch {
+          appendSolandraTurn("I couldn't confirm the stop request, so I’m still watching the existing work rather than starting anything new.");
+        } finally {
+          if (!stopButton.hidden) stopButton.disabled = false;
+        }
+      };
+
       const submit = async () => {
-        if (pending || composing) return;
+        if (pending || composing || recovering) return;
+        const existingPending = readPendingTurn();
+        const existingWork = readActiveWork();
+        if (
+          (existingPending && (!conversationId || existingPending.conversationId === conversationId))
+          || (existingWork && (!conversationId || existingWork.conversationId === conversationId))
+        ) {
+          setPending(true);
+          try { await recoverSession(); }
+          catch { appendSolandraTurn("I couldn't reconnect yet. I kept your draft and existing work identity so retry won't become duplicate work."); }
+          finally { setPending(false); input.focus(); }
+          return;
+        }
+
         const message = input.value;
         if (!message.trim()) return;
         const draft = message;
         setPending(true);
-        appendUserTurn(message);
-        if (!composerHasProductContent) composer.replaceChildren();
-        input.value = "";
         try {
           const id = await ensureConversation();
           const clarification = pendingClarification;
           const confirmsPending = clarification && isExplicitConfirmation(message);
-          const response = await fetch(confirmsPending
-            ? "/api/v1/conversations/" + encodeURIComponent(id) + "/clarifications/" + encodeURIComponent(clarification.proposalId) + "/confirm"
-            : "/api/v1/conversations/" + encodeURIComponent(id) + "/turns", {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({ turnId: crypto.randomUUID(), message }),
-          });
-          const body = await response.json();
-          if (!response.ok) throw new Error(body.message || body.error || "Consultation intake failed.");
-          if (body.status === "NEEDS_CLARIFICATION") {
-            pendingClarification = body.proposalId ? { proposalId: body.proposalId } : null;
-            appendSolandraTurn(body.proposalId
-              ? body.question + "\\n\\nReply with “" + body.confirmationExample + "” to confirm, or state a correction normally."
-              : body.question);
-            return;
-          }
-          pendingClarification = null;
-          if (body.status === "REFERENCE_RESOLVED") {
-            renderOutcome(body.knowledge, body.presentation);
-            return;
-          }
-          if (body.status === "RECOMMENDATION_REFERENCE_RESOLVED") {
-            const assistantMessage = typeof body.presentation?.assistantMessage === "string"
-              ? body.presentation.assistantMessage.trim()
-              : "";
-            if (!assistantMessage) throw new Error("Recommendation response presentation is unavailable.");
-            appendSolandraTurn(assistantMessage);
-            return;
-          }
-          if (body.status === "NEEDS_NEW_KNOWLEDGE") {
-            appendSolandraTurn(body.question || "That requires new external Knowledge before I can answer it reliably.");
-            return;
-          }
-          if (!body.runId) throw new Error("Consultation response did not identify a Run.");
-          await pollOutcome(body.runId);
+          const record = {
+            conversationId: id,
+            turnId: crypto.randomUUID(),
+            message,
+            ...(confirmsPending ? { clarificationProposalId: clarification.proposalId } : {}),
+          };
+          storePendingTurn(record);
+          appendUserTurn(message);
+          if (!composerHasProductContent) composer.replaceChildren();
+          input.value = "";
+          storageRemove(STORAGE.draft);
+          await postTurnRecord(record);
         } catch (error) {
           input.value = draft;
-          appendSolandraTurn("I couldn’t complete that turn. "
-            + (error instanceof Error ? error.message : "Unknown error")
-            + " Your draft has been restored.");
+          persistDraft(draft);
+          appendSolandraTurn(error instanceof Error
+            ? error.message
+            : "I couldn't complete that request. Your draft has been restored.");
         } finally {
           setPending(false);
           input.focus();
@@ -256,6 +694,8 @@ export function renderSolandraConversationPage(): string {
         event.preventDefault();
         void submit();
       });
+      stopButton.addEventListener("click", () => { void stopActiveWork(); });
+      input.addEventListener("input", () => persistDraft(input.value));
       input.addEventListener("compositionstart", () => { composing = true; });
       input.addEventListener("compositionend", () => { composing = false; });
       input.addEventListener("keydown", (event) => {
@@ -265,7 +705,14 @@ export function renderSolandraConversationPage(): string {
           void submit();
         }
       });
-      input.focus();
+
+      setPending(true);
+      void recoverSession()
+        .catch(() => appendSolandraTurn("I couldn't reconnect yet. I won't start duplicate work while recovery is uncertain."))
+        .finally(() => {
+          setPending(false);
+          input.focus();
+        });
     })();
   </script>
 </body>
