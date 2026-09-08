@@ -28,6 +28,12 @@ async function withKnowledgePresentation(
   const outcome = envelope.outcome as { kind?: unknown };
   if (outcome.kind !== "KNOWLEDGE") return payload;
 
+  const existingPresentation = (envelope as { presentation?: unknown }).presentation;
+  if (existingPresentation && typeof existingPresentation === "object") {
+    const assistantMessage = (existingPresentation as { assistantMessage?: unknown }).assistantMessage;
+    if (typeof assistantMessage === "string" && assistantMessage.trim().length > 0) return payload;
+  }
+
   const knowledge = outcome as KnowledgeOutcome;
   const assistantMessage = run
     ? await renderKnowledgeResponseForRun(knowledge, run, simplifier)

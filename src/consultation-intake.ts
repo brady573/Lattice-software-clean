@@ -7,7 +7,9 @@ import type { QualifiedCriterionCatalog } from "./decision/criterion-catalog.js"
 import type { DecisionInputSnapshot } from "./decision/decision-input-snapshot.js";
 import {
   consultationRunRequestSchema,
+  isConsultationRunRequest,
   type ConsultationRunRequest,
+  type LatticeRun,
 } from "./domain.js";
 import {
   ConservativeConsultationInterpreter,
@@ -36,8 +38,21 @@ import {
 } from "./knowledge/knowledge-continuity.js";
 import type { KnowledgeRecordStore } from "./knowledge/knowledge-record-store.js";
 import { buildRunOutcome } from "./outcome.js";
+import {
+  advisoryKnowledge,
+  establishRecommendation,
+  loadRecommendation,
+  loadRecommendationByRunId,
+  recommendationBasisTrace,
+  recommendationContext,
+  renderHistoricalRecommendationExplanation,
+  renderHistoricalRecommendationSources,
+  renderRecommendation,
+} from "./recommendation/recommendation-continuity.js";
+import type { RecommendationStore } from "./recommendation/recommendation-store.js";
 import { createPendingRun } from "./run-execution.js";
 import type { RunStore } from "./run-store.js";
+import type { SolandraAdvisoryRuntime } from "./solandra/advisory.js";
 import type {
   SolandraCognitionResult,
   SolandraCognitiveRuntime,
@@ -48,6 +63,7 @@ import type { SolandraKnowledgePresenter } from "./solandra/knowledge-presenter.
 const IDEMPOTENCY_RETENTION_MS = 24 * 60 * 60 * 1_000;
 const MAX_RUN_CONTEXT_ITEMS = 32;
 const MAX_COGNITIVE_HISTORY_ITEMS = 8;
+const MAX_ADVISORY_KNOWLEDGE_ROUNDS = 2;
 
 const consultationTurnSchema = z.object({
   turnId: z.string().min(1).max(200),
@@ -75,7 +91,9 @@ export interface ConsultationIntakeOptions {
   interpreter?: ConsultationInterpreter;
   criterionCatalog?: QualifiedCriterionCatalog;
   knowledgeStore?: KnowledgeRecordStore;
+  recommendationStore?: RecommendationStore;
   solandraCognition?: SolandraCognitiveRuntime;
+  solandraAdvisory?: SolandraAdvisoryRuntime;
   solandraKnowledgePresenter?: SolandraKnowledgePresenter;
   apiSubject?: string | ((request: FastifyRequest) => string);
 }
@@ -144,6 +162,7 @@ function consultationRequest(input: {
   objective: string;
   context: readonly string[];
   investigationQueries?: readonly string[];
+  advisoryRequested?: boolean;
   decisionNeed: "NONE" | "UNRESOLVED" | "QUALIFIED";
   resourceNeed: ConsultationResourceNeed;
   sourceMessageId: string;
@@ -157,6 +176,7 @@ function consultationRequest(input: {
     objective: input.objective,
     context: [...input.context],
     investigationQueries: [...(input.investigationQueries ?? [])],
+    advisoryRequested: input.advisoryRequested ?? false,
     decisionNeed: input.decisionNeed,
     resourceNeed: input.resourceNeed,
     sourceMessageId: input.sourceMessageId,
@@ -190,6 +210,7 @@ function publicCognition(result: SolandraCognitionResult | undefined): unknown {
     knowledgeNeeds: result.proposal.knowledgeNeeds,
     materialAmbiguity: result.proposal.materialAmbiguity,
     referencedKnowledgeId: result.proposal.referencedKnowledgeId,
+    referencedRecommendationId: result.proposal.referencedRecommendationId ?? null,
     proposedNextStep: result.proposal.proposedNextStep,
   };
 }
@@ -198,6 +219,10 @@ function isReferenceHelp(help: SolandraRequestedHelp): boolean {
   return help === "SOURCES_REFERENCE"
     || help === "EXPLAIN_REFERENCE"
     || help === "SIMPLIFY_REFERENCE";
+}
+
+function isRecommendationReferenceHelp(help: SolandraRequestedHelp): boolean {
+  return help === "EXPLAIN_RECOMMENDATION" || help === "SOURCES_RECOMMENDATION";
 }
 
 function cognitiveInterpretation(
@@ -287,6 +312,68 @@ async function submitConsultationRun(input: {
   return { outcome: submission.outcome, runId: submission.response.runId };
 }
 
+function advisoryKnowledgeRunId(
+  rootRunId: string,
+  intentVersionId: string,
+  round: number,
+): `${string}-${string}-${string}-${string}-${string}` {
+  return stableUuid("advisory-knowledge-run", rootRunId, intentVersionId, String(round));
+}
+
+async function submitAdvisoryKnowledgeRun(input: {
+  request: FastifyRequest;
+  options: ConsultationIntakeOptions;
+  apiSubjectForRequest: (request: FastifyRequest) => string;
+  rootRun: LatticeRun & { request: ConsultationRunRequest };
+  intentVersion: IntentVersion;
+  round: number;
+  knowledgeNeeds: readonly string[];
+}): Promise<string> {
+  const runId = advisoryKnowledgeRunId(input.rootRun.id, input.intentVersion.intentVersionId, input.round);
+  const requestBody = consultationRequest({
+    objective: authoritativeObjective(input.intentVersion),
+    context: input.rootRun.request.context ?? [],
+    investigationQueries: input.knowledgeNeeds,
+    advisoryRequested: false,
+    decisionNeed: "NONE",
+    resourceNeed: "NONE",
+    sourceMessageId: input.rootRun.request.sourceMessageId,
+    sourceMessageDigest: input.rootRun.request.sourceMessageDigest,
+    intentScopeId: input.intentVersion.intentScopeId,
+    intentVersion: input.intentVersion,
+  });
+  const continuation = createPendingRun(input.rootRun.conversationId, requestBody, runId);
+  const submission = await input.options.apiControlStore.submitRun({
+    run: continuation,
+    intentBinding: {
+      intentScopeId: input.intentVersion.intentScopeId,
+      intentVersionId: input.intentVersion.intentVersionId,
+    },
+    dispatch: {
+      logicalKey: `run:${runId}:execute`,
+      queueName: "lattice.run",
+      payload: { runId, submittedVersion: continuation.version },
+    },
+    idempotency: {
+      scopeKey: input.apiSubjectForRequest(input.request),
+      httpMethod: "INTERNAL",
+      canonicalRoute: `/internal/advisory/${encodeURIComponent(input.rootRun.id)}/knowledge/${input.round}`,
+      idempotencyKey: `advisory-knowledge:${input.rootRun.id}:${input.round}`,
+      requestHash: createApiRequestHash({
+        rootRunId: input.rootRun.id,
+        intentVersionId: input.intentVersion.intentVersionId,
+        round: input.round,
+        knowledgeNeeds: [...input.knowledgeNeeds],
+      }),
+      expiresAt: new Date(Date.now() + IDEMPOTENCY_RETENTION_MS),
+    },
+  });
+  if (submission.outcome === "conflict") {
+    throw new Error("Advisory Knowledge continuation idempotency conflicted with different immutable state.");
+  }
+  return runId;
+}
+
 async function createPendingClarification(input: {
   options: ConsultationIntakeOptions;
   conversationId: string;
@@ -373,6 +460,9 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
           const governed = options.knowledgeStore
             ? await recentGovernedKnowledge(options.knowledgeStore, options.runStore, conversationId)
             : [];
+          const recommendations = options.recommendationStore
+            ? await options.recommendationStore.listRecommendationsByConversation(conversationId)
+            : [];
           const recentMessages = [...history.map((message) => message.content)];
           if (!recentMessages.includes(sourceMessage.content)) recentMessages.push(sourceMessage.content);
           cognition = await options.solandraCognition.interpret({
@@ -382,22 +472,14 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
             ...(currentVersion ? { currentObjective: authoritativeObjective(currentVersion) } : {}),
             recentUserMessages: recentMessages.slice(-MAX_COGNITIVE_HISTORY_ITEMS),
             governedKnowledge: governed.map(governedKnowledgeContext),
+            governedRecommendations: recommendations.slice(-4).map(recommendationContext),
           });
-          if (cognition.proposal.requestedHelp === "DECISION") {
-            interpretation = await interpreter.interpret({
-              message: sourceMessage.content,
-              context: parsed.data.context ?? [],
-              ...(currentVersion ? { currentIntentVersion: currentVersion } : {}),
-              ...(parsed.data.prepare ? { explicitResourceNeed: parsed.data.prepare } : {}),
-            });
-          } else {
-            interpretation = cognitiveInterpretation(
-              sourceMessage,
-              currentVersion,
-              cognition,
-              parsed.data.prepare,
-            );
-          }
+          interpretation = cognitiveInterpretation(
+            sourceMessage,
+            currentVersion,
+            cognition,
+            parsed.data.prepare,
+          );
         } else {
           interpretation = await interpreter.interpret({
             message: sourceMessage.content,
@@ -409,6 +491,45 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
       } catch (error) {
         const message = error instanceof Error ? error.message : "Consultation interpretation failed.";
         return reply.status(422).send({ error: "CONSULTATION_INTERPRETATION_FAILED", message });
+      }
+
+      if (
+        cognition
+        && isRecommendationReferenceHelp(cognition.proposal.requestedHelp)
+        && cognition.proposal.materialAmbiguity === null
+        && (cognition.proposal.referencedRecommendationId ?? null) !== null
+      ) {
+        if (!options.recommendationStore || !options.knowledgeStore || !currentVersion) {
+          return reply.status(409).send({
+            error: "GOVERNED_RECOMMENDATION_REFERENCE_UNAVAILABLE",
+            message: "The referenced governed Recommendation is not available in this conversation state.",
+          });
+        }
+        const recommendationId = cognition.proposal.referencedRecommendationId!;
+        const loaded = await loadRecommendation(
+          options.recommendationStore,
+          options.knowledgeStore,
+          options.runStore,
+          recommendationId,
+        );
+        if (!loaded || loaded.record.conversationId !== conversationId) {
+          return reply.status(404).send({ error: "RECOMMENDATION_NOT_FOUND" });
+        }
+        const assistantMessage = cognition.proposal.requestedHelp === "SOURCES_RECOMMENDATION"
+          ? renderHistoricalRecommendationSources(loaded)
+          : renderHistoricalRecommendationExplanation(loaded);
+        return reply.status(200).send({
+          status: "RECOMMENDATION_REFERENCE_RESOLVED",
+          acceptedUnderstanding: authoritativeObjective(currentVersion),
+          intentScopeId,
+          intentVersionId: currentVersion.intentVersionId,
+          recommendationReference: {
+            recommendationId: loaded.record.recommendationId,
+            knowledgeIds: loaded.record.knowledgeIds,
+          },
+          presentation: { assistantMessage },
+          interpretation: publicCognition(cognition),
+        });
       }
 
       if (
@@ -605,14 +726,20 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
           message: `Current-turn work context is limited to ${MAX_RUN_CONTEXT_ITEMS} items.`,
         });
       }
+      const advisoryRequested = cognition?.proposal.requestedHelp === "DECISION";
       const investigationQueries = cognition
-        && (cognition.proposal.requestedHelp === "KNOWLEDGE" || cognition.proposal.requestedHelp === "FRESH_RESEARCH")
+        && (
+          cognition.proposal.requestedHelp === "KNOWLEDGE"
+          || cognition.proposal.requestedHelp === "FRESH_RESEARCH"
+          || cognition.proposal.requestedHelp === "DECISION"
+        )
         ? cognition.proposal.knowledgeNeeds
         : [];
       const requestBody = consultationRequest({
         objective: authoritativeObjective(version),
         context: runContext,
         investigationQueries,
+        advisoryRequested,
         decisionNeed: qualification.decisionNeed,
         resourceNeed: interpretation.resourceNeed,
         sourceMessageId: sourceMessage.messageId,
@@ -637,6 +764,7 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
           contentDigest: sourceMessage.contentDigest,
           context: requestBody.context,
           investigationQueries: requestBody.investigationQueries,
+          advisoryRequested: requestBody.advisoryRequested,
           decisionNeed: requestBody.decisionNeed,
           resourceNeed: requestBody.resourceNeed,
         },
@@ -807,15 +935,184 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
       return reply.send({ runId: run.id, status: run.status, outcome });
     }
     const established = await establishKnowledge(options.knowledgeStore, run, truth, outcome);
+    const knowledgeReference = {
+      knowledgeId: established.record.knowledgeId,
+      referenceId: established.reference.referenceId,
+      responseId: established.reference.responseId,
+    };
+
+    if (isConsultationRunRequest(run.request) && run.request.advisoryRequested) {
+      if (!options.recommendationStore || !options.solandraAdvisory) {
+        return reply.status(503).send({ error: "SOLANDRA_ADVISORY_UNAVAILABLE" });
+      }
+      const existing = await loadRecommendationByRunId(
+        options.recommendationStore,
+        options.knowledgeStore,
+        options.runStore,
+        run.id,
+      );
+      if (existing) {
+        return reply.send({
+          runId: run.id,
+          status: run.status,
+          outcome,
+          knowledgeReference,
+          recommendationReference: {
+            recommendationId: existing.record.recommendationId,
+            intentVersionId: existing.record.intentVersionId,
+            knowledgeIds: existing.record.knowledgeIds,
+            claimIds: existing.record.claimIds,
+            selectionAuthorized: existing.record.selectionAuthorized,
+          },
+          presentation: { assistantMessage: renderRecommendation(existing.record) },
+        });
+      }
+
+      const intentVersionId = run.request.intentVersionId;
+      const intentVersion = intentVersionId ? await options.intentStore.getVersion(intentVersionId) : undefined;
+      if (!intentVersion) return reply.status(409).send({ error: "ADVISORY_INTENT_VERSION_UNAVAILABLE" });
+      const rootKnowledge = await loadKnowledge(options.knowledgeStore, options.runStore, established.record.knowledgeId);
+      if (!rootKnowledge) return reply.status(409).send({ error: "ADVISORY_KNOWLEDGE_UNAVAILABLE" });
+      const sourceMessage = await options.userMessageStore.get(run.request.sourceMessageId);
+      if (!sourceMessage || sourceMessage.conversationId !== run.conversationId) {
+        return reply.status(409).send({ error: "ADVISORY_USER_SOURCE_UNAVAILABLE" });
+      }
+
+      const governedKnowledge = [rootKnowledge];
+      let nextKnowledgeRound = 1;
+      for (; nextKnowledgeRound <= MAX_ADVISORY_KNOWLEDGE_ROUNDS; nextKnowledgeRound += 1) {
+        const continuationRunId = advisoryKnowledgeRunId(run.id, intentVersion.intentVersionId, nextKnowledgeRound);
+        const continuationRun = await options.runStore.get(continuationRunId);
+        if (!continuationRun) break;
+        if (continuationRun.status === "FAILED" || continuationRun.status === "CANCELLED") {
+          const reason = "I couldn't establish the additional governed Knowledge needed for a responsible recommendation.";
+          return reply.send({
+            runId: run.id,
+            status: run.status,
+            outcome,
+            knowledgeReference,
+            advisory: { status: "INSUFFICIENT_BASIS", reason, uncertainties: [reason] },
+            presentation: { assistantMessage: reason },
+          });
+        }
+        if (continuationRun.status !== "COMPLETED") {
+          return reply.status(202).send({ runId: run.id, status: "INVESTIGATING" });
+        }
+        const continuationTruth = await options.runStore.getTruthBundle(continuationRun.id);
+        if (!continuationTruth) {
+          return reply.status(409).send({ error: "ADVISORY_CONTINUATION_TRUTH_UNAVAILABLE" });
+        }
+        const continuationOutcome = buildRunOutcome(continuationRun, continuationTruth);
+        if (continuationOutcome.kind !== "KNOWLEDGE") {
+          return reply.status(409).send({ error: "ADVISORY_CONTINUATION_KNOWLEDGE_UNAVAILABLE" });
+        }
+        const continuationEstablished = await establishKnowledge(
+          options.knowledgeStore,
+          continuationRun,
+          continuationTruth,
+          continuationOutcome,
+        );
+        const continuationKnowledge = await loadKnowledge(
+          options.knowledgeStore,
+          options.runStore,
+          continuationEstablished.record.knowledgeId,
+        );
+        if (!continuationKnowledge) {
+          return reply.status(409).send({ error: "ADVISORY_CONTINUATION_KNOWLEDGE_UNAVAILABLE" });
+        }
+        governedKnowledge.push(continuationKnowledge);
+      }
+
+      let advisory;
+      try {
+        advisory = await options.solandraAdvisory.advise({
+          conversationId: run.conversationId,
+          userMessageId: sourceMessage.messageId,
+          authoritativeIntent: intentVersion,
+          authoritativeObjective: authoritativeObjective(intentVersion),
+          userContext: [sourceMessage.content],
+          knowledge: governedKnowledge.map(advisoryKnowledge),
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Solandra advisory reasoning failed.";
+        return reply.status(422).send({ error: "SOLANDRA_ADVISORY_FAILED", message });
+      }
+
+      if (advisory.result.status === "NEEDS_KNOWLEDGE") {
+        if (nextKnowledgeRound > MAX_ADVISORY_KNOWLEDGE_ROUNDS) {
+          const reason = "I still need additional factual Knowledge after the bounded investigation available for this recommendation, so I can't recommend responsibly yet.";
+          return reply.send({
+            runId: run.id,
+            status: run.status,
+            outcome,
+            knowledgeReference,
+            advisory: {
+              status: "INSUFFICIENT_BASIS",
+              reason,
+              uncertainties: [advisory.result.reason, ...advisory.result.knowledgeNeeds],
+            },
+            presentation: { assistantMessage: reason },
+          });
+        }
+        try {
+          await submitAdvisoryKnowledgeRun({
+            request,
+            options,
+            apiSubjectForRequest,
+            rootRun: run as LatticeRun & { request: ConsultationRunRequest },
+            intentVersion,
+            round: nextKnowledgeRound,
+            knowledgeNeeds: advisory.result.knowledgeNeeds,
+          });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "Additional governed Knowledge could not be scheduled.";
+          return reply.status(409).send({ error: "ADVISORY_KNOWLEDGE_CONTINUATION_FAILED", message });
+        }
+        return reply.status(202).send({ runId: run.id, status: "INVESTIGATING" });
+      }
+
+      if (advisory.result.status !== "RECOMMENDATION") {
+        const assistantMessage = advisory.result.status === "NEEDS_CLARIFICATION"
+          ? advisory.result.question
+          : `I don't have a sufficient governed basis for a responsible recommendation. ${advisory.result.reason}`;
+        return reply.send({
+          runId: run.id,
+          status: run.status,
+          outcome,
+          knowledgeReference,
+          advisory: advisory.result,
+          presentation: { assistantMessage },
+        });
+      }
+
+      const recommendation = await establishRecommendation({
+        store: options.recommendationStore,
+        run,
+        intentVersion,
+        knowledge: governedKnowledge,
+        advisory: advisory.result,
+      });
+      return reply.send({
+        runId: run.id,
+        status: run.status,
+        outcome,
+        knowledgeReference,
+        recommendationReference: {
+          recommendationId: recommendation.recommendationId,
+          intentVersionId: recommendation.intentVersionId,
+          knowledgeIds: recommendation.knowledgeIds,
+          claimIds: recommendation.claimIds,
+          selectionAuthorized: recommendation.selectionAuthorized,
+        },
+        presentation: { assistantMessage: renderRecommendation(recommendation) },
+      });
+    }
+
     return reply.send({
       runId: run.id,
       status: run.status,
       outcome,
-      knowledgeReference: {
-        knowledgeId: established.record.knowledgeId,
-        referenceId: established.reference.referenceId,
-        responseId: established.reference.responseId,
-      },
+      knowledgeReference,
     });
   });
 
@@ -837,6 +1134,26 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
       evidenceIds: loaded.record.evidenceIds,
       truthAssessmentIds: loaded.record.truthAssessmentIds,
       outcome: loaded.knowledge,
+    });
+  });
+
+
+  app.get<{ Params: { recommendationId: string } }>("/api/v1/recommendations/:recommendationId", async (request, reply) => {
+    if (!options.recommendationStore || !options.knowledgeStore) {
+      return reply.status(404).send({ error: "RECOMMENDATION_NOT_FOUND" });
+    }
+    const loaded = await loadRecommendation(
+      options.recommendationStore,
+      options.knowledgeStore,
+      options.runStore,
+      request.params.recommendationId.trim(),
+    );
+    if (!loaded || !await options.conversationStore.getOwned(loaded.record.conversationId, apiSubjectForRequest(request))) {
+      return reply.status(404).send({ error: "RECOMMENDATION_NOT_FOUND" });
+    }
+    return reply.status(200).send({
+      ...loaded.record,
+      factualBasis: recommendationBasisTrace(loaded),
     });
   });
 }

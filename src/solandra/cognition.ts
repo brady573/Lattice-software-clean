@@ -10,6 +10,8 @@ export const solandraRequestedHelpSchema = z.enum([
   "SOURCES_REFERENCE",
   "FRESH_RESEARCH",
   "DECISION",
+  "EXPLAIN_RECOMMENDATION",
+  "SOURCES_RECOMMENDATION",
   "RESOURCE",
 ]);
 export type SolandraRequestedHelp = z.infer<typeof solandraRequestedHelpSchema>;
@@ -38,6 +40,7 @@ export const solandraSemanticProposalSchema = z.object({
   knowledgeNeeds: z.array(z.string().min(1).max(1_000)).max(16),
   materialAmbiguity: materialAmbiguitySchema.nullable(),
   referencedKnowledgeId: z.string().min(1).max(128).nullable(),
+  referencedRecommendationId: z.string().min(1).max(128).nullable().optional(),
   /**
    * Compatibility-only inert metadata from early M1 proposals. Product behavior
    * is classified by requestedHelp; this value has no intent, truth, routing,
@@ -59,6 +62,14 @@ export interface SolandraGovernedKnowledgeContext {
   readonly uncertainties: readonly string[];
 }
 
+export interface SolandraGovernedRecommendationContext {
+  readonly recommendationId: string;
+  readonly recommendation: string;
+  readonly intentVersionId: string;
+  readonly knowledgeIds: readonly string[];
+  readonly createdAt: string;
+}
+
 export interface SolandraCognitionInput {
   readonly conversationId: string;
   readonly messageId: string;
@@ -66,6 +77,7 @@ export interface SolandraCognitionInput {
   readonly currentObjective?: string;
   readonly recentUserMessages: readonly string[];
   readonly governedKnowledge: readonly SolandraGovernedKnowledgeContext[];
+  readonly governedRecommendations?: readonly SolandraGovernedRecommendationContext[];
 }
 
 export interface SolandraCognitionResult {
@@ -102,10 +114,20 @@ function buildCognitionRequest(model: string, input: SolandraCognitionInput): Ca
       `Uncertainties: ${item.uncertainties.join(" | ") || "none"}`,
     ].join("\n")).join("\n\n");
 
+  const recommendations = (input.governedRecommendations ?? []).length === 0
+    ? "No prior governed Recommendation is addressable in this conversation."
+    : (input.governedRecommendations ?? []).map((item) => [
+      `Recommendation ID: ${item.recommendationId}`,
+      `Recommendation: ${item.recommendation}`,
+      `IntentVersion ID: ${item.intentVersionId}`,
+      `Knowledge IDs: ${item.knowledgeIds.join(" | ") || "none"}`,
+      `Created at: ${item.createdAt}`,
+    ].join("\n")).join("\n\n");
+
   const schemaExample = JSON.stringify({
     objectiveRelation: "NEW_OBJECTIVE|CONTINUE|CORRECTION",
     proposedObjective: "string or null",
-    requestedHelp: "KNOWLEDGE|EXPLAIN_REFERENCE|SIMPLIFY_REFERENCE|SOURCES_REFERENCE|FRESH_RESEARCH|DECISION|RESOURCE",
+    requestedHelp: "KNOWLEDGE|EXPLAIN_REFERENCE|SIMPLIFY_REFERENCE|SOURCES_REFERENCE|FRESH_RESEARCH|DECISION|EXPLAIN_RECOMMENDATION|SOURCES_RECOMMENDATION|RESOURCE",
     relevantContext: ["string"],
     entities: ["string"],
     referents: ["string"],
@@ -114,6 +136,7 @@ function buildCognitionRequest(model: string, input: SolandraCognitionInput): Ca
     knowledgeNeeds: ["string"],
     materialAmbiguity: { question: "string", couldChangeObjective: true },
     referencedKnowledgeId: "one supplied Knowledge ID or null",
+    referencedRecommendationId: "one supplied Recommendation ID or null",
   });
 
   return {
@@ -129,6 +152,7 @@ function buildCognitionRequest(model: string, input: SolandraCognitionInput): Ca
           "Use SOURCES_REFERENCE, EXPLAIN_REFERENCE, or SIMPLIFY_REFERENCE when the user clearly refers to an existing supplied Knowledge object. referencedKnowledgeId must be exactly one supplied Knowledge ID or null.",
           "Use FRESH_RESEARCH only when the user asks for new, updated, additional, or otherwise external Knowledge beyond the supplied object. A historical provenance request is not fresh research.",
           "Use DECISION only when the user is actually asking for help choosing/deciding, not merely asking for differences or information.",
+          "Use EXPLAIN_RECOMMENDATION when the user asks why a supplied historical Recommendation was made. Use SOURCES_RECOMMENDATION when the user asks for the evidence/sources behind it. referencedRecommendationId must be exactly one supplied Recommendation ID or null.",
           "requestedHelp is the sole classification of the requested work. Do not add a separate next-step or workflow field.",
           "Return exactly one JSON object and no prose. The required shape is:",
           schemaExample,
@@ -144,6 +168,9 @@ function buildCognitionRequest(model: string, input: SolandraCognitionInput): Ca
           "Addressable governed Knowledge:",
           knowledge,
           "",
+          "Addressable governed Recommendations:",
+          recommendations,
+          "",
           `Current USER message: ${input.message}`,
         ].join("\n"),
       },
@@ -158,6 +185,10 @@ function referenceHelp(help: SolandraRequestedHelp): boolean {
   return help === "SOURCES_REFERENCE"
     || help === "EXPLAIN_REFERENCE"
     || help === "SIMPLIFY_REFERENCE";
+}
+
+function recommendationReferenceHelp(help: SolandraRequestedHelp): boolean {
+  return help === "EXPLAIN_RECOMMENDATION" || help === "SOURCES_RECOMMENDATION";
 }
 
 export class ModelSolandraCognitiveRuntime implements SolandraCognitiveRuntime {
@@ -190,6 +221,20 @@ export class ModelSolandraCognitiveRuntime implements SolandraCognitiveRuntime {
       throw new ModelProviderError(
         "invalid_output",
         "A referential Solandra proposal must identify supplied Knowledge or surface ambiguity.",
+      );
+    }
+    const allowedRecommendationIds = new Set((input.governedRecommendations ?? []).map((item) => item.recommendationId));
+    const referencedRecommendationId = proposal.referencedRecommendationId ?? null;
+    if (referencedRecommendationId !== null && !allowedRecommendationIds.has(referencedRecommendationId)) {
+      throw new ModelProviderError(
+        "invalid_output",
+        "Solandra cognition referenced a Recommendation that was not supplied by Lattice.",
+      );
+    }
+    if (recommendationReferenceHelp(proposal.requestedHelp) && referencedRecommendationId === null && proposal.materialAmbiguity === null) {
+      throw new ModelProviderError(
+        "invalid_output",
+        "A Recommendation reference proposal must identify supplied Recommendation or surface ambiguity.",
       );
     }
     return Object.freeze({
