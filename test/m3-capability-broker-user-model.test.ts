@@ -13,6 +13,8 @@ import type { CapabilityContract } from "../src/capabilities/contracts.js";
 import {
   USER_AUTHORIZED_MODEL_CAPABILITY_ID,
   UserAuthorizedModelCapability,
+  type UserModelInput,
+  type UserModelOutput,
 } from "../src/capabilities/user-model-capability.js";
 import { MemoryKnowledgeRecordStore } from "../src/knowledge/knowledge-record-store.js";
 import { ModelAssistanceCapabilityService } from "../src/model-assistance-capability.js";
@@ -63,7 +65,7 @@ test("generic broker dispatch is not user-model-specific", async () => {
   };
   broker.register(fixture);
   await broker.connect("subject-a", fixture.id);
-  const result = await broker.invoke({ subjectId: "subject-a", capabilityId: fixture.id, requestId: "r1", purpose: "fixture", payload: { value: "hello" } });
+  const result = await broker.invoke<{ value: string }, string>({ subjectId: "subject-a", capabilityId: fixture.id, requestId: "r1", purpose: "fixture", payload: { value: "hello" } });
   assert.equal(result.output, "HELLO");
   assert.equal(result.capabilityId, fixture.id);
   assert.equal(result.requester, "SOLANDRA");
@@ -80,7 +82,7 @@ test("A2 authorization does not silently authorize generalized user-model scope"
   broker.register(userCapability(provider));
   assert.equal((await broker.stateFor("subject-a", USER_AUTHORIZED_MODEL_CAPABILITY_ID)).authorized, false);
   await assert.rejects(
-    broker.invoke({
+    broker.invoke<UserModelInput, UserModelOutput>({
       subjectId: "subject-a",
       capabilityId: USER_AUTHORIZED_MODEL_CAPABILITY_ID,
       requestId: "before-grant",
@@ -102,7 +104,7 @@ test("authorized user-model call is bounded, subject-isolated, provenance-aware,
   const knowledge = new MemoryKnowledgeRecordStore();
 
   await broker.connect("subject-a", USER_AUTHORIZED_MODEL_CAPABILITY_ID);
-  const result = await broker.invoke({
+  const result = await broker.invoke<UserModelInput, UserModelOutput>({
     subjectId: "subject-a",
     capabilityId: USER_AUTHORIZED_MODEL_CAPABILITY_ID,
     requestId: "m3-user-model-1",
@@ -133,7 +135,7 @@ test("authorized user-model call is bounded, subject-isolated, provenance-aware,
 
   assert.equal((await broker.stateFor("subject-b", USER_AUTHORIZED_MODEL_CAPABILITY_ID)).authorized, false);
   await assert.rejects(
-    broker.invoke({
+    broker.invoke<UserModelInput, UserModelOutput>({
       subjectId: "subject-b",
       capabilityId: USER_AUTHORIZED_MODEL_CAPABILITY_ID,
       requestId: "subject-b",
@@ -165,7 +167,7 @@ test("revocation during invocation discards the result", async () => {
   const broker = new CapabilityBroker(store);
   broker.register(delayed);
   await broker.connect("subject-a", delayed.id);
-  const invocation = broker.invoke({ subjectId: "subject-a", capabilityId: delayed.id, requestId: "race", purpose: "race", payload: "discard me" });
+  const invocation = broker.invoke<string, string>({ subjectId: "subject-a", capabilityId: delayed.id, requestId: "race", purpose: "race", payload: "discard me" });
   await startedPromise;
   await broker.disconnect("subject-a", delayed.id);
   release();
