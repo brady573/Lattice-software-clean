@@ -17,15 +17,15 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          ref: 9818c7bd6477951d00f4d3428c8d0c6cd0bc62db
+          ref: e7136b1ee59192e735412058d4ae152ceb9d6e83
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: '24'
       - name: Verify subject
         run: |
-          test "$(git rev-parse HEAD)" = "9818c7bd6477951d00f4d3428c8d0c6cd0bc62db"
-          test "$(git rev-parse HEAD^{tree})" = "b0895c043e926dabbeb58eb666e4849536b26f67"
+          test "$(git rev-parse HEAD)" = "e7136b1ee59192e735412058d4ae152ceb9d6e83"
+          test "$(git rev-parse HEAD^{tree})" = "9bf9b4f9b9d909c9e87fe151c35981d4223d671c"
       - run: npm ci --no-audit --no-fund
       - name: Build
         run: npm run build
