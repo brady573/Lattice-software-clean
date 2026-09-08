@@ -1,4 +1,4 @@
-name: TEMP A5 Browser 7a54e38
+name: TEMP A5 Normal Browser Lifecycle Gate 7a54e38
 
 on:
   push:
@@ -10,134 +10,120 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: a5-normal-browser-lifecycle-7a54e38
+  cancel-in-progress: true
+
 jobs:
-  browser-proof:
+  browser-lifecycle:
+    name: Browser lifecycle validation
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
+    env:
+      DATABASE_URL: postgresql://lattice:lattice@127.0.0.1:55433/lattice_test
+      SUBJECT_SOURCE_SHA: 7a54e380f3f14a27fb48f1092293364c776bc95c
+
+    services:
+      postgres:
+        image: postgres:18.6
+        env:
+          POSTGRES_USER: lattice
+          POSTGRES_PASSWORD: lattice
+          POSTGRES_DB: lattice_test
+        ports:
+          - 55433:5432
+        options: >-
+          --health-cmd "pg_isready -U lattice -d lattice_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Checkout exact subject source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: 7a54e380f3f14a27fb48f1092293364c776bc95c
-          path: subject
           persist-credentials: false
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          ref: 11e1b72cdcc09e51284a39b59d1b9aed9599a3bf
-          path: harness
-          persist-credentials: false
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+
+      - name: Provision Node 24
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: '24'
-      - name: Verify frozen subject and preserved A5 blobs
-        working-directory: subject
+
+      - name: Validate source and hosted browser surface
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "7a54e380f3f14a27fb48f1092293364c776bc95c"
+          test "$(git rev-parse HEAD)" = "$SUBJECT_SOURCE_SHA"
           test "$(git rev-parse HEAD^{tree})" = "dea729808c0b7d85a4b229aa0e2b873717fcebf9"
-          test "$(git rev-parse HEAD:src/ui/solandra-conversation-page.ts)" = "a2d55a165fb49b2060d167c9ea9ce414f7ef0f50"
-          test "$(git rev-parse HEAD:test/a5-solandra-recovery-continuity.test.ts)" = "b354a64b9baf23b69e51ff90c57e801145dbac3a"
+          test "$RUNNER_OS" = "Linux"
+          test "$RUNNER_ARCH" = "X64"
+          test "$(node -p "process.versions.node.split('.')[0]")" = "24"
+          test "$(npm --version | cut -d. -f1)" = "11"
           browser="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
-          test -n "$browser"
-          echo "A5_BROWSER_EXECUTABLE=$browser" >> "$GITHUB_ENV"
-      - name: Install and build frozen subject
-        working-directory: subject
-        run: |
-          npm ci --no-audit --no-fund
-          npm run build
-      - name: Correct final browser evaluator defects
-        working-directory: subject
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-          path = Path("../harness/validation/a5-browser-proof.mjs")
-          text = path.read_text()
-          text = text.replace(
-              'const SUBJECT_SHA = "b961ef8b7df1245a224ee173aecac2f60a9428b4";',
-              'const SUBJECT_SHA = "7a54e380f3f14a27fb48f1092293364c776bc95c";',
-              1,
-          )
-          text = text.replace(
-              'const SUBJECT_TREE = "61d34a3ff612ceab26043f1f377826aeb066a635";',
-              'const SUBJECT_TREE = "dea729808c0b7d85a4b229aa0e2b873717fcebf9";',
-              1,
-          )
-          descriptor_old = "\n".join([
-              '  const descriptor = presentation.body.presentation.resources.find((item) => item.id === preparedResourceId);',
-              '  assert.ok(descriptor);',
-              '  assert.equal(descriptor.editable, true);',
-              '  assert.equal(descriptor.executionAuthorized, false);',
-          ])
-          descriptor_new = "\n".join([
-              '  assert.match(preparedResourceId, /^prepared_resource_/u);',
-              '  const presentationResourceId = `action-preparation:${preparedRun.runId}`;',
-              '  const descriptor = presentation.body.presentation.resources.find((item) =>',
-              '    item.id === presentationResourceId',
-              '    && item.kind === "generated_artifact"',
-              '    && item.editable === true',
-              '    && item.executionAuthorized === false);',
-              '  assert.ok(descriptor);',
-              '  const hydratedPresentation = await api(',
-              '    `/api/v1/conversations/${encodeURIComponent(conversationId)}/presentation/resources/${encodeURIComponent(descriptor.id)}?presentationRevision=${encodeURIComponent(presentation.body.presentation.presentationRevision)}`,',
-              '  );',
-              '  assert.equal(hydratedPresentation.response.status, 200, JSON.stringify(hydratedPresentation.body));',
-              '  assert.equal(hydratedPresentation.body.resource.descriptor.id, descriptor.id);',
-              '  assert.equal(hydratedPresentation.body.resource.descriptor.kind, "generated_artifact");',
-              '  assert.equal(hydratedPresentation.body.resource.descriptor.editable, true);',
-              '  assert.equal(hydratedPresentation.body.resource.descriptor.executionAuthorized, false);',
-              '  assert.equal(hydratedPresentation.body.resource.payload.text, preparedBody);',
-          ])
-          if descriptor_old not in text:
-              raise SystemExit("expected historical descriptor assertion not found")
-          text = text.replace(descriptor_old, descriptor_new, 1)
+          if [ -z "$browser" ]; then
+            echo 'BROWSER_EXECUTION_SURFACE_FAILURE: Chrome/Chromium not found on hosted runner' >&2
+            exit 1
+          fi
+          echo "M7_BROWSER_EXECUTABLE=$browser" >> "$GITHUB_ENV"
+          echo "BROWSER_EXECUTION_SURFACE_PASS executable=$browser"
 
-          failure_old = "\n".join([
-              '  await waitRun(failedRun.runId, "FAILED");',
-              '  const afterFailure = await uiSettled(cdp);',
-              '  assert.equal(afterFailure.composerText, composerBeforeFailure);',
-              '  assert.equal(afterFailure.inputValue, FAILURE_MESSAGE);',
-              '  assert.doesNotMatch(afterFailure.conversationText, /RUN_NOT_SUCCESSFUL|worker|queue|provider|retry epoch/iu);',
-              '  assert.match(afterFailure.conversationText, /couldn\'t complete that work reliably/iu);',
-          ])
-          failure_new = "\n".join([
-              '  const failedAuthoritative = await waitRun(failedRun.runId, "FAILED");',
-              '  assert.equal(failedAuthoritative.status, "FAILED");',
-              '  const afterFailure = await uiSettled(cdp);',
-              '  assert.equal(afterFailure.composerText, composerBeforeFailure);',
-              '  assert.equal(afterFailure.inputValue, FAILURE_MESSAGE);',
-              '  assert.doesNotMatch(afterFailure.conversationText, /RUN_NOT_SUCCESSFUL|RUN_ERROR|run error|worker(?: status)?|queue(?: status)?|provider(?: status)?|database(?: error| status)?|postgres(?:ql)?|retry epoch/iu);',
-              '  assert.match(afterFailure.conversationText, /(?:couldn\'t|could not|failed|failure|unable to complete)/iu);',
-              '  assert.match(afterFailure.conversationText, /(?:restor(?:e|ed)|revis(?:e|ed)|try again|recover(?:y|ed)?)/iu);',
-          ])
-          if failure_old not in text:
-              raise SystemExit("expected historical failure-copy assertion not found")
-          text = text.replace(failure_old, failure_new, 1)
+      - name: Install locked dependencies
+        run: npm ci --no-audit --no-fund
 
-          replay = 'assert.equal(replayPrepared.body.preparationReference.resourceId, preparedResourceId);'
-          if replay not in text:
-              raise SystemExit("authoritative prepared_resource replay assertion missing")
-          required_guardrails = [
-              'assert.equal(cancelledStill.body.status, "CANCELLED");',
-              'assert.deepEqual(storedDraft, { conversationId, value: FAILURE_MESSAGE });',
-              'assert.equal((await continuity(conversationId, OTHER)).error, "CONVERSATION_NOT_FOUND");',
-              'assert.equal(preparer.calls, 1, "PreparedResource recovery must not regenerate preparation.");',
-          ]
-          for guardrail in required_guardrails:
-              if guardrail not in text:
-                  raise SystemExit(f"required guardrail missing: {guardrail}")
-          path.write_text(text)
-          PY
-          node --check ../harness/validation/a5-browser-proof.mjs
-          node --check ../harness/validation/a5-browser-proof-runner.mjs
-      - name: Execute corrected A5 actual-browser proof
-        working-directory: subject
+      - name: Syntax-check browser lifecycle harness
+        run: node --check tools/m7-browser-lifecycle.mjs
+
+      - name: Build browser validation subject
+        run: npm run build
+
+      - name: Reset and migrate dedicated browser database
+        run: |
+          node --input-type=module <<'NODE'
+          import pg from 'pg';
+          const { Client } = pg;
+          const client = new Client({ connectionString: process.env.DATABASE_URL });
+          await client.connect();
+          const version = await client.query('show server_version_num');
+          const versionNumber = Number(version.rows[0].server_version_num);
+          if (!Number.isInteger(versionNumber) || versionNumber < 180006 || versionNumber >= 190000) {
+            throw new Error(`expected PostgreSQL 18.6+, got server_version_num=${versionNumber}`);
+          }
+          await client.query('DROP SCHEMA public CASCADE; CREATE SCHEMA public;');
+          await client.end();
+          NODE
+          node dist/src/migrate.js
+
+      - name: Execute real-browser lifecycle validation
         env:
-          A5_BROWSER_ARTIFACT_DIR: artifacts/a5-browser
-        run: node ../harness/validation/a5-browser-proof-runner.mjs
-      - name: Upload A5 browser evidence
+          LATTICE_DEPLOYMENT_MODE: development
+          LATTICE_TRUTH_MODE: v36-offline
+          LATTICE_AUTHENTICATION_MODE: development-fixture
+          LATTICE_DEVELOPMENT_FIXTURE_SUBJECT_ID: browser-validation-subject
+          LATTICE_AUTO_MIGRATE: 'false'
+          LATTICE_RUN_WORKER_LEASE_MS: '5000'
+          LATTICE_RUN_WORKER_RETRY_DELAY_MS: '5'
+          LATTICE_RUN_WORKER_BATCH_SIZE: '4'
+          LATTICE_RESEARCH_WORKER_LEASE_MS: '5000'
+          LATTICE_RESEARCH_WORKER_RETRY_DELAY_MS: '5'
+          LATTICE_RESEARCH_WORKER_BATCH_SIZE: '8'
+          PORT: '3107'
+          HOST: 127.0.0.1
+          M7_BASE_URL: http://127.0.0.1:3107
+          M7_BROWSER_ARTIFACT_DIR: artifacts/browser-lifecycle
+        run: |
+          set -euo pipefail
+          node tools/m7-browser-lifecycle.mjs
+          test "$(git rev-parse HEAD)" = "$SUBJECT_SOURCE_SHA"
+          test "$(git rev-parse HEAD^{tree})" = "dea729808c0b7d85a4b229aa0e2b873717fcebf9"
+          echo "BROWSER_LIFECYCLE=PASS sha=$SUBJECT_SOURCE_SHA"
+          echo 'PRODUCTION_DEPLOYMENT=NOT_PERFORMED'
+          echo 'PRODUCTION_DATABASE=NOT_TOUCHED'
+
+      - name: Upload browser evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: a5-browser-7a54e38-final
-          path: subject/artifacts/a5-browser/
+          name: browser-lifecycle-7a54e380
+          path: artifacts/browser-lifecycle/
           if-no-files-found: warn
           retention-days: 7
