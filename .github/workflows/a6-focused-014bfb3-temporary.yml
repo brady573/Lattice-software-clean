@@ -1,4 +1,4 @@
-name: TEMP A6 Focused Evaluator Reconciliation
+name: TEMP A6 Exact Core Validation
 
 on:
   push:
@@ -10,12 +10,17 @@ on:
 permissions:
   contents: read
 
+defaults:
+  run:
+    shell: cmd
+
 jobs:
-  focused:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
+  core-validation:
+    name: Core PR validation
+    runs-on: windows-latest
+    timeout-minutes: 20
     steps:
-      - name: Checkout exact subject
+      - name: Checkout exact subject source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: 9b3b2ed130ffdfaab6b7015958ee6c2f459d5c71
@@ -24,16 +29,48 @@ jobs:
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: '24'
-      - name: Verify exact candidate
+      - name: Validate source and runtime contract
+        env:
+          SUBJECT_SOURCE_SHA: 9b3b2ed130ffdfaab6b7015958ee6c2f459d5c71
         run: |
-          set -euo pipefail
-          test "$(git rev-parse HEAD)" = "9b3b2ed130ffdfaab6b7015958ee6c2f459d5c71"
-          test "$(git rev-parse HEAD^{tree})" = "998d6cdf9af8b3d838828affb55bd26a0dfb0c5c"
+          @echo off
+          setlocal EnableExtensions
+          for /f %%I in ('git rev-parse HEAD') do set "ACTUAL_SOURCE_SHA=%%I"
+          if /I not "%ACTUAL_SOURCE_SHA%"=="%SUBJECT_SOURCE_SHA%" (
+            echo SOURCE_PROVENANCE_FAILURE: checkout does not match subject source 1>&2
+            exit /b 1
+          )
+          if /I not "%RUNNER_OS%"=="Windows" (
+            echo EXECUTION_SURFACE_FAILURE: expected RUNNER_OS=Windows, got "%RUNNER_OS%" 1>&2
+            exit /b 1
+          )
+          if /I not "%RUNNER_ARCH%"=="X64" (
+            echo EXECUTION_SURFACE_FAILURE: expected RUNNER_ARCH=X64, got "%RUNNER_ARCH%" 1>&2
+            exit /b 1
+          )
+          for /f %%I in ('node -p "process.versions.node.split('.')[0]"') do set "NODE_MAJOR=%%I"
+          if not "%NODE_MAJOR%"=="24" (
+            echo EXECUTION_SURFACE_FAILURE: expected Node 24 1>&2
+            exit /b 1
+          )
+          for /f "tokens=1 delims=." %%I in ('npm --version') do set "NPM_MAJOR=%%I"
+          if not "%NPM_MAJOR%"=="11" (
+            echo EXECUTION_SURFACE_FAILURE: expected npm 11 1>&2
+            exit /b 1
+          )
+          if not exist package-lock.json (
+            echo DEPENDENCY_PROVENANCE_FAILURE: committed package-lock.json is required 1>&2
+            exit /b 1
+          )
       - name: Install locked dependencies
         run: npm ci --no-audit --no-fund
-      - name: Run focused reconciliation only
-        run: >-
-          node --import tsx --test
-          test/core-philosophy-reconciliation.test.ts
-          test/m1-solandra-cognitive-knowledge-spine.test.ts
-          test/m7-authoritative-lifecycle-ui.test.ts
+      - name: Run repository check
+        run: npm run check
+      - name: Record bounded core validation
+        run: |
+          @echo off
+          for /f %%I in ('git rev-parse HEAD') do set "VALIDATED_SHA=%%I"
+          echo CORE_PR_VALIDATION=PASS sha=%VALIDATED_SHA%
+          echo REPOSITORY_CHECK=PASS command=npm run check
+          echo POSTGRES_INTEGRATION=NOT_CLAIMED_BY_CORE_LANE
+          echo BROWSER_E2E=NOT_CLAIMED_BY_CORE_LANE
