@@ -1,0 +1,107 @@
+name: TEMP A5 Browser 7a54e38
+
+on:
+  push:
+    branches:
+      - validation/a5-browser-proof-7a54e38
+    paths:
+      - ".github/workflows/a5-browser-proof-7a54e38-temporary.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  browser-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: 7a54e380f3f14a27fb48f1092293364c776bc95c
+          path: subject
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: 11e1b72cdcc09e51284a39b59d1b9aed9599a3bf
+          path: harness
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '24'
+      - name: Verify frozen subject and preserved A5 blobs
+        working-directory: subject
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "7a54e380f3f14a27fb48f1092293364c776bc95c"
+          test "$(git rev-parse HEAD^{tree})" = "dea729808c0b7d85a4b229aa0e2b873717fcebf9"
+          test "$(git rev-parse HEAD:src/ui/solandra-conversation-page.ts)" = "a2d55a165fb49b2060d167c9ea9ce414f7ef0f50"
+          test "$(git rev-parse HEAD:test/a5-solandra-recovery-continuity.test.ts)" = "b354a64b9baf23b69e51ff90c57e801145dbac3a"
+          browser="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
+          test -n "$browser"
+          echo "A5_BROWSER_EXECUTABLE=$browser" >> "$GITHUB_ENV"
+      - name: Install and build frozen subject
+        working-directory: subject
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+      - name: Correct only the browser descriptor assertion
+        working-directory: subject
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path("../harness/validation/a5-browser-proof.mjs")
+          text = path.read_text()
+          text = text.replace(
+              'const SUBJECT_SHA = "b961ef8b7df1245a224ee173aecac2f60a9428b4";',
+              'const SUBJECT_SHA = "7a54e380f3f14a27fb48f1092293364c776bc95c";',
+              1,
+          )
+          text = text.replace(
+              'const SUBJECT_TREE = "61d34a3ff612ceab26043f1f377826aeb066a635";',
+              'const SUBJECT_TREE = "dea729808c0b7d85a4b229aa0e2b873717fcebf9";',
+              1,
+          )
+          old = '''  const descriptor = presentation.body.presentation.resources.find((item) => item.id === preparedResourceId);
+          assert.ok(descriptor);
+          assert.equal(descriptor.editable, true);
+          assert.equal(descriptor.executionAuthorized, false);'''
+          new = '''  assert.match(preparedResourceId, /^prepared_resource_/u);
+          const presentationResourceId = `action-preparation:${preparedRun.runId}`;
+          const descriptor = presentation.body.presentation.resources.find((item) =>
+            item.id === presentationResourceId
+            && item.kind === "generated_artifact"
+            && item.editable === true
+            && item.executionAuthorized === false);
+          assert.ok(descriptor);
+          const hydratedPresentation = await api(
+            `/api/v1/conversations/${encodeURIComponent(conversationId)}/presentation/resources/${encodeURIComponent(descriptor.id)}?presentationRevision=${encodeURIComponent(presentation.body.presentation.presentationRevision)}`,
+          );
+          assert.equal(hydratedPresentation.response.status, 200, JSON.stringify(hydratedPresentation.body));
+          assert.equal(hydratedPresentation.body.resource.descriptor.id, descriptor.id);
+          assert.equal(hydratedPresentation.body.resource.descriptor.kind, "generated_artifact");
+          assert.equal(hydratedPresentation.body.resource.descriptor.editable, true);
+          assert.equal(hydratedPresentation.body.resource.descriptor.executionAuthorized, false);
+          assert.equal(hydratedPresentation.body.resource.payload.text, preparedBody);'''
+          if old not in text:
+              raise SystemExit("expected historical descriptor assertion not found")
+          replay = 'assert.equal(replayPrepared.body.preparationReference.resourceId, preparedResourceId);'
+          if replay not in text:
+              raise SystemExit("authoritative prepared_resource replay assertion missing")
+          text = text.replace(old, new, 1)
+          path.write_text(text)
+          PY
+          node --check ../harness/validation/a5-browser-proof.mjs
+          node --check ../harness/validation/a5-browser-proof-runner.mjs
+      - name: Execute corrected A5 actual-browser proof
+        working-directory: subject
+        env:
+          A5_BROWSER_ARTIFACT_DIR: artifacts/a5-browser
+        run: node ../harness/validation/a5-browser-proof-runner.mjs
+      - name: Upload A5 browser evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: a5-browser-7a54e38
+          path: subject/artifacts/a5-browser/
+          if-no-files-found: warn
+          retention-days: 7
