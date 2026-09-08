@@ -302,7 +302,19 @@ test("canonical Solandra client handles direct Knowledge reference and new-Knowl
     assert.match(root.body, /body\.status === "REFERENCE_RESOLVED"/u);
     assert.match(root.body, /renderOutcome\(body\.knowledge, body\.presentation\)/u);
     assert.match(root.body, /body\.status === "NEEDS_NEW_KNOWLEDGE"/u);
-    assert.match(root.body, /Consultation response did not identify a Run/u);
+
+    const missingWorkGuard = root.body.match(/if \(!body\.runId\) throw new Error\("([^"]+)"\);/u);
+    assert.ok(missingWorkGuard, "Missing work identity must fail closed in the canonical browser client.");
+    const failureCopy = missingWorkGuard[1];
+    assert.match(failureCopy, /couldn't establish the requested work safely/iu);
+    assert.doesNotMatch(failureCopy, /\bRun\b|provider|worker|queue|database|retry epoch/iu);
+
+    const guardIndex = root.body.indexOf("if (!body.runId) throw new Error(");
+    const activeWorkIndex = root.body.indexOf("const work = { conversationId: record.conversationId, runId: body.runId");
+    assert.ok(
+      guardIndex >= 0 && activeWorkIndex > guardIndex,
+      "Browser must reject a missing authoritative work identity before treating the response as active/successful work.",
+    );
   } finally {
     await app.close();
   }
