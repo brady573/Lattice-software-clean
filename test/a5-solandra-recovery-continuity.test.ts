@@ -45,6 +45,8 @@ test("canonical Solandra recovery keeps browser state non-authoritative and expo
   assert.match(html, /lattice\.solandra\.draft\.v1/u);
   assert.match(html, /storePendingTurn\(record\);[\s\S]*postTurnRecord\(record\)/u);
   assert.match(html, /body: JSON\.stringify\(\{ turnId: record\.turnId, message: record\.message \}\)/u);
+  assert.match(html, /clearDraftIfSame\(record\.message\);[\s\S]*await handleTurnResponse\(body, record\);[\s\S]*clearPendingTurn\(record\.turnId\);/u);
+  assert.doesNotMatch(html, /clearPendingTurn\(record\.turnId\);[\s\S]*await handleTurnResponse\(body, record\);/u);
   assert.match(html, /\/continuity/u);
   assert.match(html, /\/presentation\/resources\//u);
   assert.match(html, /hydrated\?\.descriptor\?\.editable !== true/u);
@@ -53,6 +55,51 @@ test("canonical Solandra recovery keeps browser state non-authoritative and expo
   assert.match(html, /I stopped that work\. Your last trustworthy result is still here\./u);
   assert.doesNotMatch(html, /RUN_NOT_SUCCESSFUL/u);
   assert.doesNotMatch(html, /worker status|queue status|provider status|retry epoch/iu);
+});
+
+test("browser keeps accepted logical-turn recovery identity until active-work handoff is established", async () => {
+  const html = renderSolandraConversationPage();
+  assert.match(html, /clearDraftIfSame\(record\.message\);[\s\S]*await handleTurnResponse\(body, record\);[\s\S]*clearPendingTurn\(record\.turnId\);/u);
+
+  const app = await createRuntimeApp(config, { memoryDispatchDelayMs: 250 });
+  try {
+    const conversationId = await createConversation(app);
+    const turnId = "a5-accepted-handoff-turn";
+    const message = "Investigate this accepted handoff without duplicating it.";
+
+    const accepted = await submitTurn(app, conversationId, turnId, message);
+    assert.equal(accepted.statusCode, 202, accepted.body);
+    const first = accepted.json<{ runId: string; intentVersionId: string; provenance: { messageId: string } }>();
+
+    // Simulate reload at the exact client-side handoff boundary after durable
+    // acceptance but before active-work storage has been established.
+    const recovered = await submitTurn(app, conversationId, turnId, message);
+    assert.equal(recovered.statusCode, 202, recovered.body);
+    const replay = recovered.json<{ runId: string; intentVersionId: string; provenance: { messageId: string } }>();
+    assert.deepEqual(replay, first);
+
+    const continuity = await app.inject({
+      method: "GET",
+      url: `/api/v1/conversations/${encodeURIComponent(conversationId)}/continuity`,
+    });
+    assert.equal(continuity.statusCode, 200, continuity.body);
+    const state = continuity.json<{ messages: Array<{ id: string }>; runs: Array<{ runId: string }> }>();
+    assert.equal(state.messages.length, 1);
+    assert.equal(state.messages[0]?.id, first.provenance.messageId);
+    assert.equal(state.runs.length, 1);
+    assert.equal(state.runs[0]?.runId, first.runId);
+  } finally {
+    await app.close();
+  }
+});
+
+test("draft recovery is conversation-bound and waits for subject-owned continuity before showing USER text", () => {
+  const html = renderSolandraConversationPage();
+  assert.match(html, /writeRecord\(STORAGE\.draft, \{ conversationId: id, value \}\)/u);
+  assert.match(html, /const draft = readDraft\(\);[\s\S]*if \(draft\?\.conversationId === id\) storageRemove\(STORAGE\.draft\);/u);
+  assert.match(html, /const continuity = await continuityResponse\.json\(\);[\s\S]*setConversation\(storedId\);[\s\S]*rebuildConversation\(continuity\);[\s\S]*restoreDraftForConversation\(storedId\);/u);
+  assert.doesNotMatch(html, /recovering = true;\s*restoreDraft/u);
+  assert.doesNotMatch(html, /couldn't recover that saved conversation[^\n]*draft is still here/iu);
 });
 
 test("one logical USER turn identity replays to one durable USER message and one Run", async () => {
@@ -167,6 +214,10 @@ test("a different authenticated subject cannot recover, inspect, or cancel anoth
       headers: other,
     });
     assert.equal(cancel.statusCode, 404);
+
+    const html = renderSolandraConversationPage();
+    assert.match(html, /if \(continuityResponse\.status === 404\) \{[\s\S]*clearStoredConversationState\(storedId\);[\s\S]*return;/u);
+    assert.match(html, /const draft = readDraft\(\);[\s\S]*if \(draft\?\.conversationId === id\) storageRemove\(STORAGE\.draft\);/u);
   } finally {
     await app.close();
   }

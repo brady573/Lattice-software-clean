@@ -144,17 +144,27 @@ export function renderSolandraConversationPage(): string {
       const appendUserTurn = (text) => appendTurn(text, "user");
       const appendSolandraTurn = (text) => appendTurn(text, "solandra");
 
-      const persistDraft = (value) => {
-        if (value.length > 0) storageSet(STORAGE.draft, value);
-        else storageRemove(STORAGE.draft);
+      const readDraft = () => {
+        const record = readRecord(STORAGE.draft);
+        return record
+          && typeof record.conversationId === "string"
+          && typeof record.value === "string"
+          ? record
+          : null;
       };
-      const restoreDraft = () => {
-        const draft = storageGet(STORAGE.draft);
-        if (draft !== null && !input.value) input.value = draft;
+      const persistDraft = (value) => {
+        const id = conversationId || storageGet(STORAGE.conversation);
+        if (value.length > 0 && id) writeRecord(STORAGE.draft, { conversationId: id, value });
+        else if (value.length === 0) storageRemove(STORAGE.draft);
+      };
+      const restoreDraftForConversation = (id) => {
+        const draft = readDraft();
+        if (draft?.conversationId === id && !input.value) input.value = draft.value;
       };
       const clearDraftIfSame = (value) => {
         if (input.value === value) input.value = "";
-        if (storageGet(STORAGE.draft) === value) storageRemove(STORAGE.draft);
+        const draft = readDraft();
+        if (draft?.conversationId === conversationId && draft.value === value) storageRemove(STORAGE.draft);
       };
 
       const setConversation = (id) => {
@@ -493,9 +503,9 @@ export function renderSolandraConversationPage(): string {
           error.transportUncertain = false;
           throw error;
         }
-        clearPendingTurn(record.turnId);
         clearDraftIfSame(record.message);
         await handleTurnResponse(body, record);
+        clearPendingTurn(record.turnId);
       };
 
       const recoverPendingTurn = async (record) => {
@@ -532,13 +542,14 @@ export function renderSolandraConversationPage(): string {
         if (work?.conversationId === id) storageRemove(STORAGE.activeWork);
         const clarification = readClarification();
         if (clarification?.conversationId === id) storageRemove(STORAGE.clarification);
+        const draft = readDraft();
+        if (draft?.conversationId === id) storageRemove(STORAGE.draft);
         if (conversationId === id) conversationId = null;
       };
 
       const recoverSession = async () => {
         if (recovering) return;
         recovering = true;
-        restoreDraft();
         try {
           const storedId = storageGet(STORAGE.conversation);
           if (!storedId) return;
@@ -546,21 +557,22 @@ export function renderSolandraConversationPage(): string {
           try {
             continuityResponse = await fetch("/api/v1/conversations/" + encodeURIComponent(storedId) + "/continuity");
           } catch {
-            appendSolandraTurn("I couldn't reconnect to your saved conversation yet. Your draft is still here, and I won't start duplicate work.");
+            appendSolandraTurn("I couldn't reconnect to your saved conversation yet. I won't start duplicate work while recovery is uncertain.");
             return;
           }
           if (continuityResponse.status === 404) {
             clearStoredConversationState(storedId);
-            appendSolandraTurn("I couldn't recover that saved conversation for this signed-in user. Your draft is still here.");
+            appendSolandraTurn("I couldn't recover that saved conversation for this signed-in user.");
             return;
           }
           if (!continuityResponse.ok) {
-            appendSolandraTurn("I couldn't reconnect to your saved conversation yet. Your draft is still here, and I won't start duplicate work.");
+            appendSolandraTurn("I couldn't reconnect to your saved conversation yet. I won't start duplicate work while recovery is uncertain.");
             return;
           }
           const continuity = await continuityResponse.json();
           setConversation(storedId);
           rebuildConversation(continuity);
+          restoreDraftForConversation(storedId);
 
           const clarification = readClarification();
           if (clarification?.conversationId === storedId) {
@@ -696,7 +708,7 @@ export function renderSolandraConversationPage(): string {
 
       setPending(true);
       void recoverSession()
-        .catch(() => appendSolandraTurn("I couldn't reconnect yet. Your draft is still here, and I won't start duplicate work."))
+        .catch(() => appendSolandraTurn("I couldn't reconnect yet. I won't start duplicate work while recovery is uncertain."))
         .finally(() => {
           setPending(false);
           input.focus();
