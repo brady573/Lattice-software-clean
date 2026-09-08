@@ -53,10 +53,28 @@ test("authoritative Solandra surface is Conversation + free-form input + adaptiv
   assert.ok(scripts.length >= 1, "Expected canonical Conversation browser script.");
   for (const source of scripts) new Script(source);
 
-  const beforeAuthority = html.match(/appendUserTurn\(message\);([\s\S]*?)const id = await ensureConversation\(\);/u)?.[1] ?? "";
-  assert.notEqual(beforeAuthority, "");
-  assert.match(beforeAuthority, /composer\.replaceChildren\(\)/);
-  assert.doesNotMatch(beforeAuthority, /composer\.innerHTML|Accepted understanding|What you said|Interpreting/);
+  const submitSource = html.match(/const submit = async \(\) => \{([\s\S]*?)\n      \};\n\n      form\.addEventListener/u)?.[1] ?? "";
+  assert.notEqual(submitSource, "", "Expected canonical Conversation submission path.");
+
+  const pendingRecoveryIndex = submitSource.indexOf("try { await recoverSession(); }");
+  const ensureConversationIndex = submitSource.indexOf("const id = await ensureConversation();");
+  const recordIndex = submitSource.indexOf("const record = {");
+  const persistTurnIndex = submitSource.indexOf("storePendingTurn(record);");
+  const displayTurnIndex = submitSource.indexOf("appendUserTurn(message);");
+  const postTurnIndex = submitSource.indexOf("await postTurnRecord(record);");
+
+  assert.ok(pendingRecoveryIndex >= 0 && pendingRecoveryIndex < ensureConversationIndex, "Existing uncertain work must be recovered before new work is accepted.");
+  assert.ok(ensureConversationIndex >= 0 && recordIndex > ensureConversationIndex, "A canonical Conversation must exist before creating the logical USER turn.");
+  assert.ok(recordIndex >= 0 && persistTurnIndex > recordIndex, "The logical USER turn identity must be persisted for recovery.");
+  assert.ok(persistTurnIndex >= 0 && displayTurnIndex > persistTurnIndex, "Browser display ordering must remain downstream of the persisted logical turn identity.");
+  assert.ok(displayTurnIndex >= 0 && postTurnIndex > displayTurnIndex, "The persisted logical turn must be reused for canonical turn submission.");
+  assert.match(submitSource, /turnId: crypto\.randomUUID\(\)/u);
+  assert.match(submitSource, /const existingPending = readPendingTurn\(\);/u);
+  assert.match(submitSource, /const existingWork = readActiveWork\(\);/u);
+
+  const beforeConversation = submitSource.slice(0, ensureConversationIndex);
+  assert.doesNotMatch(beforeConversation, /appendUserTurn\(message\)|composer\.(?:replaceChildren|innerHTML)/u);
+  assert.doesNotMatch(submitSource, /composer\.innerHTML|Accepted understanding|What you said|Interpreting/u);
 });
 
 test("Composer can present accepted Intent state before terminal Run completion", async () => {
