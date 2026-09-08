@@ -18,6 +18,7 @@ import {
   registerAuthenticatedSubjectBoundary,
   type AuthenticatedSubjectResolver,
 } from "./auth/authenticated-subject.js";
+import { PostgresCapabilityAuthorizationStore } from "./capabilities/authorization-store.js";
 import { registerConsultationIntake } from "./consultation-intake.js";
 import { buildCanonicalApp } from "./http-app.js";
 import { registerConversationApi } from "./conversation/conversation-api.js";
@@ -241,6 +242,7 @@ export async function migrateRuntimeDatabase(databaseUrl: string): Promise<void>
   await PostgresKnowledgeRecordStore.migrate(databaseUrl);
   await PostgresRecommendationStore.migrate(databaseUrl);
   await PostgresPreparedResourceStore.migrate(databaseUrl);
+  await PostgresCapabilityAuthorizationStore.migrate(databaseUrl);
 
   const apiControlStore = await PostgresApiRunControlStore.connect(databaseUrl, { migrate: true });
   await apiControlStore.close();
