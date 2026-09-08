@@ -1,0 +1,78 @@
+name: TEMP — M3 Real Solandra Product Proof
+
+on:
+  push:
+    branches:
+      - validation/m3-real-solandra-product-proof
+    paths:
+      - ".github/workflows/m3-real-solandra-product-proof-temporary.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  real-product-proof:
+    name: real configured Solandra Product proof
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      DATABASE_URL: postgresql://lattice:lattice@127.0.0.1:55433/lattice_test
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      SUBJECT_SHA: b7ff5ca32516afc56c5413659f06d45d1dd33ae7
+      SUBJECT_TREE: e7eb933e228735e3cefe472bc0d4269c71b556fa
+
+    services:
+      postgres:
+        image: postgres:18.6
+        env:
+          POSTGRES_USER: lattice
+          POSTGRES_PASSWORD: lattice
+          POSTGRES_DB: lattice_test
+        ports:
+          - 55433:5432
+        options: >-
+          --health-cmd "pg_isready -U lattice -d lattice_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - name: Checkout validation harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+          path: harness
+          persist-credentials: false
+
+      - name: Checkout exact frozen Product candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: b7ff5ca32516afc56c5413659f06d45d1dd33ae7
+          path: subject
+          persist-credentials: false
+
+      - name: Provision Node 24
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '24'
+
+      - name: Verify exact Product candidate identity
+        run: |
+          set -euo pipefail
+          test "$(git -C subject rev-parse HEAD)" = "$SUBJECT_SHA"
+          test "$(git -C subject rev-parse HEAD^{tree})" = "$SUBJECT_TREE"
+          test -n "$GROQ_API_KEY"
+          echo "M3_REAL_PROOF_SUBJECT_SHA=$(git -C subject rev-parse HEAD)"
+          echo "M3_REAL_PROOF_SUBJECT_TREE=$(git -C subject rev-parse HEAD^{tree})"
+
+      - name: Install locked Product dependencies
+        working-directory: subject
+        run: npm ci --no-audit --no-fund
+
+      - name: Build exact Product candidate
+        working-directory: subject
+        run: npm run build
+
+      - name: Execute single real configured Solandra Product proof
+        working-directory: subject
+        run: node ../harness/validation/m3-real-solandra-product-proof.mjs
