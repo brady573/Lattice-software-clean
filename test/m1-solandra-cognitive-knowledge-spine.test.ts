@@ -305,7 +305,7 @@ test("canonical Solandra client handles direct Knowledge reference and new-Knowl
 
     const missingWorkGuard = root.body.match(/if \(!body\.runId\) throw new Error\("([^"]+)"\);/u);
     assert.ok(missingWorkGuard, "Missing work identity must fail closed in the canonical browser client.");
-    const failureCopy = missingWorkGuard[1];
+    const failureCopy = missingWorkGuard[1]!;
     assert.match(failureCopy, /couldn't establish the requested work safely/iu);
     assert.doesNotMatch(failureCopy, /\bRun\b|provider|worker|queue|database|retry epoch/iu);
 
