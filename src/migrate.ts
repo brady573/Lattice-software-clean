@@ -1,3 +1,4 @@
+import { PostgresCapabilityAuthorizationStore } from "./capabilities/authorization-store.js";
 import { migrateRuntimeDatabase } from "./runtime-app.js";
 
 const databaseUrl = process.env.DATABASE_URL;
@@ -6,4 +7,5 @@ if (!databaseUrl) {
 }
 
 await migrateRuntimeDatabase(databaseUrl);
+await PostgresCapabilityAuthorizationStore.migrate(databaseUrl);
 console.log("LATTICE_SCHEMA_MIGRATION=PASS");
