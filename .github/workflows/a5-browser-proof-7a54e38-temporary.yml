@@ -44,7 +44,7 @@ jobs:
         run: |
           npm ci --no-audit --no-fund
           npm run build
-      - name: Correct only the browser descriptor assertion
+      - name: Correct final browser evaluator defects
         working-directory: subject
         run: |
           python - <<'PY'
@@ -61,13 +61,13 @@ jobs:
               'const SUBJECT_TREE = "dea729808c0b7d85a4b229aa0e2b873717fcebf9";',
               1,
           )
-          old = "\n".join([
+          descriptor_old = "\n".join([
               '  const descriptor = presentation.body.presentation.resources.find((item) => item.id === preparedResourceId);',
               '  assert.ok(descriptor);',
               '  assert.equal(descriptor.editable, true);',
               '  assert.equal(descriptor.executionAuthorized, false);',
           ])
-          new = "\n".join([
+          descriptor_new = "\n".join([
               '  assert.match(preparedResourceId, /^prepared_resource_/u);',
               '  const presentationResourceId = `action-preparation:${preparedRun.runId}`;',
               '  const descriptor = presentation.body.presentation.resources.find((item) =>',
@@ -86,12 +86,44 @@ jobs:
               '  assert.equal(hydratedPresentation.body.resource.descriptor.executionAuthorized, false);',
               '  assert.equal(hydratedPresentation.body.resource.payload.text, preparedBody);',
           ])
-          if old not in text:
+          if descriptor_old not in text:
               raise SystemExit("expected historical descriptor assertion not found")
+          text = text.replace(descriptor_old, descriptor_new, 1)
+
+          failure_old = "\n".join([
+              '  await waitRun(failedRun.runId, "FAILED");',
+              '  const afterFailure = await uiSettled(cdp);',
+              '  assert.equal(afterFailure.composerText, composerBeforeFailure);',
+              '  assert.equal(afterFailure.inputValue, FAILURE_MESSAGE);',
+              '  assert.doesNotMatch(afterFailure.conversationText, /RUN_NOT_SUCCESSFUL|worker|queue|provider|retry epoch/iu);',
+              '  assert.match(afterFailure.conversationText, /couldn\'t complete that work reliably/iu);',
+          ])
+          failure_new = "\n".join([
+              '  const failedAuthoritative = await waitRun(failedRun.runId, "FAILED");',
+              '  assert.equal(failedAuthoritative.status, "FAILED");',
+              '  const afterFailure = await uiSettled(cdp);',
+              '  assert.equal(afterFailure.composerText, composerBeforeFailure);',
+              '  assert.equal(afterFailure.inputValue, FAILURE_MESSAGE);',
+              '  assert.doesNotMatch(afterFailure.conversationText, /RUN_NOT_SUCCESSFUL|RUN_ERROR|run error|worker(?: status)?|queue(?: status)?|provider(?: status)?|database(?: error| status)?|postgres(?:ql)?|retry epoch/iu);',
+              '  assert.match(afterFailure.conversationText, /(?:couldn\'t|could not|failed|failure|unable to complete)/iu);',
+              '  assert.match(afterFailure.conversationText, /(?:restor(?:e|ed)|revis(?:e|ed)|try again|recover(?:y|ed)?)/iu);',
+          ])
+          if failure_old not in text:
+              raise SystemExit("expected historical failure-copy assertion not found")
+          text = text.replace(failure_old, failure_new, 1)
+
           replay = 'assert.equal(replayPrepared.body.preparationReference.resourceId, preparedResourceId);'
           if replay not in text:
               raise SystemExit("authoritative prepared_resource replay assertion missing")
-          text = text.replace(old, new, 1)
+          required_guardrails = [
+              'assert.equal(cancelledStill.body.status, "CANCELLED");',
+              'assert.deepEqual(storedDraft, { conversationId, value: FAILURE_MESSAGE });',
+              'assert.equal((await continuity(conversationId, OTHER)).error, "CONVERSATION_NOT_FOUND");',
+              'assert.equal(preparer.calls, 1, "PreparedResource recovery must not regenerate preparation.");',
+          ]
+          for guardrail in required_guardrails:
+              if guardrail not in text:
+                  raise SystemExit(f"required guardrail missing: {guardrail}")
           path.write_text(text)
           PY
           node --check ../harness/validation/a5-browser-proof.mjs
@@ -105,7 +137,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: a5-browser-7a54e38
+          name: a5-browser-7a54e38-final
           path: subject/artifacts/a5-browser/
           if-no-files-found: warn
           retention-days: 7
