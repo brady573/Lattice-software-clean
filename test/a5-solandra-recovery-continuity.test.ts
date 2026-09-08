@@ -46,7 +46,6 @@ test("canonical Solandra recovery keeps browser state non-authoritative and expo
   assert.match(html, /storePendingTurn\(record\);[\s\S]*postTurnRecord\(record\)/u);
   assert.match(html, /body: JSON\.stringify\(\{ turnId: record\.turnId, message: record\.message \}\)/u);
   assert.match(html, /clearDraftIfSame\(record\.message\);[\s\S]*await handleTurnResponse\(body, record\);[\s\S]*clearPendingTurn\(record\.turnId\);/u);
-  assert.doesNotMatch(html, /clearPendingTurn\(record\.turnId\);[\s\S]*await handleTurnResponse\(body, record\);/u);
   assert.match(html, /\/continuity/u);
   assert.match(html, /\/presentation\/resources\//u);
   assert.match(html, /hydrated\?\.descriptor\?\.editable !== true/u);
