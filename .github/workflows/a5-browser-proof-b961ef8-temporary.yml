@@ -22,7 +22,7 @@ jobs:
           persist-credentials: false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          ref: 0a1873a31dfae92de84a6fb6ec98cb89d8eda873
+          ref: b5c6e1427c4c6e1dfb3444b99856e682407e076b
           path: harness
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
@@ -44,12 +44,14 @@ jobs:
           npm run build
       - name: Syntax-check A5 browser harness
         working-directory: subject
-        run: node --check ../harness/validation/a5-browser-proof.mjs
+        run: |
+          node --check ../harness/validation/a5-browser-proof.mjs
+          node --check ../harness/validation/a5-browser-proof-runner.mjs
       - name: Execute A5 actual-browser proof
         working-directory: subject
         env:
           A5_BROWSER_ARTIFACT_DIR: artifacts/a5-browser
-        run: node ../harness/validation/a5-browser-proof.mjs
+        run: node ../harness/validation/a5-browser-proof-runner.mjs
       - name: Upload A5 browser evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
