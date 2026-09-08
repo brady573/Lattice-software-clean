@@ -2,6 +2,11 @@ import { createHash } from "node:crypto";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { createApiRequestHash, type ApiRunControlStore } from "./api-control-store.js";
+import {
+  buildPreparedResourceRecord,
+  preparedResourceFromRecord,
+  type PreparedResourceStore,
+} from "./action-preparation/prepared-resource-store.js";
 import type { ConversationStore } from "./conversation/conversation-store.js";
 import type { QualifiedCriterionCatalog } from "./decision/criterion-catalog.js";
 import type { DecisionInputSnapshot } from "./decision/decision-input-snapshot.js";
@@ -13,6 +18,7 @@ import {
 } from "./domain.js";
 import {
   ConservativeConsultationInterpreter,
+  inferConsultationResourceNeed,
   type ConsultationInterpretationProposal,
   type ConsultationInterpreter,
   type ConsultationResourceNeed,
@@ -53,6 +59,7 @@ import type { RecommendationStore } from "./recommendation/recommendation-store.
 import { createPendingRun } from "./run-execution.js";
 import type { RunStore } from "./run-store.js";
 import type { SolandraAdvisoryRuntime } from "./solandra/advisory.js";
+import type { SolandraActionPreparer } from "./solandra/action-preparer.js";
 import type {
   SolandraCognitionResult,
   SolandraCognitiveRuntime,
@@ -92,8 +99,10 @@ export interface ConsultationIntakeOptions {
   criterionCatalog?: QualifiedCriterionCatalog;
   knowledgeStore?: KnowledgeRecordStore;
   recommendationStore?: RecommendationStore;
+  preparedResourceStore?: PreparedResourceStore;
   solandraCognition?: SolandraCognitiveRuntime;
   solandraAdvisory?: SolandraAdvisoryRuntime;
+  solandraActionPreparer?: SolandraActionPreparer;
   solandraKnowledgePresenter?: SolandraKnowledgePresenter;
   apiSubject?: string | ((request: FastifyRequest) => string);
 }
@@ -474,11 +483,25 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
             governedKnowledge: governed.map(governedKnowledgeContext),
             governedRecommendations: recommendations.slice(-4).map(recommendationContext),
           });
+          const inferredResourceNeed = cognition.proposal.requestedHelp === "RESOURCE"
+            ? inferConsultationResourceNeed(sourceMessage.content)
+            : "NONE";
+          if (
+            cognition.proposal.requestedHelp === "RESOURCE"
+            && parsed.data.prepare === undefined
+            && inferredResourceNeed !== "PREPARED_MESSAGE"
+          ) {
+            return reply.status(422).send({
+              error: "RESOURCE_SCOPE_UNSUPPORTED",
+              message: "I can currently prepare an editable message, email, note, reply, or response. This requested resource type is not supported yet.",
+              interpretation: publicCognition(cognition),
+            });
+          }
           interpretation = cognitiveInterpretation(
             sourceMessage,
             currentVersion,
             cognition,
-            parsed.data.prepare,
+            parsed.data.prepare ?? (inferredResourceNeed === "PREPARED_MESSAGE" ? inferredResourceNeed : undefined),
           );
         } else {
           interpretation = await interpreter.interpret({
@@ -931,6 +954,118 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
     const truth = await options.runStore.getTruthBundle(run.id);
     if (!truth) return reply.status(409).send({ error: "VALIDATED_TRUTH_NOT_AVAILABLE" });
     const outcome = buildRunOutcome(run, truth);
+    if (
+      outcome.kind === "ACTION_PREPARATION"
+      && outcome.resource.kind === "PREPARED_MESSAGE"
+      && isConsultationRunRequest(run.request)
+    ) {
+      if (!options.knowledgeStore || !options.preparedResourceStore || !options.solandraActionPreparer) {
+        return reply.status(503).send({
+          error: "SOLANDRA_ACTION_PREPARATION_UNAVAILABLE",
+          message: "Editable message preparation is not available in the current Product composition.",
+        });
+      }
+      const intentScopeId = run.request.intentScopeId;
+      const intentVersionId = run.request.intentVersionId;
+      if (!intentScopeId || !intentVersionId) {
+        return reply.status(409).send({ error: "ACTION_PREPARATION_INTENT_BINDING_UNAVAILABLE" });
+      }
+      const intentVersion = await options.intentStore.getVersion(intentVersionId);
+      if (!intentVersion || intentVersion.intentScopeId !== intentScopeId) {
+        return reply.status(409).send({ error: "ACTION_PREPARATION_INTENT_BINDING_UNAVAILABLE" });
+      }
+      const established = await establishKnowledge(options.knowledgeStore, run, truth, outcome.knowledge);
+      const knowledgeReference = {
+        knowledgeId: established.record.knowledgeId,
+        referenceId: established.reference.referenceId,
+        responseId: established.reference.responseId,
+      };
+      let prepared = await options.preparedResourceStore.getPreparedResourceByRunId(run.id);
+      if (!prepared) {
+        const sourceMessage = await options.userMessageStore.get(run.request.sourceMessageId);
+        if (!sourceMessage || sourceMessage.conversationId !== run.conversationId) {
+          return reply.status(409).send({ error: "ACTION_PREPARATION_USER_SOURCE_UNAVAILABLE" });
+        }
+        const recent = await recentGovernedKnowledge(
+          options.knowledgeStore,
+          options.runStore,
+          run.conversationId,
+          4,
+        );
+        const priorGoverned = recent.filter((item) => item.record.runId !== run.id);
+        const currentGoverned = priorGoverned.length === 0
+          ? await loadKnowledge(options.knowledgeStore, options.runStore, established.record.knowledgeId)
+          : undefined;
+        const governed = priorGoverned.length > 0
+          ? priorGoverned
+          : currentGoverned
+            ? [currentGoverned]
+            : [];
+        if (governed.length === 0) {
+          return reply.status(409).send({ error: "ACTION_PREPARATION_KNOWLEDGE_UNAVAILABLE" });
+        }
+        let generated;
+        try {
+          generated = await options.solandraActionPreparer.prepare({
+            conversationId: run.conversationId,
+            runId: run.id,
+            intentVersionId,
+            userMessageId: sourceMessage.messageId,
+            userMessage: sourceMessage.content,
+            authoritativeObjective: authoritativeObjective(intentVersion),
+            knowledge: governed.map(governedKnowledgeContext),
+          });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "Solandra Action Preparation failed.";
+          return reply.status(422).send({ error: "SOLANDRA_ACTION_PREPARATION_FAILED", message });
+        }
+        if (generated.result.status !== "PREPARED") {
+          return reply.status(422).send({
+            error: "SOLANDRA_ACTION_PREPARATION_FAILED",
+            status: generated.result.status,
+            message: generated.result.reason,
+          });
+        }
+        const candidate = buildPreparedResourceRecord({
+          conversationId: run.conversationId,
+          runId: run.id,
+          intentScopeId,
+          intentVersionId,
+          sourceMessageId: sourceMessage.messageId,
+          kind: "PREPARED_MESSAGE",
+          title: "Prepared message",
+          body: generated.result.body,
+          basis: generated.result.basis,
+          preservedUncertainties: generated.result.preservedUncertainties,
+          createdAt: sourceMessage.createdAt,
+        });
+        try {
+          prepared = await options.preparedResourceStore.putPreparedResource(candidate);
+        } catch (error) {
+          const raced = await options.preparedResourceStore.getPreparedResourceByRunId(run.id);
+          if (!raced) throw error;
+          prepared = raced;
+        }
+      }
+      const preparedOutcome = {
+        ...outcome,
+        resource: preparedResourceFromRecord(prepared),
+      };
+      return reply.send({
+        runId: run.id,
+        status: run.status,
+        outcome: preparedOutcome,
+        knowledgeReference,
+        preparationReference: {
+          resourceId: prepared.resourceId,
+          intentVersionId: prepared.intentVersionId,
+          knowledgeIds: prepared.knowledgeIds,
+          claimIds: prepared.claimIds,
+          editable: prepared.editable,
+          executionAuthorized: prepared.executionAuthorized,
+        },
+      });
+    }
     if (outcome.kind !== "KNOWLEDGE" || !options.knowledgeStore) {
       return reply.send({ runId: run.id, status: run.status, outcome });
     }

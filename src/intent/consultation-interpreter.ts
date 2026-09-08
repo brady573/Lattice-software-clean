@@ -54,6 +54,15 @@ export interface ConsultationInterpreter {
   interpret(input: ConsultationInterpretationInput): Promise<ConsultationInterpretationProposal>;
 }
 
+export function inferConsultationResourceNeed(message: string): ConsultationResourceNeed {
+  const normalized = message.toLocaleLowerCase("en-US");
+  const asksToPrepare = /\b(?:prepare|create|make|build|draft|write|compose)\b/u.test(normalized);
+  if (!asksToPrepare) return "NONE";
+  if (/\b(?:checklist|check list)\b/u.test(normalized)) return "CHECKLIST";
+  if (/\b(?:message|email|note|reply|response)\b/u.test(normalized)) return "PREPARED_MESSAGE";
+  return "NONE";
+}
+
 const SHORT_FORM_PATTERN = /\b[A-Z]{3}\b/gu;
 
 function escapeRegex(value: string): string {
@@ -119,18 +128,12 @@ export class ConservativeConsultationInterpreter implements ConsultationInterpre
       };
     }
 
-    const normalized = message.toLocaleLowerCase("en-US");
     const missingReferent = !hasObjective
       && /^(?:is|was|will|would|could|can|should)\s+(?:this|that|it|these|those|they)\b/iu.test(message);
     const ambiguousShortForm = !hasObjective && !missingReferent
       ? unresolvedShortForm(message)
       : undefined;
-    const asksToPrepare = /\b(?:prepare|create|make|build|draft|write|compose)\b/u.test(normalized);
-    const resourceNeed: ConsultationResourceNeed = asksToPrepare && /\b(?:checklist|check list)\b/u.test(normalized)
-      ? "CHECKLIST"
-      : asksToPrepare && /\b(?:message|email|note|reply|response)\b/u.test(normalized)
-        ? "PREPARED_MESSAGE"
-        : "NONE";
+    const resourceNeed = inferConsultationResourceNeed(message);
 
     const meaningKind: ConsultationMeaningKind = objectiveEffect.kind === "ESTABLISH"
       ? "EXPLICIT_OBJECTIVE"
