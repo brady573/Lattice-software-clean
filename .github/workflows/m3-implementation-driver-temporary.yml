@@ -1,0 +1,74 @@
+name: TEMP — M3 Implementation + Focused Validation
+
+on:
+  push:
+    branches:
+      - validation/m3-implementation-driver
+
+permissions:
+  contents: write
+
+jobs:
+  implement-and-focus:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout implementation harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+          path: harness
+          persist-credentials: false
+
+      - name: Checkout exact feature base
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: feature/m3-solandra-action-preparation
+          path: subject
+          persist-credentials: true
+
+      - name: Provision Node 24
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '24'
+
+      - name: Verify exact base
+        run: |
+          set -euo pipefail
+          test "$(git -C subject rev-parse HEAD)" = "6ea58d1c9ac166418875a9923d4f7f109655c95c"
+          test "$(git -C subject rev-parse HEAD^{tree})" = "34c2de181891f941f18bf2deeb9a3fc2b8504005"
+          echo "M3_IMPLEMENTATION_BASE_SHA=$(git -C subject rev-parse HEAD)"
+          echo "M3_IMPLEMENTATION_BASE_TREE=$(git -C subject rev-parse HEAD^{tree})"
+
+      - name: Apply bounded M3 implementation
+        run: |
+          set -euo pipefail
+          cd subject
+          python ../harness/validation/m3-apply.py
+          git diff --check
+          git status --short
+
+      - name: Install locked dependencies
+        working-directory: subject
+        run: npm ci --no-audit --no-fund
+
+      - name: Compile candidate tree
+        working-directory: subject
+        run: npm run build
+
+      - name: Run focused M3 and preserved M1/M2 structural acceptance
+        working-directory: subject
+        run: node --import tsx --test test/m3-solandra-action-preparation.test.ts test/m1-solandra-cognitive-knowledge-spine.test.ts test/m2-solandra-advisory-spine.test.ts
+
+      - name: Publish tested feature candidate
+        working-directory: subject
+        run: |
+          set -euo pipefail
+          git config user.name 'brady573'
+          git config user.email '114089255+brady573@users.noreply.github.com'
+          git add src test migrations
+          git diff --cached --check
+          git commit -m 'M3: connect conversational message preparation'
+          git push origin HEAD:feature/m3-solandra-action-preparation
+          echo "M3_CANDIDATE_SHA=$(git rev-parse HEAD)"
+          echo "M3_CANDIDATE_TREE=$(git rev-parse HEAD^{tree})"
