@@ -11,7 +11,11 @@ const config = resolveRuntimeConfig({
 } as NodeJS.ProcessEnv);
 
 async function createConversation(app: Awaited<ReturnType<typeof createRuntimeApp>>, headers?: Record<string, string>): Promise<string> {
-  const response = await app.inject({ method: "POST", url: "/api/v1/conversations", headers });
+  const response = await app.inject({
+    method: "POST",
+    url: "/api/v1/conversations",
+    ...(headers ? { headers } : {}),
+  });
   assert.equal(response.statusCode, 201, response.body);
   return response.json<{ conversation: { id: string } }>().conversation.id;
 }
@@ -26,7 +30,7 @@ async function submitTurn(
   return await app.inject({
     method: "POST",
     url: `/api/v1/conversations/${encodeURIComponent(conversationId)}/turns`,
-    headers,
+    ...(headers ? { headers } : {}),
     payload: { turnId, message },
   });
 }
