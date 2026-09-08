@@ -45,6 +45,7 @@ jobs:
           set -euo pipefail
           cd subject
           python ../harness/validation/m3-apply.py
+          python ../harness/validation/m3-fix1.py
           git diff --check
           git status --short
 
