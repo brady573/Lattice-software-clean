@@ -1,0 +1,33 @@
+name: TEMP M3 Capability Broker Focused
+
+on:
+  push:
+    branches:
+      - validation/m3-capability-broker-9818c7b
+    paths:
+      - ".github/workflows/m3-capability-broker-temporary.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  focused:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: 9818c7bd6477951d00f4d3428c8d0c6cd0bc62db
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '24'
+      - name: Verify subject
+        run: |
+          test "$(git rev-parse HEAD)" = "9818c7bd6477951d00f4d3428c8d0c6cd0bc62db"
+          test "$(git rev-parse HEAD^{tree})" = "b0895c043e926dabbeb58eb666e4849536b26f67"
+      - run: npm ci --no-audit --no-fund
+      - name: Build
+        run: npm run build
+      - name: Focused M3
+        run: node --import tsx --test test/m3-capability-broker-user-model.test.ts
