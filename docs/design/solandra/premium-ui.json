@@ -1,14 +1,19 @@
 {
   "profile": "product-admin",
-  "status": "owner-approved-offline-prototype-implementation",
-  "repositoryBaseline": "5efab8a115a6fda722116dfd7161a607e0171554",
+  "status": "owner-approved-primary-ui-cognition-trust-reconciled",
+  "repositoryBaseline": "e35f57e0621b81a66285c729b124d0c87ce8dffa",
   "sourceRoots": ["src"],
   "locale": "en",
-  "canonicalMap": "docs/design/solandra/UX-CONTRACT.md",
+  "canonicalMap": "docs/design/solandra/PRIMARY-INTERACTION-CONTRACT.md",
   "designContext": "docs/design/solandra/DESIGN.md",
   "requiredCapabilities": ["Form", "Scrollbar", "Toast"],
   "ownership": {
-    "meaning": "Lattice Product/V36/StructuredDecision",
+    "cognition": "Solandra Cognitive Runtime",
+    "intentIntegrity": "Lattice",
+    "knowledgeTrust": "Lattice / V36",
+    "recommendation": "Solandra over governed Intent and Knowledge; optional formal Decision Engine capability when qualified",
+    "userChoice": "Lattice Intent Integrity when accepted USER choice materially matters downstream; distinct from Recommendation and Authorization",
+    "actionTrust": "Lattice ActionProposal / Authorization / Execution / ExecutionReceipt / Verification boundaries",
     "presentation": "Solandra",
     "rendering": "browser client"
   },
@@ -18,12 +23,11 @@
     "unit": "npm test"
   },
   "remainingValidationGaps": [
-    "Add repository-owned browser E2E command before full UI acceptance.",
-    "Add repository-owned accessibility automation when a supported browser harness exists.",
-    "Run official designmd lint when the tool is available in the execution environment.",
-    "Run Frontend Design Premium strict project audit against the installed repository design context."
+    "Run exact-candidate browser usability and accessibility acceptance.",
+    "Validate natural Solandra cognition and governed referential continuity on an implemented runtime candidate.",
+    "Validate held-out anti-script cognition across paraphrases, contextual cases, and unrelated domains on a frozen implementation candidate.",
+    "Validate Knowledge provenance continuity, accepted USER choice separation, and action authorization/execution/verification behavior on an implemented runtime candidate."
   ],
-  "approvedPackageArchiveSha256": "36a343029d2f455af1767b853bbd527710b63331efc805b02a672bbb2bbbfcd8",
-  "approvalDate": "2026-08-26",
-  "note": "Owner-approved for offline-prototype implementation. Repository/CI validation does not by itself establish browser usability, accessibility, or production readiness."
+  "reconciliationDate": "2026-09-08",
+  "note": "Design ownership metadata only. This file does not establish runtime cognition, Product acceptance, provider qualification, production readiness, or consequential action authority."
 }

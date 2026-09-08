@@ -1,178 +1,199 @@
 # Solandra Primary Interaction Contract
 
-Status: **OWNER-APPROVED PRODUCT INTERACTION LOCK**  
-Approval date: 2026-08-31  
-Authority basis: explicit Owner direction from the 2026-08-31 Android review and subsequent UI-concept reconciliation, including the later Owner correction retiring the fixed presentation-phase model.
+Status: **OWNER-APPROVED PRIMARY INTERACTION — RECONCILED BY OD-011**
 
-This contract is the controlling Solandra presentation rule for the primary user experience. It supersedes conflicting orbit-first, dashboard-first, `Next Step`, workflow-state, fixed presentation-phase, global presentation-gate, and prior lower-field/composer terminology. It does not change Lattice truth authority, Intent Authority, DecisionPlan, Run, V36, StructuredDecision, security, production, cost, or validation boundaries.
+Reconciled: **2026-09-08**
 
-`../Lattice-Intent-and-Decision-Architecture.md` supplies the cross-system semantic constraints for USER meaning, evidence, recommendation, selection, confirmation, and uncertainty. This interaction contract controls presentation behavior only and must remain faithful to those semantic boundaries.
+`../The-Core-Lattice-Philosophy.md` remains unchanged and highest Product authority. This interaction contract is subordinate to the Core and current Owner decision OD-011.
+
+This contract preserves the approved continuous Conversation + free-form ConversationInput + adaptive Composer interaction while reconciling Solandra's current role from presentation-only to genuine cognition.
+
+`../Lattice-Intent-and-Decision-Architecture.md` and the Knowledge/action architectures control the meaning of governed state.
 
 ## 1. Core concept
 
-Imagine Solandra standing with the person and having a conversation while using a shared screen beside her.
+Imagine Solandra standing with the person, talking naturally while using a shared screen beside her.
 
-Solandra's job is to provide accurate, actionable information that helps the person understand, decide, or take the right next step. She may clarify meaning, gather information, research, compare, explain, recommend, challenge, prepare resources, or help the person act as the situation requires.
+Solandra is the intelligent expert in that interaction. She may understand, clarify, investigate, reason, compare, recommend, coordinate capabilities, prepare action, and explain.
 
 The shared screen is the **Composer**.
 
-The Composer is not the text-entry box. It is the primary visual information surface Solandra uses throughout the conversation.
+The primary frame remains:
 
-The primary experience is therefore:
+1. **Conversation** — the interpersonal exchange.
+2. **ConversationInput** — free-form text entry/send.
+3. **Composer** — the dominant visual information surface for what is most useful now.
 
-1. **Conversation** — the person and Solandra communicate.
-2. **Composer** — Solandra visually presents the most useful information for the current point in that conversation.
-3. **Conversation input** — the text-entry/send control through which the person can speak to Solandra when using text.
+## 2. Continuous interaction
 
-Any permanent UI element that cannot justify itself inside this model should not exist in the primary experience.
+Ordinary interaction is one continuous conversation, not a fixed user-facing workflow or presentation-stage sequence.
 
-## 2. Continuous interaction model
+Solandra may move naturally among:
 
-Ordinary Solandra interaction is one continuous conversation, not a user-facing sequence of fixed stages.
+- interpretation;
+- clarification;
+- Knowledge gathering;
+- explanation;
+- comparison;
+- Recommendation;
+- USER choice when relevant;
+- correction;
+- evidence/source inspection;
+- Resource use;
+- ActionProposal preparation;
+- authorization discussion;
+- execution/recovery/verification follow-up.
 
-Solandra may move naturally among clarification, investigation, explanation, comparison, recommendation, correction, evidence review, resource use, and action preparation according to what is useful now. Those activities do not require the person to understand or operate a workflow model.
+The person should not have to learn stage names or hidden trigger phrases to make Solandra useful.
 
-The Composer changes because the useful information changes, not because the UI advances through a fixed presentation taxonomy.
+## 3. Cognition and trust
 
-Examples of useful Composer content include:
+Solandra may think ahead and decide what work is useful. Material state is still constrained by Lattice trust boundaries:
 
-- a concise representation of accepted USER meaning;
-- a tentative interpretation that is clearly still pending when seeing it helps the person respond;
-- a supported fact or finding;
-- material uncertainty or limitation;
-- a comparison;
-- authoritative recommendation/frontier state;
-- a warning;
-- a plan or sequence;
-- a map, contact, document, image, video, checklist, prepared message, generated artifact, or other contextual resource;
-- evidence, provenance, verification, or audit detail when intentionally requested.
+- Solandra interpretation/hypothesis is not automatically canonical USER Intent;
+- Lattice Intent Integrity establishes what meaning may be relied upon;
+- raw information/model/provider output is not automatically Knowledge;
+- Lattice Knowledge Trust/V36 establishes governed factual support;
+- Solandra produces ordinary advisory Recommendation over governed Intent + Knowledge;
+- an optional formal Decision Engine capability may contribute when formal guarantees are useful;
+- Recommendation is not the person's accepted Decision/Choice;
+- when exact USER choice materially matters downstream, Intent Integrity may preserve an optional `AcceptedChoice`;
+- accepted USER Decision/Choice is not Authorization;
+- Recommendation is not Authorization;
+- consequential ActionProposal execution requires the applicable Authorization;
+- Authorization is not Execution;
+- Execution is not Verification; and
+- ExecutionReceipt is not Verification.
 
-These are **content patterns**, not phases, permanent regions, or hidden unlock states.
+The UI may feel fluid without hiding a material trust distinction when the distinction affects what the person can safely rely on or do.
 
-The person should not need to discover a special command such as `compare`, `research`, `recommend`, or `next step` to make Solandra useful. When useful content is available and licensed by the Product authority that owns its meaning, Solandra should surface it naturally.
+## 4. Material clarification
 
-## 3. Content licensing and semantic fidelity
+Solandra should proceed on ordinary reasonable interpretation when meaning is materially sufficient.
 
-There is no global presentation-state gate that independently decides when Solandra may become useful.
+Ask/confirm when unresolved meaning could materially change:
 
-Instead, each material piece of content must be faithful to the Product authority that licenses the meaning it presents:
+- what Knowledge is needed;
+- truth/research scope;
+- Recommendation or formal decision outcome;
+- the person's materially consequential choice;
+- target/arguments of a consequential action;
+- authorization scope.
 
-- accepted USER meaning comes from Intent Authority;
-- pending interpretation remains proposal material until resolved under Intent Authority semantics;
-- external factual claims depend on V36-admitted evidence;
-- eligibility, comparison, recommendation/frontier state, and any selected outcome depend on Decision Engine state;
-- consequential external action remains subject to the applicable authorization and Execution Runtime boundaries;
-- presentation may explain, organize, prioritize, or render those states but may not strengthen them.
+Do not turn confirmation into ceremony. A generic `yes` only confirms the exact fresh proposition it unambiguously answers.
 
-Solandra may ask a clarification question whenever unresolved USER meaning materially affects what should happen next. She may also present already-supported useful information without waiting for a separate presentation milestone, provided doing so does not misrepresent unresolved intent or strengthen another Product authority.
+## 5. Composer law
 
-Likewise, investigation or decision work may continue while the Composer shows whatever trustworthy information is already useful. Internal work-in-progress does not require a special user-facing phase or progress-only screen.
+At every point ask:
 
-A supported limitation can itself be useful content when that limitation materially affects the person's understanding, decision, or action.
+> **What is the most useful trustworthy thing for this person to see right now?**
 
-## 4. Composer law
+Composer content may include:
 
-At every point, ask one question:
+- accepted Intent/understanding;
+- a clearly tentative interpretation;
+- governed Knowledge/findings;
+- material uncertainty/limitations;
+- comparison or Recommendation;
+- accepted USER choice when seeing it is useful;
+- optional formal decision result/frontier;
+- warning/plan;
+- Resource;
+- source/evidence inspection;
+- ActionProposal/authorization summary;
+- execution/verification state;
+- recovery information.
 
-**What is the most useful thing for this person to see on the shared screen right now?**
+These are content patterns, not fixed phases.
 
-The answer determines Composer content, subject to the semantic fidelity rules above.
+Prefer useful information over narration of provider, worker, Run, queue, task, model-route, or orchestration machinery.
 
-`What I understand`, consequential explanation, comparison views, recommendations, evidence, and resources are Composer content patterns, not permanent structural regions that must occupy the screen at all times.
+## 6. No-riddle behavior
 
-A pattern should appear only when it makes the Composer more useful at that moment.
+Useful Product capability must not depend on discovering commands such as:
 
-The Composer should prefer useful information over narration of internal Product state. It should not normally announce workflow, semantic-category, provider, worker, or execution labels simply to explain why content is present.
+- `compare`;
+- `research`;
+- `recommend`;
+- `continue`;
+- `what next`;
+- `show sources`.
 
-## 5. Conversation, input, and exact confirmation
+Those are valid requests, but Solandra should proactively use/surface relevant capabilities when licensed and useful.
 
-Conversation is the interpersonal exchange. It carries Solandra's questions, explanations, corrections, knowledge, and continuity.
+## 7. Governed referential continuity
 
-The conversation input is only an input mechanism. It remains free-form and does not become a wizard, workflow controller, command palette, or hidden unlock mechanism.
+ConversationReference binds meaningful turns to exact governed objects.
 
-A submitted message does not itself create accepted intent, truth, recommendation authority, selected-outcome authority, or execution authorization.
+Natural follow-ups should resolve against those refs:
 
-When the person needs to act or decide, Solandra communicates naturally in Conversation while the Composer presents the information that best supports that decision or action.
+- “Explain that.” -> the exact referenced Knowledge/Recommendation.
+- “What were your sources?” -> actual historical Knowledge -> Evidence -> Source provenance.
+- “What about the second option?” -> the referenced alternative/basis.
+- “I’ll take the second one.” -> the referenced alternative may become an `AcceptedChoice` through Intent Integrity when exact choice matters downstream.
+- “Do it.” -> the exact ActionProposal if current, or a newly prepared proposal from the referenced Recommendation/AcceptedChoice.
+- “Did it work?” -> the exact ExecutionReceipt/Verification state.
 
-When a USER reply is being used to confirm pending intent meaning, the confirmation must bind the exact fresh proposition and semantic basis required by Intent Authority. A broad `yes` or approval of a whole Composer screen must not silently confirm several materially independent pending interpretations unless that exact combined proposition is unambiguous and valid under the Intent Authority contract.
+Do not re-search merely to invent provenance for an old answer. Do not treat pronoun/reference resolution, Recommendation, or USER choice as action Authorization.
 
-A large understanding summary may support comprehension without becoming a bulk semantic-commit control.
+## 8. Recommendation shape
 
-## 6. Change and reversibility
+Ordinary Recommendation is Solandra advisory state and may be one recommendation, alternatives, a conditional answer, or no responsible recommendation.
 
-Useful information never freezes the person's need.
+The person's actual choice remains distinct from the Recommendation. Presentation must not imply that Solandra's preferred option was selected by the USER merely because it was recommended or visually emphasized.
 
-If the person materially corrects or changes the request, Intent Authority updates accepted meaning under its own contract. Solandra must retire or recompute dependent presentation that is no longer valid on the revised basis.
+When a formal Decision Engine capability is used, preserve its qualified shape. A formal frontier/tie must not become a fabricated winner through presentation convenience.
 
-A question or follow-up that does not change the accepted USER meaning may simply be answered without forcing a presentation reset.
+The UI does not require formal Decision Engine participation for ordinary advice or ordinary USER choice.
 
-Historical intent, evidence, and StructuredDecision state are not rewritten merely because the current Composer changes.
+## 9. Resources and action
 
-## 7. Recommendations, alternatives, and uncertainty
+A useful Resource may take over Composer while Conversation and ConversationInput remain available. One quiet return action restores the prior composition.
 
-The Composer must preserve the shape of authoritative decision state.
-
-A recommendation may be:
-
-- one clearly dominant option;
-- several materially distinct frontier options;
-- an explicit tie or unresolved outcome;
-- a limitation that prevents a safe recommendation; or
-- no safely recommendable option.
-
-Presentation must not manufacture a single winner merely because one large visual surface is easier to design. A selected outcome may be shown only when authoritative Decision Engine state actually contains one.
-
-Uncertainty also retains its semantic source. Intent uncertainty, V36 evidence uncertainty, and Decision Engine outcome uncertainty may be translated into plain language, but the presentation/read model must not collapse them into one generic confidence state or let one kind of certainty repair another.
-
-## 8. Resources and deeper inspection
-
-A resource belongs in the Composer only when it materially helps the person understand, decide, or act.
-
-Examples include a map, prepared message, contact, checklist, document, image, video, source material, or downloadable artifact.
-
-A substantial resource may temporarily take over the Composer. Conversation and the conversation input remain available, and one quiet return action restores the prior Composer content.
-
-Criteria, evidence, provenance, verification, and audit detail remain available when intentionally requested, but they are not permanent primary-screen chrome. If the person asks to look behind the curtain, the Composer can present that information directly without converting presentation detail into semantic authority.
-
-## 9. Authority law
-
-The model may propose an interpretation or useful content. It does not own accepted intent, Product truth, recommendation authority, selected-outcome authority, or execution authority.
+Prepared assistance and USER choice remain separate from authorization and execution:
 
 ```text
-message submitted != accepted USER intent
-pending interpretation != accepted USER intent
-content visible != factual truth established
-supported USER meaning != external facts automatically established
-supported USER meaning != recommendation automatically licensed
-model says "X is best" != recommendation licensed
-frontier contains options != selected winner exists
-recommendation presented != user decision
-user decision != execution authorized
-resource exists != resource should be shown
+Recommendation
+  -> optional accepted USER Decision/Choice
+  -> ActionProposal
+  -> Authorization
+  -> Execution
+  -> ExecutionReceipt
+  -> Verification
 ```
 
-## 10. Primary anti-drift invariants
+Not every action requires a prior Recommendation or durable `AcceptedChoice`; those states remain distinct whenever they exist.
 
-A Solandra UI change is non-conforming if any of these is true:
+Solandra may ask naturally for missing Authorization. Do not expose an authorization wizard unless a concrete Product need requires it.
 
-1. It cannot be explained as supporting Conversation or making the Composer more useful.
-2. It treats the text-entry box as the Composer.
-3. It turns an understanding summary into permanent primary-screen chrome when other information is more useful.
-4. It introduces a fixed user-facing presentation-phase taxonomy or requires phase navigation for ordinary use.
-5. It presents pending interpretation as accepted USER meaning.
-6. It presents external claims, recommendations, selected outcomes, or action authority more strongly than the owning Product state licenses.
-7. It requires the person to guess a command or solve a UI puzzle to make Solandra useful.
-8. It adds permanent `Compare`, `Details`, `Next`, orbit, dashboard, workflow, or similar chrome for operations Conversation can handle naturally.
-9. It repeats the same information across Conversation and Composer without a distinct user benefit.
-10. It surfaces technical machinery instead of information useful to the person.
-11. It retains stale dependent knowledge after the accepted USER basis materially changes.
-12. It collapses intent, evidence, and decision uncertainty into a generic confidence authority.
-13. It turns a recommendation frontier into a fabricated single winner or selected outcome.
-14. It lets presentation or model output strengthen Product truth or authority.
-15. Mobile clipping, overlap, or navigation friction makes the Composer materially less useful.
+## 10. Change and reversibility
 
-Any future UI element must pass this test before it is added:
+When the person corrects or changes meaning:
 
-**Does this help the person converse with Solandra or make the Composer more useful without changing who owns the underlying meaning?**
+- Intent Integrity establishes successor Intent state;
+- Solandra recomputes only dependent cognition/output;
+- stale Knowledge/Recommendation/AcceptedChoice/ActionProposal presentation is retired where its basis is no longer valid;
+- historical governed state remains inspectable rather than rewritten.
 
-If not, discard it from the primary UI.
+A follow-up question that does not change Intent may simply be answered through existing references.
+
+## 11. Primary anti-drift invariants
+
+A UI/interaction change is non-conforming if it:
+
+1. reduces Solandra to presentation-only behavior;
+2. turns ConversationInput into a workflow controller;
+3. introduces a fixed user-facing stage taxonomy/global readiness gate;
+4. requires hidden commands to unlock capability;
+5. presents Solandra interpretation as canonical Intent without the applicable trust basis;
+6. presents raw information as governed Knowledge;
+7. requires formal Decision Engine state for every Recommendation or USER choice;
+8. converts Recommendation into accepted USER Decision/Choice;
+9. converts accepted USER Decision/Choice into Authorization;
+10. converts Recommendation or ActionProposal into Authorization;
+11. collapses Authorization into Execution;
+12. converts Execution or ExecutionReceipt into Verification;
+13. reconstructs old authority/provenance from prose when exact governed refs exist;
+14. exposes internal provider/worker/Run machinery instead of useful state;
+15. fabricates a formal winner/frontier collapse;
+16. makes mobile/zoom/accessibility materially less usable.

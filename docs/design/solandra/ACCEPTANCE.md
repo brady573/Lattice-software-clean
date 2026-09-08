@@ -1,218 +1,255 @@
-# Solandra Offline Prototype Acceptance Contract
+# Solandra Acceptance Contract — Cognition / Trust Reconciled
 
-Status: **OWNER-APPROVED ACCEPTANCE INTENT — EXECUTION EVIDENCE REQUIRED**
+Status: **OWNER-DIRECTED ACCEPTANCE INTENT — EXECUTION EVIDENCE REQUIRED**
 
-The approved package defines the following black-box scenarios. Each executed probe records user input, authoritative expectation, presentation expectation, forbidden presentation, observed result, and exact revision/state.
+Reconciled: **2026-09-08**
 
-`PRIMARY-INTERACTION-CONTRACT.md` is the controlling primary-interaction acceptance basis for Solandra. `../Lattice-Intent-and-Decision-Architecture.md` supplies the semantic fidelity constraints for USER meaning, evidence, recommendation, selection, confirmation, and uncertainty.
+`../The-Core-Lattice-Philosophy.md` remains unchanged and highest Product authority. This acceptance contract is subordinate to the Core and current Owner decision OD-011.
 
-## Core acceptance slice
+These are black-box Product acceptance requirements for future implementation. Documentation changes do not satisfy them.
 
-### A01 — authoritative decision fidelity
-Input: a decision with at least one exact USER hard requirement and at least one material preference or priority, plus the qualified evidence required to evaluate viable options.
+## A01 — natural ordinary-language cognition
 
-Required: Decision Engine / StructuredDecision determines eligibility and recommendation/frontier state; an option that fails an applicable hard requirement remains ineligible regardless of lower-priority appeal; presentation leads with the authoritative result and does not present ineligible alternatives as ordinary runners-up.
+Given an ordinary request stated in lay language, Solandra should form a materially useful interpretation and continue naturally without requiring ritual confirmation when no material ambiguity exists.
 
-Forbidden: score visually rescues an ineligible option.
+Forbidden:
 
-### A05 — evidence inspection
-Decision effect must lead to the material fact, then licensed evidence and verification/provenance detail. Rejected/non-qualifying evidence cannot appear as positive support.
+- presentation-only response that cannot reason about the request;
+- deterministic keyword ceremony that asks the USER to restate clearly inferable meaning;
+- treating model confidence itself as USER authority.
 
-### A07 — presentation tampering
-Changing browser-side winner/eligibility cannot change backend authority; authoritative re-fetch must restore licensed state.
+## A02 — material ambiguity routes to Intent Integrity
 
-### A08 — active progress
-Only truthful public Product progress. No fake percentage and no provider/worker/task exposure.
+When two plausible interpretations would materially change Knowledge, Recommendation/formal result, USER choice, or consequential action, Solandra asks a precise natural clarification and does not silently commit the risky interpretation.
 
-### A10 — failure recovery
-Useful context remains, recovery is specific, and the Product does not collapse to a generic dead-end error page.
+Historical USER provenance/correction remains intact.
 
-### A12 — accessibility
-Available controls and evidence disclosure are keyboard reachable; focus is visible; material states have text/non-color cues; routine live updates do not steal focus.
+## A03 — Knowledge acquisition beyond USER awareness
 
-### A13 — mobile / 200% zoom
-Conversation, conversation input, Composer content, material uncertainty, useful information, and any active resource remain reachable and legible without two-dimensional page scrolling, clipping, or overlapping primary content.
-
-### A21 — core primary interaction
-The ordinary primary UI consists of Conversation, conversation input, and Composer.
+When a material external fact the USER did not know to ask about could change the outcome, Solandra may identify and acquire that information through a qualified capability.
 
 Required:
-- Conversation carries the interpersonal exchange with Solandra.
-- Conversation input remains free-form and is not treated as a workflow controller.
-- Composer is the dominant visual information surface.
-- Composer content changes according to what is most useful at the current point in the conversation.
+
+- raw acquisition remains information;
+- material factual claims cross Knowledge Trust/V36;
+- unresolved/conflicting evidence remains explicit.
+
+Forbidden: provider/model success becomes fact automatically.
+
+## A04 — durable Knowledge provenance
+
+A governed Knowledge result preserves traceable Source -> Evidence -> Claim support/conflict/uncertainty sufficient for later inspection.
+
+## A05 — historical source continuity
+
+After Solandra answers from Knowledge K and later the USER asks “What were your sources?”, the response traverses the exact provenance used by K (or its referenced Recommendation).
 
 Forbidden:
-- calling or treating the textarea/send control as the Composer;
-- a permanent dashboard, orbit, workflow stepper, card grid, or resource tray competing with the core interaction;
-- duplicate panels without distinct user purpose.
 
-### A22 — continuous adaptive Composer behavior
-Ordinary interaction is one continuous conversation rather than a fixed user-facing presentation sequence.
+- silently re-searching and attributing newly found sources to the old answer;
+- source-count or provider reputation substituting for actual provenance.
+
+## A06 — ordinary Recommendation without mandatory formal engine
+
+For an ordinary advisory problem that does not require formal typed decision guarantees, Solandra can produce a materially useful Recommendation over governed Intent + Knowledge without creating/using a DecisionPlan or formal Decision Engine solely because the USER asked for advice.
+
+Recommendation remains advisory and basis-attributable. It is not the person's accepted Decision/Choice.
+
+## A06B — USER Decision/Choice boundary
+
+When the USER actually chooses among alternatives and downstream trust depends on that exact choice, the Product preserves the choice as governed USER state distinct from both the prior Recommendation and any later action Authorization.
 
 Required:
-- Composer may show accepted USER meaning whenever seeing that meaning is useful;
-- material pending interpretation remains distinguishable from accepted meaning whenever both are shown;
-- already-supported useful information may appear while unrelated clarification, research, or decision work remains unresolved;
-- findings, comparisons, recommendation/frontier state, warnings, plans, Resources, and inspection detail may become visually primary whenever useful and licensed by their owning Product authority;
-- Conversation can clarify, explain, correct, compare, recommend, or prepare action without requiring dedicated workflow navigation.
+
+- the accepted choice is attributable to actual USER provenance and the referenced option/outcome when material;
+- the person may choose without authorizing external execution;
+- the choice may inform a later ActionProposal without itself authorizing that proposal;
+- accepting ordinary USER choice does not require the formal Decision Engine.
 
 Forbidden:
-- a fixed user-facing presentation-phase taxonomy;
-- presentation-stage controls the user must operate to make Solandra advance;
-- a global gate that withholds already-valid useful information solely because another category of work is unfinished;
-- presenting pending interpretation as though it were already canonical USER meaning;
-- permanent `Next Step`, `Compare`, `Details`, or similar workflow chrome.
 
-### A23 — content licensing and no-riddle behavior
-Every material piece of Composer content must be faithful to the Product authority that licenses its meaning.
+- treating Solandra's Recommendation, visual emphasis, or a formal capability result as though the USER chose it;
+- treating accepted USER choice as consequential Authorization;
+- creating a new universal decision-authority subsystem solely to record ordinary USER choice.
+
+## A07 — optional formal capability fidelity
+
+For a problem deliberately qualified for the formal Decision Engine, its hard-requirement/tri-state/frontier/tie semantics remain intact and Solandra explains them faithfully.
+
+Forbidden: visual or narrative collapse of a formal multi-option frontier into a fabricated winner.
+
+## A08 — Recommendation basis and uncertainty
+
+A Recommendation identifies enough basis/assumptions/material uncertainty to explain why it follows and when it should change.
+
+New material Intent/Knowledge produces successor advice rather than rewriting the old Recommendation's historical basis.
+
+## A09 — “Explain that” reference continuity
+
+After a Recommendation/finding, “Explain that” resolves the intended referenced governed object and explains from its exact basis without asking the USER to restate the topic unnecessarily.
+
+## A10 — “second option” reference continuity
+
+After alternatives are discussed, “What about the second option?” resolves the correct alternative/reference and preserves historical basis unless new analysis is explicitly performed.
+
+## A11 — “Do it” action continuity
+
+After a Recommendation/Resource or accepted USER choice, “Do it” resolves or creates the exact current ActionProposal.
 
 Required:
-- accepted USER meaning comes from Intent Authority;
-- external factual claims presented as established come from V36-admitted evidence;
-- comparison/recommendation/frontier/selected-outcome presentation comes from Decision Engine / StructuredDecision state;
-- consequential action remains separately authorized and executed;
-- data gathering may include information the person did not know to ask for when it materially improves usefulness, accuracy, or actionability;
-- useful licensed information is surfaced naturally without requiring a trigger phrase;
-- a supported limitation may itself be presented when materially useful;
-- a material correction retires or recomputes stale dependent Composer content without forcing unaffected valid content to disappear.
 
-Forbidden:
-- requiring trigger phrases such as `compare`, `research`, `recommend`, `continue`, or `what next` merely to make Solandra useful;
-- treating model confidence or model prose as Product authority;
-- treating accepted USER meaning as proof that external facts, recommendation state, a selected outcome, or action authorization already exists;
-- withholding a supported Resource, finding, or explanation merely because some unrelated Product work remains incomplete;
-- strengthening incomplete research or decision work into established content because the UI wants a cleaner state.
+- exact target/arguments/proposal version;
+- applicable Authorization check;
+- natural request for missing narrow Authorization;
+- Runtime final binding/policy check.
 
-### A24 — useful information, recommendation shape, and resources
-Composer may include explanations, findings, comparisons, recommendations, warnings, uncertainty, plans, maps, links, contacts, documents, media, checklists, generated artifacts, or actionable guidance.
+Forbidden: pronoun resolution, prior Recommendation, or accepted USER choice treated as blanket execution authority.
+
+## A12 — authorization exactness
+
+Authorization of ActionProposal version N cannot authorize materially changed version N+1.
+
+Generic approval of the whole Composer must not silently authorize several independent consequential actions.
+
+## A13 — execution receipt is not verification
+
+After execution reports success, Solandra distinguishes that report from verified resulting state.
+
+If an independent verification capability is available, use it before claiming verified completion. If verification is unavailable, state the limitation.
+
+## A14 — ambiguous consequential completion
+
+When a non-idempotent/consequential action may have executed but outcome is unknown:
+
+- no blind retry;
+- no inference from timeout/model/telemetry alone;
+- reconcile with authoritative external status/idempotency evidence when available;
+- otherwise preserve explicit ambiguity/action-required state.
+
+## A15 — restart/reconnect continuity
+
+After process/client restart, the conversation can continue from durable Intent, Knowledge, Recommendation, accepted USER choice where applicable, ConversationReference, action, receipt, and verification state without reconstructing authority from prose.
+
+## A16 — correction lineage
+
+A material USER correction creates successor Intent and invalidates only dependent state. Historical Intent/Knowledge/Recommendation/choice/action records remain inspectable and are not rewritten.
+
+## A17 — subject/privacy isolation
+
+Another authenticated subject cannot enumerate or dereference ConversationReference, Knowledge, Resource, AcceptedChoice, ActionProposal, receipt, or Verification objects from a Conversation they do not own.
+
+Deletion blocks normal access to the owned graph and rejects late result release.
+
+## A18 — capability-first behavior
+
+Solandra can request a useful capability by Product purpose without provider-specific user workflow.
+
+Provider/worker/Run/queue mechanics remain hidden in ordinary UX unless a material trust/recovery consequence makes them useful.
+
+## A19 — user-authorized model boundary
+
+When a USER-authorized model capability is used, its context/permissions/provenance remain bounded and logically distinct from Solandra's own cognitive role.
+
+Its output cannot bypass Intent Integrity, Knowledge Trust, Authorization, or Verification.
+
+## A20 — no-riddle interaction
+
+The USER need not discover `compare`, `research`, `recommend`, `continue`, `sources`, or `what next` as hidden commands to unlock useful Product behavior.
+
+## A21 — primary interaction frame
+
+Ordinary primary UI remains:
+
+- Conversation;
+- free-form ConversationInput;
+- adaptive Composer.
+
+Forbidden: dashboard/orbit/workflow stepper/provider console as primary interaction.
+
+## A22 — adaptive Composer
+
+Composer may surface whatever currently useful trustworthy content fits the conversation: Intent, Knowledge, Recommendation, accepted USER choice, formal result when present, Resource, sources, ActionProposal, execution/verification/recovery.
+
+No fixed user-facing presentation-stage taxonomy or global readiness gate.
+
+## A23 — presentation fidelity
+
+Presentation cannot strengthen:
+
+- Solandra interpretation -> canonical Intent;
+- information -> Knowledge;
+- Recommendation -> accepted USER Decision/Choice;
+- accepted USER Decision/Choice -> Authorization;
+- Recommendation -> Authorization;
+- ActionProposal -> Authorization;
+- Authorization -> Execution;
+- Execution -> Verification;
+- ExecutionReceipt -> Verification;
+- formal frontier -> selected winner.
+
+## A24 — Resource behavior
+
+A substantial Resource may take over Composer while Conversation/Input remain available. Back restores prior composition. Resource display/selection does not itself change Intent, Recommendation, USER choice, Authorization, or Verification.
+
+## A25 — source and verification inspection
+
+When requested, Composer can present actual evidence/source/verification detail from governed objects without requiring permanent technical chrome.
+
+## A26 — failure/recovery
+
+Useful context remains available during recoverable failure. Product-visible copy describes the real consequence/safe next action, not raw provider/worker/database errors.
+
+Healthy bounded recovery need not be exposed as failure.
+
+## A27 — accessibility and responsive behavior
+
+Keyboard reachability, visible focus, non-color material-state cues, reduced motion, IME-safe input, 200% zoom/reflow, and mobile layout preserve Conversation/Input/Composer and active Resource/action/verification content without clipping or two-dimensional page scrolling.
+
+## A28 — design/runtime evidence boundary
+
+Repository design checks may establish document consistency only.
+
+Runtime acceptance requires executed evidence on an exact implementation revision, including representative real cognition, persistence/restart, Knowledge provenance, reference resolution, capability, USER choice, action/authorization, ambiguity, verification, privacy, and browser usability behavior.
+
+## A29 — held-out anti-script cognition capability gate
+
+Published examples and deterministic fixtures are development probes, not Product grammar and not sufficient evidence of general cognition.
+
+Before a cognition candidate is evaluated for this gate:
+
+1. freeze the exact cognition implementation revision, prompts, routing/configuration, and relevant model/capability selection;
+2. keep the held-out natural-language probe set undisclosed to that candidate and its implementation process until the freeze is recorded;
+3. evaluate multiple paraphrases, contextual/reference-dependent cases, and materially unrelated domains that are not merely noun substitutions of published examples; and
+4. inspect the candidate source/configuration/prompts for probe-specific or domain-specific branches whose practical purpose is to recognize the acceptance examples rather than provide general Product behavior.
 
 Required:
-- Composer prioritizes the most useful information currently licensed for the person's need;
-- external factual claims presented as established remain faithful to V36-admitted evidence;
-- comparison/recommendation/frontier/selected-outcome presentation remains faithful to Decision Engine / StructuredDecision state;
-- a multi-option material-dominance frontier remains multi-option unless valid authoritative selection exists;
-- a materially useful supported limitation may itself be presented;
-- a substantial resource may take over Composer while Conversation and conversation input remain available;
-- one quiet Back action restores the prior Composer composition;
-- criteria/evidence/provenance may be presented through Composer when intentionally requested.
+
+- materially equivalent useful cognition across ordinary paraphrases rather than exact keyword/token dependence;
+- context-sensitive handling where meaning depends on prior conversation;
+- useful behavior across unrelated domains without adding one handwritten semantic pipeline per probe/domain;
+- examples remain test inputs, never ontology/schema/workflow definitions;
+- failures are recorded rather than hidden by selecting only favorable runs.
 
 Forbidden:
-- fabricating a single winner because one dominant visual answer is easier to present;
-- visual emphasis that implies selected-outcome authority not present in StructuredDecision;
-- using provider status, worker progress, or similar internal activity as a substitute for useful information;
-- a permanent resource taxonomy or technical inspector occupying the ordinary primary screen;
-- showing resources merely because they exist.
 
-### A25 — Composer discard rule
-Every permanent primary UI element must materially support at least one of:
+- disclosing held-out probes and then tuning the same candidate against them while still counting the probes as held out;
+- hard-coded branches, prompt clauses, routers, fixture recognizers, or domain scripts added merely to satisfy known acceptance wording;
+- claiming capability from schema-valid/static/fixture output alone.
 
-1. Conversation; or
-2. making the Composer more useful for understanding, deciding, or acting.
+If the frozen candidate is changed after held-out disclosure in a way that could affect cognition behavior, that held-out set is consumed for acceptance and a fresh undisclosed set is required for the changed candidate.
 
-It must also preserve the semantic authority of the state it presents.
+## Human usability questions
 
-Forbidden:
-- empty structural placeholders for content that is not currently useful;
-- permanent `Why this matters` chrome when there is nothing useful to explain;
-- raw criterion keys, intent/decision-plan IDs, provenance handles, provider status, source-count badges, or implementation classifications competing with useful information;
-- retaining an understanding-first layout after other information has become more useful;
-- fixed presentation-stage or workflow chrome.
+A representative person should be able to answer:
 
-When consequential explanation is useful, it may appear as direct Composer content rather than as abstract navigation.
-
-### A26 — semantic presentation fidelity
-The UI may simplify internal machinery but must preserve the semantic distinctions that affect USER meaning or decision trustworthiness.
-
-Required:
-- accepted USER meaning remains distinguishable from pending interpretation;
-- a material confirmation interaction binds an exact, current pending USER-meaning proposition under Intent Authority semantics;
-- intent uncertainty, evidence uncertainty, and decision uncertainty remain distinguishable in the semantic presentation/read model even when visible copy is plain-language;
-- USER intent confirmation does not visually imply confirmation of external facts, recommendation correctness, delegation, selected outcome, or external action authorization;
-- presentation-only changes cannot mutate or strengthen canonical intent, V36 evidence, eligibility, recommendation/frontier membership, or selected-outcome state.
-
-Forbidden:
-- using one generic confidence value to stand in for intent, evidence, and decision uncertainty;
-- treating a generic `yes` to a broad understanding screen as bulk confirmation of materially independent pending interpretations unless the exact combined proposition is unambiguous and valid under Intent Authority semantics;
-- reconstructing semantic authority from presentation text;
-- converting a recommendation frontier into a winner through visual ordering, size, color, or copy.
-
-## Conversation-test prototype
-
-These scenarios apply when the offline model simulator is configured for the prototype.
-
-### S01 — simulated conversation round-trip
-A user can enter arbitrary text through the conversation input and receive a simulated assistant reply in the same consultation thread. The reply is labeled as conversation-test material.
-
-### S02 — simulation cannot strengthen Product authority
-The simulated response must not expose or create `verified`, confidence, truth-verdict, evidence-admission, ranking, winner, or decision authority. Authoritative decision state remains produced only through the existing V36 → StructuredDecision path.
-
-### S03 — explicit configuration boundary
-When no Product-owned model runtime is configured, the existing canonical disabled-input state remains and the prototype conversation endpoint fails closed. No remote provider fallback is permitted.
-
-### S04 — simulator failure and retry
-A simulator transport/provider failure preserves the visible transcript, reports a plain-language failure without raw backend detail, and offers retry for the unanswered turn. Draft text entered while a response is pending is not auto-sent. A failed unanswered turn blocks a later send until that same logical turn is retried.
-
-### S05 — conversation input, context, and update behavior
-Enter sends only when IME composition is inactive; Shift+Enter creates a newline. Each message is limited to 4,000 characters and the transient transcript is limited to 24 messages with an explicit boundary message when reached. A simulated response does not force-scroll a user who deliberately moved away from the newest content; a `New response` affordance is provided instead.
-
-## Future-capability scenarios retained by the approved package
-
-These become applicable only when the corresponding Product capability exists:
-- A02 missing requirement evidence → unknown/insufficient, not automatic pass/fail;
-- A03 contradictory evidence → conflict remains explicit, no source-majority shortcut;
-- A04 outdated evidence → temporal problem explicit;
-- A09 cancellation → Stop only when supported; cancelling/cancelled distinct;
-- A11 post-decision requirement change → historical result preserved, new evaluation separate;
-- A14 clarification necessity → ask only outcome-changing questions;
-- A15 uncertainty blocks decision → no cosmetic winner;
-- A16 active Run local draft → no silent queueing;
-- A17 scroll ownership/new update → manual reading position respected;
-- A18 overlay/focus behavior → modal/non-modal contracts preserved;
-- A19 IME-safe input → composition Enter does not send; Shift+Enter newline;
-- A20 degraded transport/uncertain completion → authoritative re-fetch before duplicate retry when outcome is uncertain.
-
-## Current acceptance boundary
-
-The core decision acceptance boundary includes A01, A05, A07 authority separation, A08 truthful indeterminate progress, A10 failure recovery, A12 available-control accessibility, A13 responsive/reflow requirements, and A21-A26 primary-interaction/semantic-presentation requirements.
-
-When model simulation is configured, S01-S05 additionally apply to the transient conversation-test surface. S01-S05 do **not** establish natural-language intent interpretation, durable conversation semantics, V36 acceptance of model output, or authoritative model-assisted decision making.
-
-Repository tests can establish server projection, model-boundary isolation, static markup properties, and deterministic presentation contracts. Full acceptance still requires an actual browser/usability pass on the exact candidate revision for keyboard, focus, zoom/reflow, reduced motion, IME composition, manual-scroll preservation, slow/failure/retry behavior, presentation comprehension, Composer hierarchy, pending-versus-accepted understanding, recommendation shape, uncertainty routing, confirmation semantics, resource behavior, and the absence of a fixed presentation-phase/global-gate interaction.
-
-The Android real-device screenshots from 2026-08-31 are Product-observable evidence that the pre-lock implementation did not satisfy the later primary-interaction direction. Those observations do not transfer to future revisions.
-
-## Interaction design fixtures
-
-UI inspection examples may use any number or order of representative turns. Fixtures should exercise semantic consequences without defining domain schema or a canonical presentation sequence.
-
-At minimum, useful fixture coverage includes:
-
-- clarification while already-valid useful content remains visible;
-- newly admitted evidence becoming useful during an ongoing conversation;
-- a multi-option decision frontier without a fabricated winner;
-- a material correction invalidating only dependent presentation;
-- Resource takeover and return;
-- recovery while preserving the last trustworthy Composer state.
-
-A fixture's order, turn count, topic, or nouns are not authoritative Product behavior.
-
-If a fixture displays external facts, a comparison, recommendation/frontier, or selected outcome, its exact fixture basis must license those claims. Persuasive copy alone is not fixture authority.
-
-## Human usability gate
-
-A representative user should be able to answer:
-1. What is Solandra helping me with right now?
-2. What information on the Composer is most useful now?
-3. If Solandra is proposing an interpretation, can I tell that it is tentative rather than already accepted?
-4. Can I correct or clarify naturally without operating a workflow?
-5. Can useful supported information appear even if another question or research task is still unresolved?
-6. Can I tell whether a material statement is a fact, recommendation, option set, limitation, or prepared resource when that distinction matters?
-7. If there are several credible options, can I see the meaningful trade-off without a fabricated winner?
-8. Why is the information consequential to my decision or next step?
-9. What can I do with the Composer content right now?
-10. Can I change the basis and have stale dependent content reconsidered?
-11. Can I inspect deeper evidence/provenance if I intentionally ask?
-12. Can I use the experience without learning hidden commands, stage names, or UI machinery?
-
-Functional correctness, semantic fidelity, and human comprehension are separate gates.
+1. What is Solandra helping me accomplish?
+2. Does Solandra appear to understand the conversation naturally?
+3. Can I correct her naturally when she is wrong?
+4. What does Lattice actually know versus what is tentative?
+5. Why is this Recommendation being made?
+6. What sources supported it?
+7. Can I refer naturally to something Solandra said earlier?
+8. Can I choose among recommendations without that choice silently authorizing an external action?
+9. If I say “Do it,” is the exact action clear before consequential execution?
+10. Can I tell whether an action was merely reported successful or actually verified?
+11. Can I use the Product without learning workflow/provider/internal-system terminology?

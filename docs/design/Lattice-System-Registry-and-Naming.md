@@ -1,129 +1,201 @@
 # Lattice System Registry and Naming
 
-Status: **Owner-approved Product naming and architecture-boundary convention**.
+Status: **OWNER-APPROVED CANONICAL NAMING / BOUNDARY REGISTRY — RECONCILED BY OD-011**
 
-Approved: **August 26, 2026**.
+Reconciled: **2026-09-08**
 
-Repository provenance for this installation Work Item: `main @ cad448809a8f02df6d31de4e516cd1df21d5b456`.
+Repository baseline: `main @ e35f57e0621b81a66285c729b124d0c87ce8dffa`, tree `e7eb933e228735e3cefe472bc0d4269c71b556fa`.
 
-This registry gives every major Lattice Product or prototype system one canonical name so design documents, implementation handoffs, tests, and status reports do not accidentally merge distinct authority boundaries. It supplements the canonical living Product design; it does not weaken qualified SPEC-1 or protected V36 contracts.
+`The-Core-Lattice-Philosophy.md` remains unchanged and highest authority. This registry is subordinate to the Core and to current Owner decision OD-011.
 
-The current implementation-level composition of these systems is mapped in `docs/design/Lattice-System-Architecture.md`. That document may describe implementation bindings such as `DecisionPlan`, Run stores, workers, persistence adapters, and presentation projections without promoting those components into peer Product authorities.
+## 1. Purpose
 
-## 1. Canonical system registry
+This registry keeps names aligned with real Product responsibility. Names do not create authority; they make authority and capability boundaries easier to see.
 
-| Class | Canonical name | Short form | Owns | Does not own |
-|---|---|---|---|---|
-| Umbrella Product | **Lattice Product** | **Lattice** | The complete user-facing Product and Product-owned architecture. | It is not shorthand for one subsystem when a subsystem-specific claim is being made. |
-| Product authority | **Lattice Intent Authority** | **Intent Authority** | Versioned structured user intent, intent deltas, clarification state, USER provenance, correction lineage, and exact `intentVersionId` binding. | External-world truth, eligibility/ranking, or presentation authority. |
-| Product runtime | **Lattice Execution Runtime** | **Execution Runtime** | Durable Run lifecycle, coordination, cancellation, recovery, public Run events, research scheduling/work execution, and operational state. | External factual truth or decision semantics. |
-| Product boundary | **Lattice Model Gateway** | **Model Gateway** | Provider-neutral model requests, capability negotiation, bounded/cancellable invocation, and model-adapter isolation. | User-intent authority, V36 truth, decision authority, or Product validation. |
-| Product authority | **V36 Truth Core** | **V36** | External factual truth, evidence qualification/admission, provenance, contradiction, proof status, temporal applicability, and Lattice truth confidence. | User preferences, operational scheduling, or winner selection. |
-| Product authority | **Lattice Decision Engine** | **Decision Engine** | Hard-constraint evaluation, eligibility, preference utility/ranking, trade-offs, tie/outcome semantics, and authoritative `StructuredDecision`. | Strengthening V36 truth or rewriting user intent. |
-| Product experience | **Solandra Experience** | **Solandra** | Conversation UX, clarification presentation, progress presentation, explanation, adaptive Composer presentation, evidence/uncertainty presentation, Resource presentation, and continuation. | Canonical intent mutation, external truth, eligibility/ranking, or winner authority. |
-| External development system | **V7 LLM Simulation Lab** | **V7 Simulation Lab** | Offline model/API simulation, protocol/fault experiments, and qualification evidence about the simulator itself. | Lattice Product authority, V36 acceptance, real-model reliability, or production readiness. |
+## 2. Canonical logical planes
 
-`DecisionPlan` is an implementation-level durable binding, not a separate Product authority. It freezes the faithful planning projection of one exact `IntentVersion` for one Run. Likewise, research schedulers, research workers, provider adapters, API processes, persistence adapters, migration/admin processes, conversation indexes, and presentation projections are implementation components or process roles. They do not receive independent Product-authority names merely because they are durable or separately executable.
+### Solandra — cognitive plane
 
-## 2. Canonical authority flow
+Canonical name: **Solandra** or **Solandra Cognitive Runtime** when the distinction from UI rendering matters.
 
-The canonical conceptual flow is:
+Owns ordinary cognitive behavior:
 
-```text
-User conversation
-      |
-      v
-Lattice Intent Authority
-      | confirmed IntentVersion
-      v
-DecisionPlan
-      | exact planning projection for one Run
-      v
-Lattice Execution Runtime
-      | research / operational work
-      v
-V36 Truth Core
-      | admitted decision evidence
-      v
-Lattice Decision Engine
-      | StructuredDecision
-      v
-Solandra Experience
-      |
-      v
-User
-```
+- conversation understanding and reference resolution;
+- interpretation/hypothesis formation;
+- clarification strategy;
+- investigation planning;
+- reasoning over governed Knowledge;
+- advisory Recommendation;
+- capability coordination;
+- natural explanation; and
+- Conversation + Composer interaction.
 
-`DecisionPlan` appears in the flow because it is the durable boundary that preserves exact intent-to-Run planning fidelity. Its placement does not make it a peer semantic authority: Lattice Intent Authority remains the owner of USER meaning, and Lattice Execution Runtime remains the owner of Run lifecycle.
+Does not own factual truth, USER authority, consequential authorization, execution authority, or verification authority.
 
-The **Lattice Model Gateway** is a non-authoritative capability boundary that may be invoked by Product systems where a qualified design permits model assistance. Model output remains proposal/rendering material until the owning Product authority accepts it under its own contract.
+### Lattice — trust plane
 
-During prototype development, the **V7 LLM Simulation Lab** may stand in for model/API behavior at the Model Gateway boundary. That substitution does not move the lab into Lattice Product authority.
+**Lattice** is the trust system that constrains and records what Solandra may responsibly rely upon or cause.
 
-## 3. Lattice Intent Authority naming decision
+Its stable trust responsibilities are:
 
-The Owner-approved canonical name for the user-intent subsystem is **Lattice Intent Authority**.
+- **Intent Integrity** — established USER meaning, provenance, correction lineage, material clarification/confirmation, and accepted USER Decision/Choice state when exact choice materially matters downstream;
+- **Knowledge Trust** — Source/Evidence/Claim/Knowledge provenance, support/conflict/uncertainty, currency, and admission;
+- **Execution Safety** — bounded capabilities, idempotency, retry/recovery, stale-result rejection, budgets, privacy/egress, and operational provenance;
+- **Action Trust** — ActionProposal binding, Authorization, Execution, ExecutionReceipt, and Verification.
 
-The uploaded external artifact `lattice-conversation-drift-design-approval-handoff-v1.zip` is therefore described as the **Intent Authority design handoff candidate**. Its central principle is:
+These responsibilities may be implemented in modules rather than separate services.
 
-> Transcript is context and provenance. Versioned structured intent is authority.
+### Capability plane
 
-The naming and ownership boundary are confirmed by Owner decision. The artifact's detailed candidate architecture remains a design candidate until separately approved or incorporated into another qualified Product source. Recording the artifact in the living design does not by itself validate or implement its proposed reducer, persistence, provenance, clarification, or interpreter contracts.
-
-## 4. Naming grammar
-
-Use these suffixes consistently:
-
-| Suffix | Meaning |
-|---|---|
-| **Core** | Protected semantic authority with especially strong invariants. |
-| **Authority** | Canonical Product state within a bounded semantic domain. |
-| **Engine** | Deterministic Product evaluation/transformation producing authoritative Product output. |
-| **Runtime** | Operational execution/lifecycle infrastructure. |
-| **Gateway** | Non-authoritative capability boundary to model/provider functionality. |
-| **Experience** | Human-facing presentation and interaction. |
-| **Lab** | External/development experimentation; never Product authority merely by existence. |
-| **Specification / Handoff / Design / Package** | Documentation or artifact, never a runtime system. |
-
-Implementation nouns such as **Plan**, **Store**, **Worker**, **Bridge**, **Adapter**, **Index**, **Projection**, and **Snapshot** describe bounded implementation responsibilities. They do not imply independent Product-semantic authority unless a qualified Product design explicitly establishes one.
-
-## 5. Language rules
-
-Prefer the canonical name on first use. The short form may follow when the surrounding scope is unambiguous.
-
-Avoid unqualified phrases such as:
-
-- `conversation system`;
-- `AI system`;
-- `model system`;
-- `truth layer`;
-- `decision system`;
-- `Solandra system`;
-- `V7` when the statement could be mistaken for Product validation.
+**Capabilities** are replaceable mechanisms Solandra can request through Lattice-owned policy/execution boundaries.
 
 Examples:
 
-- Prefer: **“The Lattice Decision Engine selected the authorized outcome; Solandra presented the decision.”**
-- Avoid: **“Solandra decided the outcome.”**
-- Prefer: **“Lattice Intent Authority accepted a USER-supported semantic change and created a new IntentVersion.”**
-- Avoid: **“The conversation changed authoritative intent.”**
-- Prefer: **“DecisionPlan bound the exact IntentVersion and faithful RunRequest for this Run.”**
-- Avoid: **“DecisionPlan decided what the user meant.”**
-- Prefer: **“The V7 LLM Simulation Lab passed its standalone simulator test.”**
-- Avoid: **“V7 validated Lattice.”**
+- model reasoning;
+- web/source acquisition;
+- document reading;
+- database query;
+- calculation;
+- code execution;
+- formal decision algorithms;
+- file/application manipulation;
+- external communication/action.
 
-## 6. Artifact naming
+Capability identity does not grant semantic authority.
 
-Documents and external packages must be named as artifacts rather than systems. Current examples:
+## 3. Existing canonical subsystem/component names
 
-- **Lattice Living Product Design** — the canonical living design document.
-- **Lattice System Architecture** — the current implementation structural map; it maps Product systems, bindings, dependency direction, authoritative/durable/derived state, and trust boundaries without replacing the living design.
-- **Solandra Offline Prototype UI Specification** — the Owner-approved offline-prototype UI design package/specification; it specifies Solandra and is not Solandra itself.
-- **Intent Authority Design Handoff Candidate** — the conversation-drift R&D/design package; it informs Lattice Intent Authority and is not the runtime subsystem.
-- **V7 Simulation Results / V7 Research Artifacts** — evidence produced by the V7 LLM Simulation Lab; never label these as Lattice Product validation unless exact Product validation independently establishes that claim.
+### Lattice Intent Integrity
 
-## 7. Drift rule
+Preferred current Product name for the trust boundary historically called **Lattice Intent Authority**.
 
-When a repository document, test, handoff, or status report uses an old or ambiguous name, correct the terminology without silently changing the underlying authority semantics. A rename does not transfer validation, implementation status, or authority between systems.
+Existing `IntentVersion`, provenance, clarification, correction, and exact-binding mechanisms remain valid foundations. The name change narrows responsibility: Solandra performs ordinary semantic understanding; Lattice establishes what meaning is justified as canonical USER intent.
 
-When an implementation component such as `DecisionPlan` becomes important enough to appear in architecture diagrams, preserve the canonical authority owner around it. Visibility, durability, or centrality in the call graph does not independently make a component a Product authority.
+When an exact USER decision/choice materially matters downstream, Intent Integrity may preserve it as an `AcceptedChoice`. This is governed USER state, not a new subsystem and not execution Authorization.
+
+When discussing historical decisions/source names, `Lattice Intent Authority` remains correct historical terminology.
+
+### Lattice Knowledge Trust
+
+Preferred Product-level name for the governed information-to-Knowledge boundary.
+
+**V36 Truth Core** remains the canonical name of the protected epistemic mechanism/contracts already present in the repository. V36 may implement substantial portions of Knowledge Trust; it is not discarded or weakened by OD-011.
+
+### Lattice Execution Runtime
+
+Canonical implementation/trust mechanism for durable operational lifecycle, bounded execution, workers/tasks, retry, cancellation, idempotency, stale-result rejection, budgets, and recovery.
+
+Runtime is not the Product's cognitive model. `Run`, worker, task, attempt, lease, queue, dispatch, checkpoint, and outbox are implementation/operational terms and should not be promoted to primary user-facing concepts without a demonstrated trust need.
+
+### Capability Broker
+
+Canonical **logical interface**, not automatically a separate service or top-level authority.
+
+It describes the Product-facing capability catalog/request boundary used by Solandra. Execution Runtime, Model Gateway, research adapters, local functions, or other executors may implement capabilities behind it.
+
+### Lattice Model Gateway
+
+Canonical provider-neutral model adapter/mechanism. It supplies model capabilities and route normalization. It does not own cognition, USER intent, Knowledge, Recommendation, Authorization, or Verification.
+
+### Lattice Decision Engine
+
+Canonical name for the existing **optional qualified formal decision capability**.
+
+It may own formal semantics for a specific invocation: typed hard-constraint evaluation, qualified criterion comparison, optimization/frontier/tie logic, and structured formal result.
+
+It is **not** the universal source of ordinary Recommendation state.
+
+### Lattice Action Trust boundary
+
+Canonical umbrella name for the action safety chain:
+
+```text
+ActionProposal -> Authorization -> Execution -> ExecutionReceipt -> Verification
+```
+
+Execution is performed through qualified capability/executor mechanisms. The trust boundary owns the distinctions and exact bindings, not a particular executor technology.
+
+## 4. Canonical governed object names
+
+Use these terms consistently for target durable Product state:
+
+- `Intent`
+- `Source`
+- `Evidence`
+- `Claim`
+- `Knowledge`
+- `Recommendation`
+- `AcceptedChoice` when an exact USER decision/choice materially matters downstream
+- `ActionProposal`
+- `Authorization`
+- `ExecutionReceipt`
+- `Verification`
+- `ConversationReference`
+
+`AcceptedChoice` is optional and Intent-Integrity-owned. It prevents a Solandra Recommendation from being mistaken for the person's actual decision and prevents that decision from being mistaken for action Authorization.
+
+Historical implementation types such as `IntentVersion`, `TruthSnapshot`, `StructuredDecision`, `Resource`, or `Run` may continue where they carry real implementation semantics. They should map to, rather than redefine, the current Product distinctions.
+
+## 5. Naming grammar
+
+Prefer names that describe the role a concept actually owns:
+
+- **Cognitive Runtime** — interprets/reasons/plans but does not become trust authority.
+- **Integrity / Trust** — establishes what may be treated as canonical, factual, authorized, or verified.
+- **Capability** — bounded useful operation; replaceable provider/tool implementation.
+- **Runtime** — durable operational coordination/recovery.
+- **Gateway / Adapter** — translation/routing mechanism, never authority merely by name.
+- **Engine** — formal algorithmic capability with explicitly qualified semantics.
+- **Reference** — durable link to an already-governed object; not a copied authority.
+
+Avoid multiplying peer “systems” when a module/interface inside the modular monolith is sufficient.
+
+## 6. Canonical Product composition
+
+```text
+USER
+  <-> Solandra Cognitive Runtime
+          |
+          +--> Lattice Intent Integrity
+          +--> Lattice Knowledge Trust
+          +--> Capability Broker
+          |       +--> user-authorized model
+          |       +--> sources/tools/algorithms
+          |       +--> optional Lattice Decision Engine
+          |
+          +--> Recommendation
+          +--> optional AcceptedChoice (USER state via Intent Integrity)
+          +--> ActionProposal
+                  |
+                  v
+          Lattice Action Trust
+          Authorization -> Execution -> ExecutionReceipt -> Verification
+```
+
+ConversationReference binds later conversational references to the exact governed objects used/produced by prior turns.
+
+## 7. Preferred wording
+
+Prefer:
+
+- “Solandra reasoned over governed Knowledge and produced a Recommendation.”
+- “The person chose option B; that accepted choice does not authorize an external action.”
+- “Lattice admitted the supporting evidence into Knowledge.”
+- “The formal Decision Engine was used as a qualified capability for this comparison.”
+- “Lattice Intent Integrity accepted the USER-supported meaning.”
+- “The executor returned an ExecutionReceipt; Lattice has not yet verified the resulting state.”
+
+Avoid:
+
+- “Solandra is presentation only.”
+- “Every recommendation comes from the Decision Engine.”
+- “Solandra recommended it, so the user chose it.”
+- “The user chose it, so the action is authorized.”
+- “The model established the user's intent.”
+- “The provider response is truth.”
+- “The Run decided.”
+- “Execution success proves completion.”
+
+## 8. Historical terminology
+
+Older Owner decisions and design records retain their original names as provenance. Current documents should point to OD-011 when an older historical allocation conflicts with current direction rather than rewriting the historical record to pretend the earlier architecture never existed.
