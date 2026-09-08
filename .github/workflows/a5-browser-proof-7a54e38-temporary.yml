@@ -61,27 +61,31 @@ jobs:
               'const SUBJECT_TREE = "dea729808c0b7d85a4b229aa0e2b873717fcebf9";',
               1,
           )
-          old = '''  const descriptor = presentation.body.presentation.resources.find((item) => item.id === preparedResourceId);
-          assert.ok(descriptor);
-          assert.equal(descriptor.editable, true);
-          assert.equal(descriptor.executionAuthorized, false);'''
-          new = '''  assert.match(preparedResourceId, /^prepared_resource_/u);
-          const presentationResourceId = `action-preparation:${preparedRun.runId}`;
-          const descriptor = presentation.body.presentation.resources.find((item) =>
-            item.id === presentationResourceId
-            && item.kind === "generated_artifact"
-            && item.editable === true
-            && item.executionAuthorized === false);
-          assert.ok(descriptor);
-          const hydratedPresentation = await api(
-            `/api/v1/conversations/${encodeURIComponent(conversationId)}/presentation/resources/${encodeURIComponent(descriptor.id)}?presentationRevision=${encodeURIComponent(presentation.body.presentation.presentationRevision)}`,
-          );
-          assert.equal(hydratedPresentation.response.status, 200, JSON.stringify(hydratedPresentation.body));
-          assert.equal(hydratedPresentation.body.resource.descriptor.id, descriptor.id);
-          assert.equal(hydratedPresentation.body.resource.descriptor.kind, "generated_artifact");
-          assert.equal(hydratedPresentation.body.resource.descriptor.editable, true);
-          assert.equal(hydratedPresentation.body.resource.descriptor.executionAuthorized, false);
-          assert.equal(hydratedPresentation.body.resource.payload.text, preparedBody);'''
+          old = "\n".join([
+              '  const descriptor = presentation.body.presentation.resources.find((item) => item.id === preparedResourceId);',
+              '  assert.ok(descriptor);',
+              '  assert.equal(descriptor.editable, true);',
+              '  assert.equal(descriptor.executionAuthorized, false);',
+          ])
+          new = "\n".join([
+              '  assert.match(preparedResourceId, /^prepared_resource_/u);',
+              '  const presentationResourceId = `action-preparation:${preparedRun.runId}`;',
+              '  const descriptor = presentation.body.presentation.resources.find((item) =>',
+              '    item.id === presentationResourceId',
+              '    && item.kind === "generated_artifact"',
+              '    && item.editable === true',
+              '    && item.executionAuthorized === false);',
+              '  assert.ok(descriptor);',
+              '  const hydratedPresentation = await api(',
+              '    `/api/v1/conversations/${encodeURIComponent(conversationId)}/presentation/resources/${encodeURIComponent(descriptor.id)}?presentationRevision=${encodeURIComponent(presentation.body.presentation.presentationRevision)}`,',
+              '  );',
+              '  assert.equal(hydratedPresentation.response.status, 200, JSON.stringify(hydratedPresentation.body));',
+              '  assert.equal(hydratedPresentation.body.resource.descriptor.id, descriptor.id);',
+              '  assert.equal(hydratedPresentation.body.resource.descriptor.kind, "generated_artifact");',
+              '  assert.equal(hydratedPresentation.body.resource.descriptor.editable, true);',
+              '  assert.equal(hydratedPresentation.body.resource.descriptor.executionAuthorized, false);',
+              '  assert.equal(hydratedPresentation.body.resource.payload.text, preparedBody);',
+          ])
           if old not in text:
               raise SystemExit("expected historical descriptor assertion not found")
           replay = 'assert.equal(replayPrepared.body.preparationReference.resourceId, preparedResourceId);'
