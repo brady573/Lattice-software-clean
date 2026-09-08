@@ -1,4 +1,4 @@
-# Corrected one-shot validation-only execution harness. Product checkout is frozen below.
+# Validation-only trigger for the reviewed M3 real Product proof. Product checkout is frozen below.
 name: TEMP — M3 Real Solandra Product Proof
 
 on:
@@ -7,6 +7,7 @@ on:
       - validation/m3-real-solandra-product-proof
     paths:
       - ".github/workflows/m3-real-solandra-product-proof-temporary.yml"
+      - "validation/m3-real-solandra-product-proof.mjs"
 
 permissions:
   contents: read
