@@ -38,10 +38,10 @@ Does not own factual truth, USER authority, consequential authorization, executi
 
 Its stable trust responsibilities are:
 
-- **Intent Integrity** — established USER meaning, provenance, correction lineage, and material clarification/confirmation;
+- **Intent Integrity** — established USER meaning, provenance, correction lineage, material clarification/confirmation, and accepted USER Decision/Choice state when exact choice materially matters downstream;
 - **Knowledge Trust** — Source/Evidence/Claim/Knowledge provenance, support/conflict/uncertainty, currency, and admission;
 - **Execution Safety** — bounded capabilities, idempotency, retry/recovery, stale-result rejection, budgets, privacy/egress, and operational provenance;
-- **Action Trust** — ActionProposal binding, Authorization, ExecutionReceipt, and Verification.
+- **Action Trust** — ActionProposal binding, Authorization, Execution, ExecutionReceipt, and Verification.
 
 These responsibilities may be implemented in modules rather than separate services.
 
@@ -70,6 +70,8 @@ Capability identity does not grant semantic authority.
 Preferred current Product name for the trust boundary historically called **Lattice Intent Authority**.
 
 Existing `IntentVersion`, provenance, clarification, correction, and exact-binding mechanisms remain valid foundations. The name change narrows responsibility: Solandra performs ordinary semantic understanding; Lattice establishes what meaning is justified as canonical USER intent.
+
+When an exact USER decision/choice materially matters downstream, Intent Integrity may preserve it as an `AcceptedChoice`. This is governed USER state, not a new subsystem and not execution Authorization.
 
 When discussing historical decisions/source names, `Lattice Intent Authority` remains correct historical terminology.
 
@@ -108,7 +110,7 @@ It is **not** the universal source of ordinary Recommendation state.
 Canonical umbrella name for the action safety chain:
 
 ```text
-ActionProposal -> Authorization -> ExecutionReceipt -> Verification
+ActionProposal -> Authorization -> Execution -> ExecutionReceipt -> Verification
 ```
 
 Execution is performed through qualified capability/executor mechanisms. The trust boundary owns the distinctions and exact bindings, not a particular executor technology.
@@ -123,11 +125,14 @@ Use these terms consistently for target durable Product state:
 - `Claim`
 - `Knowledge`
 - `Recommendation`
+- `AcceptedChoice` when an exact USER decision/choice materially matters downstream
 - `ActionProposal`
 - `Authorization`
 - `ExecutionReceipt`
 - `Verification`
 - `ConversationReference`
+
+`AcceptedChoice` is optional and Intent-Integrity-owned. It prevents a Solandra Recommendation from being mistaken for the person's actual decision and prevents that decision from being mistaken for action Authorization.
 
 Historical implementation types such as `IntentVersion`, `TruthSnapshot`, `StructuredDecision`, `Resource`, or `Run` may continue where they carry real implementation semantics. They should map to, rather than redefine, the current Product distinctions.
 
@@ -159,6 +164,7 @@ USER
           |       +--> optional Lattice Decision Engine
           |
           +--> Recommendation
+          +--> optional AcceptedChoice (USER state via Intent Integrity)
           +--> ActionProposal
                   |
                   v
@@ -173,6 +179,7 @@ ConversationReference binds later conversational references to the exact governe
 Prefer:
 
 - “Solandra reasoned over governed Knowledge and produced a Recommendation.”
+- “The person chose option B; that accepted choice does not authorize an external action.”
 - “Lattice admitted the supporting evidence into Knowledge.”
 - “The formal Decision Engine was used as a qualified capability for this comparison.”
 - “Lattice Intent Integrity accepted the USER-supported meaning.”
@@ -182,6 +189,8 @@ Avoid:
 
 - “Solandra is presentation only.”
 - “Every recommendation comes from the Decision Engine.”
+- “Solandra recommended it, so the user chose it.”
+- “The user chose it, so the action is authorized.”
 - “The model established the user's intent.”
 - “The provider response is truth.”
 - “The Run decided.”

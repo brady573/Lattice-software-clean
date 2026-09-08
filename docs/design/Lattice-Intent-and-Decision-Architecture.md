@@ -15,12 +15,13 @@ This document defines the boundary among:
 - Solandra semantic understanding;
 - Lattice Intent Integrity;
 - governed Knowledge;
-- ordinary advisory Recommendation; and
+- ordinary advisory Recommendation;
+- accepted USER Decision/Choice when exact choice materially matters downstream; and
 - the optional formal Decision Engine capability.
 
 The central rule is:
 
-> **Solandra may infer and reason; Lattice preserves what may be treated as established USER meaning and governed Knowledge. Formal decision machinery is used only when its guarantees are actually needed.**
+> **Solandra may infer and reason; Lattice preserves what may be treated as established USER meaning and governed Knowledge. A Solandra Recommendation is not the person's decision, and the person's decision is not action Authorization. Formal decision machinery is used only when its guarantees are actually needed.**
 
 ## 2. Canonical ordinary path
 
@@ -39,6 +40,18 @@ USER expression
 ```
 
 No `DecisionPlan` or formal Decision Engine is required on this ordinary path.
+
+When the person later makes a materially relevant choice, that is a separate USER-state transition:
+
+```text
+Recommendation / alternatives
+ -> Conversation / Composer
+ -> USER chooses
+ -> Intent Integrity
+ -> optional AcceptedChoice
+```
+
+`AcceptedChoice` is needed only when preserving the exact USER choice materially helps downstream trust, continuity, or action preparation. It is not a universal state requirement.
 
 ## 3. Conversation and interpretation
 
@@ -107,6 +120,7 @@ Keep these concepts distinct:
 - **Constraint** — an authoritative restriction applied by an applicable qualified boundary.
 - **Tolerance** — USER meaning about materially meaningful differences where representable.
 - **Delegation** — scoped permission to let Lattice/Solandra choose or act, never implied from silence.
+- **AcceptedChoice** — optional governed USER state recording what the person actually chose when exact choice materially matters downstream.
 
 Intent meaning remains separate from factual evidence about whether the world satisfies that meaning.
 
@@ -152,7 +166,7 @@ A Recommendation may express:
 - a need for more Knowledge; or
 - an explicit inability to recommend responsibly.
 
-Recommendation is not truth, USER intent, authorization, or execution.
+Recommendation is not truth, USER intent, accepted USER Decision/Choice, authorization, or execution.
 
 ## 8. Solandra reasoning responsibilities
 
@@ -205,11 +219,22 @@ These are capabilities of the formal branch, not universal ontology for every Re
 
 It is not required for Knowledge-only work, ordinary advice, or Action Preparation by default.
 
-DecisionPlan has no independent USER, truth, recommendation, or authorization authority.
+DecisionPlan has no independent USER, truth, recommendation, choice, or authorization authority.
 
-## 12. User choice, delegation, and action
+## 12. USER Decision/Choice, delegation, and action
 
 A person may choose an option conversationally without granting consequential execution authority.
+
+When an exact choice materially matters downstream, Lattice may preserve an `AcceptedChoice` under Intent Integrity. This is the smallest governed record needed to distinguish what the person actually chose from what Solandra recommended.
+
+Conceptually:
+
+```text
+Recommendation != AcceptedChoice
+AcceptedChoice != Authorization
+```
+
+An `AcceptedChoice` may bind the selected referenced option/outcome, relevant Intent basis, USER provenance, and freshness needed to prevent later ambiguity. Exact schema is future implementation work.
 
 Any scoped choice/delegation state remains separate from:
 
@@ -218,7 +243,9 @@ Any scoped choice/delegation state remains separate from:
 - Authorization; and
 - Execution.
 
-A formal selected outcome, Solandra Recommendation, or USER choice can inform creation of an ActionProposal. None automatically authorizes the external action.
+A formal selected outcome, Solandra Recommendation, or accepted USER choice can inform creation of an ActionProposal. None automatically authorizes the external action.
+
+Accepting or recording a USER choice does not require the formal Decision Engine.
 
 ## 13. ConversationReference
 
@@ -229,7 +256,8 @@ Examples:
 - “Explain that” -> referenced Recommendation or Knowledge.
 - “Why that one?” -> referenced Recommendation alternative/basis.
 - “What were your sources?” -> referenced Recommendation -> Knowledge -> Evidence -> Source.
-- “Do it” -> referenced ActionProposal if one exists and remains current, otherwise prepare a new exact ActionProposal from the referenced advisory state.
+- “I’ll take the second one” -> referenced alternative may become an `AcceptedChoice` through Intent Integrity when that exact choice matters downstream.
+- “Do it” -> referenced ActionProposal if one exists and remains current, otherwise prepare a new exact ActionProposal from the referenced advisory/choice state.
 
 Reference resolution is cognition. Authority still belongs to the referenced object's owning trust boundary.
 
@@ -237,14 +265,15 @@ Reference resolution is cognition. Authority still belongs to the referenced obj
 
 - USER correction creates successor Intent state; historical Intent is not rewritten.
 - New Knowledge may justify a successor Recommendation; the old Recommendation remains historical with its old basis.
+- A later USER choice does not rewrite the historical Recommendation that preceded it.
 - A later formal criterion/version/evidence basis must not silently reinterpret an old formal result.
 - Conversation wording changes do not mutate governed objects unless the appropriate semantic boundary accepts a real change.
 
 ## 15. Presentation boundary
 
-Solandra is both cognitive and human-facing. The Composer may organize and explain Intent, Knowledge, Recommendation, formal results, Resources, ActionProposals, and Verification.
+Solandra is both cognitive and human-facing. The Composer may organize and explain Intent, Knowledge, Recommendation, accepted USER choice, formal results, Resources, ActionProposals, and Verification.
 
-Presentation must remain faithful to each object's status. Visual emphasis cannot upgrade proposal to intent, information to Knowledge, Recommendation to Authorization, or ExecutionReceipt to Verification.
+Presentation must remain faithful to each object's status. Visual emphasis cannot upgrade proposal to intent, information to Knowledge, Recommendation to USER Decision/Choice, USER Decision/Choice to Authorization, Recommendation to Authorization, or ExecutionReceipt to Verification.
 
 ## 16. Validation direction
 
@@ -256,9 +285,10 @@ Later implementation evidence should prove:
 4. Knowledge-only work bypasses formal Decision Engine machinery.
 5. ordinary Recommendation can complete without a DecisionPlan/Decision Engine.
 6. Recommendation remains attributable to exact Intent/Knowledge basis.
-7. formal Decision Engine can still be invoked and preserves its formal invariants.
-8. ConversationReference resolves prior recommendations/sources without prose reconstruction.
-9. Recommendation cannot authorize external action.
-10. correction/new Knowledge creates successor state rather than rewriting history.
+7. accepted USER Decision/Choice is distinguishable from both Recommendation and Authorization when exact choice matters downstream.
+8. formal Decision Engine can still be invoked and preserves its formal invariants.
+9. ConversationReference resolves prior recommendations/sources/choices without prose reconstruction.
+10. Recommendation or USER choice cannot authorize external action.
+11. correction/new Knowledge creates successor state rather than rewriting history.
 
 This design reconciliation alone establishes none of those runtime behaviors.

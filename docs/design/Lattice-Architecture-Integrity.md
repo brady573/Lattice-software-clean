@@ -39,15 +39,18 @@ The following distinctions are architectural invariants:
 5. `retrieval success != evidence admission`
 6. `provider/model output != Product truth`
 7. `Knowledge/truth != Recommendation`
-8. `formal decision result != universal recommendation architecture`
-9. `Recommendation != ActionProposal`
-10. `ActionProposal != Authorization`
-11. `Authorization != Execution`
-12. `ExecutionReceipt != Verification`
-13. `presentation != authority`
-14. `capability != authority`
-15. `persistence != authority transfer`
-16. `retry/recovery != semantic promotion`
+8. `Recommendation != accepted USER Decision/Choice`
+9. `accepted USER Decision/Choice != Authorization`
+10. `formal decision result != universal recommendation architecture`
+11. `Recommendation != ActionProposal`
+12. `ActionProposal != Authorization`
+13. `Authorization != Execution`
+14. `Execution != Verification`
+15. `ExecutionReceipt != Verification`
+16. `presentation != authority`
+17. `capability != authority`
+18. `persistence != authority transfer`
+19. `retry/recovery != semantic promotion`
 
 A design or implementation may reorganize components while preserving these boundaries.
 
@@ -70,7 +73,8 @@ Solandra must not silently:
 - convert its interpretation into unsupported canonical USER intent;
 - present ungoverned information as established Knowledge;
 - strengthen evidence or erase material uncertainty;
-- convert a Recommendation into authorization;
+- convert a Recommendation into a USER Decision/Choice;
+- convert a Recommendation or USER Decision/Choice into authorization;
 - execute a consequential action without the applicable authorization boundary; or
 - report verified completion from an execution receipt alone.
 
@@ -85,6 +89,8 @@ It preserves:
 - materiality-sensitive clarification/confirmation;
 - separation of transcript/context from canonical intent; and
 - exact basis binding where downstream trust depends on it.
+
+When a person's actual decision or choice materially matters downstream, Intent Integrity may also preserve an exact accepted `AcceptedChoice` as governed USER state. That is not a new authority subsystem. It is the minimum durable distinction needed to keep Solandra's Recommendation separate from what the person actually chose, and to keep that choice separate from any later Authorization.
 
 It is a trust guard, not a requirement that ordinary language understanding be deterministic or ritualized.
 
@@ -102,13 +108,15 @@ Material Knowledge retains provenance, currency, conflict, uncertainty, and unre
 
 Operational success, source count, repeated model agreement, provider reputation, or fluent prose may not bypass this boundary.
 
-## 7. Recommendation and optional formal decision boundary
+## 7. Recommendation, USER choice, and optional formal decision boundary
 
 General advisory Recommendation is Solandra cognitive Product state grounded in current governed Intent and Knowledge.
 
+A person may accept, reject, or choose among recommendations conversationally. When that choice matters to later Product state, the accepted choice is governed USER state owned by Intent Integrity. It is not inferred from Solandra's preference, visual emphasis, or a formal result, and it is not execution Authorization.
+
 The formal Lattice Decision Engine is optional. It may be invoked as a qualified capability when typed constraints, criterion semantics, optimization, frontier/tie analysis, or other formal guarantees materially help.
 
-When used, its exact formal result remains attributable to its qualified inputs and must be represented faithfully. Formal machinery must not be required merely because a user asks for ordinary advice.
+When used, its exact formal result remains attributable to its qualified inputs and must be represented faithfully. Formal machinery must not be required merely because a user asks for ordinary advice or makes an ordinary choice.
 
 ## 8. Capability boundary
 
@@ -120,10 +128,11 @@ Capability before provider remains the design preference.
 
 ## 9. Action integrity boundary
 
-Consequential behavior preserves this chain:
+Consequential behavior preserves these distinctions:
 
 ```text
 Recommendation
+   -> optional accepted USER Decision/Choice
    -> optional ActionProposal
    -> Authorization
    -> Execution
@@ -131,7 +140,7 @@ Recommendation
    -> Verification
 ```
 
-Each arrow is an explicit boundary. A prior stage cannot be treated as proof of a later one.
+Not every action is preceded by a Recommendation or explicit durable choice, but whenever those states exist they remain distinct. Each arrow is an explicit boundary. A prior stage cannot be treated as proof of a later one.
 
 Authorization is narrow and action-specific where required. Ambiguous consequential completion fails closed. Verification should use independent observation when available; where verification cannot be established, the Product says so.
 
@@ -147,13 +156,14 @@ Current target governed objects include:
 - Claim;
 - Knowledge;
 - Recommendation;
+- AcceptedChoice when an exact USER decision/choice materially matters downstream;
 - ActionProposal;
 - Authorization;
 - ExecutionReceipt;
 - Verification; and
 - ConversationReference.
 
-Operational Runs, tasks, attempts, leases, checkpoints, queues, and provider requests may remain durable implementation state, but they do not replace those semantic/trust objects.
+Operational Runs, tasks, attempts, leases, checkpoints, queues, provider requests, and the act of Execution may remain durable implementation/operational state, but they do not replace those semantic/trust objects.
 
 Stale authoritative writes are rejected. Stale derived state is recomputed or discarded. Retry, restart, and reconnect do not transfer authority.
 
@@ -172,7 +182,7 @@ A change is non-conforming if it:
 - lets Solandra/model output bypass Intent Integrity or Knowledge Trust;
 - treats internal workflow topology as Product cognition;
 - exposes providers/workers/queues/Runs to users when they are not materially useful trust state;
-- conflates Recommendation, Authorization, Execution, or Verification;
+- conflates Recommendation, accepted USER Decision/Choice, Authorization, Execution, ExecutionReceipt, or Verification;
 - weakens V36/evidence/provenance safeguards for convenience;
 - turns persistence or telemetry into a second authority; or
 - adds a major subsystem without demonstrated Product value for this one-owner project.
@@ -185,6 +195,6 @@ Architecture Integrity review should establish, for an exact candidate:
 - no current normative document requires the formal Decision Engine for ordinary Recommendation;
 - intent integrity and semantic understanding are distinct;
 - durable Knowledge and ConversationReference are explicit target concepts;
-- action authorization/execution/verification remain separate;
+- Recommendation, accepted USER Decision/Choice, Authorization, Execution, and Verification remain distinct where applicable;
 - provider/model non-authority remains explicit; and
 - no runtime behavior is claimed from documentation changes alone.

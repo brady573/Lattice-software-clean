@@ -12,7 +12,7 @@ Repository design baseline: `main @ e35f57e0621b81a66285c729b124d0c87ce8dffa`, t
 
 Persistence preserves governed Product state and safe operational continuation. It never transfers authority merely because data is durable.
 
-The target durable graph expands the predecessor Run/Intent/V36/decision composition into explicit Knowledge, Recommendation, conversational-reference, action-authorization, and verification state.
+The target durable graph expands the predecessor Run/Intent/V36/decision composition into explicit Knowledge, Recommendation, optional accepted USER choice, conversational-reference, action-authorization, and verification state.
 
 ## 2. Governing rule
 
@@ -34,6 +34,7 @@ Conversation
        |       +--> Intent
        |       +--> Knowledge
        |       +--> Recommendation
+       |       +--> AcceptedChoice
        |       +--> ActionProposal
        |       +--> Authorization
        |       +--> ExecutionReceipt
@@ -43,10 +44,15 @@ Conversation
        |
        +--> Recommendation
        |
+       +--> optional AcceptedChoice
+       |
        +--> Resource / ActionProposal
                    |
                    v
               Authorization
+                   |
+                   v
+               Execution
                    |
                    v
               ExecutionReceipt
@@ -55,7 +61,7 @@ Conversation
                Verification
 ```
 
-Operational Runs/tasks/checkpoints may support these objects without replacing them.
+Operational Runs/tasks/checkpoints may support these objects and the execution stage without replacing them.
 
 ## 4. State classes
 
@@ -69,6 +75,7 @@ State whose meaning is established by an owning Product boundary:
 - Claim;
 - Knowledge;
 - Recommendation;
+- AcceptedChoice when an exact USER Decision/Choice materially matters downstream;
 - ActionProposal;
 - Authorization;
 - ExecutionReceipt;
@@ -86,6 +93,7 @@ State required for safe execution/recovery:
 - cancellation/supersession;
 - V36 continuation checkpoints/results;
 - capability result/provenance;
+- execution attempt/status;
 - retry/ambiguity state.
 
 Operational state does not become semantic authority.
@@ -114,7 +122,7 @@ Derived state may be cached but cannot outrank its governed basis.
 
 ## 5. Conversation and USER provenance
 
-Conversation is the durable subject-owned interaction root. It does not itself own Intent, Knowledge, Recommendation, Authorization, or Verification meaning.
+Conversation is the durable subject-owned interaction root. It does not itself own Intent, Knowledge, Recommendation, AcceptedChoice, Authorization, or Verification meaning.
 
 USER-authored messages/provenance are immutable/append-only once accepted under their identity. Identity reuse with different content fails rather than rewriting history.
 
@@ -165,7 +173,20 @@ Recommendation is durable advisory state produced by Solandra over exact governe
 
 A historical Recommendation is immutable at its exact basis. If Intent or Knowledge changes materially, produce a successor Recommendation; do not rewrite the prior recommendation as though it had used the new evidence.
 
-Recommendation must remain distinguishable from a formal Decision Engine result when the optional formal capability was used.
+Recommendation must remain distinguishable from both an accepted USER choice and a formal Decision Engine result when the optional formal capability was used.
+
+## 8.1 AcceptedChoice
+
+`AcceptedChoice` is optional governed USER state owned by Intent Integrity when the person's actual decision/choice materially matters downstream.
+
+It exists to preserve two Core boundaries without inventing a new subsystem:
+
+```text
+Recommendation != AcceptedChoice
+AcceptedChoice != Authorization
+```
+
+The exact record may bind the chosen referenced option/outcome, USER provenance, relevant Intent basis, and freshness needed to make later use unambiguous. If no downstream trust need exists, ordinary conversational choice need not create another durable object.
 
 ## 9. ConversationReference
 
@@ -180,6 +201,7 @@ turnId
 intentRefs[]
 knowledgeRefs[]
 recommendationRefs[]
+acceptedChoiceRefs[]
 resourceRefs[]
 actionProposalRefs[]
 authorizationRefs[]
@@ -211,6 +233,8 @@ Authorization records narrow permission under the applicable action policy.
 For consequential action it must bind enough exact state to establish what was authorized, by whom, under what scope/freshness, and against which ActionProposal.
 
 Authorization must survive long enough for safe dispatch/recovery/audit but does not prove execution.
+
+An accepted USER choice is not Authorization.
 
 ## 12. ExecutionReceipt
 
@@ -245,13 +269,13 @@ AMBIGUOUS
 UNVERIFIABLE_WITH_CURRENT_CAPABILITY
 ```
 
-Exact enums are future design/implementation work. The required distinction is `ExecutionReceipt != Verification`.
+Exact enums are future design/implementation work. The required distinctions are `Authorization != Execution`, `Execution != Verification`, and `ExecutionReceipt != Verification`.
 
 ## 14. Operational Run state
 
 Run remains an implementation-level durable composition envelope for current code and later safe execution.
 
-`Run.version` remains an operational concurrency epoch. It is not Intent version, Knowledge version, Recommendation version, Authorization version, or Verification state.
+`Run.version` remains an operational concurrency epoch. It is not Intent version, Knowledge version, Recommendation version, AcceptedChoice version, Authorization version, or Verification state.
 
 A later architecture may reduce how visible Run is upward without deleting the reliability value of exact operational identity.
 
@@ -263,6 +287,7 @@ Default rules:
 - Intent versions: immutable, successor lineage;
 - Source/Evidence/Claim/Knowledge exact records: immutable at exact identity/basis, successor/supersession where needed;
 - Recommendation exact basis: immutable;
+- AcceptedChoice exact USER-state record: immutable at its accepted identity/basis; later change creates successor governed USER state where persistence is needed;
 - ConversationReference: append-only/immutable historical binding;
 - ActionProposal exact version: immutable;
 - Authorization exact grant: immutable, may expire/revoke/supersede through explicit state;
@@ -291,8 +316,9 @@ owned Conversation
  -> current/historical Intent
  -> relevant Knowledge graph
  -> Recommendation history/current refs
+ -> AcceptedChoice where downstream continuity requires it
  -> Resources/action objects
- -> Authorization / ExecutionReceipt / Verification
+ -> Authorization -> Execution state -> ExecutionReceipt -> Verification
  -> exact operational continuation state still in flight
  -> reconstruct ConversationReference-aware Solandra presentation/context
 ```
@@ -302,7 +328,8 @@ Do not:
 - resummarize transcript to recreate canonical Intent when Intent exists;
 - re-search to fabricate prior Knowledge provenance;
 - reconstruct Recommendation from explanation prose when Recommendation exists;
-- infer Authorization from chat wording alone when authorization state exists;
+- infer a USER choice from Solandra's Recommendation when accepted choice state exists or is required;
+- infer Authorization from chat wording or USER choice alone when authorization state exists;
 - infer verified success from a stored execution success message.
 
 ## 18. Staleness
@@ -311,6 +338,7 @@ Stale derived state is discarded. Stale authoritative writes are rejected.
 
 - late cognition/capability output cannot attach to a superseded Intent/Knowledge/action basis;
 - later Knowledge does not silently rewrite prior Recommendation provenance;
+- later Recommendation does not rewrite a historical AcceptedChoice;
 - authorization of ActionProposal N does not authorize N+1;
 - an old ExecutionReceipt cannot prove the current external state after later contradictory Verification.
 
@@ -322,6 +350,7 @@ Deletion of an owned Conversation must immediately block normal access to the en
 - Intent;
 - Knowledge/Source/Evidence/Claim state owned exclusively by the graph;
 - Recommendation;
+- AcceptedChoice;
 - Resources;
 - ConversationReference;
 - ActionProposal/Authorization/ExecutionReceipt/Verification;
@@ -347,7 +376,7 @@ Never promote these into independent authority:
 
 The baseline already demonstrates valuable mechanisms: Conversation ownership/deletion, USER-message identity, IntentVersion lineage, durable Run CAS, V36 checkpoint/snapshot integrity, idempotency, subject isolation, and reconstructed Solandra presentation.
 
-The target first-class Knowledge, Recommendation, ConversationReference, Authorization, ExecutionReceipt, and Verification graph is **not** claimed to be fully implemented by this document.
+The target first-class Knowledge, Recommendation, optional AcceptedChoice, ConversationReference, Authorization, ExecutionReceipt, and Verification graph is **not** claimed to be fully implemented by this document.
 
 ## 22. Validation direction
 
@@ -356,6 +385,7 @@ Later exact-revision probes should prove:
 - restart reconstructs the same governed object graph;
 - old answer source requests traverse historical refs rather than re-searching;
 - correction/new Knowledge creates successor state without rewriting history;
+- accepted USER Decision/Choice cannot be fabricated from Recommendation and cannot become Authorization;
 - cross-subject reference guessing fails closed;
 - authorization binds exact proposal;
 - ambiguous action survives restart without duplicate dispatch;

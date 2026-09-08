@@ -20,7 +20,7 @@ Forbidden:
 
 ## A02 — material ambiguity routes to Intent Integrity
 
-When two plausible interpretations would materially change Knowledge, Recommendation/formal result, or consequential action, Solandra asks a precise natural clarification and does not silently commit the risky interpretation.
+When two plausible interpretations would materially change Knowledge, Recommendation/formal result, USER choice, or consequential action, Solandra asks a precise natural clarification and does not silently commit the risky interpretation.
 
 Historical USER provenance/correction remains intact.
 
@@ -53,7 +53,24 @@ Forbidden:
 
 For an ordinary advisory problem that does not require formal typed decision guarantees, Solandra can produce a materially useful Recommendation over governed Intent + Knowledge without creating/using a DecisionPlan or formal Decision Engine solely because the USER asked for advice.
 
-Recommendation remains advisory and basis-attributable.
+Recommendation remains advisory and basis-attributable. It is not the person's accepted Decision/Choice.
+
+## A06B — USER Decision/Choice boundary
+
+When the USER actually chooses among alternatives and downstream trust depends on that exact choice, the Product preserves the choice as governed USER state distinct from both the prior Recommendation and any later action Authorization.
+
+Required:
+
+- the accepted choice is attributable to actual USER provenance and the referenced option/outcome when material;
+- the person may choose without authorizing external execution;
+- the choice may inform a later ActionProposal without itself authorizing that proposal;
+- accepting ordinary USER choice does not require the formal Decision Engine.
+
+Forbidden:
+
+- treating Solandra's Recommendation, visual emphasis, or a formal capability result as though the USER chose it;
+- treating accepted USER choice as consequential Authorization;
+- creating a new universal decision-authority subsystem solely to record ordinary USER choice.
 
 ## A07 — optional formal capability fidelity
 
@@ -77,7 +94,7 @@ After alternatives are discussed, “What about the second option?” resolves t
 
 ## A11 — “Do it” action continuity
 
-After a Recommendation/Resource, “Do it” resolves or creates the exact current ActionProposal.
+After a Recommendation/Resource or accepted USER choice, “Do it” resolves or creates the exact current ActionProposal.
 
 Required:
 
@@ -86,7 +103,7 @@ Required:
 - natural request for missing narrow Authorization;
 - Runtime final binding/policy check.
 
-Forbidden: pronoun resolution or prior Recommendation treated as blanket execution authority.
+Forbidden: pronoun resolution, prior Recommendation, or accepted USER choice treated as blanket execution authority.
 
 ## A12 — authorization exactness
 
@@ -111,15 +128,15 @@ When a non-idempotent/consequential action may have executed but outcome is unkn
 
 ## A15 — restart/reconnect continuity
 
-After process/client restart, the conversation can continue from durable Intent, Knowledge, Recommendation, ConversationReference, action, receipt, and verification state without reconstructing authority from prose.
+After process/client restart, the conversation can continue from durable Intent, Knowledge, Recommendation, accepted USER choice where applicable, ConversationReference, action, receipt, and verification state without reconstructing authority from prose.
 
 ## A16 — correction lineage
 
-A material USER correction creates successor Intent and invalidates only dependent state. Historical Intent/Knowledge/Recommendation/action records remain inspectable and are not rewritten.
+A material USER correction creates successor Intent and invalidates only dependent state. Historical Intent/Knowledge/Recommendation/choice/action records remain inspectable and are not rewritten.
 
 ## A17 — subject/privacy isolation
 
-Another authenticated subject cannot enumerate or dereference ConversationReference, Knowledge, Resource, ActionProposal, receipt, or Verification objects from a Conversation they do not own.
+Another authenticated subject cannot enumerate or dereference ConversationReference, Knowledge, Resource, AcceptedChoice, ActionProposal, receipt, or Verification objects from a Conversation they do not own.
 
 Deletion blocks normal access to the owned graph and rejects late result release.
 
@@ -151,7 +168,7 @@ Forbidden: dashboard/orbit/workflow stepper/provider console as primary interact
 
 ## A22 — adaptive Composer
 
-Composer may surface whatever currently useful trustworthy content fits the conversation: Intent, Knowledge, Recommendation, formal result when present, Resource, sources, ActionProposal, execution/verification/recovery.
+Composer may surface whatever currently useful trustworthy content fits the conversation: Intent, Knowledge, Recommendation, accepted USER choice, formal result when present, Resource, sources, ActionProposal, execution/verification/recovery.
 
 No fixed user-facing presentation-stage taxonomy or global readiness gate.
 
@@ -161,14 +178,18 @@ Presentation cannot strengthen:
 
 - Solandra interpretation -> canonical Intent;
 - information -> Knowledge;
+- Recommendation -> accepted USER Decision/Choice;
+- accepted USER Decision/Choice -> Authorization;
 - Recommendation -> Authorization;
 - ActionProposal -> Authorization;
+- Authorization -> Execution;
+- Execution -> Verification;
 - ExecutionReceipt -> Verification;
 - formal frontier -> selected winner.
 
 ## A24 — Resource behavior
 
-A substantial Resource may take over Composer while Conversation/Input remain available. Back restores prior composition. Resource display/selection does not itself change Intent, Recommendation, Authorization, or Verification.
+A substantial Resource may take over Composer while Conversation/Input remain available. Back restores prior composition. Resource display/selection does not itself change Intent, Recommendation, USER choice, Authorization, or Verification.
 
 ## A25 — source and verification inspection
 
@@ -188,7 +209,34 @@ Keyboard reachability, visible focus, non-color material-state cues, reduced mot
 
 Repository design checks may establish document consistency only.
 
-Runtime acceptance requires executed evidence on an exact implementation revision, including representative real cognition, persistence/restart, Knowledge provenance, reference resolution, capability, action/authorization, ambiguity, verification, privacy, and browser usability behavior.
+Runtime acceptance requires executed evidence on an exact implementation revision, including representative real cognition, persistence/restart, Knowledge provenance, reference resolution, capability, USER choice, action/authorization, ambiguity, verification, privacy, and browser usability behavior.
+
+## A29 — held-out anti-script cognition capability gate
+
+Published examples and deterministic fixtures are development probes, not Product grammar and not sufficient evidence of general cognition.
+
+Before a cognition candidate is evaluated for this gate:
+
+1. freeze the exact cognition implementation revision, prompts, routing/configuration, and relevant model/capability selection;
+2. keep the held-out natural-language probe set undisclosed to that candidate and its implementation process until the freeze is recorded;
+3. evaluate multiple paraphrases, contextual/reference-dependent cases, and materially unrelated domains that are not merely noun substitutions of published examples; and
+4. inspect the candidate source/configuration/prompts for probe-specific or domain-specific branches whose practical purpose is to recognize the acceptance examples rather than provide general Product behavior.
+
+Required:
+
+- materially equivalent useful cognition across ordinary paraphrases rather than exact keyword/token dependence;
+- context-sensitive handling where meaning depends on prior conversation;
+- useful behavior across unrelated domains without adding one handwritten semantic pipeline per probe/domain;
+- examples remain test inputs, never ontology/schema/workflow definitions;
+- failures are recorded rather than hidden by selecting only favorable runs.
+
+Forbidden:
+
+- disclosing held-out probes and then tuning the same candidate against them while still counting the probes as held out;
+- hard-coded branches, prompt clauses, routers, fixture recognizers, or domain scripts added merely to satisfy known acceptance wording;
+- claiming capability from schema-valid/static/fixture output alone.
+
+If the frozen candidate is changed after held-out disclosure in a way that could affect cognition behavior, that held-out set is consumed for acceptance and a fresh undisclosed set is required for the changed candidate.
 
 ## Human usability questions
 
@@ -201,6 +249,7 @@ A representative person should be able to answer:
 5. Why is this Recommendation being made?
 6. What sources supported it?
 7. Can I refer naturally to something Solandra said earlier?
-8. If I say “Do it,” is the exact action clear before consequential execution?
-9. Can I tell whether an action was merely reported successful or actually verified?
-10. Can I use the Product without learning workflow/provider/internal-system terminology?
+8. Can I choose among recommendations without that choice silently authorizing an external action?
+9. If I say “Do it,” is the exact action clear before consequential execution?
+10. Can I tell whether an action was merely reported successful or actually verified?
+11. Can I use the Product without learning workflow/provider/internal-system terminology?

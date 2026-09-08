@@ -19,7 +19,7 @@ Where an older Owner-approved decision, architecture document, acceptance contra
 The current target architecture is:
 
 - **Solandra = cognition** — ordinary-language understanding, conversational context, reference resolution, planning, investigation strategy, advisory reasoning, recommendation, capability coordination, and natural explanation.
-- **Lattice = trust** — intent integrity, governed Knowledge/provenance/uncertainty, authorization, durable safety/recovery, execution governance, and verification.
+- **Lattice = trust** — intent integrity, governed Knowledge/provenance/uncertainty, accepted USER choice when exact choice matters downstream, authorization, durable safety/recovery, execution governance, and verification.
 - **Models, sources, algorithms, and tools = capabilities** — bounded mechanisms used by Solandra through Lattice-owned trust and execution boundaries.
 
 These are logical planes. Lattice remains a one-owner hobby project and should prefer a modular monolith unless observed reliability, safety, capability, or operational evidence justifies physical separation.
@@ -38,7 +38,7 @@ Solandra is no longer presentation-only. Current Product direction permits Solan
 - prepare ActionProposals; and
 - explain results naturally through Conversation and Composer.
 
-Solandra cognition does not make Solandra truth authority, authorization authority, execution authority, or verification authority.
+Solandra cognition does not make Solandra truth authority, USER-choice authority, authorization authority, execution authority, or verification authority.
 
 ## 4. Intent Integrity replaces universal language-understanding ownership
 
@@ -49,7 +49,7 @@ Preserved rules:
 - conversation/transcript is not canonical intent;
 - model interpretation is not USER provenance;
 - explicit USER correction creates durable lineage rather than rewriting history;
-- material ambiguity that could change truth, recommendation/formal decision, or consequential action fails closed to clarification/confirmation;
+- material ambiguity that could change truth, recommendation/formal decision, USER choice, or consequential action fails closed to clarification/confirmation;
 - model confidence cannot become USER authority.
 
 Narrowed rule:
@@ -57,6 +57,8 @@ Narrowed rule:
 - deterministic Intent Authority machinery is not the universal conversational intelligence engine. Ordinary reasonable interpretation may proceed without ritual confirmation when the supported meaning is materially sufficient and no material ambiguity requires clarification.
 
 Existing `IntentVersion`-style provenance/versioning mechanisms may remain implementation foundations for this trust boundary.
+
+When the person's actual decision or choice materially matters downstream, Intent Integrity may preserve an exact accepted `AcceptedChoice`. That is governed USER state, not a new subsystem, not Solandra's Recommendation, and not action Authorization.
 
 ## 5. Knowledge is a first-class trust object
 
@@ -80,9 +82,23 @@ Ordinary advisory reasoning is performed by Solandra over:
 - known uncertainty; and
 - optional qualified capabilities.
 
-A durable `Recommendation` is advisory Product state. It is not USER intent, factual truth, authorization, execution, or verification.
+A durable `Recommendation` is advisory Product state. It is not USER intent, factual truth, the person's accepted Decision/Choice, authorization, execution, or verification.
 
 The Lattice Decision Engine is no longer the universal authority required for ordinary advice or recommendation.
+
+### 6.1 USER Decision/Choice remains distinct
+
+The Core distinction that truth is not a decision and a decision is not authorization remains explicit.
+
+When a person actually chooses among recommendations/options and preserving that exact choice matters downstream, Lattice may record an optional `AcceptedChoice` under Intent Integrity.
+
+```text
+Knowledge != Recommendation
+Recommendation != AcceptedChoice
+AcceptedChoice != Authorization
+```
+
+`AcceptedChoice` is intentionally small. It may bind the exact referenced option/outcome, actual USER provenance, and relevant Intent/freshness basis. It does not create a new “Decision Authority,” does not require the formal Decision Engine, and does not authorize external execution.
 
 ## 7. Formal Decision Engine becomes an optional qualified capability
 
@@ -110,6 +126,7 @@ ConversationReference
   -> Intent
   -> Knowledge
   -> Recommendation
+  -> AcceptedChoice
   -> ActionProposal
   -> Authorization
   -> ExecutionReceipt
@@ -121,7 +138,8 @@ This enables grounded follow-ups such as:
 - “Explain that” -> the exact referenced Recommendation/Knowledge object;
 - “What were your sources?” -> the actual Knowledge -> Evidence -> Source provenance used then;
 - “What about the second option?” -> the exact referenced alternative/basis;
-- “Do it” -> the exact current ActionProposal or a new proposal derived from the referenced Recommendation, never a prose-only execution authorization.
+- “I’ll take the second one” -> the exact referenced option may become an AcceptedChoice through Intent Integrity when downstream trust requires it;
+- “Do it” -> the exact current ActionProposal or a new proposal derived from the referenced Recommendation/AcceptedChoice, never a prose-only execution authorization.
 
 ## 9. Capability architecture
 
@@ -146,6 +164,15 @@ The user-authorized model is one cognitive capability available to Solandra. Its
 The current trust chain is explicitly:
 
 ```text
+Knowledge
+  != Recommendation
+
+Recommendation
+  != AcceptedChoice
+
+AcceptedChoice
+  != Authorization
+
 Recommendation
   != ActionProposal
 
@@ -159,10 +186,12 @@ ActionProposal
 Rules:
 
 - Recommendation is advisory.
+- AcceptedChoice, when present, records what the USER actually chose; it is not Authorization.
 - ActionProposal is exact prepared execution intent, not authority.
 - Authorization must be narrow, current, and bound to the exact consequential proposal where required.
 - Authorization is not execution.
 - Executor does not decide whether it was allowed to act.
+- Execution is not verification.
 - ExecutionReceipt is an operational report, not verified reality.
 - Completion is represented as verified only when Lattice has sufficient independent evidence of the intended resulting state.
 - If independent verification is unavailable, the limitation remains explicit.
@@ -177,9 +206,12 @@ conversation != canonical intent
 interpretation != USER authority
 information != Knowledge/truth
 Knowledge/truth != Recommendation
+Recommendation != accepted USER Decision/Choice
+accepted USER Decision/Choice != Authorization
 Recommendation != ActionProposal
 ActionProposal != Authorization
 Authorization != Execution
+Execution != Verification
 ExecutionReceipt != Verification
 presentation != authority
 capability != authority
@@ -209,7 +241,7 @@ Architecture Integrity must not block Solandra cognition merely because an older
 
 **Preserved:** exact USER provenance, immutable/versioned intent lineage, correction, material clarification, exact downstream binding, and fail-closed treatment of material unsupported inference.
 
-**Narrowed:** Intent Authority becomes Intent Integrity rather than the universal language-understanding/cognitive engine. Solandra performs ordinary semantic understanding and proposes meaning.
+**Narrowed:** Intent Authority becomes Intent Integrity rather than the universal language-understanding/cognitive engine. Solandra performs ordinary semantic understanding and proposes meaning. Accepted USER Decision/Choice may be preserved under this same trust boundary when materially needed downstream; it does not create a new universal decision authority.
 
 ### OD-007 — M8 continuity
 
@@ -223,4 +255,4 @@ Architecture Integrity must not block Solandra cognition merely because an older
 
 ## 13. No implementation claim
 
-OD-011 changes current Product direction and the design corpus only. At the base revision, existing runtime code still reflects substantial portions of the predecessor architecture. A later bounded implementation handoff must establish cognition, durable Knowledge, ConversationReference, capability brokerage, Recommendation, Authorization, ExecutionReceipt, and Verification behavior with exact runtime evidence.
+OD-011 changes current Product direction and the design corpus only. At the base revision, existing runtime code still reflects substantial portions of the predecessor architecture. A later bounded implementation handoff must establish cognition, durable Knowledge, optional AcceptedChoice, ConversationReference, capability brokerage, Recommendation, Authorization, ExecutionReceipt, and Verification behavior with exact runtime evidence.

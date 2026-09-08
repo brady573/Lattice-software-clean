@@ -12,7 +12,8 @@
     "intentIntegrity": "Lattice",
     "knowledgeTrust": "Lattice / V36",
     "recommendation": "Solandra over governed Intent and Knowledge; optional formal Decision Engine capability when qualified",
-    "actionTrust": "Lattice ActionProposal / Authorization / ExecutionReceipt / Verification boundaries",
+    "userChoice": "Lattice Intent Integrity when accepted USER choice materially matters downstream; distinct from Recommendation and Authorization",
+    "actionTrust": "Lattice ActionProposal / Authorization / Execution / ExecutionReceipt / Verification boundaries",
     "presentation": "Solandra",
     "rendering": "browser client"
   },
@@ -24,7 +25,8 @@
   "remainingValidationGaps": [
     "Run exact-candidate browser usability and accessibility acceptance.",
     "Validate natural Solandra cognition and governed referential continuity on an implemented runtime candidate.",
-    "Validate Knowledge provenance continuity and action authorization/verification behavior on an implemented runtime candidate."
+    "Validate held-out anti-script cognition across paraphrases, contextual cases, and unrelated domains on a frozen implementation candidate.",
+    "Validate Knowledge provenance continuity, accepted USER choice separation, and action authorization/execution/verification behavior on an implemented runtime candidate."
   ],
   "reconciliationDate": "2026-09-08",
   "note": "Design ownership metadata only. This file does not establish runtime cognition, Product acceptance, provider qualification, production readiness, or consequential action authority."
