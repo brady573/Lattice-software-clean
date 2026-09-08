@@ -16,6 +16,11 @@ export interface CapabilityBrokerComposition {
   readonly userModelConfigured: boolean;
 }
 
+/**
+ * Compose the Product-facing broker independently from A2 authorization.
+ * M3 may reuse the same underlying configured provider/model as Solandra, but
+ * the user-model capability has its own context, purpose, grant, and audit path.
+ */
 export async function createConfiguredCapabilityBroker(
   config: RuntimeConfig,
 ): Promise<CapabilityBrokerComposition> {
@@ -27,10 +32,10 @@ export async function createConfiguredCapabilityBroker(
     })();
 
   const broker = new CapabilityBroker(store);
-  if (config.userModelRoute === "groq-gpt-oss-120b") {
-    if (!config.userModelApiKey) throw new Error("Configured user-model capability route is missing its runtime credential.");
+  if (config.solandraCognitionRoute === "groq-gpt-oss-120b") {
+    if (!config.solandraCognitionApiKey) throw new Error("Configured Solandra provider machinery is missing its runtime credential.");
     const runtime = new GroqKnowledgeSimplifierModelRuntime(
-      new GroqKnowledgeSimplifierModelProvider({ apiKey: config.userModelApiKey }),
+      new GroqKnowledgeSimplifierModelProvider({ apiKey: config.solandraCognitionApiKey }),
     );
     broker.register(new UserAuthorizedModelCapability(runtime, GROQ_KNOWLEDGE_SIMPLIFIER_MODEL));
     return Object.freeze({ broker, userModelConfigured: true });
