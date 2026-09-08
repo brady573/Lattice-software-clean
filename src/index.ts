@@ -28,6 +28,7 @@ try {
       ...(solandra === undefined ? {} : {
         solandraCognition: solandra.cognition,
         solandraAdvisory: solandra.advisory,
+        solandraActionPreparer: solandra.actionPreparer,
         solandraKnowledgePresenter: solandra.knowledgePresenter,
       }),
     });

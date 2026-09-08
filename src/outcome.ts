@@ -60,12 +60,19 @@ export interface KnowledgeOutcome {
   truthAssessmentIds: string[];
 }
 
+export interface PreparedResourceBasis {
+  knowledgeId: string;
+  claimIds: string[];
+}
+
 export interface PreparedResource {
   kind: "CHECKLIST" | "PREPARED_MESSAGE";
   title: string;
   body: string;
   editable: true;
   executionAuthorized: false;
+  basis?: PreparedResourceBasis[];
+  preservedUncertainties?: string[];
 }
 
 export interface ActionPreparationOutcome {

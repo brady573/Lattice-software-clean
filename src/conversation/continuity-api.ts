@@ -1,4 +1,8 @@
 import type { FastifyInstance } from "fastify";
+import {
+  preparedResourceFromRecord,
+  type PreparedResourceStore,
+} from "../action-preparation/prepared-resource-store.js";
 import { getAuthenticatedSubject } from "../auth/authenticated-subject.js";
 import { isConsultationRunRequest, type LatticeRunRequest } from "../domain.js";
 import type {
@@ -33,6 +37,7 @@ export interface ConversationContinuityApiOptions {
   intentStore?: IntentAuthorityStore;
   knowledgeStore?: KnowledgeRecordStore;
   recommendationStore?: RecommendationStore;
+  preparedResourceStore?: PreparedResourceStore;
 }
 
 function validBoundedId(value: string, maxChars: number): string | undefined {
@@ -66,7 +71,15 @@ async function readLatestPresentationBasis(
     const truth = run.status === "COMPLETED"
       ? await options.runStore.getTruthBundle(run.id)
       : undefined;
-    const outcome = truth ? buildRunOutcome(run, truth) : undefined;
+    let outcome = truth ? buildRunOutcome(run, truth) : undefined;
+    if (
+      outcome?.kind === "ACTION_PREPARATION"
+      && outcome.resource.kind === "PREPARED_MESSAGE"
+      && options.preparedResourceStore
+    ) {
+      const prepared = await options.preparedResourceStore.getPreparedResourceByRunId(run.id);
+      if (prepared) outcome = { ...outcome, resource: preparedResourceFromRecord(prepared) };
+    }
     return { run, decisionPlan, intentVersion, outcome };
   }
   return { run: undefined, decisionPlan: undefined, intentVersion: undefined, outcome: undefined };
