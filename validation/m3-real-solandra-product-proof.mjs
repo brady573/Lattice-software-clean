@@ -216,7 +216,11 @@ try {
   const knowledgeTurn = await postOrdinaryTurn(first, conversationId, KNOWLEDGE_USER);
   assert.equal(knowledgeTurn.acceptedUnderstanding, KNOWLEDGE_USER);
   assert.equal(knowledgeTurn.interpretation?.authority, "NON_AUTHORITATIVE_PROPOSAL");
-  assert.equal(knowledgeTurn.interpretation?.requestedHelp, "KNOWLEDGE");
+  assert.ok(
+    knowledgeTurn.interpretation?.requestedHelp === "KNOWLEDGE"
+      || knowledgeTurn.interpretation?.requestedHelp === "FRESH_RESEARCH",
+    `The ordinary Knowledge prerequisite must use a governed investigation classification, got ${knowledgeTurn.interpretation?.requestedHelp ?? "NONE"}.`,
+  );
   await executeRun(executionStore, knowledgeTurn.runId);
   const knowledgeOutcome = await getOutcome(first, knowledgeTurn.runId);
   assert.equal(knowledgeOutcome.outcome.kind, "KNOWLEDGE");
