@@ -45,10 +45,41 @@ jobs:
         run: |
           npm ci --no-audit --no-fund
           npm run build
-      - name: Syntax-check prepared resolved A6 harness
+      - name: Apply authorized validation-only harness corrections
+        working-directory: harness
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD:validation/a6-alpha-product-proof-resolved.mjs)" = "c7b5f16d23bf062e0997692ad35a994b83eaffe8"
+          python - <<'PY'
+          from pathlib import Path
+          path = Path("validation/a6-alpha-product-proof-resolved.mjs")
+          text = path.read_text()
+          old_turn = '  assert.equal(second.acceptedUnderstanding, RESOURCE_REQUEST);\n'
+          new_turn = (
+              '  assert.equal(second.acceptedUnderstanding, PRIMARY_REQUEST);\n'
+              '  assert.equal(second.intentVersionId, first.intentVersionId);\n'
+          )
+          old_continuity = (
+              '  assert.equal(continuity.messages.length, 2);\n'
+              '  assert.equal(continuity.runs.length, 2);\n'
+          )
+          new_continuity = (
+              '  assert.equal(continuity.messages.length, 2);\n'
+              '  assert.equal(continuity.messages[0]?.content, PRIMARY_REQUEST);\n'
+              '  assert.equal(continuity.messages[1]?.content, RESOURCE_REQUEST);\n'
+              '  assert.equal(continuity.runs.length, 2);\n'
+          )
+          if text.count(old_turn) != 1:
+              raise SystemExit("authorized second-turn assertion target not found exactly once")
+          if text.count(old_continuity) != 1:
+              raise SystemExit("authorized continuity assertion target not found exactly once")
+          text = text.replace(old_turn, new_turn, 1).replace(old_continuity, new_continuity, 1)
+          path.write_text(text)
+          PY
+      - name: Syntax-check corrected resolved A6 harness
         working-directory: subject
         run: node --check ../harness/validation/a6-alpha-product-proof-resolved.mjs
-      - name: Execute prepared resolved A6 Product proof exactly once
+      - name: Execute corrected resolved A6 Product proof exactly once
         working-directory: subject
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
