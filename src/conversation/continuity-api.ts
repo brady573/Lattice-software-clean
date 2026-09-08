@@ -152,6 +152,7 @@ export function registerConversationContinuityApi(
         conversation,
         messages: messages.map((message) => ({
           id: message.messageId,
+          logicalUserTurnId: message.logicalUserTurnId,
           role: "USER" as const,
           content: message.content,
           createdAt: message.createdAt,
