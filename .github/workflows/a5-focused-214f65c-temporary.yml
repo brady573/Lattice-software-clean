@@ -1,0 +1,31 @@
+name: TEMP A5 Focused 214f65c
+
+on:
+  push:
+    branches:
+      - validation/a5-focused-214f65c
+    paths:
+      - ".github/workflows/a5-focused-214f65c-temporary.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  focused:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: 214f65c914a99d73c790173e28f9bb52b935cec3
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '24'
+      - name: Verify frozen subject
+        run: |
+          test "$(git rev-parse HEAD)" = "214f65c914a99d73c790173e28f9bb52b935cec3"
+          test "$(git rev-parse HEAD^{tree})" = "d2d940b30b84770944483eeebcf7a4cb0be0edb6"
+      - run: npm ci --no-audit --no-fund
+      - run: npm run build
+      - run: node --import tsx --test test/a5-solandra-recovery-continuity.test.ts
