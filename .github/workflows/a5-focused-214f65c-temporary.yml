@@ -1,4 +1,4 @@
-name: TEMP A5 Focused 214f65c
+name: TEMP A5 Focused b961ef8
 
 on:
   push:
@@ -17,15 +17,15 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          ref: 214f65c914a99d73c790173e28f9bb52b935cec3
+          ref: b961ef8b7df1245a224ee173aecac2f60a9428b4
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: '24'
       - name: Verify frozen subject
         run: |
-          test "$(git rev-parse HEAD)" = "214f65c914a99d73c790173e28f9bb52b935cec3"
-          test "$(git rev-parse HEAD^{tree})" = "d2d940b30b84770944483eeebcf7a4cb0be0edb6"
+          test "$(git rev-parse HEAD)" = "b961ef8b7df1245a224ee173aecac2f60a9428b4"
+          test "$(git rev-parse HEAD^{tree})" = "61d34a3ff612ceab26043f1f377826aeb066a635"
       - run: npm ci --no-audit --no-fund
       - run: npm run build
       - run: node --import tsx --test test/a5-solandra-recovery-continuity.test.ts
