@@ -44,7 +44,8 @@ test("Core philosophy controls the current Product-design read order and 1.0 def
 
   assert.match(roadmap, /SUBORDINATE TO THE CORE LATTICE PHILOSOPHY/u);
   assert.match(roadmap, /The-Core-Lattice-Philosophy\.md[^\n]+highest Product philosophy authority/u);
-  assert.match(integrity, /subordinate to `The-Core-Lattice-Philosophy\.md`/u);
+  assert.match(integrity, /`The-Core-Lattice-Philosophy\.md` remains unchanged and highest authority/u);
+  assert.match(integrity, /This document is subordinate to the Core/u);
 
   assert.match(intentDecision, /Recommendation is not the person's decision/u);
   assert.match(intentDecision, /the person's decision is not action Authorization/u);
