@@ -18,7 +18,7 @@ jobs:
       - name: Checkout exact subject
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          ref: 014bfb381c138df588a6fd183eca4dc9aa9cc97c
+          ref: d753f7b4d70d05b358c8c81100ea219cbf41d848
           persist-credentials: false
       - name: Provision Node 24
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
@@ -27,8 +27,8 @@ jobs:
       - name: Verify exact candidate
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "014bfb381c138df588a6fd183eca4dc9aa9cc97c"
-          test "$(git rev-parse HEAD^{tree})" = "e8aee6c19ef50ba5d3132b6dd1a77ee009150dc5"
+          test "$(git rev-parse HEAD)" = "d753f7b4d70d05b358c8c81100ea219cbf41d848"
+          test "$(git rev-parse HEAD^{tree})" = "2379a2615f4c1fc96ea05d55933b21cc08d8520e"
       - name: Install locked dependencies
         run: npm ci --no-audit --no-fund
       - name: Run focused reconciliation only
