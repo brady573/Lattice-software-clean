@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import { Pool } from "pg";
 import type { ModelInvocationProvenance } from "../model/types.js";
 
-const migration = "033_capability_authorizations.sql" as const;
+const migration = "036_capability_authorizations.sql" as const;
 
 export type CapabilityGrantStatus = "CONNECTED" | "DISCONNECTED";
 export type CapabilityInvocationOutcome = "SUCCEEDED" | "PROVIDER_FAILURE" | "REVOKED";
