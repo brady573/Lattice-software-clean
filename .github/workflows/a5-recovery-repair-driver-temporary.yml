@@ -1,0 +1,262 @@
+name: TEMP — A5 Recovery Repair Driver
+
+on:
+  push:
+    branches:
+      - validation/a5-recovery-repair-driver
+    paths:
+      - ".github/workflows/a5-recovery-repair-driver-temporary.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: feature/a5-solandra-recovery-continuity
+          fetch-depth: 0
+      - name: Verify exact starting subject
+        run: |
+          test "$(git rev-parse HEAD)" = "ec7b1e118b783e768c99e76b82876dff786c02b6"
+          test "$(git rev-parse HEAD^{tree})" = "96c0cb250023a7f85ff690df6ded1a3e4bf38537"
+      - name: Apply bounded browser recovery repair
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          ui = Path('src/ui/solandra-conversation-page.ts')
+          text = ui.read_text()
+
+          old = '''      const persistDraft = (value) => {
+        if (value.length > 0) storageSet(STORAGE.draft, value);
+        else storageRemove(STORAGE.draft);
+      };
+      const restoreDraft = () => {
+        const draft = storageGet(STORAGE.draft);
+        if (draft !== null && !input.value) input.value = draft;
+      };
+      const clearDraftIfSame = (value) => {
+        if (input.value === value) input.value = "";
+        if (storageGet(STORAGE.draft) === value) storageRemove(STORAGE.draft);
+      };
+'''
+          new = '''      const readDraft = () => {
+        const record = readRecord(STORAGE.draft);
+        return record
+          && typeof record.conversationId === "string"
+          && typeof record.value === "string"
+          ? record
+          : null;
+      };
+      const persistDraft = (value) => {
+        const id = conversationId || storageGet(STORAGE.conversation);
+        if (value.length > 0 && id) writeRecord(STORAGE.draft, { conversationId: id, value });
+        else if (value.length === 0) storageRemove(STORAGE.draft);
+      };
+      const restoreDraftForConversation = (id) => {
+        const draft = readDraft();
+        if (draft?.conversationId === id && !input.value) input.value = draft.value;
+      };
+      const clearDraftIfSame = (value) => {
+        if (input.value === value) input.value = "";
+        const draft = readDraft();
+        if (draft?.conversationId === conversationId && draft.value === value) storageRemove(STORAGE.draft);
+      };
+'''
+          if text.count(old) != 1:
+              raise SystemExit('draft helper anchor mismatch')
+          text = text.replace(old, new)
+
+          old = '''        clearPendingTurn(record.turnId);
+        clearDraftIfSame(record.message);
+        await handleTurnResponse(body, record);
+'''
+          new = '''        clearDraftIfSame(record.message);
+        await handleTurnResponse(body, record);
+        clearPendingTurn(record.turnId);
+'''
+          if text.count(old) != 1:
+              raise SystemExit('accepted-turn handoff anchor mismatch')
+          text = text.replace(old, new)
+
+          old = '''        const clarification = readClarification();
+        if (clarification?.conversationId === id) storageRemove(STORAGE.clarification);
+        if (conversationId === id) conversationId = null;
+'''
+          new = '''        const clarification = readClarification();
+        if (clarification?.conversationId === id) storageRemove(STORAGE.clarification);
+        const draft = readDraft();
+        if (draft?.conversationId === id) storageRemove(STORAGE.draft);
+        if (conversationId === id) conversationId = null;
+'''
+          if text.count(old) != 1:
+              raise SystemExit('purge anchor mismatch')
+          text = text.replace(old, new)
+
+          old = '''        recovering = true;
+        restoreDraft();
+        try {
+'''
+          new = '''        recovering = true;
+        try {
+'''
+          if text.count(old) != 1:
+              raise SystemExit('early draft restore anchor mismatch')
+          text = text.replace(old, new)
+
+          old = '''          } catch {
+            appendSolandraTurn("I couldn't reconnect to your saved conversation yet. Your draft is still here, and I won't start duplicate work.");
+            return;
+          }
+          if (continuityResponse.status === 404) {
+            clearStoredConversationState(storedId);
+            appendSolandraTurn("I couldn't recover that saved conversation for this signed-in user. Your draft is still here.");
+            return;
+          }
+          if (!continuityResponse.ok) {
+            appendSolandraTurn("I couldn't reconnect to your saved conversation yet. Your draft is still here, and I won't start duplicate work.");
+            return;
+          }
+          const continuity = await continuityResponse.json();
+          setConversation(storedId);
+          rebuildConversation(continuity);
+'''
+          new = '''          } catch {
+            appendSolandraTurn("I couldn't reconnect to your saved conversation yet. I won't start duplicate work while recovery is uncertain.");
+            return;
+          }
+          if (continuityResponse.status === 404) {
+            clearStoredConversationState(storedId);
+            appendSolandraTurn("I couldn't recover that saved conversation for this signed-in user.");
+            return;
+          }
+          if (!continuityResponse.ok) {
+            appendSolandraTurn("I couldn't reconnect to your saved conversation yet. I won't start duplicate work while recovery is uncertain.");
+            return;
+          }
+          const continuity = await continuityResponse.json();
+          setConversation(storedId);
+          rebuildConversation(continuity);
+          restoreDraftForConversation(storedId);
+'''
+          if text.count(old) != 1:
+              raise SystemExit('revalidation anchor mismatch')
+          text = text.replace(old, new)
+
+          old = '''      void recoverSession()
+        .catch(() => appendSolandraTurn("I couldn't reconnect yet. Your draft is still here, and I won't start duplicate work."))
+'''
+          new = '''      void recoverSession()
+        .catch(() => appendSolandraTurn("I couldn't reconnect yet. I won't start duplicate work while recovery is uncertain."))
+'''
+          if text.count(old) != 1:
+              raise SystemExit('startup recovery language anchor mismatch')
+          text = text.replace(old, new)
+
+          ui.write_text(text)
+
+          test = Path('test/a5-solandra-recovery-continuity.test.ts')
+          text = test.read_text()
+
+          old = '''  assert.match(html, /body: JSON\\.stringify\\(\\{ turnId: record\\.turnId, message: record\\.message \\}\\)/u);
+  assert.match(html, /\\/continuity/u);
+'''
+          new = '''  assert.match(html, /body: JSON\\.stringify\\(\\{ turnId: record\\.turnId, message: record\\.message \\}\\)/u);
+  assert.match(html, /clearDraftIfSame\\(record\\.message\\);[\\s\\S]*await handleTurnResponse\\(body, record\\);[\\s\\S]*clearPendingTurn\\(record\\.turnId\\);/u);
+  assert.doesNotMatch(html, /clearPendingTurn\\(record\\.turnId\\);[\\s\\S]*await handleTurnResponse\\(body, record\\);/u);
+  assert.match(html, /\\/continuity/u);
+'''
+          if text.count(old) != 1:
+              raise SystemExit('focused handoff assertion anchor mismatch')
+          text = text.replace(old, new)
+
+          old = '''  assert.doesNotMatch(html, /worker status|queue status|provider status|retry epoch/iu);
+});
+
+test("one logical USER turn identity replays to one durable USER message and one Run", async () => {
+'''
+          new = '''  assert.doesNotMatch(html, /worker status|queue status|provider status|retry epoch/iu);
+});
+
+test("browser keeps accepted logical-turn recovery identity until active-work handoff is established", async () => {
+  const html = renderSolandraConversationPage();
+  assert.match(html, /clearDraftIfSame\\(record\\.message\\);[\\s\\S]*await handleTurnResponse\\(body, record\\);[\\s\\S]*clearPendingTurn\\(record\\.turnId\\);/u);
+
+  const app = await createRuntimeApp(config, { memoryDispatchDelayMs: 250 });
+  try {
+    const conversationId = await createConversation(app);
+    const turnId = "a5-accepted-handoff-turn";
+    const message = "Investigate this accepted handoff without duplicating it.";
+
+    const accepted = await submitTurn(app, conversationId, turnId, message);
+    assert.equal(accepted.statusCode, 202, accepted.body);
+    const first = accepted.json<{ runId: string; intentVersionId: string; provenance: { messageId: string } }>();
+
+    // This replay represents reload at the exact client-side handoff boundary after
+    // durable acceptance but before active-work storage has been established.
+    const recovered = await submitTurn(app, conversationId, turnId, message);
+    assert.equal(recovered.statusCode, 202, recovered.body);
+    const replay = recovered.json<{ runId: string; intentVersionId: string; provenance: { messageId: string } }>();
+    assert.deepEqual(replay, first);
+
+    const continuity = await app.inject({
+      method: "GET",
+      url: `/api/v1/conversations/${encodeURIComponent(conversationId)}/continuity`,
+    });
+    assert.equal(continuity.statusCode, 200, continuity.body);
+    const state = continuity.json<{ messages: Array<{ id: string }>; runs: Array<{ runId: string }> }>();
+    assert.equal(state.messages.length, 1);
+    assert.equal(state.messages[0]?.id, first.provenance.messageId);
+    assert.equal(state.runs.length, 1);
+    assert.equal(state.runs[0]?.runId, first.runId);
+  } finally {
+    await app.close();
+  }
+});
+
+test("draft recovery is conversation-bound and waits for subject-owned continuity before showing USER text", () => {
+  const html = renderSolandraConversationPage();
+  assert.match(html, /writeRecord\\(STORAGE\\.draft, \\{ conversationId: id, value \\}\\)/u);
+  assert.match(html, /const draft = readDraft\\(\\);[\\s\\S]*if \\(draft\\?\\.conversationId === id\\) storageRemove\\(STORAGE\\.draft\\);/u);
+  assert.match(html, /const continuity = await continuityResponse\\.json\\(\\);[\\s\\S]*setConversation\\(storedId\\);[\\s\\S]*rebuildConversation\\(continuity\\);[\\s\\S]*restoreDraftForConversation\\(storedId\\);/u);
+  assert.doesNotMatch(html, /recovering = true;\\s*restoreDraft/u);
+  assert.doesNotMatch(html, /couldn't recover that saved conversation[^\n]*draft is still here/iu);
+});
+
+test("one logical USER turn identity replays to one durable USER message and one Run", async () => {
+'''
+          if text.count(old) != 1:
+              raise SystemExit('focused regression insertion anchor mismatch')
+          text = text.replace(old, new)
+
+          old = '''    assert.equal(cancel.statusCode, 404);
+  } finally {
+'''
+          new = '''    assert.equal(cancel.statusCode, 404);
+
+    const html = renderSolandraConversationPage();
+    assert.match(html, /if \\(continuityResponse\\.status === 404\\) \\{[\\s\\S]*clearStoredConversationState\\(storedId\\);[\\s\\S]*return;/u);
+    assert.match(html, /const draft = readDraft\\(\\);[\\s\\S]*if \\(draft\\?\\.conversationId === id\\) storageRemove\\(STORAGE\\.draft\\);/u);
+  } finally {
+'''
+          if text.count(old) != 1:
+              raise SystemExit('subject isolation assertion anchor mismatch')
+          text = text.replace(old, new)
+          test.write_text(text)
+          PY
+
+          git diff --check
+          git diff -- src/ui/solandra-conversation-page.ts test/a5-solandra-recovery-continuity.test.ts
+      - name: Commit Product repair
+        run: |
+          git config user.name "brady573"
+          git config user.email "114089255+brady573@users.noreply.github.com"
+          git add src/ui/solandra-conversation-page.ts test/a5-solandra-recovery-continuity.test.ts
+          git commit -m "A5: close recovery handoff and draft isolation gaps"
+          git push origin HEAD:feature/a5-solandra-recovery-continuity
+          echo "PRODUCT_SHA=$(git rev-parse HEAD)"
+          echo "PRODUCT_TREE=$(git rev-parse HEAD^{tree})"
