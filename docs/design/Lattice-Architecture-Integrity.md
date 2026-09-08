@@ -1,118 +1,190 @@
 # Lattice Architecture Integrity
 
-Status: **Owner-approved cross-cutting Product architecture control subordinate to `The-Core-Lattice-Philosophy.md`**.
+Status: **OWNER-APPROVED CROSS-CUTTING ARCHITECTURE CONTROL — RECONCILED BY OD-011**
 
-Approved: **August 26, 2026**.
+Reconciled: **2026-09-08**
 
-Current deployment reconciliation baseline: `main @ 51d47bb27bf1f42051917654e308ef458d3cd5fc`, tree `6b7e6a34d96c7c09668e46495394215f69a53751`.
+Repository baseline: `main @ e35f57e0621b81a66285c729b124d0c87ce8dffa`, tree `e7eb933e228735e3cefe472bc0d4269c71b556fa`.
 
-Source candidate artifact: `lattice-antidrift-handoff-v1.zip`, SHA-256 `d4f015a01106cc22fcdd7e348c4694ca970712b38421025ff839beec2d90101c`.
+`The-Core-Lattice-Philosophy.md` remains unchanged and highest authority. This document is subordinate to the Core and to current Owner decision OD-011 where OD-011 supersedes older topology.
 
 ## 1. Purpose
 
-Lattice Architecture Integrity preserves **Product-semantic ownership and authority boundaries** as Lattice evolves across M3-M12. It is subordinate to `The-Core-Lattice-Philosophy.md`, which is the highest Product-design authority and first filter. If an integrity rule, architecture source, or implementation conflicts with the Core, the Core governs and the conflicting element must be reconciled or removed.
+Architecture Integrity protects the Product distinctions that make Lattice trustworthy. It does **not** freeze a historical component topology.
 
-It is cross-cutting Product architecture, not a Product subsystem and not a numbered milestone. It supplements the canonical living Product design without renumbering M0-M12.
+## 2. Primary integrity law
 
-The current implementation-level composition of these protected boundaries is mapped in `docs/design/Lattice-System-Architecture.md`. That structural map may name durable bindings and implementation components such as `DecisionPlan`, Run stores, workers, bridges, and presentation projections without creating additional peer semantic authorities.
+The current architecture is logically:
 
-This document intentionally does **not** duplicate repository/process operating guidance. Applicable Owner/Project guidance governs requirement qualification, debugging/recovery process, source freshness, validation provenance, Owner-only boundaries, production/security/cost controls, and optional workflow mechanics. Those operating mechanics do not create Product requirements or require a particular team, issue tracker, review ceremony, or handoff structure.
+```text
+Solandra cognition
+      |
+      +--> Lattice intent integrity
+      +--> Lattice Knowledge trust
+      +--> bounded capabilities
+      +--> optional formal decision capability
+      +--> action authorization / execution / verification
+```
 
-## 2. Product-semantic invariants
+Solandra may understand, reason, plan, investigate, recommend, coordinate capabilities, and explain. Those cognitive acts remain proposals or advisory state until the applicable Lattice trust boundary establishes what may be treated as authoritative.
 
-### AIC-01 — Canonical ownership does not transfer implicitly
+## 3. Protected distinctions
 
-Use the canonical Product systems when authority distinctions matter:
+The following distinctions are architectural invariants:
 
-- **Lattice Intent Authority** owns canonical versioned USER intent and correction lineage.
-- **Lattice Execution Runtime** owns durable operational lifecycle, coordination, cancellation, recovery, and research execution.
-- **Lattice Model Gateway** is a non-authoritative model capability boundary.
-- **V36 Truth Core** owns protected external factual truth/evidence state.
-- **Lattice Decision Engine** conditionally owns authoritative eligibility, typed comparison, frontier, and StructuredDecision semantics for qualified decision work.
-- **Solandra Experience** owns human-facing conversation, advocacy, presentation, and explanation within its licensed fidelity boundary.
-- **V7 LLM Simulation Lab** is an external development simulation/qualification system, not Product authority.
+1. `conversation != canonical intent`
+2. `interpretation != USER authority`
+3. `model confidence != USER provenance`
+4. `information != Knowledge/truth`
+5. `retrieval success != evidence admission`
+6. `provider/model output != Product truth`
+7. `Knowledge/truth != Recommendation`
+8. `formal decision result != universal recommendation architecture`
+9. `Recommendation != ActionProposal`
+10. `ActionProposal != Authorization`
+11. `Authorization != Execution`
+12. `ExecutionReceipt != Verification`
+13. `presentation != authority`
+14. `capability != authority`
+15. `persistence != authority transfer`
+16. `retry/recovery != semantic promotion`
 
-Every Run has an exact IntentVersion binding. `DecisionPlan` is an additional durable, faithful planning projection only for qualified decision work. It does not independently own USER meaning, execution lifecycle, truth, decision, or presentation semantics; Knowledge and non-decision Action Preparation Runs have no DecisionPlan.
+A design or implementation may reorganize components while preserving these boundaries.
 
-A rename, adapter, process split, model output, provider, simulator, UI surface, repository move, persistence boundary, durable binding, or deployment transition does not transfer authority between these systems.
+## 4. Solandra cognition boundary
 
-### AIC-02 — Operational capability cannot become truth authority
+Solandra owns the Product's ordinary cognitive work:
 
-Execution Runtime state, Model Gateway output, provider output, simulator output, retrieval mechanics, retries, availability, or operational failure must not create or strengthen V36 truth.
+- semantic interpretation of conversation;
+- reference resolution;
+- hypothesis formation about intent and useful next work;
+- clarification strategy;
+- investigation planning;
+- reasoning over governed Knowledge;
+- advisory comparison and Recommendation;
+- capability coordination; and
+- natural explanation/presentation.
 
-Only the protected V36 contract may admit or change authoritative factual evidence state.
+Solandra must not silently:
 
-### AIC-03 — Intent, truth, decision, and presentation remain separate
+- convert its interpretation into unsupported canonical USER intent;
+- present ungoverned information as established Knowledge;
+- strengthen evidence or erase material uncertainty;
+- convert a Recommendation into authorization;
+- execute a consequential action without the applicable authorization boundary; or
+- report verified completion from an execution receipt alone.
 
-Transcript/model interpretation may propose USER meaning but must not silently become canonical Lattice Intent Authority state.
+## 5. Intent Integrity boundary
 
-V36 truth does not require or select a decision by itself. When decision work is qualified, Decision Engine logic must not strengthen evidence, sum incompatible raw scales, or force a winner. Solandra may advocate, challenge, clarify, and explain, but generated prose must not create USER intent, external facts, eligibility, recommendation frontier membership, or winner identity.
+Lattice Intent Integrity owns what the Product is justified in treating as established USER intent.
 
-### AIC-04 — Prototype and provider evidence does not silently promote Product authority
+It preserves:
 
-Development prototypes, Specialist Guidance, simulated conversations, local models, hosted simulators, and future live providers remain within their explicitly qualified Product boundary.
+- exact USER provenance;
+- immutable/versioned correction lineage;
+- materiality-sensitive clarification/confirmation;
+- separation of transcript/context from canonical intent; and
+- exact basis binding where downstream trust depends on it.
 
-Prototype success does not silently authorize canonical Intent Authority integration, V36 evidence admission, Decision Engine authority, production operation, or live-provider promotion.
+It is a trust guard, not a requirement that ordinary language understanding be deterministic or ritualized.
 
-### AIC-05 — Milestone transitions preserve upstream semantics
+## 6. Knowledge Integrity boundary
 
-Later milestones may add capability but must preserve confirmed upstream authority contracts unless a qualified Product design explicitly changes them.
+Lattice Knowledge Trust owns the transition from information to governed Knowledge.
 
-Examples:
+The protected graph is conceptually:
 
-- M4 durable research may extend execution while V36 remains epistemic authority.
-- M5 Intent Authority may structure USER intent without giving Solandra/model inference canonical commit authority; every Run preserves exact IntentVersion binding and a conditional DecisionPlan preserves decision-projection fidelity without becoming a new semantic authority.
-- M6 Decision Engine generalization may expand decision semantics without changing V36 evidence strength.
-- M7-M8 conversation/auth continuity may add persistence without changing truth/decision ownership.
-- M9 live-provider work may add provider capability without changing provider non-authority.
-- M10 Solandra generalization may improve explanation without changing authoritative decision state.
+```text
+Source -> Evidence -> Claim -> Knowledge
+```
 
-## 3. Milestone integration
+Material Knowledge retains provenance, currency, conflict, uncertainty, and unresolved limits. Existing V36 Truth Core contracts remain protected implementation/trust machinery where applicable.
 
-Architecture Integrity applies continuously across **M3-M12** and does not consume a milestone number.
+Operational success, source count, repeated model agreement, provider reputation, or fluent prose may not bypass this boundary.
 
-| Milestone range | Product-semantic integrity requirement |
-|---|---|
-| M3-M4 | Preserve Execution Runtime operational ownership versus V36 epistemic ownership during durable composition and research continuation. |
-| M5 | Prevent transcript/model interpretation from silently becoming canonical Intent Authority; preserve explicit USER provenance, exact Run binding, and conditional DecisionPlan fidelity. |
-| M6 | Preserve V36 truth versus conditional Decision Engine authority; decision logic cannot strengthen evidence, manufacture comparability, or force a winner. |
-| M7-M8 | Preserve conversation/progress/auth/data ownership boundaries while adding persistence and continuity. |
-| M9 | Live-provider capability remains non-authoritative and requires separate Product qualification. |
-| M10 | Solandra remains fidelity-bound over intent/truth/decision authority; generated explanation cannot create material Product facts. |
-| M11 | Production operation does not change Product semantic ownership merely because deployment topology changes. |
-| M12 | Apply AIC-R1 to the exact release candidate in addition to the applicable release gates. |
+## 7. Recommendation and optional formal decision boundary
 
-## 4. Supplemental release gate — AIC-R1
+General advisory Recommendation is Solandra cognitive Product state grounded in current governed Intent and Knowledge.
 
-M12 requires the existing applicable G1-G10 release gates **plus AIC-R1 — Architecture Integrity**.
+The formal Lattice Decision Engine is optional. It may be invoked as a qualified capability when typed constraints, criterion semantics, optimization, frontier/tie analysis, or other formal guarantees materially help.
 
-AIC-R1 PASS requires the exact release candidate to demonstrate, for the release scope:
+When used, its exact formal result remains attributable to its qualified inputs and must be represented faithfully. Formal machinery must not be required merely because a user asks for ordinary advice.
 
-1. canonical Product systems still own the semantics assigned to them by qualified Product design;
-2. no adapter, model, provider, simulator, UI, process split, rename, persistence boundary, durable binding, or deployment transition has silently transferred authority;
-3. no prototype-only or development-only mechanism has silently become canonical or production authority;
-4. Intent Authority, V36 Truth Core, Decision Engine, and Solandra Experience remain semantically separated as specified;
-5. milestone-added capability preserves confirmed upstream Product invariants unless an explicit qualified design change says otherwise;
-6. all release-relevant Product architecture sources are mutually consistent on system ownership and authority boundaries and subordinate to the Core;
-7. Knowledge, conditional Decision Support, and Action Preparation retain distinct canonical paths, with decision machinery absent where it is not qualified.
+## 8. Capability boundary
 
-AIC-R1 is a Product architecture gate. Applicable Owner/Project operating guidance remains controlling for how release validation, provenance, acceptance, production authorization, and any optional coordination mechanics are executed.
+Models, providers, algorithms, retrieval systems, tools, workers, queues, and external APIs are capabilities or execution mechanisms.
 
-## 5. Deployment model and nonclaims
+They may perform bounded work. They do not acquire USER, truth, recommendation, authorization, or verification authority by availability or success.
 
-Architecture Integrity is repository-visible Product architecture, not a runtime service.
+Capability before provider remains the design preference.
 
-Its minimal repository surface is:
+## 9. Action integrity boundary
 
-- this Product architecture document;
-- the current structural map in `docs/design/Lattice-System-Architecture.md`;
-- concise roadmap integration across M3-M12 and M12/AIC-R1; and
-- one repository-adapter discoverability reference.
+Consequential behavior preserves this chain:
 
-It introduces no runtime dependency, migration, provider, database resource, secret, paid service, production deployment, external infrastructure, team topology, issue tracker, reviewer quorum, or operational staffing requirement.
+```text
+Recommendation
+   -> optional ActionProposal
+   -> Authorization
+   -> Execution
+   -> ExecutionReceipt
+   -> Verification
+```
 
-It does not independently validate Product behavior, transfer validation between revisions, qualify unrelated handoffs, or replace the higher Core philosophy, conforming Living Design, current system architecture map, system registry, V36 contract, applicable Owner/Project operating guidance, or explicit Owner authority.
+Each arrow is an explicit boundary. A prior stage cannot be treated as proof of a later one.
 
-## 6. Change control
+Authorization is narrow and action-specific where required. Ambiguous consequential completion fails closed. Verification should use independent observation when available; where verification cannot be established, the Product says so.
 
-Material changes to these Product-semantic integrity constraints require an explicit qualified Product design update. Repository-process guidance belongs in the repository adapter or applicable Project operating guidance rather than being duplicated here.
+## 10. State and recovery integrity
+
+Durability must preserve meaning rather than reconstruct it from prose or telemetry.
+
+Current target governed objects include:
+
+- Intent;
+- Source;
+- Evidence;
+- Claim;
+- Knowledge;
+- Recommendation;
+- ActionProposal;
+- Authorization;
+- ExecutionReceipt;
+- Verification; and
+- ConversationReference.
+
+Operational Runs, tasks, attempts, leases, checkpoints, queues, and provider requests may remain durable implementation state, but they do not replace those semantic/trust objects.
+
+Stale authoritative writes are rejected. Stale derived state is recomputed or discarded. Retry, restart, and reconnect do not transfer authority.
+
+## 11. Privacy and ownership integrity
+
+Authenticated subject isolation, Conversation ownership, deletion/retention boundaries, secret handling, and minimum-necessary capability context remain protected.
+
+ConversationReference and Knowledge provenance must not become shortcuts around subject ownership or deletion.
+
+## 12. Anti-drift review
+
+A change is non-conforming if it:
+
+- forces Solandra back into presentation-only behavior without current Owner authority;
+- requires formal Decision Engine participation for ordinary Recommendation by default;
+- lets Solandra/model output bypass Intent Integrity or Knowledge Trust;
+- treats internal workflow topology as Product cognition;
+- exposes providers/workers/queues/Runs to users when they are not materially useful trust state;
+- conflates Recommendation, Authorization, Execution, or Verification;
+- weakens V36/evidence/provenance safeguards for convenience;
+- turns persistence or telemetry into a second authority; or
+- adds a major subsystem without demonstrated Product value for this one-owner project.
+
+## 13. Acceptance evidence
+
+Architecture Integrity review should establish, for an exact candidate:
+
+- current design documents consistently allow Solandra cognition;
+- no current normative document requires the formal Decision Engine for ordinary Recommendation;
+- intent integrity and semantic understanding are distinct;
+- durable Knowledge and ConversationReference are explicit target concepts;
+- action authorization/execution/verification remain separate;
+- provider/model non-authority remains explicit; and
+- no runtime behavior is claimed from documentation changes alone.
