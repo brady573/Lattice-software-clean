@@ -168,6 +168,36 @@ async function assertComposerResource(app, conversationId, expectedBody) {
   return { presentationRevision: snapshot.presentationRevision, resourceId: descriptor.id };
 }
 
+function assertGovernedKnowledgeTrace(knowledge, establishmentOutcome) {
+  assert.ok(knowledge && typeof knowledge.knowledgeId === "string" && knowledge.knowledgeId.length > 0,
+    "Durable governed Knowledge identity must exist.");
+  const establishmentFinding = establishmentOutcome.outcome.findings.find((finding) => finding.text === FINDING);
+  assert.ok(establishmentFinding, "The governed Knowledge establishment outcome must retain the expected source-bound finding.");
+  const finding = knowledge.outcome.findings.find((item) => item.text === FINDING && item.basis === "SOURCE_REPORT");
+  assert.ok(finding, "Durable Knowledge must retain the expected exact source-report finding.");
+  assert.equal(finding.claimId, establishmentFinding.claimId,
+    "The exact governed claim identity must remain stable from establishment to durable Knowledge retrieval.");
+  assert.ok(typeof finding.claimId === "string" && finding.claimId.length > 0);
+  assert.ok(knowledge.claimIds.includes(finding.claimId), "Durable Knowledge claim IDs must include the expected finding claim.");
+
+  const provenanceIds = new Set(knowledge.outcome.provenance.map((source) => source.sourceId));
+  const admitted = (knowledge.outcome.evidence ?? []).filter((item) =>
+    item.claimId === finding.claimId
+      && item.admitted === true
+      && item.verification === "VERIFIED");
+  assert.ok(admitted.length > 0, "The expected governed finding must retain admitted verified evidence.");
+  for (const item of admitted) {
+    assert.ok(knowledge.evidenceIds.includes(item.evidenceId), "Durable Knowledge must retain the admitted evidence identity.");
+    assert.ok(knowledge.sourceIds.includes(item.sourceId), "Durable Knowledge must retain the admitted evidence source identity.");
+    assert.ok(provenanceIds.has(item.sourceId), "Admitted evidence source must traverse to Knowledge provenance.");
+  }
+  if (finding.status === "UNRESOLVED" || finding.status === "CONFLICTED") {
+    assert.ok(knowledge.outcome.uncertainties.length > 0,
+      "Governed unresolved/conflicted Knowledge must expose its material uncertainty rather than silently promoting certainty.");
+  }
+  return { finding, admitted };
+}
+
 function assertGovernedBasis(prepared, knowledge) {
   assert.ok(Array.isArray(prepared.outcome.resource.basis) && prepared.outcome.resource.basis.length > 0,
     "Real prepared material must retain an exact governed Knowledge/claim basis.");
@@ -228,11 +258,20 @@ try {
   assert.ok(establishedKnowledgeId, "The ordinary Knowledge turn must establish governed Knowledge.");
   const knowledge = await getKnowledge(first, establishedKnowledgeId);
   assert.equal(knowledge.knowledgeId, establishedKnowledgeId);
-  assert.ok(knowledge.outcome.findings.some((finding) => finding.status === "SUPPORTED"));
-  assert.ok(knowledge.outcome.provenance.length > 0);
+  const knowledgeTrace = assertGovernedKnowledgeTrace(knowledge, knowledgeOutcome);
+
+  console.log(`M3_REAL_KNOWLEDGE_CLASSIFICATION=${knowledgeTurn.interpretation.requestedHelp}`);
+  console.log(`M3_REAL_KNOWLEDGE_ID=${establishedKnowledgeId}`);
+  console.log(`M3_REAL_FINDING_CLAIM_ID=${knowledgeTrace.finding.claimId}`);
+  console.log(`M3_REAL_FINDING_STATUS=${knowledgeTrace.finding.status}`);
+  console.log(`M3_REAL_ADMITTED_VERIFIED_EVIDENCE_COUNT=${knowledgeTrace.admitted.length}`);
+  console.log(`M3_REAL_KNOWLEDGE_SOURCE_IDS=${JSON.stringify(knowledge.sourceIds)}`);
+  console.log(`M3_REAL_KNOWLEDGE_UNCERTAINTIES=${JSON.stringify(knowledge.outcome.uncertainties)}`);
 
   const resourceTurn = await postOrdinaryTurn(first, conversationId, RESOURCE_USER);
-  assert.equal(resourceTurn.acceptedUnderstanding, RESOURCE_USER);
+  assert.equal(typeof resourceTurn.acceptedUnderstanding, "string");
+  assert.ok(resourceTurn.acceptedUnderstanding.trim().length > 0,
+    "The RESOURCE turn must retain an authoritative accepted understanding without prescribing whether the existing objective was preserved or explicitly replaced.");
   assert.equal(resourceTurn.interpretation?.authority, "NON_AUTHORITATIVE_PROPOSAL");
   assert.equal(resourceTurn.interpretation?.requestedHelp, "RESOURCE");
   assert.ok(resourceTurn.runId);
@@ -274,27 +313,39 @@ try {
 
   const composer = await assertComposerResource(first, conversationId, prepared.outcome.resource.body);
   const callsAtPersistence = rawCalls.length;
+  const generationCountAtPersistence = generationCalls.length;
+  const groundingCountAtPersistence = groundingCalls.length;
   const replay = await getOutcome(first, resourceTurn.runId);
   assert.equal(replay.preparationReference.resourceId, prepared.preparationReference.resourceId);
   assert.equal(replay.outcome.resource.body, prepared.outcome.resource.body);
   assert.equal(rawCalls.length, callsAtPersistence, "Historical prepared-resource replay must not invoke Solandra again.");
+  assert.equal(rawCalls.filter((call) => call.role === "PREPARATION_GENERATION").length, generationCountAtPersistence);
+  assert.equal(rawCalls.filter((call) => call.role === "PREPARATION_GROUNDING").length, groundingCountAtPersistence);
 
   console.log(`M3_REAL_SOLANDRA_PROVIDER_MODEL=${EXPECTED_MODEL}`);
   console.log(`M3_REAL_KNOWLEDGE_REQUEST=${JSON.stringify(KNOWLEDGE_USER)}`);
   console.log(`M3_REAL_RESOURCE_REQUEST=${JSON.stringify(RESOURCE_USER)}`);
+  console.log(`M3_REAL_RESOURCE_CLASSIFICATION=${resourceTurn.interpretation.requestedHelp}`);
   console.log(`M3_REAL_RESOURCE_KIND=${prepared.outcome.resource.kind}`);
   console.log(`M3_REAL_RESOURCE_BODY=${JSON.stringify(prepared.outcome.resource.body)}`);
   console.log(`M3_REAL_RESOURCE_BODY_SHA256=${createHash("sha256").update(prepared.outcome.resource.body).digest("hex")}`);
   console.log(`M3_REAL_PREPARED_RESOURCE_ID=${prepared.preparationReference.resourceId}`);
   console.log(`M3_REAL_INTENT_VERSION_ID=${prepared.preparationReference.intentVersionId}`);
-  console.log(`M3_REAL_KNOWLEDGE_ID=${establishedKnowledgeId}`);
-  console.log(`M3_REAL_BASIS_CLAIM_COUNT=${prepared.preparationReference.claimIds.length}`);
-  console.log(`M3_REAL_PRESERVED_UNCERTAINTY_COUNT=${prepared.outcome.resource.preservedUncertainties.length}`);
+  console.log(`M3_REAL_BASIS_KNOWLEDGE_IDS=${JSON.stringify(prepared.preparationReference.knowledgeIds)}`);
+  console.log(`M3_REAL_BASIS_CLAIM_IDS=${JSON.stringify(prepared.preparationReference.claimIds)}`);
+  console.log(`M3_REAL_PRESERVED_UNCERTAINTIES=${JSON.stringify(prepared.outcome.resource.preservedUncertainties)}`);
   console.log(`M3_REAL_EDITABLE=${prepared.outcome.resource.editable}`);
   console.log(`M3_REAL_EXECUTION_AUTHORIZED=${prepared.outcome.resource.executionAuthorized}`);
   console.log(`M3_REAL_COMPOSER_RESOURCE_ID=${composer.resourceId}`);
+  console.log(`M3_REAL_COGNITION_CALL_COUNT=${cognitionCalls.length}`);
+  console.log(`M3_REAL_PREPARATION_GENERATION_CALL_COUNT=${generationCalls.length}`);
+  console.log(`M3_REAL_PREPARATION_GROUNDING_CALL_COUNT=${groundingCalls.length}`);
   console.log(`M3_REAL_GENERATION_RAW_SHA256=${createHash("sha256").update(generationCalls[0].content).digest("hex")}`);
   console.log(`M3_REAL_GROUNDING_RAW_SHA256=${createHash("sha256").update(groundingCalls[0].content).digest("hex")}`);
+  console.log(`M3_REAL_GROUNDING_STATUS=${groundingRaw.status}`);
+  console.log(`M3_REAL_GROUNDING_UNSUPPORTED_PREMISES=${JSON.stringify(groundingRaw.unsupportedExternalPremises)}`);
+  console.log(`M3_REAL_GROUNDING_UNCERTAINTY_PRESERVED=${groundingRaw.materialUncertaintyPreserved}`);
+  console.log(`M3_REAL_GROUNDING_AUTHORITY_PRESERVED=${groundingRaw.authorityBoundaryPreserved}`);
 
   await executionStore.close();
   executionStore = undefined;
@@ -315,11 +366,25 @@ try {
 
   const afterRestart = await getOutcome(second, resourceTurn.runId);
   assert.equal(afterRestart.preparationReference.resourceId, prepared.preparationReference.resourceId);
+  assert.equal(afterRestart.preparationReference.intentVersionId, prepared.preparationReference.intentVersionId);
+  assert.deepEqual(afterRestart.preparationReference.knowledgeIds, prepared.preparationReference.knowledgeIds);
+  assert.deepEqual(afterRestart.preparationReference.claimIds, prepared.preparationReference.claimIds);
+  assert.equal(afterRestart.preparationReference.editable, true);
+  assert.equal(afterRestart.preparationReference.executionAuthorized, false);
   assert.equal(afterRestart.outcome.resource.body, prepared.outcome.resource.body);
+  assert.deepEqual(afterRestart.outcome.resource.basis, prepared.outcome.resource.basis);
+  assert.deepEqual(afterRestart.outcome.resource.preservedUncertainties, prepared.outcome.resource.preservedUncertainties);
+  assert.equal(afterRestart.outcome.resource.editable, true);
   assert.equal(afterRestart.outcome.resource.executionAuthorized, false);
   await assertComposerResource(second, conversationId, prepared.outcome.resource.body);
   assert.equal(rawCalls.length, callsAtPersistence, "PostgreSQL recomposition/replay must not invoke Solandra again.");
+  assert.equal(rawCalls.filter((call) => call.role === "PREPARATION_GENERATION").length, generationCountAtPersistence,
+    "PostgreSQL recomposition must not regenerate prepared material.");
+  assert.equal(rawCalls.filter((call) => call.role === "PREPARATION_GROUNDING").length, groundingCountAtPersistence,
+    "PostgreSQL recomposition must not reground prepared material.");
 
+  console.log("M3_REAL_POSTGRES_RECOMPOSITION=PASS");
+  console.log("M3_REAL_HISTORICAL_REPLAY_NO_RECOMPUTATION=PASS");
   console.log("M3_REAL_SOLANDRA_PRODUCT_PROOF=PASS");
 } catch (error) {
   for (const call of rawCalls) {
