@@ -1,0 +1,64 @@
+name: TEMP A6 Alpha Product Proof 9b3b2ed
+
+on:
+  push:
+    branches:
+      - validation/a6-product-proof-9b3b2ed
+    paths:
+      - ".github/workflows/a6-product-proof-9b3b2ed-temporary.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  a6-product-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact frozen Product candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: 9b3b2ed130ffdfaab6b7015958ee6c2f459d5c71
+          path: subject
+          persist-credentials: false
+      - name: Checkout validation harness only
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: validation/a6-product-proof-9b3b2ed
+          path: harness
+          persist-credentials: false
+      - name: Provision Node 24
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '24'
+      - name: Verify frozen Product subject
+        working-directory: subject
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "9b3b2ed130ffdfaab6b7015958ee6c2f459d5c71"
+          test "$(git rev-parse HEAD^{tree})" = "998d6cdf9af8b3d838828affb55bd26a0dfb0c5c"
+          test -n "${GROQ_API_KEY:-}"
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      - name: Install and build exact Product subject
+        working-directory: subject
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+      - name: Syntax-check A6 validation harness
+        working-directory: subject
+        run: node --check ../harness/validation/a6-alpha-product-proof.mjs
+      - name: Execute connected A6 Product proof and held-out probe
+        working-directory: subject
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          A6_ARTIFACT_DIR: artifacts/a6
+        run: node ../harness/validation/a6-alpha-product-proof.mjs
+      - name: Upload A6 evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: a6-alpha-product-proof-9b3b2ed
+          path: subject/artifacts/a6/
+          if-no-files-found: warn
+          retention-days: 7
