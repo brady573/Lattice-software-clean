@@ -1,4 +1,4 @@
-name: TEMP A6 Alpha Product Proof 9b3b2ed
+name: TEMP A6 Alpha Resolved Product Proof 9b3b2ed
 
 on:
   push:
@@ -11,7 +11,7 @@ permissions:
   contents: read
 
 jobs:
-  a6-product-proof:
+  a6-product-proof-resolved:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -45,20 +45,20 @@ jobs:
         run: |
           npm ci --no-audit --no-fund
           npm run build
-      - name: Syntax-check A6 validation harness
+      - name: Syntax-check prepared resolved A6 harness
         working-directory: subject
-        run: node --check ../harness/validation/a6-alpha-product-proof.mjs
-      - name: Execute connected A6 Product proof and held-out probe
+        run: node --check ../harness/validation/a6-alpha-product-proof-resolved.mjs
+      - name: Execute prepared resolved A6 Product proof exactly once
         working-directory: subject
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-          A6_ARTIFACT_DIR: artifacts/a6
-        run: node ../harness/validation/a6-alpha-product-proof.mjs
-      - name: Upload A6 evidence
+          A6_ARTIFACT_DIR: artifacts/a6-resolved
+        run: node ../harness/validation/a6-alpha-product-proof-resolved.mjs
+      - name: Upload resolved A6 evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: a6-alpha-product-proof-9b3b2ed
-          path: subject/artifacts/a6/
+          name: a6-alpha-product-proof-resolved-9b3b2ed
+          path: subject/artifacts/a6-resolved/
           if-no-files-found: warn
           retention-days: 7
