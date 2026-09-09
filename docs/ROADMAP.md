@@ -2,12 +2,18 @@
 
 Status: **OWNER-DIRECTED CURRENT EXECUTION ROADMAP — SUBORDINATE TO THE CORE LATTICE PHILOSOPHY**
 
-Date: **2026-09-06**
+Date: **2026-09-09**
 
 Reconciliation baseline before this roadmap update:
 
 - canonical `main`: `c590d60322130367d02478488105c359f03287a8`
 - tree: `97a24017c0661eb44f41fff5d6ae1a6f2348ba54`
+
+Current reconciliation point:
+
+- canonical `main`: `47213e8184bd89e7d2fadef51b1e31720e4c40e8`
+- substantial A1–A5 implementation and A6-candidate integration work are already merged in bounded accepted scopes;
+- current black-box acceptance is blocked by reliable Conversation -> Intent topic transition, not by a need to restart the Alpha sequence at A1.
 
 This roadmap records the Owner-directed execution sequence for reaching a functional Lattice 1.0 Alpha. It does not amend or supersede `docs/design/The-Core-Lattice-Philosophy.md`, which remains the sole highest Product philosophy authority.
 
@@ -72,14 +78,15 @@ These mechanisms are retained infrastructure. They are not a forward staircase t
 
 ### Current black-box Product findings
 
-Owner black-box use of canonical Solandra has exposed the current highest-value gaps:
+Owner black-box use of canonical Solandra has exposed the current highest-value gaps and established later capabilities:
 
 1. Useful governed evidence can exist without Solandra synthesizing it into a direct answer to the user's question.
 2. Ordinary human terminology and context are not yet reliably resolved into effective investigation concepts.
 3. Current live Knowledge acquisition is too narrow for domains where authoritative primary or otherwise appropriate sources materially matter.
 4. Internal epistemic/retrieval machinery can become visible user content rather than remaining behind meaningful Product boundaries.
 5. Fail-closed truth behavior is functioning and must be preserved.
-6. User-controlled model/service authorization through Solandra is not yet established as an end-to-end Product capability.
+6. User-controlled cognitive model/service authorization through Solandra is now established in a bounded real hosted Product path; provider output remains non-authoritative.
+7. The current blocking black-box defect is Conversation -> Intent topic-transition reliability: a clearly unrelated later USER turn can retain a stale prior objective and bind downstream Run work to that stale Intent.
 
 These observations govern Alpha sequencing more strongly than historical subsystem ordering because they reveal whether Lattice actually removes barriers at the Product surface.
 
@@ -118,7 +125,7 @@ PASS when substantial work is being selected by Product barrier or necessary bou
 
 ## A1 — Trustworthy Knowledge spine
 
-Status: **CURRENT PRODUCT FRONTIER / NEXT IMPLEMENTATION OBJECTIVE**
+Status: **SUBSTANTIAL IMPLEMENTATION MERGED; BLACK-BOX PRODUCT ACCEPTANCE REMAINS QUALIFIED**
 
 ### Product outcome
 
@@ -190,7 +197,7 @@ PASS when ordinary Knowledge consultation reliably converts supported governed e
 
 ## A2 — User-authorized model/service capability
 
-Status: **PENDING A1 OR EARLIER ONLY IF A1 ESTABLISHES A HARD DEPENDENCY**
+Status: **SUBSTANTIAL IMPLEMENTATION MERGED; BOUNDED REAL HOSTED COGNITIVE-CAPABILITY PATH ESTABLISHED**
 
 ### Product outcome
 
@@ -224,7 +231,7 @@ PASS when the user can authorize a real model/service capability and Solandra/La
 
 ## A3 — End-to-end Decision capability
 
-Status: **PENDING**
+Status: **SUBSTANTIAL IMPLEMENTATION MERGED; END-TO-END PRODUCT ACCEPTANCE REMAINS QUALIFIED**
 
 ### Product outcome
 
@@ -264,7 +271,7 @@ PASS when at least one realistic decision journey works completely through Solan
 
 ## A4 — End-to-end Action Preparation
 
-Status: **PENDING**
+Status: **SUBSTANTIAL IMPLEMENTATION MERGED; BOUNDED PREPARATION CAPABILITY EXISTS WITHOUT EXECUTION AUTHORITY**
 
 ### Product outcome
 
@@ -291,7 +298,7 @@ PASS when Solandra can prepare genuinely useful material from the governed Produ
 
 ## A5 — Continuity, interruption, failure, and recovery as one Product
 
-Status: **PENDING**
+Status: **SUBSTANTIAL IMPLEMENTATION MERGED; CURRENT BLACK-BOX BLOCKER IS CONVERSATION -> INTENT TOPIC-TRANSITION RELIABILITY**
 
 ### Product outcome
 
@@ -324,7 +331,7 @@ PASS when the Alpha Product spine survives ordinary interruption and failure wit
 
 ## A6 — Lattice 1.0 Alpha release candidate
 
-Status: **PENDING**
+Status: **CANDIDATE WORK IMPLEMENTED/MERGED; ALPHA ACCEPTANCE BLOCKED BY CURRENT TOPIC-TRANSITION RELIABILITY DEFECT**
 
 Freeze one exact candidate and validate the Product as a whole.
 
@@ -477,11 +484,13 @@ For Alpha promotion, the strongest evidence is reproducible end-to-end behavior 
 
 # Current Product frontier
 
-**A1 — Trustworthy Knowledge spine**
+**Conversation -> Intent topic-transition reliability**
 
-This is the highest-value current objective because canonical black-box use has already established that Lattice possesses substantial truth/runtime machinery while ordinary users can still be forced to perform terminology translation, evidence synthesis, and proof-state interpretation themselves.
+Substantial A1–A5 implementation and A6-candidate work already exists in canonical Product state. Current black-box use exposed a narrower Product barrier: a person can naturally change topics inside one Conversation while canonical Intent remains stuck on an unrelated prior objective, causing downstream work to answer the wrong task or fail closed for the wrong reason.
 
-The next implementation work should therefore make the existing governed Knowledge path complete enough to deliver useful understanding without sacrificing provenance, uncertainty, semantic authority, fail-closed behavior, or human control.
+The current implementation objective is therefore to repair the existing Solandra cognition -> Intent transition seam so clear new topics establish successor Intent, same-topic follow-ups preserve the current objective, material ambiguity is clarified, and downstream Run work binds to the correct current IntentVersion.
+
+This is a Product vertical repair, not a reason to restart A1, add routing/orchestration machinery, or weaken Intent Authority.
 
 Do not automatically resume M9-5 or another historical milestone simply because it was previously next in sequence.
 

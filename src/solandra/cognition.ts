@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { explicitConsultationObjectiveCorrection } from "../intent/consultation-interpreter.js";
 import { ModelProviderError } from "../model/errors.js";
 import { ModelRuntime } from "../model/runtime.js";
 import type { CanonicalModelRequest, ModelInvocationProvenance } from "../model/types.js";
@@ -45,11 +46,7 @@ export const solandraSemanticProposalSchema = z.object({
   referencedKnowledgeId: z.string().min(1).max(128).nullable(),
   referencedRecommendationId: z.string().min(1).max(128).nullable().optional(),
   referencedOptionId: z.string().min(1).max(128).nullable().optional(),
-  /**
-   * Compatibility-only inert metadata from early M1 proposals. Product behavior
-   * is classified by requestedHelp; this value has no intent, truth, routing,
-   * decision, or authorization authority and is no longer requested from models.
-   */
+  /** Compatibility-only inert metadata from early M1 proposals. */
   proposedNextStep: z.string().min(1).max(100).optional(),
 }).strict();
 export type SolandraSemanticProposal = z.infer<typeof solandraSemanticProposalSchema>;
@@ -57,11 +54,7 @@ export type SolandraSemanticProposal = z.infer<typeof solandraSemanticProposalSc
 export interface SolandraGovernedKnowledgeContext {
   readonly knowledgeId: string;
   readonly objective: string;
-  readonly findings: readonly Readonly<{
-    claimId: string;
-    text: string;
-    status: string;
-  }>[];
+  readonly findings: readonly Readonly<{ claimId: string; text: string; status: string }>[];
   readonly sourceCount: number;
   readonly uncertainties: readonly string[];
 }
@@ -100,11 +93,7 @@ function parseJsonObject(text: string): unknown {
   try {
     return JSON.parse(unfenced);
   } catch (error) {
-    throw new ModelProviderError(
-      "invalid_output",
-      "Solandra cognition returned malformed semantic JSON.",
-      { cause: error },
-    );
+    throw new ModelProviderError("invalid_output", "Solandra cognition returned malformed semantic JSON.", { cause: error });
   }
 }
 
@@ -155,6 +144,12 @@ function buildCognitionRequest(model: string, input: SolandraCognitionInput): Ca
           "You are Solandra's semantic cognition boundary. Understand the user's conversational request and return a non-authoritative proposal only.",
           "Do not answer the factual question. Do not establish truth, canonical intent, a recommendation, authorization, or action.",
           "Canonical USER intent is written elsewhere. Your proposedObjective is advisory and must never be treated as USER-authored merely because you generated it.",
+          "Classify objectiveRelation by comparing the current USER message with the current canonical objective, not by assuming that every message in one Conversation continues the same topic.",
+          "Use NEW_OBJECTIVE when the current USER message asks about a materially different subject, task, decision, or goal such that preserving the old objective would make downstream work answer the wrong question. A clear standalone new request remains NEW_OBJECTIVE even when recent messages discuss another topic.",
+          "Use CONTINUE when the current USER message materially depends on the same objective, such as a contextual follow-up, explanation request, source request, elaboration, or reference that would not make sense as unrelated work.",
+          "Use CORRECTION when the USER explicitly corrects, revises, narrows, or replaces meaning within the current objective rather than simply starting an independent new topic.",
+          "Recent USER messages are context for references and continuity; they do not make an otherwise independent current request a continuation.",
+          "When it is genuinely unclear whether the current turn continues the same objective or begins materially different work, use materialAmbiguity with the minimum question needed to resolve that distinction instead of defaulting to CONTINUE.",
           "Use materialAmbiguity only when uncertainty could materially change the objective or requested work. Do not treat acronyms, technical tokens, or unfamiliar terms as ambiguous merely because of their surface form when context makes the request clear.",
           "Use SOURCES_REFERENCE, EXPLAIN_REFERENCE, or SIMPLIFY_REFERENCE when the user clearly refers to an existing supplied Knowledge object. referencedKnowledgeId must be exactly one supplied Knowledge ID or null.",
           "Use FRESH_RESEARCH only when the user asks for new, updated, additional, or otherwise external Knowledge beyond the supplied object. A historical provenance request is not fresh research.",
@@ -192,9 +187,7 @@ function buildCognitionRequest(model: string, input: SolandraCognitionInput): Ca
 }
 
 function referenceHelp(help: SolandraRequestedHelp): boolean {
-  return help === "SOURCES_REFERENCE"
-    || help === "EXPLAIN_REFERENCE"
-    || help === "SIMPLIFY_REFERENCE";
+  return help === "SOURCES_REFERENCE" || help === "EXPLAIN_REFERENCE" || help === "SIMPLIFY_REFERENCE";
 }
 
 function recommendationReferenceHelp(help: SolandraRequestedHelp): boolean {
@@ -202,10 +195,7 @@ function recommendationReferenceHelp(help: SolandraRequestedHelp): boolean {
 }
 
 export class ModelSolandraCognitiveRuntime implements SolandraCognitiveRuntime {
-  constructor(
-    private readonly runtime: ModelRuntime,
-    private readonly model: string,
-  ) {
+  constructor(private readonly runtime: ModelRuntime, private readonly model: string) {
     if (!model.trim()) throw new Error("Solandra cognition model must be non-empty.");
   }
 
@@ -219,33 +209,35 @@ export class ModelSolandraCognitiveRuntime implements SolandraCognitiveRuntime {
     if (result.response.output.length !== 1 || result.response.output[0]?.type !== "text") {
       throw new ModelProviderError("invalid_output", "Solandra cognition requires exactly one semantic text output.");
     }
-    const proposal = solandraSemanticProposalSchema.parse(parseJsonObject(result.response.output[0].text));
+
+    const parsedProposal = solandraSemanticProposalSchema.parse(parseJsonObject(result.response.output[0].text));
+    const explicitCorrection = explicitConsultationObjectiveCorrection(
+      input.message,
+      input.currentObjective !== undefined,
+    );
+    const proposal: SolandraSemanticProposal = explicitCorrection
+      ? {
+        ...parsedProposal,
+        objectiveRelation: "CORRECTION",
+        proposedObjective: input.message.trim(),
+        materialAmbiguity: null,
+      }
+      : parsedProposal;
+
     const allowedKnowledgeIds = new Set(input.governedKnowledge.map((item) => item.knowledgeId));
     if (proposal.referencedKnowledgeId !== null && !allowedKnowledgeIds.has(proposal.referencedKnowledgeId)) {
-      throw new ModelProviderError(
-        "invalid_output",
-        "Solandra cognition referenced Knowledge that was not supplied by Lattice.",
-      );
+      throw new ModelProviderError("invalid_output", "Solandra cognition referenced Knowledge that was not supplied by Lattice.");
     }
     if (referenceHelp(proposal.requestedHelp) && proposal.referencedKnowledgeId === null && proposal.materialAmbiguity === null) {
-      throw new ModelProviderError(
-        "invalid_output",
-        "A referential Solandra proposal must identify supplied Knowledge or surface ambiguity.",
-      );
+      throw new ModelProviderError("invalid_output", "A referential Solandra proposal must identify supplied Knowledge or surface ambiguity.");
     }
     const allowedRecommendationIds = new Set((input.governedRecommendations ?? []).map((item) => item.recommendationId));
     const referencedRecommendationId = proposal.referencedRecommendationId ?? null;
     if (referencedRecommendationId !== null && !allowedRecommendationIds.has(referencedRecommendationId)) {
-      throw new ModelProviderError(
-        "invalid_output",
-        "Solandra cognition referenced a Recommendation that was not supplied by Lattice.",
-      );
+      throw new ModelProviderError("invalid_output", "Solandra cognition referenced a Recommendation that was not supplied by Lattice.");
     }
     if (recommendationReferenceHelp(proposal.requestedHelp) && referencedRecommendationId === null && proposal.materialAmbiguity === null) {
-      throw new ModelProviderError(
-        "invalid_output",
-        "A Recommendation reference proposal must identify supplied Recommendation or surface ambiguity.",
-      );
+      throw new ModelProviderError("invalid_output", "A Recommendation reference proposal must identify supplied Recommendation or surface ambiguity.");
     }
     const optionToRecommendation = new Map<string, string>();
     for (const recommendation of input.governedRecommendations ?? []) {
@@ -263,9 +255,6 @@ export class ModelSolandraCognitiveRuntime implements SolandraCognitiveRuntime {
         throw new ModelProviderError("invalid_output", "Solandra cognition bound an option to the wrong Recommendation.");
       }
     }
-    return Object.freeze({
-      proposal,
-      invocationProvenance: result.audit.invocationProvenance,
-    });
+    return Object.freeze({ proposal, invocationProvenance: result.audit.invocationProvenance });
   }
 }

@@ -25,31 +25,20 @@ export type ConsultationMeaningKind =
   | "MATERIAL_INFERENCE";
 
 export interface MaterialIntentClarificationProposal {
-  /**
-   * Non-authoritative semantic operations proposed from USER language. Intent
-   * Authority must keep these pending until the USER confirms them.
-   */
   readonly operations: readonly IntentOperation[];
   readonly question: string;
   readonly confirmationExample: string;
 }
 
 export interface ConsultationInterpretationProposal {
-  /** Proposed objective effect. Intent Authority remains the only writer. */
   readonly objectiveEffect: ConsultationObjectiveEffect;
   readonly meaningKind: ConsultationMeaningKind;
   readonly decisionRequested: boolean;
   readonly resourceNeed: ConsultationResourceNeed;
   readonly materialClarification?: MaterialIntentClarificationProposal;
-  /** Missing referent/scope question; it proposes no authoritative meaning. */
   readonly clarificationQuestion?: string;
 }
 
-/**
- * Provider-neutral, non-authoritative interpretation boundary. Implementations
- * may propose structured meaning, but proposed decision semantics cannot enter
- * an IntentVersion until Intent Authority receives explicit USER confirmation.
- */
 export interface ConsultationInterpreter {
   interpret(input: ConsultationInterpretationInput): Promise<ConsultationInterpretationProposal>;
 }
@@ -70,10 +59,20 @@ function escapeRegex(value: string): string {
 }
 
 /**
- * Return a short form whose meaning is material to a non-definition request
- * but is not supplied by the USER in the same turn. This never resolves the
- * term itself; it only decides whether one concise clarification is required.
+ * Return an objective replacement only when the USER's own language explicitly
+ * marks the turn as a correction. This is a USER-language signal, not model
+ * authority; callers still submit the replacement through Intent Authority.
  */
+export function explicitConsultationObjectiveCorrection(
+  message: string,
+  hasCurrentObjective: boolean,
+): string | undefined {
+  if (!hasCurrentObjective) return undefined;
+  const match = /^(?:no\s*[,;:-]?\s*actually\s*[,;:-]?\s*|actually\s*[,;:-]?\s*i\s+mean(?:t)?\s+|actually\s*[,;:-]?\s*(?:my|the)\s+objective\s+(?:is|should be)\s+|i\s+mean(?:t)?\s+|(?:change|replace|update)\s+(?:the\s+)?objective\s+(?:to\s+)?|instead\s*[,;:-]?\s*)(.+)$/iu.exec(message.trim());
+  const replacement = match?.[1]?.trim();
+  return replacement ? replacement : undefined;
+}
+
 function unresolvedShortForm(message: string): string | undefined {
   const matches = [...message.matchAll(SHORT_FORM_PATTERN)]
     .map((match) => match[0])
@@ -98,26 +97,17 @@ function unresolvedShortForm(message: string): string | undefined {
   return undefined;
 }
 
-/**
- * Conservative Product default. It preserves ordinary free-form USER language
- * verbatim, asks for an unresolved material short-form meaning instead of
- * guessing it, and detects only an explicit, reversible preparation request.
- * It proposes no decision semantics and therefore cannot manufacture criteria,
- * constraints, priorities, candidates, or a qualified decision need.
- */
 export class ConservativeConsultationInterpreter implements ConsultationInterpreter {
   async interpret(input: ConsultationInterpretationInput): Promise<ConsultationInterpretationProposal> {
     const message = input.message.trim();
     const existingObjective = input.currentIntentVersion?.state.objective;
     const hasObjective = existingObjective?.value.state === "VALUE"
       && typeof existingObjective.value.value === "string";
-    const explicitCorrection = hasObjective
-      ? /^(?:no\s*[,;:-]?\s*actually\s*[,;:-]?\s*|actually\s*[,;:-]?\s*i\s+meant\s+|actually\s*[,;:-]?\s*(?:my|the)\s+objective\s+(?:is|should be)\s+|i\s+mean(?:t)?\s+|(?:change|replace|update)\s+(?:the\s+)?objective\s+(?:to\s+)?|instead\s*[,;:-]?\s*)(.+)$/iu.exec(message)
-      : null;
+    const explicitCorrection = explicitConsultationObjectiveCorrection(message, hasObjective);
     const objectiveEffect: ConsultationObjectiveEffect = !hasObjective
       ? { kind: "ESTABLISH", value: message }
-      : explicitCorrection?.[1]?.trim()
-        ? { kind: "REPLACE_EXPLICIT", value: explicitCorrection[1].trim() }
+      : explicitCorrection
+        ? { kind: "REPLACE_EXPLICIT", value: explicitCorrection }
         : { kind: "PRESERVE" };
     if (input.explicitResourceNeed) {
       return {
