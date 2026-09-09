@@ -1,0 +1,100 @@
+name: Validation — Current Canonical Cognitive Assistance
+
+on:
+  push:
+    branches:
+      - validation/canonical-generalized-cognitive-assistance-current
+    paths:
+      - .github/workflows/canonical-generalized-cognitive-assistance-current-validation.yml
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout validation helper branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: validation/canonical-generalized-cognitive-assistance-current
+          persist-credentials: false
+
+      - name: Checkout exact Product candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: 39b6bb9213c1d0e280929acc4554653ffa927469
+          path: product
+          persist-credentials: false
+
+      - name: Verify exact Product candidate
+        working-directory: product
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "39b6bb9213c1d0e280929acc4554653ffa927469"
+          test "$(git rev-parse HEAD^{tree})" = "84e29da495ce1de00a094238837280735f68bb63"
+          echo "CANDIDATE_VERIFIED=PASS"
+
+      - name: Provision Node 24
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+
+      - name: Install locked dependencies
+        working-directory: product
+        run: npm ci --no-audit --no-fund
+
+      - name: Build
+        working-directory: product
+        run: npm run build
+
+      - name: Focused generalized capability and canonical Solandra tests
+        working-directory: product
+        run: |
+          node --test \
+            dist/test/canonical-generalized-cognitive-assistance.test.js \
+            dist/test/m3-capability-broker-user-model.test.js \
+            dist/test/m1-solandra-cognitive-knowledge-spine.test.js \
+            dist/test/m4-general-decision-journey.test.js \
+            dist/test/a5-solandra-recovery-continuity.test.js
+
+      - name: Standard repository gate
+        working-directory: product
+        run: env -u DATABASE_URL npm run check
+
+      - name: Locate hosted browser
+        run: |
+          set -euo pipefail
+          browser="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
+          if [ -z "$browser" ]; then
+            echo 'BROWSER_EXECUTION_SURFACE_FAILURE: Chrome/Chromium not found' >&2
+            exit 1
+          fi
+          echo "COGNITIVE_BROWSER_EXECUTABLE=$browser" >> "$GITHUB_ENV"
+
+      - name: Real configured canonical Solandra browser proof
+        working-directory: product
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          LATTICE_DEPLOYMENT_MODE: development
+          LATTICE_TRUTH_MODE: v36-offline
+          LATTICE_AUTHENTICATION_MODE: development-fixture
+          LATTICE_DEVELOPMENT_FIXTURE_SUBJECT_ID: canonical-cognitive-browser-proof
+          LATTICE_SOLANDRA_COGNITION_ROUTE: groq-gpt-oss-120b
+          LATTICE_AUTO_MIGRATE: 'false'
+          PORT: '3113'
+          HOST: 127.0.0.1
+          COGNITIVE_BASE_URL: http://127.0.0.1:3113
+        run: |
+          set -euo pipefail
+          test -n "${GROQ_API_KEY:-}"
+          node ../validation/canonical-cognitive-live-proof.mjs
+
+      - name: Verify candidate unchanged after validation
+        working-directory: product
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "39b6bb9213c1d0e280929acc4554653ffa927469"
+          test "$(git rev-parse HEAD^{tree})" = "84e29da495ce1de00a094238837280735f68bb63"
+          echo "CANDIDATE_STILL_EXACT=PASS"
