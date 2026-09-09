@@ -1,4 +1,4 @@
-name: TEMP M3 R1-R4 Staging Preflight
+name: TEMP M3 R1-R4 Frozen Evidence
 
 on:
   push:
@@ -11,12 +11,12 @@ permissions:
   contents: read
 
 jobs:
-  staging-preflight:
+  frozen-evidence:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     env:
       DATABASE_URL: postgresql://lattice:lattice@127.0.0.1:55433/lattice_test
-      SUBJECT_SHA: 35c489cb57c4d3c5a4b7ba1228c891992ab08c83
+      SUBJECT_SHA: 09b04fad9c931ae409577a9b09ca8e7849d74861
       SUBJECT_TREE: 1db6a07e8f2e4743c36f408f980c2d99f4da3112
     services:
       postgres:
@@ -35,18 +35,21 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          ref: 35c489cb57c4d3c5a4b7ba1228c891992ab08c83
+          ref: 09b04fad9c931ae409577a9b09ca8e7849d74861
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: '24'
-      - name: Verify staging subject
+      - name: Verify frozen repair subject
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$SUBJECT_SHA"
           test "$(git rev-parse HEAD^{tree})" = "$SUBJECT_TREE"
+          test -n "${GROQ_API_KEY:-}"
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
       - run: npm ci --no-audit --no-fund
-      - name: Build
+      - name: Build invalidated M3 surface
         run: npm run build
       - name: Focused M3 R1-R4
         run: node --import tsx --test test/m3-capability-broker-user-model.test.ts
@@ -62,3 +65,22 @@ jobs:
           NODE
       - name: M3 PostgreSQL grant/finalization acceptance
         run: node --import tsx --test --test-concurrency=1 test/m3-capability-authorization-postgres.test.ts test/runtime-schema-readiness-postgres.test.ts
+      - name: Live configured user-model proof after finalization repair
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          LATTICE_M3_EXPECTED_SHA: 09b04fad9c931ae409577a9b09ca8e7849d74861
+          LATTICE_M3_EXPECTED_TREE: 1db6a07e8f2e4743c36f408f980c2d99f4da3112
+          LATTICE_M3_ARTIFACT_DIR: artifacts/m3-r1-r4
+        run: env -u DATABASE_URL node tools/m3-live-user-model-proof.mjs
+      - name: Verify frozen repair subject unchanged
+        run: |
+          test "$(git rev-parse HEAD)" = "$SUBJECT_SHA"
+          test "$(git rev-parse HEAD^{tree})" = "$SUBJECT_TREE"
+      - name: Upload M3 repair evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: m3-r1-r4-09b04fad
+          path: artifacts/m3-r1-r4/
+          if-no-files-found: warn
+          retention-days: 7
