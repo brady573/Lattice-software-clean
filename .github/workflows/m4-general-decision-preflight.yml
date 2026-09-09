@@ -15,8 +15,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      SUBJECT_SHA: 28cd9de6bbcafcb6771bf27048921cbacf5354e5
-      SUBJECT_TREE: ddc700cb64a63c3573bc8a63a28c40f4b56698cb
+      SUBJECT_SHA: 8dca14233908988604fcbbf3f1a32e2f0a4b4a16
+      SUBJECT_TREE: 6d7962927b6af47d75a74818f1d116a8c819664c
       DATABASE_URL: postgresql://lattice:lattice@127.0.0.1:55433/lattice_test
     services:
       postgres:
@@ -35,7 +35,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          ref: 28cd9de6bbcafcb6771bf27048921cbacf5354e5
+          ref: 8dca14233908988604fcbbf3f1a32e2f0a4b4a16
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
