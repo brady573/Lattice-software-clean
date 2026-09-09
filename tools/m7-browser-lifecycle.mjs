@@ -342,8 +342,12 @@ async function main() {
       const requests=[];
       let turnCount=0;
       window.__clarificationFixtureRequests=requests;
-      window.fetch=async (url,init={})=>{
-        const path=String(url);
+      const originalOwnerFetch=window.ownerFetch;
+      if(typeof originalOwnerFetch!=='function')throw new Error('canonical ownerFetch missing');
+      window.ownerFetch=async (url,init={})=>{
+        const raw=typeof url==='string'||url instanceof URL?String(url):url instanceof Request?url.url:String(url);
+        const target=new URL(raw,window.location.href);
+        const path=target.pathname+target.search;
         requests.push({path,method:init.method||'GET',body:init.body||null});
         if(path==='/api/v1/conversations')return new Response(JSON.stringify({conversation:{id:'browser-clarification'}}),{status:201,headers:{'content-type':'application/json'}});
         if(path.endsWith('/turns')){
@@ -363,7 +367,7 @@ async function main() {
           kind:'KNOWLEDGE',acceptedUnderstanding:path.includes('run-corrected')?'Explain the evidence instead.':'Compare the available approaches.',
           findings:[],uncertainties:['Fixture limitation.'],provenance:[]
         },presentation:{assistantMessage:'Fixture limitation.'}}),{status:200,headers:{'content-type':'application/json'}});
-        throw new Error('unexpected fixture request '+path);
+        return originalOwnerFetch(url,init);
       };
       return true;
     })()`);
