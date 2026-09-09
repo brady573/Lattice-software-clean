@@ -15,7 +15,112 @@ const capabilityStyles = `
     .capability-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
     .capability-actions button { border: 1px solid #c8c4b8; border-radius: 11px; background: #fffefa; padding: 8px 11px; cursor: pointer; }
     .capability-actions .primary { border-color: #22211c; background: #22211c; color: #fff; }
+    .owner-access-gate { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; padding: 18px; background: rgba(245,244,239,.96); }
+    .owner-access-gate[hidden] { display: none; }
+    .owner-access-card { width: min(430px, 100%); padding: 24px; border: 1px solid #c8c4b8; border-radius: 20px; background: #fffefa; box-shadow: 0 24px 70px rgba(30,29,24,.12); }
+    .owner-access-card h1 { margin: 0 0 8px; font-size: 1.3rem; }
+    .owner-access-card p { line-height: 1.5; }
+    .owner-access-card input { width: 100%; border: 1px solid #c8c4b8; border-radius: 12px; padding: 11px 12px; background: #fff; color: inherit; }
+    .owner-access-card button { margin-top: 12px; width: 100%; border: 0; border-radius: 12px; padding: 11px 14px; background: #22211c; color: #fff; cursor: pointer; }
+    .owner-access-error { min-height: 1.3em; margin-top: 10px; color: #765047; font-size: .88rem; }
 `;
+
+const ownerAccessMarkup = `
+    <section id="ownerAccessGate" class="owner-access-gate" aria-label="Owner access" hidden>
+      <form id="ownerAccessForm" class="owner-access-card">
+        <h1>Owner access</h1>
+        <p>Enter your private access key to use Solandra.</p>
+        <input id="ownerAccessInput" type="password" autocomplete="current-password" aria-label="Access key" />
+        <button id="ownerAccessSubmit" type="submit">Continue</button>
+        <div id="ownerAccessError" class="owner-access-error" aria-live="polite"></div>
+      </form>
+    </section>`;
+
+const ownerAccessScript = `
+  <script>
+    (() => {
+      const STORAGE_KEY = "lattice.solandra.owner-access.v1";
+      const nativeFetch = window.fetch.bind(window);
+      const gate = document.getElementById("ownerAccessGate");
+      const form = document.getElementById("ownerAccessForm");
+      const input = document.getElementById("ownerAccessInput");
+      const submit = document.getElementById("ownerAccessSubmit");
+      const errorNode = document.getElementById("ownerAccessError");
+
+      const readToken = () => {
+        try { return window.sessionStorage.getItem(STORAGE_KEY) || ""; } catch { return ""; }
+      };
+      const storeToken = (value) => {
+        try { window.sessionStorage.setItem(STORAGE_KEY, value); } catch {}
+      };
+      const clearToken = () => {
+        try { window.sessionStorage.removeItem(STORAGE_KEY); } catch {}
+      };
+      const showGate = (message = "") => {
+        gate.hidden = false;
+        errorNode.textContent = message;
+        queueMicrotask(() => input.focus());
+      };
+      const hideGate = () => {
+        gate.hidden = true;
+        errorNode.textContent = "";
+        input.value = "";
+      };
+
+      window.ownerFetch = async (resource, options = {}) => {
+        const target = typeof resource === "string" || resource instanceof URL
+          ? new URL(resource, window.location.href)
+          : new URL(resource.url, window.location.href);
+        if (target.origin !== window.location.origin || !target.pathname.startsWith("/api/v1/")) {
+          return nativeFetch(resource, options);
+        }
+        const headers = new Headers(options.headers || (resource instanceof Request ? resource.headers : undefined));
+        const token = readToken();
+        if (token) headers.set("authorization", "Bearer " + token);
+        const response = await nativeFetch(resource, { ...options, headers });
+        if (response.status === 401) {
+          clearToken();
+          showGate("Owner access is required.");
+        }
+        return response;
+      };
+
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const candidate = input.value;
+        if (!candidate) {
+          showGate("Enter your access key.");
+          return;
+        }
+        submit.disabled = true;
+        errorNode.textContent = "Checking access…";
+        try {
+          const response = await nativeFetch("/api/v1/capabilities/model-assistance", {
+            headers: { authorization: "Bearer " + candidate },
+          });
+          if (response.status === 401) {
+            clearToken();
+            showGate("That access key was not accepted.");
+            return;
+          }
+          if (!response.ok) {
+            showGate("Solandra couldn't confirm access right now. Please try again.");
+            return;
+          }
+          storeToken(candidate);
+          hideGate();
+          window.location.reload();
+        } catch {
+          showGate("Solandra couldn't confirm access right now. Please try again.");
+        } finally {
+          submit.disabled = false;
+        }
+      });
+
+      if (readToken()) hideGate();
+      else showGate();
+    })();
+  </script>`;
 
 const capabilityMarkup = `
     <dialog id="modelAssistanceDialog" class="capability-dialog">
@@ -62,7 +167,7 @@ const capabilityScript = `
       const load = async () => {
         button.setAttribute("aria-busy", "true");
         try {
-          const response = await fetch("/api/v1/capabilities/model-assistance");
+          const response = await window.ownerFetch("/api/v1/capabilities/model-assistance");
           if (!response.ok) throw new Error("Capability status is unavailable.");
           const body = await response.json();
           render(body.capability);
@@ -82,7 +187,7 @@ const capabilityScript = `
         toggle.disabled = true;
         try {
           const connected = state?.status === "CONNECTED";
-          const response = await fetch("/api/v1/capabilities/model-assistance/connect", {
+          const response = await window.ownerFetch("/api/v1/capabilities/model-assistance/connect", {
             method: connected ? "DELETE" : "POST",
           });
           const body = await response.json();
@@ -101,10 +206,12 @@ const capabilityScript = `
 /** Canonical Product surface: Conversation + free-form input + adaptive Composer. */
 export function renderSolandraAuthoritativeConversationPage(): string {
   return renderSolandraConversationPage()
+    .replaceAll("fetch(", "window.ownerFetch(")
     .replace("</style>", `${capabilityStyles}</style>`)
     .replace(
       '<div class="brand">Solandra</div>',
       '<div class="brand">Solandra</div><button id="modelAssistanceButton" class="capability-button" type="button" aria-label="Model assistance"><span id="modelAssistanceDot" class="capability-dot"></span>Model assistance</button>',
     )
+    .replace("  <script>\n    (() => {", `${ownerAccessMarkup}${ownerAccessScript}  <script>\n    (() => {`)
     .replace("</body>", `${capabilityMarkup}${capabilityScript}</body>`);
 }
