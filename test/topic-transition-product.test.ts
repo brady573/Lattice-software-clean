@@ -2,11 +2,12 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
 import type { FastifyInstance } from "fastify";
+import { Pool } from "pg";
 import type { ModelProvider } from "../src/model/provider.js";
 import { ModelRuntime } from "../src/model/runtime.js";
 import type { CanonicalModelRequest, ModelCallContext, ModelInvocationProvenance, ModelProviderResult } from "../src/model/types.js";
 import { createRuntimeApp } from "../src/runtime-app.js";
-import { resolveRuntimeConfig } from "../src/runtime-config.js";
+import { resolveRuntimeConfig, type RuntimeConfig } from "../src/runtime-config.js";
 import {
   ModelSolandraCognitiveRuntime,
   type SolandraCognitionInput,
@@ -14,6 +15,8 @@ import {
   type SolandraCognitiveRuntime,
   type SolandraSemanticProposal,
 } from "../src/solandra/cognition.js";
+
+const databaseUrl = process.env.DATABASE_URL;
 
 const PROVENANCE: ModelInvocationProvenance = Object.freeze({
   executionClass: "LOCAL_OFFLINE",
@@ -53,7 +56,11 @@ class TopicFixtureCognition implements SolandraCognitiveRuntime {
     if (!input.currentObjective) {
       return { proposal: proposal({ objectiveRelation: "NEW_OBJECTIVE", proposedObjective: message }), invocationProvenance: PROVENANCE };
     }
-    if (message === "How should I prepare soil for new sod?" || message === "Plan a simple weekend budget for a museum trip.") {
+    if (
+      message === "How should I prepare soil for new sod?"
+      || message === "Plan a simple weekend budget for a museum trip."
+      || message === "How can I organize photos from a family trip?"
+    ) {
       return { proposal: proposal({ objectiveRelation: "NEW_OBJECTIVE", proposedObjective: message }), invocationProvenance: PROVENANCE };
     }
     if (message === "Why?" || message === "Explain that more simply.") {
@@ -97,6 +104,22 @@ class CapturingProvider implements ModelProvider {
       },
     };
   }
+}
+
+function postgresConfig(database: string, autoMigrate: boolean): RuntimeConfig {
+  return {
+    port: 3000,
+    host: "127.0.0.1",
+    databaseUrl: database,
+    deploymentMode: "development",
+    truthMode: "v36-offline",
+    autoMigrate,
+    modelSimulatorBaseUrl: undefined,
+    modelSimulatorModel: "offline-prototype",
+    androidModelRelayToken: undefined,
+    androidModelRelayModel: "android-local-prototype",
+    androidModelRelayTimeoutMs: 45_000,
+  };
 }
 
 async function createConversation(app: FastifyInstance): Promise<string> {
@@ -207,5 +230,72 @@ test("unrelated transitions are domain-general rather than tied to one example",
     assert.equal(b.acceptedUnderstanding, "Plan a simple weekend budget for a museum trip.");
   } finally {
     await app.close();
+  }
+});
+
+test("PostgreSQL recovery does not make restored Intent sticky across an unrelated new topic", { skip: !databaseUrl }, async () => {
+  assert.ok(databaseUrl);
+  const cognition = new TopicFixtureCognition();
+  let conversationId = "";
+  let intentScopeId = "";
+  let firstRunId = "";
+  let secondRunId = "";
+  let firstIntentVersionId = "";
+
+  const firstApp = await createRuntimeApp(postgresConfig(databaseUrl, true), { solandraCognition: cognition });
+  try {
+    conversationId = await createConversation(firstApp);
+    const first = await submit(firstApp, conversationId, "Why does iron rust?");
+    assert.equal(first.statusCode, 202, first.body);
+    const body = first.json<{ runId: string; intentScopeId: string; intentVersionId: string }>();
+    firstRunId = body.runId;
+    intentScopeId = body.intentScopeId;
+    firstIntentVersionId = body.intentVersionId;
+  } finally {
+    await firstApp.close();
+  }
+
+  const reopened = await createRuntimeApp(postgresConfig(databaseUrl, false), { solandraCognition: cognition });
+  try {
+    const second = await submit(reopened, conversationId, "How can I organize photos from a family trip?");
+    assert.equal(second.statusCode, 202, second.body);
+    const body = second.json<{ runId: string; intentVersionId: string; acceptedUnderstanding: string }>();
+    secondRunId = body.runId;
+    assert.notEqual(body.intentVersionId, firstIntentVersionId);
+    assert.equal(body.acceptedUnderstanding, "How can I organize photos from a family trip?");
+
+    const run = await reopened.inject({ method: "GET", url: `/api/v1/runs/${body.runId}` });
+    assert.equal(run.statusCode, 200, run.body);
+    const durable = run.json<{ request: { sourceMessageId: string; intentVersionId: string; objective: string } }>();
+    assert.equal(durable.request.intentVersionId, body.intentVersionId);
+    assert.equal(durable.request.objective, "How can I organize photos from a family trip?");
+
+    const continuity = await reopened.inject({ method: "GET", url: `/api/v1/conversations/${conversationId}/continuity` });
+    assert.equal(continuity.statusCode, 200, continuity.body);
+    const state = continuity.json<{ messages: Array<{ messageId: string; content: string }>; runs: Array<{ runId: string; exactBinding: { intentVersionId: string } }> }>();
+    const source = state.messages.find((message) => message.content === "How can I organize photos from a family trip?");
+    assert.ok(source);
+    assert.equal(durable.request.sourceMessageId, source.messageId);
+    const runState = state.runs.find((item) => item.runId === body.runId);
+    assert.ok(runState);
+    assert.equal(runState.exactBinding.intentVersionId, body.intentVersionId);
+  } finally {
+    await reopened.close();
+    const pool = new Pool({ connectionString: databaseUrl });
+    try {
+      const runIds = [firstRunId, secondRunId].filter(Boolean);
+      if (runIds.length > 0) {
+        await pool.query("DELETE FROM decision_plans WHERE run_id = ANY($1::uuid[])", [runIds]);
+        await pool.query("DELETE FROM run_intent_bindings WHERE run_id = ANY($1::uuid[])", [runIds]);
+        await pool.query("DELETE FROM run_events WHERE run_id = ANY($1::uuid[])", [runIds]);
+        await pool.query("DELETE FROM dispatch_outbox WHERE run_id = ANY($1::uuid[])", [runIds]);
+        await pool.query("DELETE FROM runs WHERE id = ANY($1::uuid[])", [runIds]);
+      }
+      await pool.query("DELETE FROM intent_user_messages WHERE conversation_id=$1", [conversationId]);
+      await pool.query("DELETE FROM intent_scopes WHERE intent_scope_id=$1", [intentScopeId]);
+      await pool.query("DELETE FROM conversations WHERE id=$1", [conversationId]);
+    } finally {
+      await pool.end();
+    }
   }
 });
