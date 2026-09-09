@@ -73,11 +73,25 @@ jobs:
             dist/test/knowledge-followup-capability-honesty.test.js \
             dist/test/v36-execution-pipeline.test.js
 
-      - name: PostgreSQL M4 and M2 continuity
+      - name: PostgreSQL M4 continuity
+        run: node --test dist/test/m4-postgres-decision-continuity.test.js
+
+      - name: Reset PostgreSQL schema between independent restart tests
         run: |
-          node --test \
-            dist/test/m4-postgres-decision-continuity.test.js \
-            dist/test/m2-postgres-recommendation-restart.test.js
+          node --input-type=module <<'NODE'
+          import pg from 'pg';
+          const client = new pg.Client({ connectionString: process.env.DATABASE_URL });
+          await client.connect();
+          try {
+            await client.query('DROP SCHEMA public CASCADE');
+            await client.query('CREATE SCHEMA public');
+          } finally {
+            await client.end();
+          }
+          NODE
+
+      - name: PostgreSQL M2 Recommendation continuity regression
+        run: node --test dist/test/m2-postgres-recommendation-restart.test.js
 
       - name: Ordinary Core with database variable unset
         run: env -u DATABASE_URL npm run check
