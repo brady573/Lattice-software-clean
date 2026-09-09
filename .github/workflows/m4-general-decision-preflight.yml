@@ -1,4 +1,4 @@
-name: TEMP M4 General Decision Preflight
+name: TEMP M4 Candidate Validation
 
 on:
   push:
@@ -8,50 +8,65 @@ on:
       - ".github/workflows/m4-general-decision-preflight.yml"
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  preflight:
+  candidate-validation:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
+    env:
+      SUBJECT_SHA: 28cd9de6bbcafcb6771bf27048921cbacf5354e5
+      SUBJECT_TREE: ddc700cb64a63c3573bc8a63a28c40f4b56698cb
+      DATABASE_URL: postgresql://lattice:lattice@127.0.0.1:55433/lattice_test
+    services:
+      postgres:
+        image: postgres:18.6
+        env:
+          POSTGRES_USER: lattice
+          POSTGRES_PASSWORD: lattice
+          POSTGRES_DB: lattice_test
+        ports:
+          - 55433:5432
+        options: >-
+          --health-cmd "pg_isready -U lattice -d lattice_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
-      - name: Checkout Product branch
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          ref: feature/m4-general-decision-journey
-          fetch-depth: 1
-      - name: Verify untouched M4 base
-        run: |
-          set -euo pipefail
-          test "$(git rev-parse HEAD)" = "654701d6794db0293963be062ec54e3f782cf5e0"
-          test "$(git rev-parse HEAD^{tree})" = "1db6a07e8f2e4743c36f408f980c2d99f4da3112"
-      - name: Checkout validation patcher
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          ref: validation/m4-general-decision-journey
-          path: _validation
+          ref: 28cd9de6bbcafcb6771bf27048921cbacf5354e5
           persist-credentials: false
-      - name: Apply bounded M4 patch
-        run: python _validation/validation/m4-apply.py
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: '24'
+      - name: Verify exact candidate
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SUBJECT_SHA"
+          test "$(git rev-parse HEAD^{tree})" = "$SUBJECT_TREE"
       - run: npm ci --no-audit --no-fund
-      - name: Build candidate
+      - name: Build
         run: npm run build
       - name: Focused M4 memory acceptance
         run: node --import tsx --test test/m4-general-decision-journey.test.ts
-      - name: Inspect bounded diff
+      - name: Reset PostgreSQL schema
         run: |
-          set -euo pipefail
-          git status --short
-          git diff --check
-          git diff --name-only
-      - name: Commit and push Product candidate
+          node --input-type=module <<'NODE'
+          import pg from 'pg';
+          const { Client } = pg;
+          const client = new Client({ connectionString: process.env.DATABASE_URL });
+          await client.connect();
+          await client.query('DROP SCHEMA public CASCADE; CREATE SCHEMA public;');
+          await client.end();
+          NODE
+      - name: M4 and invalidated Recommendation PostgreSQL acceptance
+        run: node --import tsx --test --test-concurrency=1 test/m4-postgres-decision-continuity.test.ts test/m2-postgres-recommendation-restart.test.ts test/runtime-schema-readiness-postgres.test.ts
+      - name: Invalidated Solandra advisory regression
+        run: env -u DATABASE_URL node --import tsx --test test/m2-solandra-advisory-spine.test.ts test/m3-solandra-action-preparation.test.ts
+      - name: Ordinary Core
+        run: env -u DATABASE_URL npm run check
+      - name: Verify exact candidate unchanged
         run: |
-          set -euo pipefail
-          git config user.name "Lattice Coding Agent"
-          git config user.email "114089255+brady573@users.noreply.github.com"
-          git add migrations/037_m4_general_decision_journey.sql src/recommendation/recommendation-options.ts src/intent/accepted-choice-store.ts src/recommendation/recommendation-store.ts src/recommendation/recommendation-continuity.ts src/solandra/advisory.ts src/solandra/cognition.ts src/consultation-intake.ts src/conversation/continuity-api.ts src/runtime-app.ts src/ui/solandra-conversation-page.ts test/m4-general-decision-journey.test.ts test/m4-postgres-decision-continuity.test.ts
-          git commit -m "M4: establish general decision continuity"
-          git push origin HEAD:feature/m4-general-decision-journey
+          test "$(git rev-parse HEAD)" = "$SUBJECT_SHA"
+          test "$(git rev-parse HEAD^{tree})" = "$SUBJECT_TREE"
