@@ -4,24 +4,40 @@ import { pathToFileURL } from "node:url";
 
 const DEFAULT_SHUTDOWN_TIMEOUT_MS = 15_000;
 
-function onceExit(child) {
+function onceTermination(child) {
   return new Promise((resolve) => {
-    child.once("exit", (code, signal) => resolve({ code, signal }));
+    let settled = false;
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      child.off("exit", onExit);
+      child.off("error", onError);
+      resolve(result);
+    };
+    const onExit = (code, signal) => finish({ code, signal, error: undefined });
+    const onError = (error) => finish({ code: null, signal: null, error });
+    child.once("exit", onExit);
+    child.once("error", onError);
   });
 }
 
 async function terminateChild(child, signal, timeoutMs) {
   if (child.exitCode !== null || child.signalCode !== null) return;
+
+  const terminated = onceTermination(child);
   child.kill(signal);
-  const exited = onceExit(child);
+  let timeoutHandle;
   const timeout = new Promise((resolve) => {
-    const timer = setTimeout(() => {
-      if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
-      resolve();
-    }, timeoutMs);
-    timer.unref?.();
+    timeoutHandle = setTimeout(() => resolve("timeout"), timeoutMs);
+    timeoutHandle.unref?.();
   });
-  await Promise.race([exited, timeout]);
+
+  const result = await Promise.race([terminated, timeout]);
+  if (timeoutHandle) clearTimeout(timeoutHandle);
+  if (result !== "timeout") return;
+
+  if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+  await onceTermination(child);
 }
 
 export async function superviseColocatedRuntime({
@@ -41,7 +57,6 @@ export async function superviseColocatedRuntime({
   });
 
   let stopping = false;
-  let requestedSignal;
   let resolveStop;
   const stopRequested = new Promise((resolve) => {
     resolveStop = resolve;
@@ -49,7 +64,6 @@ export async function superviseColocatedRuntime({
   const requestStop = (signal) => {
     if (stopping) return;
     stopping = true;
-    requestedSignal = signal;
     resolveStop({ type: "signal", signal });
   };
   const onSigterm = () => requestStop("SIGTERM");
@@ -57,8 +71,8 @@ export async function superviseColocatedRuntime({
   onSignal("SIGTERM", onSigterm);
   onSignal("SIGINT", onSigint);
 
-  const apiExit = onceExit(api).then((result) => ({ type: "child", name: "api", result }));
-  const workerExit = onceExit(worker).then((result) => ({ type: "child", name: "worker", result }));
+  const apiExit = onceTermination(api).then((result) => ({ type: "child", name: "api", result }));
+  const workerExit = onceTermination(worker).then((result) => ({ type: "child", name: "worker", result }));
 
   try {
     const first = await Promise.race([apiExit, workerExit, stopRequested]);
@@ -74,8 +88,11 @@ export async function superviseColocatedRuntime({
     const sibling = first.name === "api" ? worker : api;
     await terminateChild(sibling, "SIGTERM", shutdownTimeoutMs);
     const code = first.result.code === 0 ? 1 : (first.result.code ?? 1);
+    const detail = first.result.error instanceof Error
+      ? ` error=${JSON.stringify(first.result.error.message)}`
+      : "";
     console.error(
-      `LATTICE_COLOCATED_RUNTIME_CHILD_EXIT name=${first.name} code=${first.result.code ?? "null"} signal=${first.result.signal ?? "null"}`,
+      `LATTICE_COLOCATED_RUNTIME_CHILD_EXIT name=${first.name} code=${first.result.code ?? "null"} signal=${first.result.signal ?? "null"}${detail}`,
     );
     return {
       reason: "child-exit",
@@ -86,7 +103,6 @@ export async function superviseColocatedRuntime({
   } finally {
     offSignal("SIGTERM", onSigterm);
     offSignal("SIGINT", onSigint);
-    if (!stopping && requestedSignal) stopping = true;
   }
 }
 
