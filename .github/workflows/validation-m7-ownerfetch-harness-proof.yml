@@ -1,0 +1,114 @@
+name: Validation — M7 ownerFetch harness proof
+
+on:
+  push:
+    branches:
+      - validation/m7-ownerfetch-harness-repair
+
+permissions:
+  contents: read
+
+jobs:
+  browser-lifecycle:
+    name: Browser lifecycle validation
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      DATABASE_URL: postgresql://lattice:lattice@127.0.0.1:55433/lattice_test
+      SUBJECT_SOURCE_SHA: 950149651c39daf1f9dd2a02731c4b888174027a
+    services:
+      postgres:
+        image: postgres:18.6
+        env:
+          POSTGRES_USER: lattice
+          POSTGRES_PASSWORD: lattice
+          POSTGRES_DB: lattice_test
+        ports:
+          - 55433:5432
+        options: >-
+          --health-cmd "pg_isready -U lattice -d lattice_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: 950149651c39daf1f9dd2a02731c4b888174027a
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '24'
+      - name: Verify exact subject and browser surface
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SUBJECT_SOURCE_SHA"
+          browser="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
+          test -n "$browser"
+          echo "M7_BROWSER_EXECUTABLE=$browser" >> "$GITHUB_ENV"
+      - run: npm ci --no-audit --no-fund
+      - run: node --check tools/m7-browser-lifecycle.mjs
+      - run: npm run build
+      - name: Reset and migrate dedicated browser database
+        run: |
+          node --input-type=module <<'NODE'
+          import pg from 'pg';
+          const { Client } = pg;
+          const client = new Client({ connectionString: process.env.DATABASE_URL });
+          await client.connect();
+          const version = await client.query('show server_version_num');
+          const versionNumber = Number(version.rows[0].server_version_num);
+          if (!Number.isInteger(versionNumber) || versionNumber < 180006 || versionNumber >= 190000) throw new Error(`expected PostgreSQL 18.6+, got ${versionNumber}`);
+          await client.query('DROP SCHEMA public CASCADE; CREATE SCHEMA public;');
+          await client.end();
+          NODE
+          node dist/src/migrate.js
+      - name: Execute real-browser lifecycle validation
+        env:
+          LATTICE_DEPLOYMENT_MODE: development
+          LATTICE_TRUTH_MODE: v36-offline
+          LATTICE_AUTHENTICATION_MODE: development-fixture
+          LATTICE_DEVELOPMENT_FIXTURE_SUBJECT_ID: browser-validation-subject
+          LATTICE_AUTO_MIGRATE: 'false'
+          LATTICE_RUN_WORKER_LEASE_MS: '5000'
+          LATTICE_RUN_WORKER_RETRY_DELAY_MS: '5'
+          LATTICE_RUN_WORKER_BATCH_SIZE: '4'
+          LATTICE_RESEARCH_WORKER_LEASE_MS: '5000'
+          LATTICE_RESEARCH_WORKER_RETRY_DELAY_MS: '5'
+          LATTICE_RESEARCH_WORKER_BATCH_SIZE: '8'
+          PORT: '3107'
+          HOST: 127.0.0.1
+          M7_BASE_URL: http://127.0.0.1:3107
+          M7_BROWSER_ARTIFACT_DIR: artifacts/browser-lifecycle
+        run: |
+          set -euo pipefail
+          node tools/m7-browser-lifecycle.mjs
+          test "$(git rev-parse HEAD)" = "$SUBJECT_SOURCE_SHA"
+          echo "BROWSER_LIFECYCLE=PASS sha=$SUBJECT_SOURCE_SHA"
+
+  core-validation:
+    name: Core PR validation
+    runs-on: windows-2025
+    timeout-minutes: 20
+    env:
+      SUBJECT_SOURCE_SHA: 950149651c39daf1f9dd2a02731c4b888174027a
+    defaults:
+      run:
+        shell: cmd
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: 950149651c39daf1f9dd2a02731c4b888174027a
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '24'
+      - name: Verify exact subject
+        run: |
+          @echo off
+          for /f %%I in ('git rev-parse HEAD') do set "ACTUAL_SOURCE_SHA=%%I"
+          if /I not "%ACTUAL_SOURCE_SHA%"=="%SUBJECT_SOURCE_SHA%" exit /b 1
+      - run: npm ci --no-audit --no-fund
+      - name: Run repository check
+        run: npm run check
+      - name: Record core validation
+        run: echo CORE_PR_VALIDATION=PASS sha=%SUBJECT_SOURCE_SHA%
