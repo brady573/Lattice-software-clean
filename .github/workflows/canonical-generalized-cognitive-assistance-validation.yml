@@ -1,0 +1,285 @@
+name: Validation — Canonical Cognitive Assistance
+
+on:
+  push:
+    branches:
+      - validation/canonical-generalized-cognitive-assistance
+    paths:
+      - .github/workflows/canonical-generalized-cognitive-assistance-validation.yml
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout exact Product candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: 4e90aa3ebf919c234a9b847ac78ea00c7ca24339
+          persist-credentials: false
+
+      - name: Verify exact Product candidate
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "4e90aa3ebf919c234a9b847ac78ea00c7ca24339"
+          test "$(git rev-parse HEAD^{tree})" = "e1b0b14c088f420349669e7aff423649cb22da71"
+          echo "CANDIDATE_VERIFIED=PASS"
+
+      - name: Provision Node 24
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+
+      - name: Install locked dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Build
+        run: npm run build
+
+      - name: Focused generalized capability and canonical Solandra tests
+        run: |
+          node --test \
+            dist/test/canonical-generalized-cognitive-assistance.test.js \
+            dist/test/m3-capability-broker-user-model.test.js \
+            dist/test/m1-solandra-cognitive-knowledge-spine.test.js \
+            dist/test/m4-general-decision-journey.test.js \
+            dist/test/a5-solandra-recovery-continuity.test.js
+
+      - name: Standard repository gate
+        run: env -u DATABASE_URL npm run check
+
+      - name: Locate hosted browser
+        run: |
+          set -euo pipefail
+          browser="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
+          if [ -z "$browser" ]; then
+            echo 'BROWSER_EXECUTION_SURFACE_FAILURE: Chrome/Chromium not found' >&2
+            exit 1
+          fi
+          echo "COGNITIVE_BROWSER_EXECUTABLE=$browser" >> "$GITHUB_ENV"
+
+      - name: Real configured canonical Solandra browser proof
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          LATTICE_DEPLOYMENT_MODE: development
+          LATTICE_TRUTH_MODE: v36-offline
+          LATTICE_AUTHENTICATION_MODE: development-fixture
+          LATTICE_DEVELOPMENT_FIXTURE_SUBJECT_ID: canonical-cognitive-browser-proof
+          LATTICE_SOLANDRA_COGNITION_ROUTE: groq-gpt-oss-120b
+          LATTICE_AUTO_MIGRATE: 'false'
+          PORT: '3113'
+          HOST: 127.0.0.1
+          COGNITIVE_BASE_URL: http://127.0.0.1:3113
+        run: |
+          set -euo pipefail
+          test -n "${GROQ_API_KEY:-}"
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import { spawn } from 'node:child_process';
+          import { once } from 'node:events';
+          import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
+          import { tmpdir } from 'node:os';
+          import { join } from 'node:path';
+          import { randomUUID } from 'node:crypto';
+
+          const baseUrl = process.env.COGNITIVE_BASE_URL;
+          const browserExecutable = process.env.COGNITIVE_BROWSER_EXECUTABLE;
+          assert.ok(baseUrl);
+          assert.ok(browserExecutable);
+
+          const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+          async function waitFor(description, probe, timeoutMs = 30000, intervalMs = 100) {
+            const deadline = Date.now() + timeoutMs;
+            let lastError;
+            while (Date.now() < deadline) {
+              try {
+                const value = await probe();
+                if (value) return value;
+              } catch (error) {
+                lastError = error;
+              }
+              await sleep(intervalMs);
+            }
+            throw new Error(`Timed out waiting for ${description}${lastError instanceof Error ? `: ${lastError.message}` : ''}`);
+          }
+
+          async function stop(child) {
+            if (!child || child.exitCode !== null) return;
+            child.kill('SIGTERM');
+            await Promise.race([once(child, 'exit').catch(() => {}), sleep(2000)]);
+            if (child.exitCode === null) child.kill('SIGKILL');
+          }
+
+          class Cdp {
+            constructor(url) {
+              this.url = url;
+              this.socket = null;
+              this.nextId = 1;
+              this.pending = new Map();
+            }
+            async connect() {
+              this.socket = new WebSocket(this.url);
+              await new Promise((resolve, reject) => {
+                const timeout = setTimeout(() => reject(new Error('CDP connect timeout')), 5000);
+                this.socket.addEventListener('open', () => { clearTimeout(timeout); resolve(); }, { once: true });
+                this.socket.addEventListener('error', () => { clearTimeout(timeout); reject(new Error('CDP connect failed')); }, { once: true });
+              });
+              this.socket.addEventListener('message', (event) => {
+                const message = JSON.parse(String(event.data));
+                if (typeof message.id !== 'number') return;
+                const pending = this.pending.get(message.id);
+                if (!pending) return;
+                this.pending.delete(message.id);
+                if (message.error) pending.reject(new Error(message.error.message));
+                else pending.resolve(message.result ?? {});
+              });
+            }
+            send(method, params = {}) {
+              const id = this.nextId++;
+              return new Promise((resolve, reject) => {
+                const timeout = setTimeout(() => {
+                  this.pending.delete(id);
+                  reject(new Error(`CDP timeout: ${method}`));
+                }, 10000);
+                this.pending.set(id, {
+                  resolve: (value) => { clearTimeout(timeout); resolve(value); },
+                  reject: (error) => { clearTimeout(timeout); reject(error); },
+                });
+                this.socket.send(JSON.stringify({ id, method, params }));
+              });
+            }
+            async eval(expression) {
+              const result = await this.send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true });
+              if (result.exceptionDetails) throw new Error(result.exceptionDetails.text ?? 'Browser evaluation failed');
+              return result.result?.value;
+            }
+            close() { try { this.socket?.close(); } catch {} }
+          }
+
+          const api = spawn(process.execPath, ['dist/src/index.js'], {
+            env: process.env,
+            stdio: ['ignore', 'pipe', 'pipe'],
+          });
+          let apiOutput = '';
+          for (const stream of [api.stdout, api.stderr]) {
+            stream?.on('data', (chunk) => {
+              const text = chunk.toString();
+              apiOutput += text;
+              if (!text.includes('GROQ_API_KEY')) process.stdout.write(`[api] ${text}`);
+            });
+          }
+
+          let browser;
+          let cdp;
+          let profile;
+          try {
+            await waitFor('API health', async () => (await fetch(`${baseUrl}/health`).catch(() => null))?.ok === true, 15000);
+
+            profile = join(tmpdir(), `lattice-cognitive-proof-${randomUUID()}`);
+            mkdirSync(profile, { recursive: true });
+            browser = spawn(browserExecutable, [
+              '--headless=new', '--disable-gpu', '--no-sandbox', '--no-first-run', '--no-default-browser-check',
+              '--remote-debugging-port=0', `--user-data-dir=${profile}`, baseUrl,
+            ], { stdio: ['ignore', 'pipe', 'pipe'] });
+            const portFile = join(profile, 'DevToolsActivePort');
+            const port = await waitFor('browser debug port', async () => {
+              if (!existsSync(portFile)) return null;
+              const value = Number.parseInt(readFileSync(portFile, 'utf8').split(/\r?\n/)[0] ?? '', 10);
+              return Number.isInteger(value) && value > 0 ? value : null;
+            });
+            const target = await waitFor('canonical Product browser target', async () => {
+              const response = await fetch(`http://127.0.0.1:${port}/json/list`).catch(() => null);
+              if (!response?.ok) return null;
+              const targets = await response.json();
+              return targets.find((item) => item.type === 'page' && item.url.startsWith(baseUrl)) ?? null;
+            });
+            cdp = new Cdp(target.webSocketDebuggerUrl);
+            await cdp.connect();
+            await cdp.send('Runtime.enable');
+            await cdp.send('Page.enable');
+
+            const stateLabel = async () => await cdp.eval(`document.getElementById('cognitiveAssistanceLabel')?.textContent || ''`);
+            await waitFor('disconnected cognitive state', async () => (await stateLabel()).includes('disconnected'));
+            console.log('PRODUCT_PROOF_DISCONNECTED=PASS');
+
+            await cdp.eval(`document.getElementById('cognitiveAssistanceButton').click()`);
+            await waitFor('cognitive capability dialog', async () => await cdp.eval(`document.getElementById('cognitiveAssistanceDialog')?.open === true`));
+            await cdp.eval(`document.getElementById('cognitiveAssistanceToggle').click()`);
+            await waitFor('connected cognitive state', async () => (await stateLabel()).includes('connected'));
+            console.log('PRODUCT_PROOF_CONNECT_UI=PASS');
+
+            await cdp.send('Page.reload', { ignoreCache: true });
+            await waitFor('connected state after reload', async () => (await stateLabel()).includes('connected'));
+            console.log('PRODUCT_PROOF_CONNECTED_RELOAD=PASS');
+
+            const message = 'Rewrite this sentence to be shorter: I keep rough notes here because I might use them later.';
+            await cdp.eval(`(() => { const input = document.getElementById('conversationInput'); input.value = ${JSON.stringify(message)}; document.getElementById('conversationForm').requestSubmit(); return true; })()`);
+            const assistantText = await waitFor('visible cognitive assistant response', async () => {
+              const turns = await cdp.eval(`[...document.querySelectorAll('.turn.solandra')].map((node) => node.textContent || '')`);
+              const last = turns.at(-1) ?? '';
+              return last && !last.includes('checking the request') ? last : null;
+            }, 60000, 200);
+            assert.ok(assistantText.trim().length > 0);
+            assert.doesNotMatch(assistantText, /couldn't establish the requested work safely/iu);
+            assert.doesNotMatch(assistantText, /Cognitive assistance is disconnected/iu);
+
+            const successfulState = await cdp.eval(`fetch('/api/v1/capabilities/user-model').then((r) => r.json())`);
+            assert.equal(successfulState.capability.status, 'CONNECTED');
+            assert.equal(successfulState.capability.lastInvocation?.outcome, 'SUCCEEDED');
+            const successfulRequestId = successfulState.capability.lastInvocation.requestId;
+            const conversationId = await cdp.eval(`localStorage.getItem('lattice.solandra.conversation.v1')`);
+            assert.ok(conversationId);
+            const continuity = await cdp.eval(`fetch('/api/v1/conversations/' + encodeURIComponent(${JSON.stringify('PLACEHOLDER')})).then(() => null)`)
+              .catch(() => null);
+            const structural = await cdp.eval(`(() => { const id = localStorage.getItem('lattice.solandra.conversation.v1'); return fetch('/api/v1/conversations/' + encodeURIComponent(id) + '/continuity').then((r) => r.json()); })()`);
+            assert.equal(structural.runs.length, 0);
+            assert.equal(structural.knowledge.length, 0);
+            assert.equal(structural.recommendations.length, 0);
+            assert.equal(structural.acceptedChoices.length, 0);
+            console.log('PRODUCT_PROOF_DIRECT_RESPONSE=PASS');
+            console.log('PRODUCT_PROOF_NON_AUTHORITATIVE_STATE=PASS');
+
+            await cdp.eval(`document.getElementById('cognitiveAssistanceButton').click()`);
+            await waitFor('cognitive capability dialog after success', async () => await cdp.eval(`document.getElementById('cognitiveAssistanceDialog')?.open === true`));
+            await cdp.eval(`document.getElementById('cognitiveAssistanceToggle').click()`);
+            await waitFor('disconnected state after revoke', async () => (await stateLabel()).includes('disconnected'));
+            console.log('PRODUCT_PROOF_REVOKE_UI=PASS');
+
+            await cdp.send('Page.reload', { ignoreCache: true });
+            await waitFor('disconnected state after reload', async () => (await stateLabel()).includes('disconnected'));
+            console.log('PRODUCT_PROOF_DISCONNECTED_RELOAD=PASS');
+
+            const deniedMessage = 'Rewrite this sentence to be shorter: These are more rough notes I might revisit later.';
+            await cdp.eval(`(() => { const input = document.getElementById('conversationInput'); input.value = ${JSON.stringify(deniedMessage)}; document.getElementById('conversationForm').requestSubmit(); return true; })()`);
+            const deniedText = await waitFor('visible revoked-capability boundary', async () => {
+              const turns = await cdp.eval(`[...document.querySelectorAll('.turn.solandra')].map((node) => node.textContent || '')`);
+              return turns.find((text) => text.includes('Cognitive assistance is disconnected. Connect it to use this request.')) ?? null;
+            }, 30000, 100);
+            assert.match(deniedText, /Cognitive assistance is disconnected/iu);
+            const revokedState = await cdp.eval(`fetch('/api/v1/capabilities/user-model').then((r) => r.json())`);
+            assert.equal(revokedState.capability.status, 'DISCONNECTED');
+            assert.equal(revokedState.capability.lastInvocation?.requestId, successfulRequestId);
+            const afterRevoke = await cdp.eval(`(() => { const id = localStorage.getItem('lattice.solandra.conversation.v1'); return fetch('/api/v1/conversations/' + encodeURIComponent(id) + '/continuity').then((r) => r.json()); })()`);
+            assert.equal(afterRevoke.runs.length, 0);
+            assert.equal(afterRevoke.knowledge.length, 0);
+            assert.equal(afterRevoke.recommendations.length, 0);
+            assert.equal(afterRevoke.acceptedChoices.length, 0);
+            console.log('PRODUCT_PROOF_REVOKED_REQUEST_BLOCKED=PASS');
+            console.log('LATTICE_CANONICAL_COGNITIVE_ASSISTANCE_PRODUCT_PROOF=PASS');
+          } finally {
+            cdp?.close();
+            await stop(browser);
+            await stop(api);
+            if (profile) rmSync(profile, { recursive: true, force: true });
+          }
+          NODE
+
+      - name: Verify candidate unchanged after validation
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "4e90aa3ebf919c234a9b847ac78ea00c7ca24339"
+          test "$(git rev-parse HEAD^{tree})" = "e1b0b14c088f420349669e7aff423649cb22da71"
+          echo "CANDIDATE_STILL_EXACT=PASS"
