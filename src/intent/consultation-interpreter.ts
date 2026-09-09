@@ -70,6 +70,25 @@ function escapeRegex(value: string): string {
 }
 
 /**
+ * Return an objective replacement only when the USER's own language explicitly
+ * marks the turn as a correction. This is a USER-language signal, not model
+ * authority; callers still submit the replacement through Intent Authority.
+ */
+export function explicitConsultationObjectiveCorrection(
+  message: string,
+  currentIntentVersion?: IntentVersion,
+): string | undefined {
+  const existingObjective = currentIntentVersion?.state.objective;
+  const hasObjective = existingObjective?.value.state === "VALUE"
+    && typeof existingObjective.value.value === "string";
+  if (!hasObjective) return undefined;
+
+  const match = /^(?:no\s*[,;:-]?\s*actually\s*[,;:-]?\s*|actually\s*[,;:-]?\s*i\s+mean(?:t)?\s+|actually\s*[,;:-]?\s*(?:my|the)\s+objective\s+(?:is|should be)\s+|i\s+mean(?:t)?\s+|(?:change|replace|update)\s+(?:the\s+)?objective\s+(?:to\s+)?|instead\s*[,;:-]?\s*)(.+)$/iu.exec(message.trim());
+  const replacement = match?.[1]?.trim();
+  return replacement ? replacement : undefined;
+}
+
+/**
  * Return a short form whose meaning is material to a non-definition request
  * but is not supplied by the USER in the same turn. This never resolves the
  * term itself; it only decides whether one concise clarification is required.
@@ -111,13 +130,11 @@ export class ConservativeConsultationInterpreter implements ConsultationInterpre
     const existingObjective = input.currentIntentVersion?.state.objective;
     const hasObjective = existingObjective?.value.state === "VALUE"
       && typeof existingObjective.value.value === "string";
-    const explicitCorrection = hasObjective
-      ? /^(?:no\s*[,;:-]?\s*actually\s*[,;:-]?\s*|actually\s*[,;:-]?\s*i\s+meant\s+|actually\s*[,;:-]?\s*(?:my|the)\s+objective\s+(?:is|should be)\s+|i\s+mean(?:t)?\s+|(?:change|replace|update)\s+(?:the\s+)?objective\s+(?:to\s+)?|instead\s*[,;:-]?\s*)(.+)$/iu.exec(message)
-      : null;
+    const explicitCorrection = explicitConsultationObjectiveCorrection(message, input.currentIntentVersion);
     const objectiveEffect: ConsultationObjectiveEffect = !hasObjective
       ? { kind: "ESTABLISH", value: message }
-      : explicitCorrection?.[1]?.trim()
-        ? { kind: "REPLACE_EXPLICIT", value: explicitCorrection[1].trim() }
+      : explicitCorrection
+        ? { kind: "REPLACE_EXPLICIT", value: explicitCorrection }
         : { kind: "PRESERVE" };
     if (input.explicitResourceNeed) {
       return {
