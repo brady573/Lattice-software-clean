@@ -12,6 +12,7 @@ export const solandraRequestedHelpSchema = z.enum([
   "DECISION",
   "EXPLAIN_RECOMMENDATION",
   "SOURCES_RECOMMENDATION",
+  "COGNITIVE_ASSISTANCE",
   "RESOURCE",
 ]);
 export type SolandraRequestedHelp = z.infer<typeof solandraRequestedHelpSchema>;
@@ -127,7 +128,7 @@ function buildCognitionRequest(model: string, input: SolandraCognitionInput): Ca
   const schemaExample = JSON.stringify({
     objectiveRelation: "NEW_OBJECTIVE|CONTINUE|CORRECTION",
     proposedObjective: "string or null",
-    requestedHelp: "KNOWLEDGE|EXPLAIN_REFERENCE|SIMPLIFY_REFERENCE|SOURCES_REFERENCE|FRESH_RESEARCH|DECISION|EXPLAIN_RECOMMENDATION|SOURCES_RECOMMENDATION|RESOURCE",
+    requestedHelp: "KNOWLEDGE|EXPLAIN_REFERENCE|SIMPLIFY_REFERENCE|SOURCES_REFERENCE|FRESH_RESEARCH|DECISION|EXPLAIN_RECOMMENDATION|SOURCES_RECOMMENDATION|COGNITIVE_ASSISTANCE|RESOURCE",
     relevantContext: ["string"],
     entities: ["string"],
     referents: ["string"],
@@ -153,6 +154,8 @@ function buildCognitionRequest(model: string, input: SolandraCognitionInput): Ca
           "Use FRESH_RESEARCH only when the user asks for new, updated, additional, or otherwise external Knowledge beyond the supplied object. A historical provenance request is not fresh research.",
           "Use DECISION only when the user is actually asking for help choosing/deciding, not merely asking for differences or information.",
           "Use EXPLAIN_RECOMMENDATION when the user asks why a supplied historical Recommendation was made. Use SOURCES_RECOMMENDATION when the user asks for the evidence/sources behind it. referencedRecommendationId must be exactly one supplied Recommendation ID or null.",
+          "Use COGNITIVE_ASSISTANCE for bounded non-consequential help such as brainstorming, analyzing USER-authored material, rewriting, or transforming material when the request does not require new factual Knowledge, a governed Recommendation, a formal Decision, or Action Preparation.",
+          "COGNITIVE_ASSISTANCE is only a request for a capability. It does not itself authorize that capability and it does not turn generated content into Knowledge.",
           "requestedHelp is the sole classification of the requested work. Do not add a separate next-step or workflow field.",
           "Return exactly one JSON object and no prose. The required shape is:",
           schemaExample,
