@@ -170,6 +170,7 @@ async function wrapOwnerFetch(cdp) {
 }
 
 async function submitThroughBrowser(cdp, message) {
+  await waitFor(`canonical Composer ready for ${message}`, () => cdp.eval("document.getElementById('conversationInput') instanceof HTMLTextAreaElement && document.getElementById('sendButton') instanceof HTMLButtonElement && !document.getElementById('sendButton').disabled"));
   const before = await cdp.eval("window.__topicTransitionProof.length");
   await cdp.eval(`(() => {
     const input=document.getElementById('conversationInput');
