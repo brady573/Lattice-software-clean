@@ -4,6 +4,19 @@ export type CapabilityEffect = "COGNITIVE_ONLY";
 export type CapabilityTrustHandling = "NON_AUTHORITATIVE_PROPOSAL" | "KNOWLEDGE_REVIEW_REQUIRED";
 export type CapabilityAuthorizationRequirement = "EXPLICIT_SUBJECT_GRANT";
 
+export type CapabilityProvenance =
+  | (Readonly<{
+    kind: "MODEL";
+    source: "MODEL_RUNTIME";
+  }> & ModelInvocationProvenance)
+  | Readonly<{
+    kind: "CAPABILITY";
+    source: string;
+    details?: Readonly<Record<string, string>>;
+    actualProvider?: never;
+    actualModel?: never;
+  }>;
+
 export interface CapabilityContract<Input, Output> {
   readonly id: string;
   readonly description: string;
@@ -25,7 +38,7 @@ export interface CapabilityExecutionContext {
 
 export interface CapabilityExecutionResult<Output> {
   readonly output: Output;
-  readonly provenance: ModelInvocationProvenance | null;
+  readonly provenance: CapabilityProvenance | null;
 }
 
 export interface CapabilityInvocationResult<Output> {
@@ -36,5 +49,5 @@ export interface CapabilityInvocationResult<Output> {
   readonly trustHandling: CapabilityTrustHandling;
   readonly authorizationVersion: number;
   readonly output: Output;
-  readonly provenance: ModelInvocationProvenance | null;
+  readonly provenance: CapabilityProvenance | null;
 }
