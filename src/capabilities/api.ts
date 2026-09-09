@@ -56,7 +56,14 @@ export function registerCapabilityBrokerApi(app: FastifyInstance, broker: Capabi
 
   app.post("/api/v1/solandra/capabilities/user-model", async (request, reply) => {
     const { subjectId } = getAuthenticatedSubject(request);
-    const body = invocationSchema.parse(request.body);
+    const parsed = invocationSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.status(400).send({
+        error: "INVALID_USER_MODEL_INVOCATION",
+        message: "The requested cognitive capability input is invalid or attempts to supply unsupported trust context.",
+      });
+    }
+    const body = parsed.data;
     try {
       const result = await broker.invoke({
         subjectId,
