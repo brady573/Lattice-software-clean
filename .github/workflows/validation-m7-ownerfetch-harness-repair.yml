@@ -1,0 +1,55 @@
+name: Validation — M7 ownerFetch harness repair
+
+on:
+  push:
+    branches:
+      - validation/m7-ownerfetch-harness-repair
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout frozen combined branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: combine/authenticated-cognitive-assistance
+          fetch-depth: 0
+      - name: Verify exact pre-repair head
+        env:
+          EXPECTED_SHA: fd153b6a32408d2819947f752f2bac34d6b3641e
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+      - name: Repair only stale browser fixture seam
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('tools/m7-browser-lifecycle.mjs')
+          text = path.read_text()
+          old_assignment = """      window.__clarificationFixtureRequests=requests;\n      window.fetch=async (url,init={})=>{\n        const path=String(url);\n        requests.push({path,method:init.method||'GET',body:init.body||null});"""
+          new_assignment = """      window.__clarificationFixtureRequests=requests;\n      const originalOwnerFetch=window.ownerFetch;\n      if(typeof originalOwnerFetch!=='function')throw new Error('canonical ownerFetch missing');\n      window.ownerFetch=async (url,init={})=>{\n        const raw=typeof url==='string'||url instanceof URL?String(url):url instanceof Request?url.url:String(url);\n        const target=new URL(raw,window.location.href);\n        const path=target.pathname+target.search;\n        requests.push({path,method:init.method||'GET',body:init.body||null});"""
+          old_tail = """        throw new Error('unexpected fixture request '+path);\n      };"""
+          new_tail = """        return originalOwnerFetch(url,init);\n      };"""
+          if text.count(old_assignment) != 1:
+              raise SystemExit(f'expected one fixture assignment, found {text.count(old_assignment)}')
+          if text.count(old_tail) != 1:
+              raise SystemExit(f'expected one fixture tail, found {text.count(old_tail)}')
+          text = text.replace(old_assignment, new_assignment, 1).replace(old_tail, new_tail, 1)
+          path.write_text(text)
+          PY
+          git diff --check
+          git diff -- tools/m7-browser-lifecycle.mjs
+      - name: Commit harness-only repair
+        run: |
+          set -euo pipefail
+          test "$(git status --short | wc -l)" -eq 1
+          test "$(git status --short | awk '{print $2}')" = "tools/m7-browser-lifecycle.mjs"
+          git config user.name brady573
+          git config user.email 114089255+brady573@users.noreply.github.com
+          git add tools/m7-browser-lifecycle.mjs
+          git commit -m "Repair browser lifecycle fixture for ownerFetch"
+          git push origin HEAD:combine/authenticated-cognitive-assistance
