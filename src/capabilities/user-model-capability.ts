@@ -6,6 +6,7 @@ import type { CapabilityContract, CapabilityExecutionContext } from "./contracts
 export const USER_AUTHORIZED_MODEL_CAPABILITY_ID = "user-authorized-cognitive-model" as const;
 
 export const userModelPurposeSchema = z.enum([
+  "GENERAL_COGNITIVE_ASSISTANCE",
   "ANALYZE_USER_MATERIAL",
   "DRAFT_FROM_USER_MATERIAL",
   "BRAINSTORM",
@@ -17,11 +18,9 @@ export const userModelInputSchema = z.object({
   purpose: userModelPurposeSchema,
   instruction: z.string().min(1).max(8_000),
   userContext: z.array(z.string().min(1).max(2_000)).max(12).default([]),
-  governedKnowledge: z.array(z.object({
-    knowledgeId: z.string().min(1).max(128),
-    findings: z.array(z.string().min(1).max(1_000)).max(16),
-    uncertainties: z.array(z.string().min(1).max(1_000)).max(16),
-  }).strict()).max(8).default([]),
+  // Public callers cannot assert governed Knowledge. Empty compatibility input is
+  // accepted so older clients do not gain a truth-labeling surface by omission.
+  governedKnowledge: z.array(z.never()).max(0).optional(),
 }).strict();
 export type UserModelInput = z.infer<typeof userModelInputSchema>;
 
@@ -32,13 +31,6 @@ export interface UserModelOutput {
 }
 
 function requestFor(model: string, input: UserModelInput): CanonicalModelRequest {
-  const governed = input.governedKnowledge.length === 0
-    ? "No governed Knowledge was supplied."
-    : input.governedKnowledge.map((item) => [
-      `Knowledge ID: ${item.knowledgeId}`,
-      `Findings: ${item.findings.join(" | ") || "none"}`,
-      `Uncertainties: ${item.uncertainties.join(" | ") || "none"}`,
-    ].join("\n")).join("\n\n");
   return {
     model,
     messages: [
@@ -48,7 +40,8 @@ function requestFor(model: string, input: UserModelInput): CanonicalModelRequest
           "You are a user-authorized cognitive capability used by Solandra for bounded non-consequential work.",
           "Your output is proposed cognitive work only. It is not canonical USER intent, Knowledge, a Recommendation, USER choice, authorization, execution, or verification.",
           "Do not claim that an external factual premise is established merely because you generated it. Factual claims require Lattice Knowledge Trust before Product adoption.",
-          "Use only the bounded context supplied below. Do not request credentials, provider details, hidden system state, or the full conversation graph.",
+          "Use only the bounded USER-authored context supplied below. No governed Knowledge is supplied through this capability input.",
+          "Do not request credentials, provider details, hidden system state, or the full conversation graph.",
           `Purpose: ${input.purpose}`,
         ].join("\n"),
       },
@@ -57,8 +50,6 @@ function requestFor(model: string, input: UserModelInput): CanonicalModelRequest
         content: [
           `Instruction: ${input.instruction}`,
           `USER-authored context: ${input.userContext.join(" | ") || "none"}`,
-          "Governed Knowledge context:",
-          governed,
         ].join("\n"),
       },
     ],
@@ -74,8 +65,8 @@ export class UserAuthorizedModelCapability implements CapabilityContract<UserMod
   readonly authorizationRequirement = "EXPLICIT_SUBJECT_GRANT" as const;
   readonly effect = "COGNITIVE_ONLY" as const;
   readonly trustHandling = "NON_AUTHORITATIVE_PROPOSAL" as const;
-  readonly inputContract = "purpose + instruction + bounded USER context + optional governed Knowledge references";
-  readonly outputContract = "bounded non-authoritative text proposal + sanitized model provenance";
+  readonly inputContract = "purpose + instruction + bounded USER-authored context; caller-supplied governed Knowledge is rejected";
+  readonly outputContract = "bounded non-authoritative text proposal + sanitized capability provenance";
 
   constructor(private readonly runtime: ModelRuntime, private readonly model: string) {
     if (!model.trim()) throw new Error("User-authorized model capability requires a non-empty model identity.");
@@ -99,7 +90,11 @@ export class UserAuthorizedModelCapability implements CapabilityContract<UserMod
         authority: "NON_AUTHORITATIVE_PROPOSAL" as const,
         factualTreatment: "REQUIRES_KNOWLEDGE_TRUST" as const,
       }),
-      provenance: result.audit.invocationProvenance,
+      provenance: Object.freeze({
+        kind: "MODEL" as const,
+        source: "MODEL_RUNTIME" as const,
+        ...result.audit.invocationProvenance,
+      }),
     });
   }
 }
