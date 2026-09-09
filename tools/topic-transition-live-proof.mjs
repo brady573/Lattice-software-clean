@@ -161,9 +161,7 @@ async function wrapOwnerFetch(cdp) {
       const response = await original(...args);
       try {
         const url = typeof args[0] === 'string' ? args[0] : args[0]?.url || '';
-        if (/\\/turns(?:\\?|$)/.test(url)) {
-          window.__topicTransitionProof.push(await response.clone().json());
-        }
+        if (/\\/turns(?:\\?|$)/.test(url)) window.__topicTransitionProof.push(await response.clone().json());
       } catch {}
       return response;
     };
@@ -174,14 +172,13 @@ async function wrapOwnerFetch(cdp) {
 async function submitThroughBrowser(cdp, message) {
   const before = await cdp.eval("window.__topicTransitionProof.length");
   await cdp.eval(`(() => {
-    const input = document.querySelector('textarea');
-    if (!input) throw new Error('Conversation textarea not found');
-    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set;
-    setter.call(input, ${JSON.stringify(message)});
-    input.dispatchEvent(new Event('input', { bubbles: true }));
-    const button = [...document.querySelectorAll('button')].find((item) => item.textContent?.trim() === 'Send');
-    if (!button || button.disabled) throw new Error('Send button unavailable');
-    button.click();
+    const input=document.getElementById('conversationInput');
+    const send=document.getElementById('sendButton');
+    if(!(input instanceof HTMLTextAreaElement)||!(send instanceof HTMLButtonElement))throw new Error('canonical input missing');
+    input.value=${JSON.stringify(message)};
+    input.dispatchEvent(new Event('input',{bubbles:true}));
+    if(send.disabled)throw new Error('send disabled');
+    send.click();
     return true;
   })()`);
   return waitFor(`turn response for ${message}`, async () => {
@@ -224,7 +221,7 @@ try {
   cdp = new Cdp(target.webSocketDebuggerUrl);
   await cdp.connect();
   await cdp.send("Runtime.enable");
-  await waitFor("Solandra page", () => cdp.eval("document.body?.innerText.includes('Solandra')"), 20_000, 100);
+  await waitFor("canonical Solandra input", () => cdp.eval("document.getElementById('conversationInput') instanceof HTMLTextAreaElement"), 20_000, 100);
   await wrapOwnerFetch(cdp);
 
   const aMessage = "What makes ocean tides rise and fall?";
@@ -247,7 +244,7 @@ try {
 
   await cdp.send("Page.enable");
   await cdp.send("Page.reload", { ignoreCache: true });
-  await waitFor("reloaded Solandra", () => cdp.eval("document.body?.innerText.includes('Solandra')"), 20_000, 100);
+  await waitFor("reloaded canonical Solandra input", () => cdp.eval("document.getElementById('conversationInput') instanceof HTMLTextAreaElement"), 20_000, 100);
   await waitFor("reloaded prior conversation", () => cdp.eval(`document.body?.innerText.includes(${JSON.stringify(bMessage)})`), 20_000, 100);
   await wrapOwnerFetch(cdp);
 
