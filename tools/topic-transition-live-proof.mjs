@@ -231,7 +231,7 @@ try {
   assert.ok(a.runId);
   await waitRun(cdp, a.runId);
 
-  const bMessage = "How should I organize a small entryway closet?";
+  const bMessage = "What causes bread dough to rise?";
   const b = await submitThroughBrowser(cdp, bMessage);
   assert.equal(b.interpretation?.objectiveRelation, "NEW_OBJECTIVE", JSON.stringify(b));
   assert.equal(b.acceptedUnderstanding, bMessage);
