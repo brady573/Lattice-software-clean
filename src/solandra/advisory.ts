@@ -96,6 +96,27 @@ export interface SolandraAdvisoryRuntime {
   advise(input: SolandraAdvisoryInput): Promise<SolandraAdvisoryRuntimeResult>;
 }
 
+function normalizeSingleExtraTrailingArrayBracket(text: string): unknown | undefined {
+  if (!text.startsWith("[") || !text.endsWith("]]")) return undefined;
+  const candidate = text.slice(0, -1);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(candidate);
+  } catch {
+    return undefined;
+  }
+  if (
+    !Array.isArray(parsed)
+    || parsed.length !== 1
+    || parsed[0] === null
+    || typeof parsed[0] !== "object"
+    || Array.isArray(parsed[0])
+  ) {
+    return undefined;
+  }
+  return parsed;
+}
+
 function parseJsonObject(text: string, label = "Solandra advisory reasoning"): unknown {
   const trimmed = text.trim();
   const unfenced = /^```(?:json)?\s*([\s\S]*?)\s*```$/iu.exec(trimmed)?.[1] ?? trimmed;
@@ -103,7 +124,11 @@ function parseJsonObject(text: string, label = "Solandra advisory reasoning"): u
   try {
     parsed = JSON.parse(unfenced);
   } catch (error) {
-    throw new ModelProviderError("invalid_output", `${label} returned malformed JSON.`, { cause: error });
+    const repaired = normalizeSingleExtraTrailingArrayBracket(unfenced);
+    if (repaired === undefined) {
+      throw new ModelProviderError("invalid_output", `${label} returned malformed JSON.`, { cause: error });
+    }
+    parsed = repaired;
   }
   if (!Array.isArray(parsed)) return parsed;
   if (
