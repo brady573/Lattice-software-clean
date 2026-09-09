@@ -10,6 +10,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "start": "node dist/src/index.js",
+    "start:render-colocated": "node tools/render-colocated-runtime.mjs",
     "dev": "tsx src/index.ts",
     "dev:prototype": "tsx src/development/index.ts",
     "worker:run": "node dist/src/run-worker-main.js",
