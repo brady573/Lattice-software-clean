@@ -1,3 +1,5 @@
+import { registerCapabilityBrokerApi } from "./capabilities/api.js";
+import { createConfiguredCapabilityBroker } from "./capabilities/composition.js";
 import { createAlphaDecisionRuntimeComposition } from "./decision/alpha-decision-composition.js";
 import { registerModelAssistanceApi } from "./model-assistance-api.js";
 import { createConfiguredModelAssistanceCapability } from "./model-assistance-composition.js";
@@ -18,6 +20,7 @@ try {
   }
 
   const modelAssistance = await createConfiguredModelAssistanceCapability(config);
+  const capabilityComposition = await createConfiguredCapabilityBroker(config);
   const decisionCapability = createAlphaDecisionRuntimeComposition();
   const solandra = createConfiguredSolandraCognition(config);
   let app;
@@ -33,12 +36,13 @@ try {
       }),
     });
   } catch (error) {
-    await modelAssistance.close();
+    await Promise.allSettled([modelAssistance.close(), capabilityComposition.broker.close()]);
     throw error;
   }
   registerModelAssistanceApi(app, modelAssistance);
+  registerCapabilityBrokerApi(app, capabilityComposition.broker);
   app.addHook("onClose", async () => {
-    await modelAssistance.close();
+    await Promise.allSettled([modelAssistance.close(), capabilityComposition.broker.close()]);
   });
 
   try {
