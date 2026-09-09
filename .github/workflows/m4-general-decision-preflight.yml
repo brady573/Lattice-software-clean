@@ -1,4 +1,4 @@
-name: TEMP M4 Diagnostic Candidate Validation
+name: TEMP M4 Bounded Repair Validation
 
 on:
   push:
@@ -11,21 +11,36 @@ permissions:
   contents: read
 
 jobs:
-  diagnostic-candidate:
+  repaired-candidate:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 30
     env:
-      SUBJECT_SHA: f1189f41d976b3c9c57336289ee793f7f78f58ca
-      SUBJECT_TREE: 73c7b42027a8300724c2a32155d0457d19ebe665
+      SUBJECT_SHA: 71545f69b60b4c7d85d539d5ab630ba776dc8599
+      SUBJECT_TREE: bc91c39ec346b8f5fe79397705dc734f2241c6e2
+      DATABASE_URL: postgresql://lattice:lattice@127.0.0.1:55433/lattice_test
+    services:
+      postgres:
+        image: postgres:18.6
+        env:
+          POSTGRES_USER: lattice
+          POSTGRES_PASSWORD: lattice
+          POSTGRES_DB: lattice_test
+        ports:
+          - 55433:5432
+        options: >-
+          --health-cmd "pg_isready -U lattice -d lattice_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          ref: f1189f41d976b3c9c57336289ee793f7f78f58ca
+          ref: 71545f69b60b4c7d85d539d5ab630ba776dc8599
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: '24'
-      - name: Verify exact candidate and credential
+      - name: Verify exact repaired candidate and credential
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
         run: |
@@ -36,11 +51,31 @@ jobs:
       - run: npm ci --no-audit --no-fund
       - name: Build
         run: npm run build
-      - name: Diagnostic observability and invalidated M4 acceptance
-        run: node --import tsx --test test/m4-advisory-diagnostic-observability.test.ts test/m2-solandra-advisory-spine.test.ts test/m4-general-decision-journey.test.ts
+      - name: Focused parser, observability, M2 advisory, and M4 decision acceptance
+        run: >-
+          node --import tsx --test
+          test/m4-advisory-framing-regression.test.ts
+          test/m4-advisory-diagnostic-observability.test.ts
+          test/m2-solandra-advisory-spine.test.ts
+          test/m4-general-decision-journey.test.ts
+      - name: Reset PostgreSQL test schema
+        run: |
+          node --input-type=module <<'NODE'
+          import pg from 'pg';
+          const { Client } = pg;
+          const client = new Client({ connectionString: process.env.DATABASE_URL });
+          await client.connect();
+          await client.query('DROP SCHEMA public CASCADE; CREATE SCHEMA public;');
+          await client.end();
+          NODE
+      - name: M4 and M2 PostgreSQL continuity regressions
+        run: >-
+          node --import tsx --test --test-concurrency=1
+          test/m4-postgres-decision-continuity.test.ts
+          test/m2-postgres-recommendation-restart.test.ts
       - name: Ordinary Core
         run: env -u DATABASE_URL npm run check
-      - name: Exactly one public configured-model diagnostic execution
+      - name: Exactly one public configured-model M4 execution
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
         run: |
@@ -88,20 +123,27 @@ jobs:
             const unfenced = /^```(?:json)?\s*([\s\S]*?)\s*```$/iu.exec(trimmed)?.[1] ?? trimmed;
             try {
               const parsed = JSON.parse(unfenced);
-              if (Array.isArray(parsed)) return { class: parsed.length === 1 ? 'JSON_SINGLE_ARRAY' : 'JSON_MULTI_ARRAY', parsed };
-              if (parsed !== null && typeof parsed === 'object') return { class: 'JSON_OBJECT', parsed };
-              return { class: 'JSON_NON_OBJECT', parsed };
+              if (Array.isArray(parsed)) return { class: parsed.length === 1 ? 'JSON_SINGLE_ARRAY' : 'JSON_MULTI_ARRAY' };
+              if (parsed !== null && typeof parsed === 'object') return { class: 'JSON_OBJECT' };
+              return { class: 'JSON_NON_OBJECT' };
             } catch (error) {
-              return { class: 'JSON_SYNTAX_ERROR', error: error instanceof Error ? error.message : String(error) };
+              if (unfenced.startsWith('[') && unfenced.endsWith(']]')) {
+                try {
+                  const repaired = JSON.parse(unfenced.slice(0, -1));
+                  if (Array.isArray(repaired) && repaired.length === 1 && repaired[0] !== null && typeof repaired[0] === 'object' && !Array.isArray(repaired[0])) {
+                    return { class: 'JSON_SINGLE_ARRAY_PLUS_ONE_TRAILING_BRACKET', parseError: error instanceof Error ? error.message : String(error) };
+                  }
+                } catch {}
+              }
+              return { class: 'JSON_SYNTAX_ERROR', parseError: error instanceof Error ? error.message : String(error) };
             }
           }
 
-          let response;
           try {
             const created = await app.inject({ method: 'POST', url: '/api/v1/conversations' });
             assert.equal(created.statusCode, 201, created.body);
             const conversationId = created.json().conversation.id;
-            response = await app.inject({
+            const response = await app.inject({
               method: 'POST',
               url: `/api/v1/conversations/${conversationId}/turns`,
               payload: { turnId: randomUUID(), message: PUBLIC_DEVELOPMENT_PROBE },
@@ -113,8 +155,8 @@ jobs:
               completionTokens: diagnostic.completionTokens,
               totalTokens: diagnostic.totalTokens,
               upstreamRequestId: diagnostic.upstreamRequestId,
-              content: diagnostic.content,
               structural: classify(diagnostic.content),
+              content: diagnostic.content,
             }));
             console.log('LATTICE_M4_DIAGNOSTIC=' + JSON.stringify(classified));
             console.log('LATTICE_M4_PRODUCT_RESPONSE=' + response.body);
@@ -124,9 +166,18 @@ jobs:
             assert.equal(body.interpretation?.requestedHelp, 'DECISION');
             assert.equal(body.recommendationReference?.selectionAuthorized, false);
             assert.ok(Array.isArray(body.recommendationReference?.options) && body.recommendationReference.options.length >= 2);
+            const continuityResponse = await app.inject({ method: 'GET', url: `/api/v1/conversations/${conversationId}/continuity` });
+            assert.equal(continuityResponse.statusCode, 200, continuityResponse.body);
+            const continuity = continuityResponse.json();
+            assert.equal(continuity.runs.length, 0);
+            assert.equal(continuity.knowledge.length, 0);
+            assert.equal(continuity.recommendations.length, 1);
+            assert.equal(continuity.recommendations[0].selectionAuthorized, false);
+            assert.equal(continuity.acceptedChoices.length, 0);
             assert.ok(classified.length >= 3, 'Expected cognition, advisory, and grounding completions.');
-            assert.equal(classified[1].structural.class === 'JSON_OBJECT' || classified[1].structural.class === 'JSON_SINGLE_ARRAY', true);
-            assert.equal(classified[2].structural.class === 'JSON_OBJECT' || classified[2].structural.class === 'JSON_SINGLE_ARRAY', true);
+            const allowed = new Set(['JSON_OBJECT', 'JSON_SINGLE_ARRAY', 'JSON_SINGLE_ARRAY_PLUS_ONE_TRAILING_BRACKET']);
+            assert.equal(allowed.has(classified[1].structural.class), true, JSON.stringify(classified[1]));
+            assert.equal(allowed.has(classified[2].structural.class), true, JSON.stringify(classified[2]));
             console.log('LATTICE_M4_PUBLIC_LIVE_DECISION=PASS');
           } finally {
             await app.close();
