@@ -18,6 +18,12 @@ const invocationSchema = z.object({
   input: userModelInputSchema,
 }).strict();
 
+const registeredBrokers = new WeakMap<FastifyInstance, CapabilityBroker>();
+
+export function registeredCapabilityBrokerFor(app: FastifyInstance): CapabilityBroker | undefined {
+  return registeredBrokers.get(app);
+}
+
 function productState(state: Awaited<ReturnType<CapabilityBroker["stateFor"]>>) {
   return {
     ...state,
@@ -30,6 +36,8 @@ function productState(state: Awaited<ReturnType<CapabilityBroker["stateFor"]>>) 
 }
 
 export function registerCapabilityBrokerApi(app: FastifyInstance, broker: CapabilityBroker): void {
+  registeredBrokers.set(app, broker);
+
   app.get("/api/v1/capabilities/user-model", async (request) => {
     const { subjectId } = getAuthenticatedSubject(request);
     return { capability: productState(await broker.stateFor(subjectId, USER_AUTHORIZED_MODEL_CAPABILITY_ID)) };
