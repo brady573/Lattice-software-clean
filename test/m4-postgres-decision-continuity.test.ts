@@ -13,7 +13,7 @@ class C implements SolandraCognitiveRuntime { async interpret(input: Parameters<
 const advisory: SolandraAdvisoryRuntime = { async advise() { return { result: { status: "RECOMMENDATION", recommendation: "Keep the lighter routine.", basis: [], rationale: ["Matches USER preference."], tradeoffs: [], assumptions: [], uncertainties: [], preservedUncertainties: [], alternatives: ["Use the more structured routine."] }, invocationProvenance: P }; } };
 
 test("PostgreSQL persists run-free Recommendation and AcceptedChoice across restart", { skip: !databaseUrl }, async () => {
-  const config = resolveRuntimeConfig({ LATTICE_DEPLOYMENT_MODE: "development", LATTICE_TRUTH_MODE: "v36-offline", LATTICE_DATABASE_URL: databaseUrl!, LATTICE_AUTO_MIGRATE: "true", LATTICE_AUTHENTICATION_MODE: "development-fixture", LATTICE_DEVELOPMENT_FIXTURE_SUBJECT_ID: "m4-pg-user" } as NodeJS.ProcessEnv);
+  const config = resolveRuntimeConfig({ DATABASE_URL: databaseUrl!, LATTICE_DEPLOYMENT_MODE: "development", LATTICE_TRUTH_MODE: "v36-offline", LATTICE_AUTO_MIGRATE: "true", LATTICE_AUTHENTICATION_MODE: "development-fixture", LATTICE_DEVELOPMENT_FIXTURE_SUBJECT_ID: "m4-pg-user" } as NodeJS.ProcessEnv);
   let first = await createRuntimeApp(config, { solandraCognition: new C(), solandraAdvisory: advisory });
   let conversationId = "";
   let choiceId = "";
@@ -25,7 +25,7 @@ test("PostgreSQL persists run-free Recommendation and AcceptedChoice across rest
     assert.equal(chosen.statusCode, 200, chosen.body); choiceId = chosen.json().acceptedChoice.acceptedChoiceId;
   } finally { await first.close(); }
 
-  const restartConfig = resolveRuntimeConfig({ LATTICE_DEPLOYMENT_MODE: "development", LATTICE_TRUTH_MODE: "v36-offline", LATTICE_DATABASE_URL: databaseUrl!, LATTICE_AUTO_MIGRATE: "false", LATTICE_AUTHENTICATION_MODE: "development-fixture", LATTICE_DEVELOPMENT_FIXTURE_SUBJECT_ID: "m4-pg-user" } as NodeJS.ProcessEnv);
+  const restartConfig = resolveRuntimeConfig({ DATABASE_URL: databaseUrl!, LATTICE_DEPLOYMENT_MODE: "development", LATTICE_TRUTH_MODE: "v36-offline", LATTICE_AUTO_MIGRATE: "false", LATTICE_AUTHENTICATION_MODE: "development-fixture", LATTICE_DEVELOPMENT_FIXTURE_SUBJECT_ID: "m4-pg-user" } as NodeJS.ProcessEnv);
   const second = await createRuntimeApp(restartConfig, { solandraCognition: new C(), solandraAdvisory: advisory });
   try {
     const continuity = await second.inject({ method: "GET", url: `/api/v1/conversations/${conversationId}/continuity` });
