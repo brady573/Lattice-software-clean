@@ -4,6 +4,7 @@ import {
   type PreparedResourceStore,
 } from "../action-preparation/prepared-resource-store.js";
 import { getAuthenticatedSubject } from "../auth/authenticated-subject.js";
+import type { AcceptedChoiceStore } from "../intent/accepted-choice-store.js";
 import { isConsultationRunRequest, type LatticeRunRequest } from "../domain.js";
 import type {
   DecisionPlanStore,
@@ -15,6 +16,7 @@ import type { IntentVersion } from "../intent/types.js";
 import type { IntentUserMessageStore } from "../intent/source-message-store.js";
 import type { KnowledgeRecordStore } from "../knowledge/knowledge-record-store.js";
 import type { RecommendationStore } from "../recommendation/recommendation-store.js";
+import { recommendationOptions } from "../recommendation/recommendation-options.js";
 import { buildRunOutcome, type RunOutcome } from "../outcome.js";
 import {
   composeSolandraPresentation,
@@ -37,6 +39,7 @@ export interface ConversationContinuityApiOptions {
   intentStore?: IntentAuthorityStore;
   knowledgeStore?: KnowledgeRecordStore;
   recommendationStore?: RecommendationStore;
+  acceptedChoiceStore?: AcceptedChoiceStore;
   preparedResourceStore?: PreparedResourceStore;
 }
 
@@ -101,12 +104,13 @@ export function registerConversationContinuityApi(
       const conversation = await options.conversationStore.getOwned(conversationId, subjectId);
       if (!conversation) return reply.status(404).send({ error: "CONVERSATION_NOT_FOUND" });
 
-      const [messages, runIds, knowledge, references, recommendations] = await Promise.all([
+      const [messages, runIds, knowledge, references, recommendations, acceptedChoices] = await Promise.all([
         options.userMessageStore.listByConversation(conversationId),
         options.runIndexStore.listRunIds(conversationId),
         options.knowledgeStore?.listKnowledgeByConversation(conversationId) ?? Promise.resolve([]),
         options.knowledgeStore?.listReferences(conversationId) ?? Promise.resolve([]),
         options.recommendationStore?.listRecommendationsByConversation(conversationId) ?? Promise.resolve([]),
+        options.acceptedChoiceStore?.listAcceptedChoicesByConversation(conversationId) ?? Promise.resolve([]),
       ]);
 
       const runs = await Promise.all(runIds.map(async (runId) => {
@@ -186,6 +190,7 @@ export function registerConversationContinuityApi(
           intentVersionId: record.intentVersionId,
           sourceMessageId: record.sourceMessageId,
           basis: record.basis,
+          userMaterialBasis: record.userMaterialBasis,
           knowledgeIds: record.knowledgeIds,
           claimIds: record.claimIds,
           recommendation: record.recommendation,
@@ -194,10 +199,12 @@ export function registerConversationContinuityApi(
           assumptions: record.assumptions,
           uncertainties: record.uncertainties,
           alternatives: record.alternatives,
+          options: recommendationOptions(record),
           selectionAuthorized: record.selectionAuthorized,
           createdAt: record.createdAt,
           link: `/api/v1/recommendations/${encodeURIComponent(record.recommendationId)}`,
         })),
+        acceptedChoices: acceptedChoices.map((choice) => ({ ...choice })),
       });
     },
   );

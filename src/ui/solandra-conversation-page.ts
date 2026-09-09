@@ -463,7 +463,7 @@ export function renderSolandraConversationPage(): string {
           renderOutcome(body.knowledge, body.presentation);
           return;
         }
-        if (body.status === "RECOMMENDATION_REFERENCE_RESOLVED") {
+        if (["RECOMMENDATION_ESTABLISHED", "RECOMMENDATION_REFERENCE_RESOLVED", "OPTION_REFERENCE_RESOLVED", "ACCEPTED_CHOICE_ESTABLISHED", "ADVISORY_INSUFFICIENT_BASIS"].includes(body.status)) {
           const assistantMessage = typeof body.presentation?.assistantMessage === "string"
             ? body.presentation.assistantMessage.trim()
             : "";

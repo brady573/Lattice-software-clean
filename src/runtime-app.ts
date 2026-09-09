@@ -19,6 +19,11 @@ import {
   type AuthenticatedSubjectResolver,
 } from "./auth/authenticated-subject.js";
 import { PostgresCapabilityAuthorizationStore } from "./capabilities/authorization-store.js";
+import {
+  MemoryAcceptedChoiceStore,
+  PostgresAcceptedChoiceStore,
+  type AcceptedChoiceStore,
+} from "./intent/accepted-choice-store.js";
 import { registerConsultationIntake } from "./consultation-intake.js";
 import { buildCanonicalApp } from "./http-app.js";
 import { registerConversationApi } from "./conversation/conversation-api.js";
@@ -113,6 +118,7 @@ export interface RuntimeAppOptions {
   decisionEvidenceProvider?: DecisionEvidenceProvider;
   knowledgeStore?: KnowledgeRecordStore;
   recommendationStore?: RecommendationStore;
+  acceptedChoiceStore?: AcceptedChoiceStore;
   preparedResourceStore?: PreparedResourceStore;
   solandraCognition?: SolandraCognitiveRuntime;
   solandraAdvisory?: SolandraAdvisoryRuntime;
@@ -243,6 +249,7 @@ export async function migrateRuntimeDatabase(databaseUrl: string): Promise<void>
   await PostgresRecommendationStore.migrate(databaseUrl);
   await PostgresPreparedResourceStore.migrate(databaseUrl);
   await PostgresCapabilityAuthorizationStore.migrate(databaseUrl);
+  await PostgresAcceptedChoiceStore.migrate(databaseUrl);
 
   const apiControlStore = await PostgresApiRunControlStore.connect(databaseUrl, { migrate: true });
   await apiControlStore.close();
@@ -268,6 +275,7 @@ export async function connectPostgresRuntimeStores(
   runIndexStore: ConversationRunIndexStore;
   knowledgeStore: KnowledgeRecordStore;
   recommendationStore: RecommendationStore;
+  acceptedChoiceStore: AcceptedChoiceStore;
   preparedResourceStore: PreparedResourceStore;
 }> {
   if (autoMigrate) await migrateRuntimeDatabase(databaseUrl);
@@ -295,22 +303,29 @@ export async function connectPostgresRuntimeStores(
                   try {
                     const recommendationStore = await PostgresRecommendationStore.connect(databaseUrl);
                     try {
-                      const preparedResourceStore = await PostgresPreparedResourceStore.connect(databaseUrl);
-                      const decisionPlanControl = new DecisionPlanRecordingApiRunControlStore(baseApiControlStore, decisionPlanStore);
-                      const apiControlStore = new ConversationRunIndexRecordingApiRunControlStore(decisionPlanControl, runIndexStore);
-                      return {
-                        runStore,
-                        apiControlStore,
-                        intentStore,
-                        userMessageStore,
-                        userPreferenceStore,
-                        conversationStore,
-                        decisionPlanStore,
-                        runIndexStore,
-                        knowledgeStore,
-                        recommendationStore,
-                        preparedResourceStore,
-                      };
+                      const acceptedChoiceStore = await PostgresAcceptedChoiceStore.connect(databaseUrl);
+                      try {
+                        const preparedResourceStore = await PostgresPreparedResourceStore.connect(databaseUrl);
+                        const decisionPlanControl = new DecisionPlanRecordingApiRunControlStore(baseApiControlStore, decisionPlanStore);
+                        const apiControlStore = new ConversationRunIndexRecordingApiRunControlStore(decisionPlanControl, runIndexStore);
+                        return {
+                          runStore,
+                          apiControlStore,
+                          intentStore,
+                          userMessageStore,
+                          userPreferenceStore,
+                          conversationStore,
+                          decisionPlanStore,
+                          runIndexStore,
+                          knowledgeStore,
+                          recommendationStore,
+                          acceptedChoiceStore,
+                          preparedResourceStore,
+                        };
+                      } catch (error) {
+                        await acceptedChoiceStore.close();
+                        throw error;
+                      }
                     } catch (error) {
                       await recommendationStore.close();
                       throw error;
@@ -376,6 +391,7 @@ export async function createRuntimeApp(
   let runIndexStore: ConversationRunIndexStore;
   let knowledgeStore: KnowledgeRecordStore;
   let recommendationStore: RecommendationStore;
+  let acceptedChoiceStore: AcceptedChoiceStore;
   let preparedResourceStore: PreparedResourceStore;
 
   if (config.databaseUrl) {
@@ -390,6 +406,7 @@ export async function createRuntimeApp(
       runIndexStore,
       knowledgeStore,
       recommendationStore,
+      acceptedChoiceStore,
       preparedResourceStore,
     } = await connectPostgresRuntimeStores(config.databaseUrl, config.autoMigrate));
   } else {
@@ -402,6 +419,7 @@ export async function createRuntimeApp(
     const memoryRunIndexStore = new MemoryConversationRunIndexStore();
     const memoryKnowledgeStore = options.knowledgeStore ?? new MemoryKnowledgeRecordStore();
     const memoryRecommendationStore = options.recommendationStore ?? new MemoryRecommendationStore();
+    const memoryAcceptedChoiceStore = options.acceptedChoiceStore ?? new MemoryAcceptedChoiceStore();
     const memoryPreparedResourceStore = options.preparedResourceStore ?? new MemoryPreparedResourceStore();
     const intentBoundRuns = new MemoryIntentBoundRunStore(memoryRunStore, memoryIntentStore);
     runStore = memoryRunStore;
@@ -413,6 +431,7 @@ export async function createRuntimeApp(
     runIndexStore = memoryRunIndexStore;
     knowledgeStore = memoryKnowledgeStore;
     recommendationStore = memoryRecommendationStore;
+    acceptedChoiceStore = memoryAcceptedChoiceStore;
     preparedResourceStore = memoryPreparedResourceStore;
     const decisionPlanControl = new DecisionPlanRecordingApiRunControlStore(
       new DeferredMemoryApiRunControlStore(
@@ -462,6 +481,7 @@ export async function createRuntimeApp(
     runStore,
     knowledgeStore,
     recommendationStore,
+    acceptedChoiceStore,
     preparedResourceStore,
     ...(options.consultationInterpreter ? { interpreter: options.consultationInterpreter } : {}),
     ...(options.criterionCatalog ? { criterionCatalog: options.criterionCatalog } : {}),
@@ -482,6 +502,7 @@ export async function createRuntimeApp(
     intentStore,
     knowledgeStore,
     recommendationStore,
+    acceptedChoiceStore,
     preparedResourceStore,
   });
   registerUserPreferenceControlsApi(app, {
@@ -491,6 +512,7 @@ export async function createRuntimeApp(
   });
   app.addHook("onClose", async () => {
     await preparedResourceStore.close();
+    await acceptedChoiceStore.close();
     await recommendationStore.close();
     await knowledgeStore.close();
     await conversationStore.close();

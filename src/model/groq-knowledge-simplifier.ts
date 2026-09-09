@@ -19,10 +19,23 @@ const LIVE_DIRECT_INVOCATION = Object.freeze({
   requestedProvider: GROQ_KNOWLEDGE_SIMPLIFIER_PROVIDER,
 });
 
+export interface GroqCompletionDiagnostic {
+  readonly content: string;
+  readonly finishReason: string | null;
+  readonly promptTokens: number | null;
+  readonly completionTokens: number | null;
+  readonly totalTokens: number | null;
+  readonly upstreamRequestId: string | null;
+}
+
+export type GroqCompletionDiagnosticSink = (diagnostic: GroqCompletionDiagnostic) => void;
+
 export interface GroqKnowledgeSimplifierProviderOptions {
   readonly apiKey: string;
   readonly maxResponseBytes?: number;
   readonly fetchImpl?: typeof fetch;
+  /** Optional test/development-only observability. It has no Product authority or response effect. */
+  readonly diagnosticSink?: GroqCompletionDiagnosticSink;
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -36,6 +49,10 @@ function requireApiKey(value: string): string {
     throw new Error("Groq Knowledge simplifier API key must contain between 16 and 512 characters.");
   }
   return value;
+}
+
+function optionalFiniteInteger(value: unknown): number | null {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : null;
 }
 
 async function readBoundedText(response: Response, maxBytes: number): Promise<string> {
@@ -81,6 +98,7 @@ export class GroqKnowledgeSimplifierModelProvider implements ModelProvider {
   private readonly apiKey: string;
   private readonly maxResponseBytes: number;
   private readonly fetchImpl: typeof fetch;
+  private readonly diagnosticSink: GroqCompletionDiagnosticSink | undefined;
 
   constructor(options: GroqKnowledgeSimplifierProviderOptions) {
     this.apiKey = requireApiKey(options.apiKey);
@@ -89,6 +107,7 @@ export class GroqKnowledgeSimplifierModelProvider implements ModelProvider {
       throw new Error("Groq Knowledge simplifier maxResponseBytes must be a positive safe integer.");
     }
     this.fetchImpl = options.fetchImpl ?? fetch;
+    this.diagnosticSink = options.diagnosticSink;
   }
 
   async generate(request: CanonicalModelRequest, context: ModelCallContext): Promise<ModelProviderResult> {
@@ -201,6 +220,23 @@ export class GroqKnowledgeSimplifierModelProvider implements ModelProvider {
     const upstreamRequestId = typeof root?.id === "string" && root.id.trim()
       ? root.id.trim()
       : undefined;
+    const finishReason = typeof choice?.finish_reason === "string" && choice.finish_reason.trim()
+      ? choice.finish_reason.trim()
+      : null;
+    const usage = asRecord(root?.usage);
+    const promptTokens = optionalFiniteInteger(usage?.prompt_tokens);
+    const completionTokens = optionalFiniteInteger(usage?.completion_tokens);
+    const totalTokens = optionalFiniteInteger(usage?.total_tokens);
+
+    this.diagnosticSink?.(Object.freeze({
+      content,
+      finishReason,
+      promptTokens,
+      completionTokens,
+      totalTokens,
+      upstreamRequestId: upstreamRequestId ?? null,
+    }));
+
     return {
       response: {
         id: upstreamRequestId ?? `groq-${context.requestIdentity.slice(0, 16)}-${context.attempt}`,
@@ -210,6 +246,10 @@ export class GroqKnowledgeSimplifierModelProvider implements ModelProvider {
       metadata: {
         upstreamStatus: response.status,
         upstreamRequestId: upstreamRequestId ?? null,
+        finishReason,
+        promptTokens,
+        completionTokens,
+        totalTokens,
       },
       route: {
         actualProvider: GROQ_KNOWLEDGE_SIMPLIFIER_PROVIDER,

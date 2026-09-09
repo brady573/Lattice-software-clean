@@ -14,7 +14,7 @@ export type SolandraAdvisoryBasis = z.infer<typeof advisoryBasisSchema>;
 const recommendationSchema = z.object({
   status: z.literal("RECOMMENDATION"),
   recommendation: z.string().min(1).max(8_000),
-  basis: z.array(advisoryBasisSchema).min(1).max(16),
+  basis: z.array(advisoryBasisSchema).max(16),
   rationale: z.array(z.string().min(1).max(2_000)).min(1).max(16),
   tradeoffs: z.array(z.string().min(1).max(2_000)).max(16),
   assumptions: z.array(z.string().min(1).max(2_000)).max(16),
@@ -96,14 +96,53 @@ export interface SolandraAdvisoryRuntime {
   advise(input: SolandraAdvisoryInput): Promise<SolandraAdvisoryRuntimeResult>;
 }
 
+function normalizeSingleExtraTrailingArrayBracket(text: string): unknown | undefined {
+  if (!text.startsWith("[") || !text.endsWith("]]")) return undefined;
+  const candidate = text.slice(0, -1);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(candidate);
+  } catch {
+    return undefined;
+  }
+  if (
+    !Array.isArray(parsed)
+    || parsed.length !== 1
+    || parsed[0] === null
+    || typeof parsed[0] !== "object"
+    || Array.isArray(parsed[0])
+  ) {
+    return undefined;
+  }
+  return parsed;
+}
+
 function parseJsonObject(text: string, label = "Solandra advisory reasoning"): unknown {
   const trimmed = text.trim();
   const unfenced = /^```(?:json)?\s*([\s\S]*?)\s*```$/iu.exec(trimmed)?.[1] ?? trimmed;
+  let parsed: unknown;
   try {
-    return JSON.parse(unfenced);
+    parsed = JSON.parse(unfenced);
   } catch (error) {
-    throw new ModelProviderError("invalid_output", `${label} returned malformed JSON.`, { cause: error });
+    const repaired = normalizeSingleExtraTrailingArrayBracket(unfenced);
+    if (repaired === undefined) {
+      throw new ModelProviderError("invalid_output", `${label} returned malformed JSON.`, { cause: error });
+    }
+    parsed = repaired;
   }
+  if (!Array.isArray(parsed)) return parsed;
+  if (
+    parsed.length === 1
+    && parsed[0] !== null
+    && typeof parsed[0] === "object"
+    && !Array.isArray(parsed[0])
+  ) {
+    return parsed[0];
+  }
+  throw new ModelProviderError(
+    "invalid_output",
+    `${label} must return exactly one JSON object.`,
+  );
 }
 
 function buildAdvisoryRequest(model: string, input: SolandraAdvisoryInput): CanonicalModelRequest {
@@ -143,7 +182,7 @@ function buildAdvisoryRequest(model: string, input: SolandraAdvisoryInput): Cano
           "You are Solandra's advisory reasoning boundary. Provide decision support over authoritative USER intent and governed Knowledge supplied by Lattice.",
           "You are non-authoritative. You may compare, evaluate tradeoffs, expose assumptions and uncertainty, recommend, or decline to recommend.",
           "Do not create or modify canonical USER intent. Do not establish new factual Knowledge. Do not authorize a selection or action. Do not claim execution occurred.",
-          "Every factual basis reference must use only supplied Knowledge IDs and claim IDs. If an external fact is required but not supplied, return NEEDS_KNOWLEDGE instead of inventing it.",
+          "Every factual basis reference must use only supplied Knowledge IDs and claim IDs. If no external factual premise is needed, a Recommendation may use an empty Knowledge basis and reason only from authoritative USER intent/current USER context. If an external fact is required but not supplied, return NEEDS_KNOWLEDGE instead of inventing it.",
           "Do not make supplied uncertainty disappear. For RECOMMENDATION, copy every material supplied uncertainty that affects the recommendation verbatim into preservedUncertainties, and explain it naturally in uncertainties when useful.",
           "Return exactly one top-level JSON object and no prose.",
           "The top-level object itself must contain status with exactly one of: RECOMMENDATION, NEEDS_KNOWLEDGE, NEEDS_CLARIFICATION, INSUFFICIENT_BASIS.",

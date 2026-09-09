@@ -1,4 +1,5 @@
 import { isConsultationRunRequest, type LatticeRun } from "../domain.js";
+import type { IntentUserMessage } from "../intent/source-message-store.js";
 import type { IntentVersion } from "../intent/types.js";
 import {
   loadKnowledge,
@@ -16,6 +17,7 @@ import {
   type RecommendationRecord,
   type RecommendationStore,
 } from "./recommendation-store.js";
+import { recommendationOptions } from "./recommendation-options.js";
 
 export interface LoadedRecommendation {
   record: RecommendationRecord;
@@ -105,6 +107,7 @@ export async function establishRecommendation(input: {
     intentVersionId: input.intentVersion.intentVersionId,
     sourceMessageId: input.run.request.sourceMessageId,
     basis,
+    userMaterialBasis: [],
     recommendation: input.advisory.recommendation,
     rationale: input.advisory.rationale,
     tradeoffs: input.advisory.tradeoffs,
@@ -126,6 +129,51 @@ export async function establishRecommendation(input: {
     }
     return raced;
   }
+}
+
+export async function establishConversationalRecommendation(input: {
+  store: RecommendationStore;
+  conversationId: string;
+  intentVersion: IntentVersion;
+  sourceMessage: IntentUserMessage;
+  knowledge: LoadedKnowledge[];
+  advisory: SolandraRecommendationResult;
+}): Promise<RecommendationRecord> {
+  if (input.sourceMessage.conversationId !== input.conversationId) {
+    throw new Error("Conversational Recommendation USER source binding changed.");
+  }
+  const loadedById = new Map(input.knowledge.map((item) => [item.record.knowledgeId, item]));
+  const basis: RecommendationBasis[] = input.advisory.basis.map((item) => ({
+    knowledgeId: item.knowledgeId,
+    claimIds: [...item.claimIds],
+  }));
+  for (const basisItem of basis) {
+    const loaded = loadedById.get(basisItem.knowledgeId);
+    if (!loaded || loaded.record.conversationId !== input.conversationId) {
+      throw new Error("Recommendation basis must reference governed Knowledge supplied for the same conversation.");
+    }
+    const allowedClaims = new Set(loaded.record.claimIds);
+    if (basisItem.claimIds.some((claimId) => !allowedClaims.has(claimId))) {
+      throw new Error("Recommendation basis contains a claim outside its governed Knowledge.");
+    }
+  }
+  const draft = buildRecommendationRecord({
+    conversationId: input.conversationId,
+    runId: null,
+    intentScopeId: input.intentVersion.intentScopeId,
+    intentVersionId: input.intentVersion.intentVersionId,
+    sourceMessageId: input.sourceMessage.messageId,
+    basis,
+    userMaterialBasis: [input.intentVersion.intentVersionId, input.sourceMessage.messageId],
+    recommendation: input.advisory.recommendation,
+    rationale: input.advisory.rationale,
+    tradeoffs: input.advisory.tradeoffs,
+    assumptions: input.advisory.assumptions,
+    uncertainties: [...new Set([...input.advisory.preservedUncertainties, ...input.advisory.uncertainties])],
+    alternatives: input.advisory.alternatives,
+    createdAt: input.sourceMessage.createdAt,
+  });
+  return input.store.putRecommendation(draft);
 }
 
 export async function loadRecommendation(
@@ -157,17 +205,21 @@ export async function loadRecommendation(
     }
   }
 
-  const run = await runStore.get(record.runId);
-  if (!run || !isConsultationRunRequest(run.request) || run.status !== "COMPLETED") {
-    throw new Error("Recommendation source Run could not be reconstructed.");
-  }
-  if (
-    run.conversationId !== record.conversationId
-    || run.request.intentScopeId !== record.intentScopeId
-    || run.request.intentVersionId !== record.intentVersionId
-    || run.request.sourceMessageId !== record.sourceMessageId
-  ) {
-    throw new Error("Recommendation exact Run/Intent/USER-source binding changed.");
+  if (record.runId !== null) {
+    const run = await runStore.get(record.runId);
+    if (!run || !isConsultationRunRequest(run.request) || run.status !== "COMPLETED") {
+      throw new Error("Recommendation source Run could not be reconstructed.");
+    }
+    if (
+      run.conversationId !== record.conversationId
+      || run.request.intentScopeId !== record.intentScopeId
+      || run.request.intentVersionId !== record.intentVersionId
+      || run.request.sourceMessageId !== record.sourceMessageId
+    ) {
+      throw new Error("Recommendation exact Run/Intent/USER-source binding changed.");
+    }
+  } else if (record.userMaterialBasis.length === 0) {
+    throw new Error("Run-free Recommendation is missing exact USER-material basis identity.");
   }
   return { record, knowledge: loaded };
 }
@@ -212,7 +264,7 @@ export function renderRecommendation(record: RecommendationRecord): string {
   if (record.tradeoffs.length > 0) sections.push(`Tradeoffs:\n${record.tradeoffs.map((item) => `- ${item}`).join("\n")}`);
   if (record.assumptions.length > 0) sections.push(`Assumptions that could change the answer:\n${record.assumptions.map((item) => `- ${item}`).join("\n")}`);
   if (record.uncertainties.length > 0) sections.push(`Uncertainty:\n${record.uncertainties.map((item) => `- ${item}`).join("\n")}`);
-  if (record.alternatives.length > 0) sections.push(`Alternatives worth considering:\n${record.alternatives.map((item) => `- ${item}`).join("\n")}`);
+  if (record.alternatives.length > 0) sections.push(`Options discussed:\n${recommendationOptions(record).map((item) => `${item.position}. ${item.text}${item.recommended ? " (recommended)" : ""}`).join("\n")}`);
   return sections.join("\n\n");
 }
 
@@ -249,6 +301,7 @@ export function recommendationContext(record: RecommendationRecord): Readonly<{
   intentVersionId: string;
   knowledgeIds: string[];
   createdAt: string;
+  options: ReturnType<typeof recommendationOptions>;
 }> {
   return Object.freeze({
     recommendationId: record.recommendationId,
@@ -256,5 +309,6 @@ export function recommendationContext(record: RecommendationRecord): Readonly<{
     intentVersionId: record.intentVersionId,
     knowledgeIds: [...record.knowledgeIds],
     createdAt: record.createdAt,
+    options: recommendationOptions(record),
   });
 }

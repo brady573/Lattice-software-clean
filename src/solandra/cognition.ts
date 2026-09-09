@@ -12,6 +12,8 @@ export const solandraRequestedHelpSchema = z.enum([
   "DECISION",
   "EXPLAIN_RECOMMENDATION",
   "SOURCES_RECOMMENDATION",
+  "EXPLAIN_OPTION",
+  "ACCEPT_CHOICE",
   "COGNITIVE_ASSISTANCE",
   "RESOURCE",
 ]);
@@ -42,6 +44,7 @@ export const solandraSemanticProposalSchema = z.object({
   materialAmbiguity: materialAmbiguitySchema.nullable(),
   referencedKnowledgeId: z.string().min(1).max(128).nullable(),
   referencedRecommendationId: z.string().min(1).max(128).nullable().optional(),
+  referencedOptionId: z.string().min(1).max(128).nullable().optional(),
   /**
    * Compatibility-only inert metadata from early M1 proposals. Product behavior
    * is classified by requestedHelp; this value has no intent, truth, routing,
@@ -69,6 +72,7 @@ export interface SolandraGovernedRecommendationContext {
   readonly intentVersionId: string;
   readonly knowledgeIds: readonly string[];
   readonly createdAt: string;
+  readonly options: readonly Readonly<{ optionId: string; position: number; text: string; recommended: boolean }>[];
 }
 
 export interface SolandraCognitionInput {
@@ -123,12 +127,13 @@ function buildCognitionRequest(model: string, input: SolandraCognitionInput): Ca
       `IntentVersion ID: ${item.intentVersionId}`,
       `Knowledge IDs: ${item.knowledgeIds.join(" | ") || "none"}`,
       `Created at: ${item.createdAt}`,
+      `Options: ${item.options.map((option) => `[${option.optionId}] position=${option.position} recommended=${option.recommended}: ${option.text}`).join(" | ") || "none"}`,
     ].join("\n")).join("\n\n");
 
   const schemaExample = JSON.stringify({
     objectiveRelation: "NEW_OBJECTIVE|CONTINUE|CORRECTION",
     proposedObjective: "string or null",
-    requestedHelp: "KNOWLEDGE|EXPLAIN_REFERENCE|SIMPLIFY_REFERENCE|SOURCES_REFERENCE|FRESH_RESEARCH|DECISION|EXPLAIN_RECOMMENDATION|SOURCES_RECOMMENDATION|COGNITIVE_ASSISTANCE|RESOURCE",
+    requestedHelp: "KNOWLEDGE|EXPLAIN_REFERENCE|SIMPLIFY_REFERENCE|SOURCES_REFERENCE|FRESH_RESEARCH|DECISION|EXPLAIN_RECOMMENDATION|SOURCES_RECOMMENDATION|EXPLAIN_OPTION|ACCEPT_CHOICE|COGNITIVE_ASSISTANCE|RESOURCE",
     relevantContext: ["string"],
     entities: ["string"],
     referents: ["string"],
@@ -138,6 +143,7 @@ function buildCognitionRequest(model: string, input: SolandraCognitionInput): Ca
     materialAmbiguity: { question: "string", couldChangeObjective: true },
     referencedKnowledgeId: "one supplied Knowledge ID or null",
     referencedRecommendationId: "one supplied Recommendation ID or null",
+    referencedOptionId: "one supplied option ID or null",
   });
 
   return {
@@ -154,6 +160,7 @@ function buildCognitionRequest(model: string, input: SolandraCognitionInput): Ca
           "Use FRESH_RESEARCH only when the user asks for new, updated, additional, or otherwise external Knowledge beyond the supplied object. A historical provenance request is not fresh research.",
           "Use DECISION only when the user is actually asking for help choosing/deciding, not merely asking for differences or information.",
           "Use EXPLAIN_RECOMMENDATION when the user asks why a supplied historical Recommendation was made. Use SOURCES_RECOMMENDATION when the user asks for the evidence/sources behind it. referencedRecommendationId must be exactly one supplied Recommendation ID or null.",
+          "Use EXPLAIN_OPTION when the user refers conversationally to one exact supplied option and asks about it without choosing it. Use ACCEPT_CHOICE only when the USER actually chooses one supplied option and exact choice identity matters. For either, return both its exact supplied Recommendation ID and option ID. Resolve references from context and supplied option identity, not from a phrase-specific command. If the intended option is materially ambiguous, ask a precise clarification instead of guessing.",
           "Use COGNITIVE_ASSISTANCE for bounded non-consequential help such as brainstorming, analyzing USER-authored material, rewriting, or transforming material when the request does not require new factual Knowledge, a governed Recommendation, a formal Decision, or Action Preparation.",
           "COGNITIVE_ASSISTANCE is only a request for a capability. It does not itself authorize that capability and it does not turn generated content into Knowledge.",
           "requestedHelp is the sole classification of the requested work. Do not add a separate next-step or workflow field.",
@@ -239,6 +246,22 @@ export class ModelSolandraCognitiveRuntime implements SolandraCognitiveRuntime {
         "invalid_output",
         "A Recommendation reference proposal must identify supplied Recommendation or surface ambiguity.",
       );
+    }
+    const optionToRecommendation = new Map<string, string>();
+    for (const recommendation of input.governedRecommendations ?? []) {
+      for (const option of recommendation.options) optionToRecommendation.set(option.optionId, recommendation.recommendationId);
+    }
+    const referencedOptionId = proposal.referencedOptionId ?? null;
+    if (referencedOptionId !== null && !optionToRecommendation.has(referencedOptionId)) {
+      throw new ModelProviderError("invalid_output", "Solandra cognition referenced an option that Lattice did not supply.");
+    }
+    if ((proposal.requestedHelp === "EXPLAIN_OPTION" || proposal.requestedHelp === "ACCEPT_CHOICE") && proposal.materialAmbiguity === null) {
+      if (referencedRecommendationId === null || referencedOptionId === null) {
+        throw new ModelProviderError("invalid_output", "An option reference proposal must identify supplied Recommendation and option or surface ambiguity.");
+      }
+      if (optionToRecommendation.get(referencedOptionId) !== referencedRecommendationId) {
+        throw new ModelProviderError("invalid_output", "Solandra cognition bound an option to the wrong Recommendation.");
+      }
     }
     return Object.freeze({
       proposal,
