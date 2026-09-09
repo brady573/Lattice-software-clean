@@ -13,11 +13,12 @@ export interface RecommendationBasis {
 export interface RecommendationRecord {
   recommendationId: string;
   conversationId: string;
-  runId: string;
+  runId: string | null;
   intentScopeId: string;
   intentVersionId: string;
   sourceMessageId: string;
   basis: RecommendationBasis[];
+  userMaterialBasis: string[];
   knowledgeIds: string[];
   claimIds: string[];
   recommendation: string;
@@ -71,10 +72,10 @@ function clone<T>(value: T): T {
 }
 
 export function buildRecommendationRecord(
-  input: Omit<RecommendationRecord, "recommendationId" | "selectionAuthorized" | "knowledgeIds" | "claimIds">,
+  input: Omit<RecommendationRecord, "recommendationId" | "selectionAuthorized" | "knowledgeIds" | "claimIds" | "userMaterialBasis"> & { userMaterialBasis?: string[] },
 ): RecommendationRecord {
   const conversationId = bounded(input.conversationId, "conversationId", 128);
-  const runId = bounded(input.runId, "runId", 200);
+  const runId = input.runId === null ? null : bounded(input.runId, "runId", 200);
   const intentScopeId = bounded(input.intentScopeId, "intentScopeId", 200);
   const intentVersionId = bounded(input.intentVersionId, "intentVersionId", 200);
   const sourceMessageId = bounded(input.sourceMessageId, "sourceMessageId", 200);
@@ -82,7 +83,10 @@ export function buildRecommendationRecord(
     knowledgeId: bounded(entry.knowledgeId, "basis knowledgeId", 128),
     claimIds: unique(entry.claimIds),
   })).filter((entry) => entry.claimIds.length > 0);
-  if (basis.length === 0) throw new Error("Recommendation requires at least one governed Knowledge/claim basis binding.");
+  const userMaterialBasis = unique(input.userMaterialBasis ?? []).map((item) => bounded(item, "user material basis", 200));
+  if (basis.length === 0 && userMaterialBasis.length === 0) {
+    throw new Error("Recommendation requires governed Knowledge basis or exact USER-material basis identity.");
+  }
   const basisByKnowledge = new Map<string, Set<string>>();
   for (const entry of basis) {
     const claims = basisByKnowledge.get(entry.knowledgeId) ?? new Set<string>();
@@ -96,13 +100,14 @@ export function buildRecommendationRecord(
   const claimIds = unique(normalizedBasis.flatMap((entry) => entry.claimIds));
   const exactBasisIdentity = normalizedBasis.map((entry) => `${entry.knowledgeId}:${entry.claimIds.join(",")}`);
   return Object.freeze({
-    recommendationId: stableId("recommendation", runId, intentVersionId, ...exactBasisIdentity),
+    recommendationId: stableId("recommendation", runId ?? sourceMessageId, intentVersionId, ...exactBasisIdentity, ...userMaterialBasis),
     conversationId,
     runId,
     intentScopeId,
     intentVersionId,
     sourceMessageId,
     basis: normalizedBasis,
+    userMaterialBasis,
     knowledgeIds,
     claimIds,
     recommendation: bounded(input.recommendation, "recommendation"),
@@ -127,12 +132,12 @@ export class MemoryRecommendationStore implements RecommendationStore {
       if (!sameRecord(existing, record)) throw new Error("Recommendation identity cannot be rebound to different advisory state.");
       return clone(existing);
     }
-    const runRecommendation = this.byRun.get(record.runId);
+    const runRecommendation = record.runId === null ? undefined : this.byRun.get(record.runId);
     if (runRecommendation && runRecommendation !== record.recommendationId) {
       throw new Error("A completed advisory Run cannot establish multiple Recommendation identities.");
     }
     this.records.set(record.recommendationId, clone(record));
-    this.byRun.set(record.runId, record.recommendationId);
+    if (record.runId !== null) this.byRun.set(record.runId, record.recommendationId);
     return clone(record);
   }
 
@@ -162,11 +167,12 @@ export class MemoryRecommendationStore implements RecommendationStore {
 type RecommendationRow = {
   recommendation_id: string;
   conversation_id: string;
-  run_id: string;
+  run_id: string | null;
   intent_scope_id: string;
   intent_version_id: string;
   source_message_id: string;
   basis: unknown;
+  user_material_basis: unknown;
   knowledge_ids: unknown;
   claim_ids: unknown;
   recommendation: string;
@@ -211,6 +217,7 @@ function mapRecommendation(row: RecommendationRow): RecommendationRecord {
     intentVersionId: row.intent_version_id,
     sourceMessageId: row.source_message_id,
     basis: recommendationBasis(row.basis),
+    userMaterialBasis: stringArray(row.user_material_basis, "user_material_basis"),
     knowledgeIds: stringArray(row.knowledge_ids, "knowledge_ids"),
     claimIds: stringArray(row.claim_ids, "claim_ids"),
     recommendation: row.recommendation,
@@ -248,7 +255,7 @@ async function assertReady(pool: Pool): Promise<void> {
   if (result.rows[0]?.count !== "1") throw new Error(`Recommendation schema is not ready; required migration ${migration} is missing.`);
 }
 
-const columns = "recommendation_id,conversation_id,run_id,intent_scope_id,intent_version_id,source_message_id,basis,knowledge_ids,claim_ids,recommendation,rationale,tradeoffs,assumptions,uncertainties,alternatives,selection_authorized,created_at";
+const columns = "recommendation_id,conversation_id,run_id,intent_scope_id,intent_version_id,source_message_id,basis,user_material_basis,knowledge_ids,claim_ids,recommendation,rationale,tradeoffs,assumptions,uncertainties,alternatives,selection_authorized,created_at";
 
 export class PostgresRecommendationStore implements RecommendationStore {
   readonly kind = "postgres" as const;
@@ -280,7 +287,7 @@ export class PostgresRecommendationStore implements RecommendationStore {
   async putRecommendation(record: RecommendationRecord): Promise<RecommendationRecord> {
     const result = await this.pool.query<RecommendationRow>(
       `INSERT INTO recommendations(${columns})
-       VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9::jsonb,$10,$11::jsonb,$12::jsonb,$13::jsonb,$14::jsonb,$15::jsonb,$16,$17)
+       VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9::jsonb,$10::jsonb,$11,$12::jsonb,$13::jsonb,$14::jsonb,$15::jsonb,$16::jsonb,$17,$18)
        ON CONFLICT(recommendation_id) DO NOTHING
        RETURNING ${columns}`,
       [
@@ -291,6 +298,7 @@ export class PostgresRecommendationStore implements RecommendationStore {
         record.intentVersionId,
         record.sourceMessageId,
         JSON.stringify(record.basis),
+        JSON.stringify(record.userMaterialBasis),
         JSON.stringify(record.knowledgeIds),
         JSON.stringify(record.claimIds),
         record.recommendation,
