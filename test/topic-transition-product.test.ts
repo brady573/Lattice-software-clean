@@ -283,13 +283,12 @@ test("PostgreSQL recovery does not make restored Intent sticky across an unrelat
     await reopened.close();
     const pool = new Pool({ connectionString: databaseUrl });
     try {
-      const runIds = [firstRunId, secondRunId].filter(Boolean);
-      if (runIds.length > 0) {
-        await pool.query("DELETE FROM decision_plans WHERE run_id = ANY($1::uuid[])", [runIds]);
-        await pool.query("DELETE FROM run_intent_bindings WHERE run_id = ANY($1::uuid[])", [runIds]);
-        await pool.query("DELETE FROM run_events WHERE run_id = ANY($1::uuid[])", [runIds]);
-        await pool.query("DELETE FROM dispatch_outbox WHERE run_id = ANY($1::uuid[])", [runIds]);
-        await pool.query("DELETE FROM runs WHERE id = ANY($1::uuid[])", [runIds]);
+      for (const runId of [firstRunId, secondRunId].filter(Boolean)) {
+        await pool.query("DELETE FROM decision_plans WHERE run_id=$1", [runId]);
+        await pool.query("DELETE FROM run_intent_bindings WHERE run_id=$1", [runId]);
+        await pool.query("DELETE FROM run_events WHERE run_id=$1", [runId]);
+        await pool.query("DELETE FROM dispatch_outbox WHERE run_id=$1", [runId]);
+        await pool.query("DELETE FROM runs WHERE id=$1", [runId]);
       }
       await pool.query("DELETE FROM intent_user_messages WHERE conversation_id=$1", [conversationId]);
       await pool.query("DELETE FROM intent_scopes WHERE intent_scope_id=$1", [intentScopeId]);
