@@ -4,6 +4,10 @@ This deployment composition is a delivery constraint, not a Product architecture
 
 The canonical API process remains `dist/src/index.js`. The canonical Run-worker process remains `dist/src/run-worker-main.js`. `tools/render-colocated-runtime.mjs` supervises those two existing process roles inside one Render Web Service so the zero-cost deployment can retain both roles without combining their semantic responsibilities.
 
+Use the deployment start command:
+
+`npm run start:render-colocated`
+
 The supervisor:
 
 - starts both canonical processes with the same runtime environment;
