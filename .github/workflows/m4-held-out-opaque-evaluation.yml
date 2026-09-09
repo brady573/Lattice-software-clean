@@ -1,0 +1,300 @@
+name: TEMP M4 Opaque Held-Out Evaluation
+
+on:
+  push:
+    branches:
+      - validation/m4-general-decision-journey
+    paths:
+      - ".github/workflows/m4-held-out-opaque-evaluation.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  held-out:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      SUBJECT_SHA: 71545f69b60b4c7d85d539d5ab630ba776dc8599
+      SUBJECT_TREE: bc91c39ec346b8f5fe79397705dc734f2241c6e2
+    steps:
+      - name: Checkout exact frozen Product candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: 71545f69b60b4c7d85d539d5ab630ba776dc8599
+          persist-credentials: false
+
+      - name: Verify frozen SHA and tree before held-out access
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SUBJECT_SHA"
+          test "$(git rev-parse HEAD^{tree})" = "$SUBJECT_TREE"
+          echo "FROZEN_SHA_TREE_VERIFIED=PASS"
+
+      - name: Provision Node 24
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '24'
+
+      - name: Install locked dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Build exact frozen Product candidate
+        run: npm run build
+
+      - name: Execute opaque held-out set exactly once
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          LATTICE_M4_HELD_OUT_PROBES: ${{ secrets.LATTICE_M4_HELD_OUT_PROBES }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { randomUUID } from 'node:crypto';
+          import { createRuntimeApp } from './dist/src/runtime-app.js';
+          import { resolveRuntimeConfig } from './dist/src/runtime-config.js';
+          import {
+            GROQ_KNOWLEDGE_SIMPLIFIER_MODEL,
+            GroqKnowledgeSimplifierModelProvider,
+            GroqKnowledgeSimplifierModelRuntime,
+          } from './dist/src/model/groq-knowledge-simplifier.js';
+          import { ModelSolandraCognitiveRuntime } from './dist/src/solandra/cognition.js';
+          import { ModelSolandraAdvisoryRuntime } from './dist/src/solandra/advisory.js';
+          import { ModelSolandraActionPreparer } from './dist/src/solandra/action-preparer.js';
+          import { ModelSolandraKnowledgePresenter } from './dist/src/solandra/knowledge-presenter.js';
+
+          function fail(message) {
+            const error = new Error(message);
+            error.name = 'HeldOutEvaluationError';
+            throw error;
+          }
+
+          const encoded = process.env.LATTICE_M4_HELD_OUT_PROBES;
+          if (!encoded) fail('HELD_OUT_SOURCE_MISSING');
+          let parsed;
+          try { parsed = JSON.parse(encoded); } catch { fail('HELD_OUT_SOURCE_INVALID_JSON'); }
+          const cases = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.cases) ? parsed.cases : null;
+          if (!cases || cases.length === 0) fail('HELD_OUT_SOURCE_EMPTY_OR_UNSUPPORTED');
+
+          function caseId(testCase, index) {
+            const value = testCase?.id ?? testCase?.caseId ?? testCase?.probeId ?? `CASE_${index + 1}`;
+            return String(value).replace(/[^A-Za-z0-9_.:-]/gu, '_').slice(0, 80) || `CASE_${index + 1}`;
+          }
+
+          function normalizeTurns(testCase) {
+            if (Array.isArray(testCase?.turns)) return testCase.turns;
+            if (Array.isArray(testCase?.messages)) {
+              return testCase.messages.map((item) => typeof item === 'string' ? { message: item } : item);
+            }
+            const message = testCase?.message ?? testCase?.prompt ?? testCase?.input;
+            return typeof message === 'string' ? [{ message }] : [];
+          }
+
+          function expectedFor(testCase, turn, index) {
+            if (turn && typeof turn === 'object' && (turn.expect || turn.expected)) return turn.expect ?? turn.expected;
+            if (Array.isArray(testCase?.expectations)) return testCase.expectations[index] ?? {};
+            return testCase?.expect ?? testCase?.expected ?? {};
+          }
+
+          function readMessage(turn) {
+            if (typeof turn === 'string') return turn;
+            const value = turn?.message ?? turn?.prompt ?? turn?.input ?? turn?.content;
+            return typeof value === 'string' ? value : null;
+          }
+
+          async function waitRunOutcome(app, runId) {
+            for (let attempt = 0; attempt < 300; attempt += 1) {
+              const run = await app.inject({ method: 'GET', url: `/api/v1/runs/${runId}` });
+              if (run.statusCode !== 200) return { kind: 'RUN_READ_FAILURE', statusCode: run.statusCode };
+              const runBody = run.json();
+              if (runBody.status === 'FAILED' || runBody.status === 'CANCELLED') {
+                return { kind: `RUN_${runBody.status}`, runStatus: runBody.status };
+              }
+              if (runBody.status === 'COMPLETED') {
+                const outcome = await app.inject({ method: 'GET', url: `/api/v1/runs/${runId}/outcome` });
+                if (outcome.statusCode === 200) return { kind: 'RUN_COMPLETED', runStatus: runBody.status, outcome: outcome.json() };
+              }
+              await new Promise((resolve) => setTimeout(resolve, 20));
+            }
+            return { kind: 'RUN_TIMEOUT' };
+          }
+
+          function structuralTurn(response, responseBody, runResult) {
+            return {
+              httpStatus: response.statusCode,
+              status: responseBody?.status ?? null,
+              requestedHelp: responseBody?.interpretation?.requestedHelp ?? null,
+              authority: responseBody?.interpretation?.authority ?? null,
+              decisionNeed: responseBody?.decisionNeed ?? null,
+              recommendationEstablished: responseBody?.status === 'RECOMMENDATION_ESTABLISHED' || Boolean(responseBody?.recommendationReference),
+              recommendationIdPresent: Boolean(responseBody?.recommendationReference?.recommendationId),
+              optionCount: Array.isArray(responseBody?.recommendationReference?.options) ? responseBody.recommendationReference.options.length : null,
+              selectionAuthorized: responseBody?.recommendationReference?.selectionAuthorized ?? null,
+              runIdPresent: Boolean(responseBody?.runId),
+              runKind: runResult?.kind ?? null,
+              outcomeKind: runResult?.outcome?.outcome?.kind ?? runResult?.outcome?.kind ?? null,
+              advisoryStatus: runResult?.outcome?.advisory?.status ?? null,
+            };
+          }
+
+          function continuityStructure(body) {
+            const recommendations = Array.isArray(body?.recommendations) ? body.recommendations : [];
+            const choices = Array.isArray(body?.acceptedChoices) ? body.acceptedChoices : [];
+            return {
+              runCount: Array.isArray(body?.runs) ? body.runs.length : null,
+              knowledgeCount: Array.isArray(body?.knowledge) ? body.knowledge.length : null,
+              recommendationCount: recommendations.length,
+              acceptedChoiceCount: choices.length,
+              everyRecommendationSelectionAuthorizedFalse: recommendations.every((item) => item?.selectionAuthorized === false),
+              everyAcceptedChoiceAuthorizationGrantedFalse: choices.every((item) => item?.authorizationGranted === false),
+              everyAcceptedChoiceExecutionAuthorizedFalse: choices.every((item) => item?.executionAuthorized === false),
+              acceptedChoiceHasUserProvenance: choices.every((item) => Boolean(item?.sourceMessageId)),
+            };
+          }
+
+          function scalarExpected(expected, ...keys) {
+            if (!expected || typeof expected !== 'object') return undefined;
+            for (const key of keys) if (Object.prototype.hasOwnProperty.call(expected, key)) return expected[key];
+            return undefined;
+          }
+
+          function compareExpected(actual, expected) {
+            const failures = [];
+            const mappings = [
+              ['status', 'status', 'result', 'outcome'],
+              ['requestedHelp', 'requestedHelp'],
+              ['recommendationEstablished', 'recommendationEstablished', 'recommendation'],
+              ['selectionAuthorized', 'selectionAuthorized'],
+              ['runIdPresent', 'runCreated'],
+              ['optionCount', 'optionCount'],
+              ['outcomeKind', 'outcomeKind'],
+              ['advisoryStatus', 'advisoryStatus'],
+            ];
+            for (const [actualKey, ...expectedKeys] of mappings) {
+              const expectedValue = scalarExpected(expected, ...expectedKeys);
+              if (expectedValue !== undefined && actual[actualKey] !== expectedValue) failures.push(`${actualKey}_MISMATCH`);
+            }
+            const expectClarification = scalarExpected(expected, 'needsClarification', 'clarification');
+            if (expectClarification !== undefined) {
+              const actualClarification = actual.status === 'NEEDS_CLARIFICATION';
+              if (actualClarification !== Boolean(expectClarification)) failures.push('clarification_MISMATCH');
+            }
+            return failures;
+          }
+
+          function compareContinuity(actual, expected) {
+            const failures = [];
+            const mappings = [
+              ['knowledgeCount', 'knowledgeCount'],
+              ['recommendationCount', 'recommendationCount'],
+              ['acceptedChoiceCount', 'acceptedChoiceCount'],
+              ['everyRecommendationSelectionAuthorizedFalse', 'selectionAuthorizedFalse'],
+              ['everyAcceptedChoiceAuthorizationGrantedFalse', 'authorizationGrantedFalse'],
+              ['everyAcceptedChoiceExecutionAuthorizedFalse', 'executionAuthorizedFalse'],
+              ['acceptedChoiceHasUserProvenance', 'acceptedChoiceHasUserProvenance', 'userProvenance'],
+            ];
+            for (const [actualKey, ...expectedKeys] of mappings) {
+              const expectedValue = scalarExpected(expected, ...expectedKeys);
+              if (expectedValue !== undefined && actual[actualKey] !== expectedValue) failures.push(`${actualKey}_MISMATCH`);
+            }
+            return failures;
+          }
+
+          const diagnostics = [];
+          const config = resolveRuntimeConfig({
+            ...process.env,
+            LATTICE_DEPLOYMENT_MODE: 'development',
+            LATTICE_TRUTH_MODE: 'v36-offline',
+            LATTICE_AUTHENTICATION_MODE: 'development-fixture',
+            LATTICE_DEVELOPMENT_FIXTURE_SUBJECT_ID: 'm4-held-out-user',
+            LATTICE_SOLANDRA_COGNITION_ROUTE: 'groq-gpt-oss-120b',
+          });
+          if (config.solandraCognitionRoute !== 'groq-gpt-oss-120b') fail('CONFIGURED_ROUTE_MISMATCH');
+          const provider = new GroqKnowledgeSimplifierModelProvider({
+            apiKey: config.solandraCognitionApiKey,
+            diagnosticSink: (diagnostic) => diagnostics.push({
+              finishReason: diagnostic.finishReason,
+              promptTokens: diagnostic.promptTokens,
+              completionTokens: diagnostic.completionTokens,
+              totalTokens: diagnostic.totalTokens,
+              upstreamRequestIdPresent: Boolean(diagnostic.upstreamRequestId),
+            }),
+          });
+          const runtime = new GroqKnowledgeSimplifierModelRuntime(provider);
+          const app = await createRuntimeApp(config, {
+            memoryDispatchDelayMs: 1,
+            solandraCognition: new ModelSolandraCognitiveRuntime(runtime, GROQ_KNOWLEDGE_SIMPLIFIER_MODEL),
+            solandraAdvisory: new ModelSolandraAdvisoryRuntime(runtime, GROQ_KNOWLEDGE_SIMPLIFIER_MODEL),
+            solandraActionPreparer: new ModelSolandraActionPreparer(runtime, GROQ_KNOWLEDGE_SIMPLIFIER_MODEL),
+            solandraKnowledgePresenter: new ModelSolandraKnowledgePresenter(runtime, GROQ_KNOWLEDGE_SIMPLIFIER_MODEL),
+          });
+
+          const summaries = [];
+          try {
+            for (let index = 0; index < cases.length; index += 1) {
+              const testCase = cases[index];
+              const id = caseId(testCase, index);
+              const turns = normalizeTurns(testCase);
+              if (turns.length === 0) {
+                summaries.push({ id, pass: false, failures: ['NO_EXECUTABLE_TURNS'], turns: [], continuity: null });
+                continue;
+              }
+              const created = await app.inject({ method: 'POST', url: '/api/v1/conversations' });
+              if (created.statusCode !== 201) {
+                summaries.push({ id, pass: false, failures: ['CONVERSATION_CREATE_FAILURE'], turns: [], continuity: null });
+                continue;
+              }
+              const conversationId = created.json().conversation.id;
+              const caseFailures = [];
+              const turnSummaries = [];
+              for (let turnIndex = 0; turnIndex < turns.length; turnIndex += 1) {
+                const message = readMessage(turns[turnIndex]);
+                if (!message) {
+                  caseFailures.push(`TURN_${turnIndex + 1}_MISSING_MESSAGE`);
+                  turnSummaries.push({ index: turnIndex + 1, invalid: true });
+                  continue;
+                }
+                const response = await app.inject({
+                  method: 'POST',
+                  url: `/api/v1/conversations/${conversationId}/turns`,
+                  payload: { turnId: randomUUID(), message },
+                });
+                let body = null;
+                try { body = response.json(); } catch {}
+                const runResult = body?.runId ? await waitRunOutcome(app, body.runId) : null;
+                const actual = structuralTurn(response, body, runResult);
+                const expected = expectedFor(testCase, turns[turnIndex], turnIndex);
+                const mismatches = compareExpected(actual, expected);
+                for (const mismatch of mismatches) caseFailures.push(`TURN_${turnIndex + 1}_${mismatch}`);
+                turnSummaries.push({ index: turnIndex + 1, actual, pass: mismatches.length === 0 });
+              }
+              const continuityResponse = await app.inject({ method: 'GET', url: `/api/v1/conversations/${conversationId}/continuity` });
+              const continuity = continuityResponse.statusCode === 200 ? continuityStructure(continuityResponse.json()) : null;
+              if (!continuity) caseFailures.push('CONTINUITY_READ_FAILURE');
+              const caseExpectation = testCase?.continuity ?? testCase?.expectContinuity ?? testCase?.expectedContinuity ?? {};
+              if (continuity) {
+                for (const mismatch of compareContinuity(continuity, caseExpectation)) caseFailures.push(mismatch);
+                if (!continuity.everyRecommendationSelectionAuthorizedFalse) caseFailures.push('RECOMMENDATION_AUTHORITY_VIOLATION');
+                if (!continuity.everyAcceptedChoiceAuthorizationGrantedFalse) caseFailures.push('ACCEPTED_CHOICE_AUTHORIZATION_VIOLATION');
+                if (!continuity.everyAcceptedChoiceExecutionAuthorizedFalse) caseFailures.push('ACCEPTED_CHOICE_EXECUTION_VIOLATION');
+              }
+              summaries.push({ id, pass: caseFailures.length === 0, failures: caseFailures, turns: turnSummaries, continuity });
+            }
+          } finally {
+            await app.close();
+          }
+
+          for (const summary of summaries) {
+            console.log(`HELD_OUT_${summary.id}=${summary.pass ? 'PASS' : 'FAIL'}`);
+            console.log('HELD_OUT_STRUCTURAL=' + JSON.stringify(summary));
+          }
+          console.log(`HELD_OUT_CASE_COUNT=${summaries.length}`);
+          console.log('HELD_OUT_MODEL_DIAGNOSTICS=' + JSON.stringify(diagnostics));
+          if (summaries.some((item) => !item.pass)) process.exitCode = 2;
+          NODE
+
+      - name: Verify frozen Product candidate remained unchanged
+        if: always()
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SUBJECT_SHA"
+          test "$(git rev-parse HEAD^{tree})" = "$SUBJECT_TREE"
+          echo "FROZEN_CANDIDATE_UNCHANGED=PASS"
