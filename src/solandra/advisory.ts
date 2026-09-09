@@ -99,11 +99,25 @@ export interface SolandraAdvisoryRuntime {
 function parseJsonObject(text: string, label = "Solandra advisory reasoning"): unknown {
   const trimmed = text.trim();
   const unfenced = /^```(?:json)?\s*([\s\S]*?)\s*```$/iu.exec(trimmed)?.[1] ?? trimmed;
+  let parsed: unknown;
   try {
-    return JSON.parse(unfenced);
+    parsed = JSON.parse(unfenced);
   } catch (error) {
     throw new ModelProviderError("invalid_output", `${label} returned malformed JSON.`, { cause: error });
   }
+  if (!Array.isArray(parsed)) return parsed;
+  if (
+    parsed.length === 1
+    && parsed[0] !== null
+    && typeof parsed[0] === "object"
+    && !Array.isArray(parsed[0])
+  ) {
+    return parsed[0];
+  }
+  throw new ModelProviderError(
+    "invalid_output",
+    `${label} must return exactly one JSON object.`,
+  );
 }
 
 function buildAdvisoryRequest(model: string, input: SolandraAdvisoryInput): CanonicalModelRequest {
