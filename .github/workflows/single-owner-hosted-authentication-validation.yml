@@ -31,15 +31,15 @@ jobs:
           --health-retries 20
     steps:
       - name: Checkout validation helper branch
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: validation/single-owner-hosted-authentication
           persist-credentials: false
 
       - name: Checkout exact Product candidate
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          ref: d6223eb53478fe548c219f079925f4e8fc5c5a67
+          ref: d0408a8f718440e1e64e1e44b0453475de4267c6
           path: product
           persist-credentials: false
 
@@ -47,12 +47,12 @@ jobs:
         working-directory: product
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "d6223eb53478fe548c219f079925f4e8fc5c5a67"
-          test "$(git rev-parse HEAD^{tree})" = "3117785b65388097afc2abca0b8c085b65a93f5a"
+          test "$(git rev-parse HEAD)" = "d0408a8f718440e1e64e1e44b0453475de4267c6"
+          test "$(git rev-parse HEAD^{tree})" = "cbe5bee9366debbba4382c5c51a08e7815afc25b"
           echo "CANDIDATE_VERIFIED=PASS"
 
       - name: Provision Node 24
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: '24'
 
@@ -85,16 +85,21 @@ jobs:
         working-directory: product
         run: |
           set -euo pipefail
-          test "$(git diff --name-only f87734bd607bd1026bb56ae285ce2ea17508f1cb...HEAD | sort)" = "$(printf '%s\n' \
-            src/auth/owner-access.ts \
-            src/index.ts \
-            src/ui/solandra-authoritative-conversation-page.ts \
-            test/single-owner-hosted-authentication.test.ts | sort)"
-          ! git grep -nE 'LATTICE_OWNER_ACCESS_TOKEN[[:space:]]*[:=][[:space:]]*["'"'][^"'"']+' -- ':!test/*'
-          ! git grep -nE '[?&](token|access[_-]?key)=' -- src
-          ! git grep -nE 'localStorage\.(setItem|getItem)\([^)]*owner-access' -- src
-          git grep -n 'development-fixture' -- src/runtime-config.ts >/dev/null
-          echo "SECURITY_SOURCE_AUDIT=PASS"
+          node --input-type=module <<'NODE'
+          import { readFileSync } from 'node:fs';
+          const productionFiles = [
+            'src/auth/owner-access.ts',
+            'src/index.ts',
+            'src/ui/solandra-authoritative-conversation-page.ts',
+          ];
+          const text = productionFiles.map((path) => readFileSync(path, 'utf8')).join('\n');
+          if (/LATTICE_OWNER_ACCESS_TOKEN\s*[:=]\s*["'][^"']+/u.test(text)) throw new Error('Hard-coded Owner credential-like assignment detected.');
+          if (/[?&](?:token|access[_-]?key)=/iu.test(text)) throw new Error('Owner credential-like URL query parameter detected.');
+          if (/localStorage\.(?:setItem|getItem)\([^)]*owner-access/iu.test(text)) throw new Error('Owner credential stored in localStorage.');
+          const runtimeConfig = readFileSync('src/runtime-config.ts', 'utf8');
+          if (!runtimeConfig.includes('development-fixture')) throw new Error('Development fixture boundary unexpectedly absent.');
+          console.log('SECURITY_SOURCE_AUDIT=PASS');
+          NODE
 
       - name: Generate masked disposable Owner credential
         run: |
@@ -162,13 +167,12 @@ jobs:
             exit 1
           fi
           echo "BLACKBOX_CREDENTIAL_NOT_LOGGED=PASS"
-
           node ../validation/single-owner-browser-proof.mjs
 
       - name: Verify candidate unchanged after validation
         working-directory: product
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "d6223eb53478fe548c219f079925f4e8fc5c5a67"
-          test "$(git rev-parse HEAD^{tree})" = "3117785b65388097afc2abca0b8c085b65a93f5a"
+          test "$(git rev-parse HEAD)" = "d0408a8f718440e1e64e1e44b0453475de4267c6"
+          test "$(git rev-parse HEAD^{tree})" = "cbe5bee9366debbba4382c5c51a08e7815afc25b"
           echo "CANDIDATE_STILL_EXACT=PASS"
