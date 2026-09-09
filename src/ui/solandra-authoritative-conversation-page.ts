@@ -117,8 +117,27 @@ const ownerAccessScript = `
         }
       });
 
-      if (readToken()) hideGate();
-      else showGate();
+      const initializeAccess = async () => {
+        if (readToken()) {
+          hideGate();
+          return;
+        }
+        try {
+          const response = await nativeFetch("/api/v1/capabilities/model-assistance");
+          if (response.ok) {
+            hideGate();
+            return;
+          }
+          if (response.status === 401) {
+            showGate();
+            return;
+          }
+          showGate("Solandra couldn't confirm access right now. Please try again.");
+        } catch {
+          showGate("Solandra couldn't confirm access right now. Please try again.");
+        }
+      };
+      void initializeAccess();
     })();
   </script>`;
 
