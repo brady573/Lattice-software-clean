@@ -1,0 +1,269 @@
+import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
+import { once } from "node:events";
+import { existsSync } from "node:fs";
+import { resolve } from "node:path";
+import process from "node:process";
+import { createConfiguredSolandraCognition } from "../dist/src/solandra/cognition-composition.js";
+import { resolveRuntimeConfig } from "../dist/src/runtime-config.js";
+
+const baseUrl = "http://127.0.0.1:3111";
+const browserExecutable = process.env.M7_BROWSER_EXECUTABLE;
+assert.ok(browserExecutable && existsSync(browserExecutable), "Chrome/Chromium is required.");
+assert.ok(process.env.GROQ_API_KEY, "GROQ_API_KEY is required for live cognition proof.");
+
+function sleep(ms) { return new Promise((resolvePromise) => setTimeout(resolvePromise, ms)); }
+
+async function waitFor(description, probe, timeoutMs = 45_000, intervalMs = 100) {
+  const deadline = Date.now() + timeoutMs;
+  let last;
+  while (Date.now() < deadline) {
+    try {
+      const value = await probe();
+      if (value) return value;
+    } catch (error) { last = error; }
+    await sleep(intervalMs);
+  }
+  throw new Error(`Timed out waiting for ${description}${last instanceof Error ? `: ${last.message}` : ""}`);
+}
+
+const liveConfig = resolveRuntimeConfig({
+  ...process.env,
+  LATTICE_DEPLOYMENT_MODE: "development",
+  LATTICE_TRUTH_MODE: "v36-offline",
+  LATTICE_AUTHENTICATION_MODE: "development-fixture",
+  LATTICE_DEVELOPMENT_FIXTURE_SUBJECT_ID: "topic-live-proof",
+  LATTICE_SOLANDRA_COGNITION_ROUTE: "groq-gpt-oss-120b",
+});
+const composition = createConfiguredSolandraCognition(liveConfig);
+assert.ok(composition, "Configured canonical Solandra cognition is required.");
+
+const directCases = [
+  {
+    prior: "Why are some metals magnetic?",
+    message: "Help me plan a low-maintenance balcony herb garden.",
+    expected: "NEW_OBJECTIVE",
+  },
+  {
+    prior: "How can I keep a bicycle chain from rusting?",
+    message: "Can you explain that more simply?",
+    expected: "CONTINUE",
+  },
+  {
+    prior: "How can I reduce glare on my monitor?",
+    message: "Actually, I mean glare on a television across the room.",
+    expected: "CORRECTION",
+  },
+  {
+    prior: "Draft a polite note declining a neighborhood event.",
+    message: "What should I compare when buying a compact vacuum?",
+    expected: "NEW_OBJECTIVE",
+  },
+];
+
+const directEvidence = [];
+for (let index = 0; index < directCases.length; index += 1) {
+  const item = directCases[index];
+  const result = await composition.cognition.interpret({
+    conversationId: `live-topic-${index}`,
+    messageId: `live-topic-message-${index}`,
+    message: item.message,
+    currentObjective: item.prior,
+    recentUserMessages: [item.prior, item.message],
+    governedKnowledge: [],
+  });
+  directEvidence.push({
+    priorObjective: item.prior,
+    userMessage: item.message,
+    objectiveRelation: result.proposal.objectiveRelation,
+    proposedObjective: result.proposal.proposedObjective,
+    materialAmbiguity: result.proposal.materialAmbiguity,
+  });
+  assert.equal(result.proposal.objectiveRelation, item.expected, JSON.stringify(directEvidence.at(-1)));
+}
+console.log(`TOPIC_TRANSITION_LIVE_COGNITION=${JSON.stringify(directEvidence)}`);
+
+const service = spawn(process.execPath, ["tools/render-colocated-runtime.mjs"], {
+  env: {
+    ...process.env,
+    LATTICE_DEPLOYMENT_MODE: "development",
+    LATTICE_TRUTH_MODE: "v36-offline",
+    LATTICE_AUTHENTICATION_MODE: "development-fixture",
+    LATTICE_DEVELOPMENT_FIXTURE_SUBJECT_ID: "topic-live-proof",
+    LATTICE_SOLANDRA_COGNITION_ROUTE: "groq-gpt-oss-120b",
+    LATTICE_AUTO_MIGRATE: "false",
+    PORT: "3111",
+    HOST: "127.0.0.1",
+    LATTICE_RUN_WORKER_RETRY_DELAY_MS: "5",
+  },
+  stdio: ["ignore", "pipe", "pipe"],
+});
+let serviceOutput = "";
+for (const stream of [service.stdout, service.stderr]) {
+  stream?.on("data", (chunk) => {
+    const text = chunk.toString();
+    serviceOutput += text;
+    process.stdout.write(text);
+  });
+}
+
+const profile = resolve("artifacts/topic-transition-browser-profile");
+const chrome = spawn(browserExecutable, [
+  "--headless=new",
+  "--disable-gpu",
+  "--no-sandbox",
+  "--disable-dev-shm-usage",
+  "--remote-debugging-port=9333",
+  `--user-data-dir=${profile}`,
+  baseUrl,
+], { stdio: "ignore" });
+
+class Cdp {
+  constructor(url) { this.url = url; this.socket = null; this.id = 1; this.pending = new Map(); }
+  async connect() {
+    this.socket = new WebSocket(this.url);
+    await new Promise((resolvePromise, rejectPromise) => {
+      const timer = setTimeout(() => rejectPromise(new Error("CDP connect timeout")), 10_000);
+      this.socket.addEventListener("open", () => { clearTimeout(timer); resolvePromise(); }, { once: true });
+      this.socket.addEventListener("error", () => { clearTimeout(timer); rejectPromise(new Error("CDP connection failed")); }, { once: true });
+    });
+    this.socket.addEventListener("message", (event) => {
+      const message = JSON.parse(String(event.data));
+      if (typeof message.id !== "number") return;
+      const pending = this.pending.get(message.id);
+      if (!pending) return;
+      this.pending.delete(message.id);
+      if (message.error) pending.reject(new Error(message.error.message));
+      else pending.resolve(message.result ?? {});
+    });
+  }
+  send(method, params = {}) {
+    const id = this.id++;
+    return new Promise((resolvePromise, rejectPromise) => {
+      this.pending.set(id, { resolve: resolvePromise, reject: rejectPromise });
+      this.socket.send(JSON.stringify({ id, method, params }));
+    });
+  }
+  async eval(expression) {
+    const result = await this.send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true });
+    if (result.exceptionDetails) throw new Error(result.exceptionDetails.text ?? "browser evaluation failed");
+    return result.result?.value;
+  }
+  close() { try { this.socket?.close(); } catch {} }
+}
+
+async function browserTarget() {
+  const targets = await (await fetch("http://127.0.0.1:9333/json")).json();
+  return targets.find((item) => item.type === "page" && item.webSocketDebuggerUrl);
+}
+
+async function wrapOwnerFetch(cdp) {
+  await waitFor("ownerFetch", () => cdp.eval("typeof window.ownerFetch === 'function'"));
+  await cdp.eval(`(() => {
+    const original = window.ownerFetch;
+    window.__topicTransitionProof = [];
+    window.ownerFetch = async (...args) => {
+      const response = await original(...args);
+      try {
+        const url = typeof args[0] === 'string' ? args[0] : args[0]?.url || '';
+        if (/\\/turns(?:\\?|$)/.test(url)) {
+          const payload = await response.clone().json();
+          window.__topicTransitionProof.push(payload);
+        }
+      } catch {}
+      return response;
+    };
+    return true;
+  })()`);
+}
+
+async function submitThroughBrowser(cdp, message) {
+  const before = await cdp.eval("window.__topicTransitionProof.length");
+  await cdp.eval(`(() => {
+    const input = document.querySelector('textarea');
+    if (!input) throw new Error('Conversation textarea not found');
+    input.value = ${JSON.stringify(message)};
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    const button = [...document.querySelectorAll('button')].find((item) => item.textContent?.trim() === 'Send');
+    if (!button || button.disabled) throw new Error('Send button unavailable');
+    button.click();
+    return true;
+  })()`);
+  const payload = await waitFor(`turn response for ${message}`, async () => {
+    const items = await cdp.eval("window.__topicTransitionProof");
+    return Array.isArray(items) && items.length > before ? items.at(-1) : null;
+  });
+  assert.ok(payload?.interpretation, JSON.stringify(payload));
+  return payload;
+}
+
+async function runState(cdp, runId) {
+  return cdp.eval(`window.ownerFetch('/api/v1/runs/${encodeURIComponent(runId)}').then(r => r.json())`);
+}
+
+async function waitRun(cdp, runId) {
+  return waitFor(`Run ${runId} terminal state`, async () => {
+    const run = await runState(cdp, runId);
+    return ["COMPLETED", "FAILED", "CANCELLED"].includes(run?.status) ? run : null;
+  }, 60_000, 250);
+}
+
+let cdp;
+try {
+  await waitFor("canonical API", async () => (await fetch(`${baseUrl}/health`).catch(() => null))?.ok === true, 30_000, 200);
+  const target = await waitFor("Chrome page target", browserTarget, 20_000, 100);
+  cdp = new Cdp(target.webSocketDebuggerUrl);
+  await cdp.connect();
+  await cdp.send("Runtime.enable");
+  await waitFor("Solandra page", () => cdp.eval("document.body?.innerText.includes('Solandra')"), 20_000, 100);
+  await wrapOwnerFetch(cdp);
+
+  const aMessage = "What makes ocean tides rise and fall?";
+  const a = await submitThroughBrowser(cdp, aMessage);
+  assert.equal(a.interpretation.objectiveRelation, "NEW_OBJECTIVE", JSON.stringify(a));
+  assert.equal(a.acceptedUnderstanding, aMessage);
+  assert.ok(a.runId);
+  await waitRun(cdp, a.runId);
+
+  const bMessage = "How should I organize a small entryway closet?";
+  const b = await submitThroughBrowser(cdp, bMessage);
+  assert.equal(b.interpretation.objectiveRelation, "NEW_OBJECTIVE", JSON.stringify(b));
+  assert.equal(b.acceptedUnderstanding, bMessage);
+  assert.ok(b.runId);
+  const bRun = await waitRun(cdp, b.runId);
+  assert.equal(bRun.request.objective, bMessage);
+  assert.equal(bRun.request.intentVersionId, b.intentVersionId);
+
+  await cdp.send("Page.enable");
+  await cdp.send("Page.reload", { ignoreCache: true });
+  await waitFor("reloaded Solandra", () => cdp.eval("document.body?.innerText.includes('Solandra')"), 20_000, 100);
+  await waitFor("reloaded prior conversation", () => cdp.eval(`document.body?.innerText.includes(${JSON.stringify(bMessage)})`), 20_000, 100);
+  await wrapOwnerFetch(cdp);
+
+  const cMessage = "Why do some tree leaves turn red in autumn?";
+  const c = await submitThroughBrowser(cdp, cMessage);
+  assert.equal(c.interpretation.objectiveRelation, "NEW_OBJECTIVE", JSON.stringify(c));
+  assert.equal(c.acceptedUnderstanding, cMessage);
+  assert.ok(c.runId);
+  const cRun = await waitRun(cdp, c.runId);
+  assert.equal(cRun.request.objective, cMessage);
+  assert.equal(cRun.request.intentVersionId, c.intentVersionId);
+
+  const visible = await cdp.eval("document.body.innerText");
+  assert.match(visible, /Solandra/u);
+  assert.match(visible, /tree leaves turn red/iu);
+
+  console.log(`TOPIC_TRANSITION_BROWSER_PASS=${JSON.stringify({
+    first: { message: aMessage, relation: a.interpretation.objectiveRelation, objective: a.acceptedUnderstanding },
+    second: { message: bMessage, relation: b.interpretation.objectiveRelation, objective: b.acceptedUnderstanding, runObjective: bRun.request.objective },
+    afterReload: { message: cMessage, relation: c.interpretation.objectiveRelation, objective: c.acceptedUnderstanding, runObjective: cRun.request.objective },
+    visibleCurrentTurn: /tree leaves turn red/iu.test(visible),
+  })}`);
+} finally {
+  cdp?.close();
+  try { chrome.kill("SIGTERM"); } catch {}
+  try { service.kill("SIGTERM"); } catch {}
+  await Promise.race([once(service, "exit").catch(() => {}), sleep(5_000)]);
+}
+
+assert.doesNotMatch(serviceOutput, /GROQ_API_KEY|Bearer\s+[A-Za-z0-9._-]+/u);
