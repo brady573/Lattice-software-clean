@@ -4,6 +4,7 @@ import { once } from "node:events";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import process from "node:process";
+import { Pool } from "pg";
 import { createConfiguredSolandraCognition } from "../dist/src/solandra/cognition-composition.js";
 import { resolveRuntimeConfig } from "../dist/src/runtime-config.js";
 
@@ -11,6 +12,7 @@ const baseUrl = "http://127.0.0.1:3111";
 const browserExecutable = process.env.M7_BROWSER_EXECUTABLE;
 assert.ok(browserExecutable && existsSync(browserExecutable), "Chrome/Chromium is required.");
 assert.ok(process.env.GROQ_API_KEY, "GROQ_API_KEY is required for live cognition proof.");
+assert.ok(process.env.DATABASE_URL, "DATABASE_URL is required for durable binding proof.");
 
 const sleep = (ms) => new Promise((resolvePromise) => setTimeout(resolvePromise, ms));
 async function waitFor(description, probe, timeoutMs = 60_000, intervalMs = 100) {
@@ -196,6 +198,25 @@ async function waitRun(cdp, runId) {
   }, 60_000, 250);
 }
 
+const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+async function durableBinding(runId) {
+  const result = await pool.query(
+    `SELECT r.request_json, b.intent_version_id
+       FROM runs r
+       JOIN run_intent_bindings b ON b.run_id = r.id
+      WHERE r.id = $1`,
+    [runId],
+  );
+  assert.equal(result.rowCount, 1, `Expected exactly one durable binding for Run ${runId}`);
+  const row = result.rows[0];
+  return {
+    objective: row.request_json?.objective,
+    requestIntentVersionId: row.request_json?.intentVersionId,
+    bindingIntentVersionId: row.intent_version_id,
+    sourceMessageId: row.request_json?.sourceMessageId,
+  };
+}
+
 let cdp;
 try {
   await waitFor("canonical API", async () => (await fetch(`${baseUrl}/health`).catch(() => null))?.ok === true, 30_000, 200);
@@ -218,9 +239,11 @@ try {
   assert.equal(b.interpretation?.objectiveRelation, "NEW_OBJECTIVE", JSON.stringify(b));
   assert.equal(b.acceptedUnderstanding, bMessage);
   assert.ok(b.runId);
-  const bRun = await waitRun(cdp, b.runId);
-  assert.equal(bRun.request.objective, bMessage);
-  assert.equal(bRun.request.intentVersionId, b.intentVersionId);
+  await waitRun(cdp, b.runId);
+  const bBinding = await durableBinding(b.runId);
+  assert.equal(bBinding.objective, bMessage);
+  assert.equal(bBinding.requestIntentVersionId, b.intentVersionId);
+  assert.equal(bBinding.bindingIntentVersionId, b.intentVersionId);
 
   await cdp.send("Page.enable");
   await cdp.send("Page.reload", { ignoreCache: true });
@@ -233,19 +256,22 @@ try {
   assert.equal(c.interpretation?.objectiveRelation, "NEW_OBJECTIVE", JSON.stringify(c));
   assert.equal(c.acceptedUnderstanding, cMessage);
   assert.ok(c.runId);
-  const cRun = await waitRun(cdp, c.runId);
-  assert.equal(cRun.request.objective, cMessage);
-  assert.equal(cRun.request.intentVersionId, c.intentVersionId);
+  await waitRun(cdp, c.runId);
+  const cBinding = await durableBinding(c.runId);
+  assert.equal(cBinding.objective, cMessage);
+  assert.equal(cBinding.requestIntentVersionId, c.intentVersionId);
+  assert.equal(cBinding.bindingIntentVersionId, c.intentVersionId);
 
   const visible = await cdp.eval("document.body.innerText");
   assert.match(visible, /tree leaves turn red/iu);
   console.log(`TOPIC_TRANSITION_BROWSER_PASS=${JSON.stringify({
     first: { message: aMessage, relation: a.interpretation.objectiveRelation, objective: a.acceptedUnderstanding },
-    second: { message: bMessage, relation: b.interpretation.objectiveRelation, objective: b.acceptedUnderstanding, runObjective: bRun.request.objective },
-    afterReload: { message: cMessage, relation: c.interpretation.objectiveRelation, objective: c.acceptedUnderstanding, runObjective: cRun.request.objective },
+    second: { message: bMessage, relation: b.interpretation.objectiveRelation, objective: b.acceptedUnderstanding, runObjective: bBinding.objective, intentVersionId: b.intentVersionId },
+    afterReload: { message: cMessage, relation: c.interpretation.objectiveRelation, objective: c.acceptedUnderstanding, runObjective: cBinding.objective, intentVersionId: c.intentVersionId },
     visibleCurrentTurn: true,
   })}`);
 } finally {
+  await pool.end();
   cdp?.close();
   try { chrome.kill("SIGTERM"); } catch {}
   try { service.kill("SIGTERM"); } catch {}
