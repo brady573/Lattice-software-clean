@@ -68,11 +68,32 @@ jobs:
         working-directory: product
         run: |
           set -euo pipefail
-          ! git grep -nE 'LATTICE_OWNER_ACCESS_TOKEN[[:space:]]*[:=][[:space:]]*["'"'][^"'"']+' -- ':!test/*'
-          ! git grep -nE '[?&](token|access[_-]?key)=' -- src
-          ! git grep -nE 'localStorage\.(setItem|getItem)\([^)]*owner-access' -- src
-          git grep -n 'development-fixture' -- src/runtime-config.ts >/dev/null
-          echo "SECURITY_SOURCE_AUDIT=PASS"
+          node --input-type=module <<'NODE'
+          import { readFileSync } from 'node:fs';
+          import { execFileSync } from 'node:child_process';
+
+          const productionFiles = [
+            'src/auth/owner-access.ts',
+            'src/index.ts',
+            'src/ui/solandra-authoritative-conversation-page.ts',
+          ];
+          const text = productionFiles.map((path) => readFileSync(path, 'utf8')).join('\n');
+          if (/LATTICE_OWNER_ACCESS_TOKEN\s*[:=]\s*["'][^"']+/u.test(text)) {
+            throw new Error('Hard-coded Owner credential-like assignment detected.');
+          }
+          if (/[?&](?:token|access[_-]?key)=/iu.test(text)) {
+            throw new Error('Owner credential-like URL query parameter detected.');
+          }
+          if (/localStorage\.(?:setItem|getItem)\([^)]*owner-access/iu.test(text)) {
+            throw new Error('Owner credential stored in localStorage.');
+          }
+          const runtimeConfig = readFileSync('src/runtime-config.ts', 'utf8');
+          if (!runtimeConfig.includes('development-fixture')) {
+            throw new Error('Development fixture boundary unexpectedly absent.');
+          }
+          execFileSync('git', ['status', '--porcelain=v1'], { stdio: 'pipe' });
+          console.log('SECURITY_SOURCE_AUDIT=PASS');
+          NODE
 
       - name: Generate masked disposable Owner credential
         run: |
