@@ -1,0 +1,91 @@
+name: TEMP M4 Public Structural Analysis
+
+on:
+  push:
+    branches:
+      - validation/m4-general-decision-journey
+    paths:
+      - ".github/workflows/m4-structural-public-analysis.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  structural:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:18.6
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: lattice_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d lattice_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      SUBJECT_SHA: 71545f69b60b4c7d85d539d5ab630ba776dc8599
+      SUBJECT_TREE: bc91c39ec346b8f5fe79397705dc734f2241c6e2
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/lattice_test
+    steps:
+      - name: Checkout exact frozen Product candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: 71545f69b60b4c7d85d539d5ab630ba776dc8599
+          persist-credentials: false
+
+      - name: Verify exact frozen SHA and tree
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SUBJECT_SHA"
+          test "$(git rev-parse HEAD^{tree})" = "$SUBJECT_TREE"
+          echo "M4_STRUCTURAL_SHA_TREE=PASS"
+
+      - name: Provision Node 24
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '24'
+
+      - name: Install locked dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Build
+        run: npm run build
+
+      - name: Public M4 decision and advisory structural tests
+        run: |
+          node --test \
+            dist/test/m4-general-decision-journey.test.js \
+            dist/test/m4-advisory-framing-regression.test.js \
+            dist/test/m4-advisory-diagnostic-observability.test.js \
+            dist/test/m2-solandra-advisory-spine.test.js
+
+      - name: Public governed-truth and capability-honesty tests
+        run: |
+          node --test \
+            dist/test/m1-solandra-cognitive-knowledge-spine.test.js \
+            dist/test/m1-knowledge-need-investigation.test.js \
+            dist/test/knowledge-followup-capability-honesty.test.js \
+            dist/test/v36-execution-pipeline.test.js
+
+      - name: PostgreSQL M4 and M2 continuity
+        run: |
+          node --test \
+            dist/test/m4-postgres-decision-continuity.test.js \
+            dist/test/m2-postgres-recommendation-restart.test.js
+
+      - name: Ordinary Core with database variable unset
+        run: env -u DATABASE_URL npm run check
+
+      - name: Verify frozen Product candidate unchanged
+        if: always()
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SUBJECT_SHA"
+          test "$(git rev-parse HEAD^{tree})" = "$SUBJECT_TREE"
+          echo "M4_STRUCTURAL_CANDIDATE_UNCHANGED=PASS"
