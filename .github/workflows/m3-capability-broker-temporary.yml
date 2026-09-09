@@ -1,4 +1,4 @@
-name: TEMP M3 R1-R4 Frozen Evidence
+name: TEMP M3 Held-Out Ordinary Conversation Discriminator
 
 on:
   push:
@@ -11,27 +11,12 @@ permissions:
   contents: read
 
 jobs:
-  frozen-evidence:
+  live-discriminator:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 15
     env:
-      DATABASE_URL: postgresql://lattice:lattice@127.0.0.1:55433/lattice_test
       SUBJECT_SHA: 09b04fad9c931ae409577a9b09ca8e7849d74861
       SUBJECT_TREE: 1db6a07e8f2e4743c36f408f980c2d99f4da3112
-    services:
-      postgres:
-        image: postgres:18.6
-        env:
-          POSTGRES_USER: lattice
-          POSTGRES_PASSWORD: lattice
-          POSTGRES_DB: lattice_test
-        ports:
-          - 55433:5432
-        options: >-
-          --health-cmd "pg_isready -U lattice -d lattice_test"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -40,47 +25,126 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: '24'
-      - name: Verify frozen repair subject
+      - name: Verify frozen candidate and credential surface
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$SUBJECT_SHA"
           test "$(git rev-parse HEAD^{tree})" = "$SUBJECT_TREE"
           test -n "${GROQ_API_KEY:-}"
+      - run: npm ci --no-audit --no-fund
+      - name: Build frozen candidate for execution
+        run: npm run build
+      - name: Held-out ordinary Conversation live discriminator
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-      - run: npm ci --no-audit --no-fund
-      - name: Build invalidated M3 surface
-        run: npm run build
-      - name: Focused M3 R1-R4
-        run: node --import tsx --test test/m3-capability-broker-user-model.test.ts
-      - name: Reset PostgreSQL test schema
         run: |
           node --input-type=module <<'NODE'
-          import pg from 'pg';
-          const { Client } = pg;
-          const client = new Client({ connectionString: process.env.DATABASE_URL });
-          await client.connect();
-          await client.query('DROP SCHEMA public CASCADE; CREATE SCHEMA public;');
-          await client.end();
+          import assert from 'node:assert/strict';
+          import { randomUUID } from 'node:crypto';
+          import { registerCapabilityBrokerApi } from './dist/src/capabilities/api.js';
+          import { createConfiguredCapabilityBroker } from './dist/src/capabilities/composition.js';
+          import { MemoryKnowledgeRecordStore } from './dist/src/knowledge/knowledge-record-store.js';
+          import { MemoryRecommendationStore } from './dist/src/recommendation/recommendation-store.js';
+          import { createRuntimeApp } from './dist/src/runtime-app.js';
+          import { resolveRuntimeConfig } from './dist/src/runtime-config.js';
+          import { createConfiguredSolandraCognition } from './dist/src/solandra/cognition-composition.js';
+
+          const subjectId = 'm3-held-out-live-user';
+          const probe = 'Can you brainstorm three clearer names for a folder where I keep rough ideas I might revisit later?';
+          const config = resolveRuntimeConfig({
+            ...process.env,
+            LATTICE_DEPLOYMENT_MODE: 'development',
+            LATTICE_TRUTH_MODE: 'v36-offline',
+            LATTICE_AUTHENTICATION_MODE: 'development-fixture',
+            LATTICE_DEVELOPMENT_FIXTURE_SUBJECT_ID: subjectId,
+            LATTICE_SOLANDRA_COGNITION_ROUTE: 'groq-gpt-oss-120b',
+          });
+          const solandra = createConfiguredSolandraCognition(config);
+          assert.ok(solandra, 'configured real Solandra cognition must be available');
+          const capabilities = await createConfiguredCapabilityBroker(config);
+          assert.equal(capabilities.userModelConfigured, true);
+          const knowledgeStore = new MemoryKnowledgeRecordStore();
+          const recommendationStore = new MemoryRecommendationStore();
+          const app = await createRuntimeApp(config, {
+            memoryDispatchDelayMs: 1,
+            knowledgeStore,
+            recommendationStore,
+            solandraCognition: solandra.cognition,
+            solandraAdvisory: solandra.advisory,
+            solandraActionPreparer: solandra.actionPreparer,
+            solandraKnowledgePresenter: solandra.knowledgePresenter,
+          });
+          registerCapabilityBrokerApi(app, capabilities.broker);
+
+          try {
+            const initial = await app.inject({ method: 'GET', url: '/api/v1/capabilities/user-model' });
+            assert.equal(initial.statusCode, 200, initial.body);
+            assert.equal(initial.json().capability.authorized, false);
+
+            const granted = await app.inject({ method: 'POST', url: '/api/v1/capabilities/user-model/connect' });
+            assert.equal(granted.statusCode, 200, granted.body);
+            assert.equal(granted.json().capability.authorized, true);
+
+            const created = await app.inject({ method: 'POST', url: '/api/v1/conversations' });
+            assert.equal(created.statusCode, 201, created.body);
+            const conversationId = created.json().conversation.id;
+
+            const turn = await app.inject({
+              method: 'POST',
+              url: `/api/v1/conversations/${conversationId}/turns`,
+              payload: { turnId: randomUUID(), message: probe },
+            });
+            assert.equal(turn.statusCode, 200, turn.body);
+            const body = turn.json();
+            assert.equal(body.status, 'COGNITIVE_ASSISTANCE_COMPLETED');
+            assert.equal(body.interpretation?.requestedHelp, 'COGNITIVE_ASSISTANCE');
+            assert.equal(body.interpretation?.authority, 'NON_AUTHORITATIVE_PROPOSAL');
+            assert.equal(body.capability?.capabilityId, 'user-authorized-cognitive-model');
+            assert.equal(body.capability?.authority, 'NON_AUTHORITATIVE_PROPOSAL');
+            assert.equal(body.capability?.effect, 'COGNITIVE_ONLY');
+            assert.equal(body.capability?.trustHandling, 'NON_AUTHORITATIVE_PROPOSAL');
+            assert.ok(typeof body.presentation?.assistantMessage === 'string' && body.presentation.assistantMessage.trim().length > 0);
+
+            for (const forbidden of ['runId', 'intentScopeId', 'intentVersionId', 'acceptedUnderstanding', 'knowledge', 'knowledgeReference', 'recommendationReference']) {
+              assert.equal(Object.hasOwn(body, forbidden), false, `ordinary cognitive response must not create/expose ${forbidden}`);
+            }
+            assert.deepEqual(await knowledgeStore.listKnowledgeByConversation(conversationId), []);
+            assert.deepEqual(await recommendationStore.listRecommendationsByConversation(conversationId), []);
+
+            const state = await app.inject({ method: 'GET', url: '/api/v1/capabilities/user-model' });
+            assert.equal(state.statusCode, 200, state.body);
+            const capability = state.json().capability;
+            assert.equal(capability.authorized, true);
+            assert.equal(capability.lastInvocation?.outcome, 'SUCCEEDED');
+            assert.equal(capability.lastInvocation?.provenance?.kind, 'MODEL');
+            assert.equal(capability.lastInvocation?.provenance?.executionClass, 'LIVE_DIRECT');
+            assert.equal(capability.lastInvocation?.provenance?.actualProvider, 'groq');
+            assert.equal(capability.lastInvocation?.provenance?.actualModel, 'openai/gpt-oss-120b');
+
+            console.log(JSON.stringify({
+              candidate: process.env.SUBJECT_SHA,
+              probe,
+              cognition: body.interpretation.requestedHelp,
+              capabilityId: body.capability.capabilityId,
+              capabilityOutcome: capability.lastInvocation.outcome,
+              provider: capability.lastInvocation.provenance.actualProvider,
+              model: capability.lastInvocation.provenance.actualModel,
+              solandraResponsePresent: true,
+              intentAuthorityFieldsPresent: false,
+              knowledgeCount: 0,
+              recommendationCount: 0,
+            }));
+            console.log('LATTICE_M3_HELD_OUT_ORDINARY_CONVERSATION=PASS');
+          } finally {
+            await app.close();
+            await capabilities.broker.close();
+            await knowledgeStore.close();
+            await recommendationStore.close();
+          }
           NODE
-      - name: M3 PostgreSQL grant/finalization acceptance
-        run: node --import tsx --test --test-concurrency=1 test/m3-capability-authorization-postgres.test.ts test/runtime-schema-readiness-postgres.test.ts
-      - name: Live configured user-model proof after finalization repair
-        env:
-          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-          LATTICE_M3_EXPECTED_SHA: 09b04fad9c931ae409577a9b09ca8e7849d74861
-          LATTICE_M3_EXPECTED_TREE: 1db6a07e8f2e4743c36f408f980c2d99f4da3112
-          LATTICE_M3_ARTIFACT_DIR: artifacts/m3-r1-r4
-        run: env -u DATABASE_URL node tools/m3-live-user-model-proof.mjs
-      - name: Verify frozen repair subject unchanged
+      - name: Verify frozen candidate unchanged
         run: |
           test "$(git rev-parse HEAD)" = "$SUBJECT_SHA"
           test "$(git rev-parse HEAD^{tree})" = "$SUBJECT_TREE"
-      - name: Upload M3 repair evidence
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
-        with:
-          name: m3-r1-r4-09b04fad
-          path: artifacts/m3-r1-r4/
-          if-no-files-found: warn
-          retention-days: 7
