@@ -1,4 +1,3 @@
-import { asModelProviderError } from "../model/errors.js";
 import type { CapabilityAuthorizationStore, CapabilityInvocationEvidence } from "./authorization-store.js";
 import type { CapabilityContract, CapabilityInvocationResult } from "./contracts.js";
 
@@ -25,6 +24,15 @@ export class CapabilityRevokedError extends Error {
 
 function now(): string {
   return new Date().toISOString();
+}
+
+function capabilityFailureCode(error: unknown): string {
+  if (typeof error === "object" && error !== null && "code" in error) {
+    const code = (error as { code?: unknown }).code;
+    if (typeof code === "string" && code.trim()) return code.trim().slice(0, 120);
+  }
+  if (error instanceof Error && error.name.trim()) return error.name.trim().slice(0, 120);
+  return "CAPABILITY_FAILURE";
 }
 
 export class CapabilityBroker {
@@ -83,19 +91,6 @@ export class CapabilityBroker {
         purpose: input.purpose,
         requester: "SOLANDRA",
       });
-      const after = await this.authorizations.get(input.subjectId, input.capabilityId);
-      if (after.status !== "CONNECTED" || after.version !== before.version) {
-        const evidence: CapabilityInvocationEvidence = {
-          requestId: input.requestId,
-          purpose: input.purpose,
-          outcome: "REVOKED",
-          recordedAt: now(),
-          provenance: null,
-          failureCode: null,
-        };
-        await this.authorizations.recordInvocation(input.subjectId, input.capabilityId, evidence);
-        throw new CapabilityRevokedError(input.capabilityId);
-      }
       const evidence: CapabilityInvocationEvidence = {
         requestId: input.requestId,
         purpose: input.purpose,
@@ -104,7 +99,13 @@ export class CapabilityBroker {
         provenance: executed.provenance,
         failureCode: null,
       };
-      await this.authorizations.recordInvocation(input.subjectId, input.capabilityId, evidence);
+      const finalized = await this.authorizations.finalizeInvocation(
+        input.subjectId,
+        input.capabilityId,
+        before.version,
+        evidence,
+      );
+      if (!finalized) throw new CapabilityRevokedError(input.capabilityId);
       return Object.freeze({
         capabilityId: capability.id,
         purpose: input.purpose,
@@ -117,14 +118,13 @@ export class CapabilityBroker {
       });
     } catch (error) {
       if (error instanceof CapabilityRevokedError) throw error;
-      const modelError = asModelProviderError(error);
       const evidence: CapabilityInvocationEvidence = {
         requestId: input.requestId,
         purpose: input.purpose,
-        outcome: "PROVIDER_FAILURE",
+        outcome: "CAPABILITY_FAILURE",
         recordedAt: now(),
         provenance: null,
-        failureCode: modelError.code,
+        failureCode: capabilityFailureCode(error),
       };
       await this.authorizations.recordInvocation(input.subjectId, input.capabilityId, evidence);
       throw error;
