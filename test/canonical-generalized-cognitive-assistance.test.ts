@@ -121,6 +121,9 @@ test("canonical Solandra exposes generalized cognitive assistance separately and
     assert.match(root.body, /\/api\/v1\/capabilities\/user-model\/connect/u);
     assert.match(root.body, /\/api\/v1\/capabilities\/model-assistance/u);
     assert.match(root.body, /Generated responses are proposals only/u);
+    assert.match(root.body, /COGNITIVE_ASSISTANCE_NOT_AUTHORIZED/u);
+    assert.match(root.body, /COGNITIVE_ASSISTANCE_UNAVAILABLE/u);
+    assert.match(root.body, /COGNITIVE_ASSISTANCE_REVOKED/u);
     assert.match(root.body, /Cognitive assistance is disconnected\. Connect it to use this request\./u);
     assert.match(root.body, /Cognitive assistance is unavailable in this Lattice setup\./u);
     assert.match(root.body, /Cognitive assistance couldn't complete that request\. Nothing was changed/u);
@@ -158,7 +161,7 @@ test("canonical cognitive assistance requires explicit connection, remains non-a
       payload: { turnId: "canonical-cognitive-denied", message: "Brainstorm three labels for my own notes folder." },
     });
     assert.equal(denied.statusCode, 403, denied.body);
-    assert.equal(denied.json().error, "USER_MODEL_CAPABILITY_NOT_AUTHORIZED");
+    assert.equal(denied.json().error, "COGNITIVE_ASSISTANCE_NOT_AUTHORIZED");
     assert.equal(fixture.calls(), 0);
 
     const connected = await app.inject({ method: "POST", url: "/api/v1/capabilities/user-model/connect" });
@@ -202,7 +205,7 @@ test("canonical cognitive assistance requires explicit connection, remains non-a
       payload: { turnId: "canonical-cognitive-revoked", message: "Brainstorm another three labels for my own notes folder." },
     });
     assert.equal(deniedAfterRevoke.statusCode, 403, deniedAfterRevoke.body);
-    assert.equal(deniedAfterRevoke.json().error, "USER_MODEL_CAPABILITY_NOT_AUTHORIZED");
+    assert.equal(deniedAfterRevoke.json().error, "COGNITIVE_ASSISTANCE_NOT_AUTHORIZED");
     assert.equal(fixture.calls(), 1, "Revoked capability must not silently reach the provider.");
 
     const reconnected = await app.inject({ method: "POST", url: "/api/v1/capabilities/user-model/connect" });
