@@ -272,10 +272,10 @@ test("PostgreSQL recovery does not make restored Intent sticky across an unrelat
 
     const continuity = await reopened.inject({ method: "GET", url: `/api/v1/conversations/${conversationId}/continuity` });
     assert.equal(continuity.statusCode, 200, continuity.body);
-    const state = continuity.json<{ messages: Array<{ messageId: string; content: string }>; runs: Array<{ runId: string; exactBinding: { intentVersionId: string } }> }>();
+    const state = continuity.json<{ messages: Array<{ id: string; content: string }>; runs: Array<{ runId: string; exactBinding: { intentVersionId: string } }> }>();
     const source = state.messages.find((message) => message.content === "How can I organize photos from a family trip?");
     assert.ok(source);
-    assert.equal(durable.request.sourceMessageId, source.messageId);
+    assert.equal(durable.request.sourceMessageId, source.id);
     const runState = state.runs.find((item) => item.runId === body.runId);
     assert.ok(runState);
     assert.equal(runState.exactBinding.intentVersionId, body.intentVersionId);
