@@ -201,9 +201,9 @@ const directCognitiveAssistanceHandling = `        if (body.status === "COGNITIV
         if (!body.runId) throw new Error("I couldn't establish the requested work safely.");`;
 
 const capabilityFailureHandling = `      const productFailureMessage = (status, body) => {
-        if (body?.error === "USER_MODEL_CAPABILITY_NOT_AUTHORIZED") return "Cognitive assistance is disconnected. Connect it to use this request.";
-        if (body?.error === "USER_MODEL_CAPABILITY_UNAVAILABLE") return "Cognitive assistance is unavailable in this Lattice setup.";
-        if (body?.error === "USER_MODEL_CAPABILITY_REVOKED") return "Cognitive assistance was disconnected before the response completed, so I discarded that result.";
+        if (body?.error === "COGNITIVE_ASSISTANCE_NOT_AUTHORIZED" || body?.error === "USER_MODEL_CAPABILITY_NOT_AUTHORIZED") return "Cognitive assistance is disconnected. Connect it to use this request.";
+        if (body?.error === "COGNITIVE_ASSISTANCE_UNAVAILABLE" || body?.error === "USER_MODEL_CAPABILITY_UNAVAILABLE") return "Cognitive assistance is unavailable in this Lattice setup.";
+        if (body?.error === "COGNITIVE_ASSISTANCE_REVOKED" || body?.error === "USER_MODEL_CAPABILITY_REVOKED") return "Cognitive assistance was disconnected before the response completed, so I discarded that result.";
         if (body?.error === "COGNITIVE_ASSISTANCE_FAILED") return "Cognitive assistance couldn't complete that request. Nothing was changed; you can revise it or try again.";
         if (body?.error === "RESOURCE_SCOPE_UNSUPPORTED" && typeof body.message === "string") return body.message;`;
 
