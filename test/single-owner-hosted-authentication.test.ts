@@ -124,6 +124,9 @@ test("canonical Solandra uses a session-scoped Owner access gate and bearer wrap
   assert.match(html, /authorization: "Bearer " \+ candidate/u);
   assert.match(html, /window\.ownerFetch\("\/api\/v1\/conversations"/u);
   assert.match(html, /window\.ownerFetch\("\/api\/v1\/runs\//u);
+  assert.match(html, /const initializeAccess = async \(\) =>/u);
+  assert.match(html, /if \(response\.ok\) \{\s*hideGate\(\);\s*return;/u);
+  assert.match(html, /if \(response\.status === 401\) \{\s*showGate\(\);/u);
   assert.doesNotMatch(html, /LATTICE_OWNER_ACCESS_TOKEN/u);
   assert.doesNotMatch(html, new RegExp(TOKEN, "u"));
   assert.doesNotMatch(html, /[?&](?:token|access[_-]?key)=/iu);
