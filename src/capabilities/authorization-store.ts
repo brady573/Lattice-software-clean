@@ -1,19 +1,19 @@
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { Pool } from "pg";
-import type { ModelInvocationProvenance } from "../model/types.js";
+import type { CapabilityProvenance } from "./contracts.js";
 
 const migration = "036_capability_authorizations.sql" as const;
 
 export type CapabilityGrantStatus = "CONNECTED" | "DISCONNECTED";
-export type CapabilityInvocationOutcome = "SUCCEEDED" | "PROVIDER_FAILURE" | "REVOKED";
+export type CapabilityInvocationOutcome = "SUCCEEDED" | "CAPABILITY_FAILURE" | "REVOKED";
 
 export interface CapabilityInvocationEvidence {
   readonly requestId: string;
   readonly purpose: string;
   readonly outcome: CapabilityInvocationOutcome;
   readonly recordedAt: string;
-  readonly provenance: ModelInvocationProvenance | null;
+  readonly provenance: CapabilityProvenance | null;
   readonly failureCode: string | null;
 }
 
@@ -32,6 +32,12 @@ export interface CapabilityAuthorizationStore {
   connect(subjectId: string, capabilityId: string): Promise<CapabilityGrantState>;
   disconnect(subjectId: string, capabilityId: string): Promise<CapabilityGrantState>;
   recordInvocation(subjectId: string, capabilityId: string, evidence: CapabilityInvocationEvidence): Promise<void>;
+  finalizeInvocation(
+    subjectId: string,
+    capabilityId: string,
+    authorizationVersion: number,
+    evidence: CapabilityInvocationEvidence,
+  ): Promise<boolean>;
   close(): Promise<void>;
 }
 
@@ -91,6 +97,19 @@ export class MemoryCapabilityAuthorizationStore implements CapabilityAuthorizati
     const current = this.states.get(mapKey) ?? defaultState(subjectId, capabilityId);
     if (current.version === 0) return;
     this.states.set(mapKey, { ...structuredClone(current), lastInvocation: structuredClone(evidence) });
+  }
+
+  async finalizeInvocation(
+    subjectId: string,
+    capabilityId: string,
+    authorizationVersion: number,
+    evidence: CapabilityInvocationEvidence,
+  ): Promise<boolean> {
+    const mapKey = key(subjectId, capabilityId);
+    const current = this.states.get(mapKey) ?? defaultState(subjectId, capabilityId);
+    if (current.status !== "CONNECTED" || current.version !== authorizationVersion) return false;
+    this.states.set(mapKey, { ...structuredClone(current), lastInvocation: structuredClone(evidence) });
+    return true;
   }
 
   async close(): Promise<void> {
@@ -210,6 +229,26 @@ export class PostgresCapabilityAuthorizationStore implements CapabilityAuthoriza
       "UPDATE capability_authorizations SET last_invocation_json=$3::jsonb WHERE subject_id=$1 AND capability_id=$2",
       [requireKey(subjectId, "subjectId"), requireKey(capabilityId, "capabilityId"), JSON.stringify(evidence)],
     );
+  }
+
+  async finalizeInvocation(
+    subjectId: string,
+    capabilityId: string,
+    authorizationVersion: number,
+    evidence: CapabilityInvocationEvidence,
+  ): Promise<boolean> {
+    const result = await this.pool.query(
+      `UPDATE capability_authorizations
+       SET last_invocation_json=$4::jsonb
+       WHERE subject_id=$1 AND capability_id=$2 AND status='CONNECTED' AND version=$3`,
+      [
+        requireKey(subjectId, "subjectId"),
+        requireKey(capabilityId, "capabilityId"),
+        authorizationVersion,
+        JSON.stringify(evidence),
+      ],
+    );
+    return (result.rowCount ?? 0) === 1;
   }
 
   async close(): Promise<void> {
