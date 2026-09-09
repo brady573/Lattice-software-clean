@@ -1,3 +1,4 @@
+import { resolveCanonicalOwnerSubjectResolver } from "./auth/owner-access.js";
 import { registerCapabilityBrokerApi } from "./capabilities/api.js";
 import { createConfiguredCapabilityBroker } from "./capabilities/composition.js";
 import { createAlphaDecisionRuntimeComposition } from "./decision/alpha-decision-composition.js";
@@ -23,11 +24,13 @@ try {
   const capabilityComposition = await createConfiguredCapabilityBroker(config);
   const decisionCapability = createAlphaDecisionRuntimeComposition();
   const solandra = createConfiguredSolandraCognition(config);
+  const authenticatedSubjectResolver = resolveCanonicalOwnerSubjectResolver(config);
   let app;
   try {
     app = await createRuntimeApp(config, {
       ...decisionCapability,
       modelAssistanceService: modelAssistance,
+      ...(authenticatedSubjectResolver === undefined ? {} : { authenticatedSubjectResolver }),
       ...(solandra === undefined ? {} : {
         solandraCognition: solandra.cognition,
         solandraAdvisory: solandra.advisory,
