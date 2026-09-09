@@ -1,0 +1,152 @@
+name: Validation — Single Owner Auth Blackbox
+
+on:
+  push:
+    branches:
+      - validation/single-owner-hosted-authentication-blackbox
+    paths:
+      - .github/workflows/single-owner-hosted-authentication-blackbox.yml
+      - validation/single-owner-browser-proof.mjs
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:18.6
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: lattice_owner_auth
+        ports:
+          - 55435:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d lattice_owner_auth"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - name: Checkout validation helper branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: validation/single-owner-hosted-authentication-blackbox
+          persist-credentials: false
+
+      - name: Checkout exact Product candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: d6223eb53478fe548c219f079925f4e8fc5c5a67
+          path: product
+          persist-credentials: false
+
+      - name: Verify exact Product candidate
+        working-directory: product
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "d6223eb53478fe548c219f079925f4e8fc5c5a67"
+          test "$(git rev-parse HEAD^{tree})" = "3117785b65388097afc2abca0b8c085b65a93f5a"
+          echo "CANDIDATE_VERIFIED=PASS"
+
+      - name: Provision Node 24
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+
+      - name: Install locked dependencies
+        working-directory: product
+        run: npm ci --no-audit --no-fund
+
+      - name: Build execution prerequisite
+        working-directory: product
+        run: npm run build
+
+      - name: Security source audit
+        working-directory: product
+        run: |
+          set -euo pipefail
+          ! git grep -nE 'LATTICE_OWNER_ACCESS_TOKEN[[:space:]]*[:=][[:space:]]*["'"'][^"'"']+' -- ':!test/*'
+          ! git grep -nE '[?&](token|access[_-]?key)=' -- src
+          ! git grep -nE 'localStorage\.(setItem|getItem)\([^)]*owner-access' -- src
+          git grep -n 'development-fixture' -- src/runtime-config.ts >/dev/null
+          echo "SECURITY_SOURCE_AUDIT=PASS"
+
+      - name: Generate masked disposable Owner credential
+        run: |
+          set -euo pipefail
+          token="$(node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))")"
+          echo "::add-mask::$token"
+          echo "LATTICE_OWNER_ACCESS_TOKEN=$token" >> "$GITHUB_ENV"
+
+      - name: Migrate disposable PostgreSQL
+        working-directory: product
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:55435/lattice_owner_auth
+        run: npm run db:migrate
+
+      - name: Locate hosted browser
+        run: |
+          set -euo pipefail
+          browser="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
+          test -n "$browser"
+          echo "OWNER_AUTH_BROWSER_EXECUTABLE=$browser" >> "$GITHUB_ENV"
+
+      - name: Durable canonical black-box and browser proof
+        working-directory: product
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:55435/lattice_owner_auth
+          LATTICE_DEPLOYMENT_MODE: durable
+          LATTICE_AUTHENTICATION_MODE: required
+          LATTICE_AUTO_MIGRATE: 'false'
+          LATTICE_TRUTH_MODE: v36-offline
+          PORT: '3115'
+          HOST: 127.0.0.1
+          OWNER_AUTH_BASE_URL: http://127.0.0.1:3115
+        run: |
+          set -euo pipefail
+          test -n "${LATTICE_OWNER_ACCESS_TOKEN:-}"
+          node dist/src/index.js >/tmp/lattice-owner-auth.log 2>&1 &
+          app_pid=$!
+          cleanup() { kill "$app_pid" 2>/dev/null || true; wait "$app_pid" 2>/dev/null || true; }
+          trap cleanup EXIT
+
+          for attempt in $(seq 1 80); do
+            if curl -fsS http://127.0.0.1:3115/health >/dev/null 2>&1; then break; fi
+            if ! kill -0 "$app_pid" 2>/dev/null; then cat /tmp/lattice-owner-auth.log; exit 1; fi
+            sleep 0.25
+          done
+          curl -fsS http://127.0.0.1:3115/health >/dev/null
+
+          noauth_status="$(curl -sS -o /tmp/noauth.json -w '%{http_code}' -X POST http://127.0.0.1:3115/api/v1/conversations)"
+          test "$noauth_status" = "401"
+          node -e "const b=require('/tmp/noauth.json'); if(b.error!=='AUTHENTICATION_REQUIRED') process.exit(1)"
+          echo "BLACKBOX_UNAUTHENTICATED_401=PASS"
+
+          wrong_status="$(curl -sS -o /tmp/wrong.json -w '%{http_code}' -X POST -H 'Authorization: Bearer definitely-wrong-owner-token-000000000000000000000000' http://127.0.0.1:3115/api/v1/conversations)"
+          test "$wrong_status" = "401"
+          node -e "const b=require('/tmp/wrong.json'); if(b.error!=='AUTHENTICATION_REQUIRED') process.exit(1)"
+          echo "BLACKBOX_WRONG_CREDENTIAL_401=PASS"
+
+          correct_status="$(curl -sS -o /tmp/correct.json -w '%{http_code}' -X POST -H "Authorization: Bearer $LATTICE_OWNER_ACCESS_TOKEN" http://127.0.0.1:3115/api/v1/conversations)"
+          test "$correct_status" = "201"
+          node -e "const b=require('/tmp/correct.json'); if(typeof b.conversation?.id!=='string') process.exit(1)"
+          echo "BLACKBOX_OWNER_AUTHENTICATED=PASS"
+
+          if grep -F "$LATTICE_OWNER_ACCESS_TOKEN" /tmp/lattice-owner-auth.log >/dev/null; then
+            echo 'Owner credential appeared in application logs' >&2
+            exit 1
+          fi
+          echo "BLACKBOX_CREDENTIAL_NOT_LOGGED=PASS"
+
+          node ../validation/single-owner-browser-proof.mjs
+
+      - name: Verify candidate unchanged after validation
+        working-directory: product
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "d6223eb53478fe548c219f079925f4e8fc5c5a67"
+          test "$(git rev-parse HEAD^{tree})" = "3117785b65388097afc2abca0b8c085b65a93f5a"
+          echo "CANDIDATE_STILL_EXACT=PASS"
