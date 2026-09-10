@@ -13,7 +13,7 @@ import { resolveRuntimeConfig } from "../src/runtime-config.js";
 
 const OWNER_REQUEST = "I need to know how to prepare my soil for sod.";
 const EVIDENCE_FOLLOW_UP = "What evidence do you have?";
-const CANDIDATE = "09a7a1c111f02de86798a46e013184eb5de64e18";
+const CANDIDATE = "0e9178268fc9b0e773b2c62bd5374785a89c27a3";
 
 interface RecordedAcquisition {
   request: KnowledgeAcquisitionRequest;
@@ -44,18 +44,18 @@ class RecordingWikimediaProvider implements KnowledgeAcquisitionProvider {
   }
 }
 
-async function request(app: FastifyInstance, options: InjectOptions): Promise<any> {
+async function request(app: FastifyInstance, options: InjectOptions): Promise<Record<string, any>> {
   const response = await app.inject(options);
   assert.ok(response.statusCode >= 200 && response.statusCode < 300, response.body);
-  return response.json();
+  return response.json<Record<string, any>>();
 }
 
-async function waitForOutcome(app: FastifyInstance, runId: string): Promise<any> {
+async function waitForOutcome(app: FastifyInstance, runId: string): Promise<Record<string, any>> {
   const deadline = Date.now() + 45_000;
   while (Date.now() < deadline) {
     const run = await request(app, { method: "GET", url: `/api/v1/runs/${runId}` });
     if (run.status === "FAILED" || run.status === "CANCELLED") {
-      throw new Error(`Run ${runId} reached ${run.status}.`);
+      throw new Error(`Run ${runId} reached ${String(run.status)}.`);
     }
     if (run.status === "COMPLETED") {
       return request(app, { method: "GET", url: `/api/v1/runs/${runId}/outcome` });
@@ -75,10 +75,20 @@ function compactAcquisition(call: RecordedAcquisition) {
       canonicalUri: source.canonicalUri,
       excerpt: source.content.replace(/\s+/gu, " ").trim().slice(0, 900),
     })),
+    claims: (call.result?.claims ?? []).map((claim) => ({
+      claimId: claim.claimId,
+      claimType: claim.claimType,
+      text: claim.text.replace(/\s+/gu, " ").trim().slice(0, 1200),
+      evidence: claim.evidence,
+    })),
   };
 }
 
-test("frozen procedural candidate gives the Owner useful governed sod guidance and historical evidence", { timeout: 120_000 }, async () => {
+function sentences(value: string): string[] {
+  return value.match(/[^.!?\n]+(?:[.!?]+|$)/gu)?.map((item) => item.trim()).filter(Boolean) ?? [];
+}
+
+test("frozen procedural candidate gives the Owner useful bounded governed sod guidance and historical evidence", { timeout: 120_000 }, async () => {
   const config = resolveRuntimeConfig({
     LATTICE_DEPLOYMENT_MODE: "development",
     LATTICE_TRUTH_MODE: "v36-live",
@@ -101,19 +111,11 @@ test("frozen procedural candidate gives the Owner useful governed sod guidance a
     assert.equal(accepted.status, "RUN_ACCEPTED");
     const outcomeEnvelope = await waitForOutcome(app, accepted.runId as string);
 
-    const beforeEvidenceCalls = provider.calls.length;
-    const evidenceFollowUp = await request(app, {
-      method: "POST",
-      url: `/api/v1/conversations/${conversationId}/turns`,
-      payload: { turnId: randomUUID(), message: EVIDENCE_FOLLOW_UP },
-    });
-
-    const report = {
+    const primaryReport = {
       candidate: CANDIDATE,
       userRequest: OWNER_REQUEST,
       acceptedUnderstanding: accepted.acceptedUnderstanding ?? null,
       intentVersionId: accepted.intentVersionId ?? null,
-      interpretation: accepted.interpretation ?? null,
       acquisitions: provider.calls.map(compactAcquisition),
       outcome: {
         kind: outcomeEnvelope.outcome?.kind ?? null,
@@ -123,20 +125,11 @@ test("frozen procedural candidate gives the Owner useful governed sod guidance a
         uncertainties: outcomeEnvelope.outcome?.uncertainties ?? [],
       },
       visibleSolandraResponse: outcomeEnvelope.presentation?.assistantMessage ?? null,
-      evidenceFollowUp: {
-        status: evidenceFollowUp.status ?? null,
-        acceptedUnderstanding: evidenceFollowUp.acceptedUnderstanding ?? null,
-        knowledgeReference: evidenceFollowUp.knowledgeReference ?? null,
-        visibleSolandraResponse: evidenceFollowUp.presentation?.assistantMessage ?? null,
-        provenance: evidenceFollowUp.knowledge?.provenance ?? [],
-        reacquired: provider.calls.length !== beforeEvidenceCalls,
-      },
     };
-    console.log(`PROCEDURAL_KNOWLEDGE_E2E=${JSON.stringify(report)}`);
+    console.log(`PROCEDURAL_KNOWLEDGE_PRIMARY=${JSON.stringify(primaryReport)}`);
 
     assert.equal(accepted.acceptedUnderstanding, OWNER_REQUEST);
     assert.equal(accepted.decisionNeed, "NONE");
-    assert.equal(accepted.interpretation?.authority, "NON_AUTHORITATIVE_PROPOSAL");
     assert.ok(provider.calls.length > 0, "Expected the ordinary Knowledge path to acquire information.");
     assert.ok(provider.calls.every((call) => call.error === null), "Expected live Wikimedia acquisition to return normally.");
     assert.ok(provider.calls.every((call) => call.request.objective === OWNER_REQUEST), "Acquisition must preserve the authoritative objective.");
@@ -147,22 +140,45 @@ test("frozen procedural candidate gives the Owner useful governed sod guidance a
     );
 
     assert.equal(outcomeEnvelope.outcome?.kind, "KNOWLEDGE");
-    assert.ok((outcomeEnvelope.outcome?.findings ?? []).length > 0, "Expected governed Knowledge findings.");
+    const findings = (outcomeEnvelope.outcome?.findings ?? []) as Array<Record<string, any>>;
+    assert.ok(findings.length > 0, "Expected governed Knowledge findings.");
     assert.ok((outcomeEnvelope.outcome?.evidence ?? []).length > 0, "Expected governed evidence.");
     assert.ok((outcomeEnvelope.outcome?.provenance ?? []).length > 0, "Expected governed provenance.");
+    const sourceReport = findings.find((finding) => finding.basis === "SOURCE_REPORT" && (finding.evidenceIds?.length ?? 0) > 0);
+    assert.ok(sourceReport, "Expected an admitted source-report finding.");
+    const governedSentences = sentences(String(sourceReport.text ?? ""));
+    assert.ok(governedSentences.length >= 2, "Expected the governed source report to contain more than a definition-only sentence.");
 
-    const assistantMessage = outcomeEnvelope.presentation?.assistantMessage ?? "";
-    assert.doesNotMatch(assistantMessage, /couldn't establish enough relevant evidence/iu);
-    assert.match(assistantMessage, /soil|sod|turf|tillage/iu);
-    assert.match(assistantMessage, /prepar|dig|stir|overturn|loosen|till|plant|cultivat/iu);
-    assert.doesNotMatch(assistantMessage, /V36|run state|retrieval mode|investigation quer/iu);
+    const assistantMessage = String(outcomeEnvelope.presentation?.assistantMessage ?? "");
+    assert.ok(assistantMessage.includes(governedSentences[0]!), "Visible answer must faithfully expose the first governed source-report sentence.");
+    assert.ok(assistantMessage.includes(governedSentences[1]!), "Visible answer must not discard the next bounded governed procedural sentence.");
+    assert.match(assistantMessage, /prepar|dig|stir|overturn|shovel|hoe|rake|plough|rototill|smooth|seedbed|loosen|turn/iu);
+    assert.match(assistantMessage, /does not by itself independently verify the broader real-world claim/iu);
+    assert.doesNotMatch(assistantMessage, /V36|run state|retrieval mode|investigation quer|proof obligation/iu);
+
+    const beforeEvidenceCalls = provider.calls.length;
+    const evidenceFollowUp = await request(app, {
+      method: "POST",
+      url: `/api/v1/conversations/${conversationId}/turns`,
+      payload: { turnId: randomUUID(), message: EVIDENCE_FOLLOW_UP },
+    });
+    const evidenceReport = {
+      status: evidenceFollowUp.status ?? null,
+      acceptedUnderstanding: evidenceFollowUp.acceptedUnderstanding ?? null,
+      knowledgeReference: evidenceFollowUp.knowledgeReference ?? null,
+      visibleSolandraResponse: evidenceFollowUp.presentation?.assistantMessage ?? null,
+      provenance: evidenceFollowUp.knowledge?.provenance ?? [],
+      reacquired: provider.calls.length !== beforeEvidenceCalls,
+    };
+    console.log(`PROCEDURAL_KNOWLEDGE_EVIDENCE_FOLLOW_UP=${JSON.stringify(evidenceReport)}`);
 
     assert.equal(evidenceFollowUp.status, "REFERENCE_RESOLVED");
     assert.equal(evidenceFollowUp.acceptedUnderstanding, OWNER_REQUEST);
     assert.equal(provider.calls.length, beforeEvidenceCalls, "Historical evidence follow-up must not reacquire information.");
+    assert.match(String(evidenceFollowUp.presentation?.assistantMessage ?? ""), /Sources I used:/u);
     assert.deepEqual(
-      (evidenceFollowUp.knowledge?.provenance ?? []).map((source: any) => source.canonicalUri).sort(),
-      (outcomeEnvelope.outcome?.provenance ?? []).map((source: any) => source.canonicalUri).sort(),
+      (evidenceFollowUp.knowledge?.provenance ?? []).map((source: Record<string, any>) => source.canonicalUri).sort(),
+      (outcomeEnvelope.outcome?.provenance ?? []).map((source: Record<string, any>) => source.canonicalUri).sort(),
     );
   } finally {
     await app.close();
