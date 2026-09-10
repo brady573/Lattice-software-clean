@@ -75,8 +75,6 @@ function acquired(
       text: claim,
       claimType: "INTERPRETIVE",
       evidence,
-      // Deliberately shaped as if a provider tried to claim authority. The
-      // acquisition contract/pipeline must discard these extra fields.
       admitted: true,
       verdict: "TRUE",
       confidence: "HIGH",
@@ -182,7 +180,7 @@ test("retrieved/provider output remains untrusted until V36 qualifies exact sour
   assert.ok((validated.bundle.assessments[0]?.unresolvedObligationIds.length ?? 0) > 0);
 });
 
-test("Wikimedia adapter keeps follow-up language out of authority while changing retrieval strategy", async () => {
+test("Wikimedia adapter uses only provider-ready retrieval queries and does not interpret follow-up language", async () => {
   const observed: URL[] = [];
   const fetchImpl: typeof fetch = async (input) => {
     observed.push(new URL(String(input)));
@@ -201,20 +199,29 @@ test("Wikimedia adapter keeps follow-up language out of authority while changing
   };
   const provider = new WikimediaKnowledgeAcquisitionProvider({ fetchImpl, resultLimit: 4 });
   const objective = "What explains the observed effect?";
-  const initial = await provider.acquire({ runId: "run-wiki-1", objective, context: [] });
+  const retrievalQuery = "retrieved topic explanation";
+  const initial = await provider.acquire({
+    runId: "run-wiki-1",
+    objective,
+    context: [],
+    investigationQueries: [retrievalQuery],
+  });
   const sources = await provider.acquire({
     runId: "run-wiki-2",
     objective,
     context: ["Show me the sources."],
+    investigationQueries: [retrievalQuery],
   });
 
+  const searchRequests = observed.filter((url) => url.searchParams.get("generator") === "search");
+  assert.equal(searchRequests.length, 2);
   assert.equal(initial.sources[0]?.canonicalUri, "https://en.wikipedia.org/wiki/Retrieved_topic");
   assert.equal(initial.claims[0]?.text, initial.claims[0]?.evidence[0]?.excerpt);
   assert.equal(sources.claims[0]?.text, initial.claims[0]?.text);
-  assert.equal(observed[0]?.searchParams.get("gsrsearch"), objective);
-  assert.equal(observed[1]?.searchParams.get("gsrsearch"), objective);
-  assert.equal(observed[0]?.searchParams.get("gsrlimit"), "4");
-  assert.equal(observed[1]?.searchParams.get("gsrlimit"), "6");
+  assert.equal(searchRequests[0]?.searchParams.get("gsrsearch"), retrievalQuery);
+  assert.equal(searchRequests[1]?.searchParams.get("gsrsearch"), retrievalQuery);
+  assert.equal(searchRequests[0]?.searchParams.get("gsrlimit"), "4");
+  assert.equal(searchRequests[1]?.searchParams.get("gsrlimit"), "4");
 });
 
 test("unsupported, conflicting, insufficient, and failed acquisition remain honest V36 outcomes", async () => {

@@ -5,19 +5,24 @@ import { ModelRuntime } from "../src/model/runtime.js";
 import type { CanonicalModelRequest, ModelCallContext, ModelProviderResult } from "../src/model/types.js";
 import { ModelSolandraCognitiveRuntime } from "../src/solandra/cognition.js";
 
-class NullCorrectionObjectiveProvider implements ModelProvider {
-  readonly kind = "topic-transition-null-correction";
+class SemanticProposalProvider implements ModelProvider {
+  readonly kind = "topic-transition-semantic-proposal";
+
+  constructor(
+    private readonly objectiveRelation: "NEW_OBJECTIVE" | "CONTINUE" | "CORRECTION",
+    private readonly proposedObjective: string | null,
+  ) {}
 
   async generate(request: CanonicalModelRequest, _context: ModelCallContext): Promise<ModelProviderResult> {
     return {
       response: {
-        id: "topic-transition-null-correction-response",
+        id: "topic-transition-semantic-proposal-response",
         model: request.model,
         output: [{
           type: "text",
           text: JSON.stringify({
-            objectiveRelation: "CORRECTION",
-            proposedObjective: null,
+            objectiveRelation: this.objectiveRelation,
+            proposedObjective: this.proposedObjective,
             requestedHelp: "KNOWLEDGE",
             relevantContext: [],
             entities: [],
@@ -35,18 +40,18 @@ class NullCorrectionObjectiveProvider implements ModelProvider {
       route: {
         actualProvider: this.kind,
         actualModel: request.model,
-        upstreamRequestId: "topic-transition-null-correction-request",
+        upstreamRequestId: "topic-transition-semantic-proposal-request",
       },
     };
   }
 }
 
-test("explicit USER correction remains a successor objective when model omits proposedObjective", async () => {
+test("Solandra correction semantics are not overwritten by deterministic USER-phrase reparsing", async () => {
+  const message = "Actually, I mean cameras for indoor low-light photos.";
   const cognition = new ModelSolandraCognitiveRuntime(
-    new ModelRuntime(new NullCorrectionObjectiveProvider()),
+    new ModelRuntime(new SemanticProposalProvider("CORRECTION", null)),
     "topic-transition-correction-model",
   );
-  const message = "Actually, I mean cameras for indoor low-light photos.";
   const result = await cognition.interpret({
     conversationId: "topic-transition-correction",
     messageId: "topic-transition-correction-message",
@@ -57,24 +62,26 @@ test("explicit USER correction remains a successor objective when model omits pr
   });
 
   assert.equal(result.proposal.objectiveRelation, "CORRECTION");
-  assert.equal(result.proposal.proposedObjective, message);
+  assert.equal(result.proposal.proposedObjective, null);
   assert.equal(result.proposal.materialAmbiguity, null);
 });
 
-test("ordinary follow-up is not rewritten as an explicit correction", async () => {
+test("model-proposed exact USER correction remains non-authoritative semantic output", async () => {
+  const message = "Use indoor low-light photography as the objective instead.";
   const cognition = new ModelSolandraCognitiveRuntime(
-    new ModelRuntime(new NullCorrectionObjectiveProvider()),
+    new ModelRuntime(new SemanticProposalProvider("CORRECTION", message)),
     "topic-transition-correction-model",
   );
   const result = await cognition.interpret({
-    conversationId: "topic-transition-follow-up",
-    messageId: "topic-transition-follow-up-message",
-    message: "Why?",
-    currentObjective: "Why do maple leaves change color?",
-    recentUserMessages: ["Why do maple leaves change color?", "Why?"],
+    conversationId: "topic-transition-exact-correction",
+    messageId: "topic-transition-exact-correction-message",
+    message,
+    currentObjective: "Help me compare cameras for hiking.",
+    recentUserMessages: ["Help me compare cameras for hiking.", message],
     governedKnowledge: [],
   });
 
   assert.equal(result.proposal.objectiveRelation, "CORRECTION");
-  assert.equal(result.proposal.proposedObjective, null);
+  assert.equal(result.proposal.proposedObjective, message);
+  assert.equal(result.proposal.materialAmbiguity, null);
 });
