@@ -213,13 +213,15 @@ test("Wikimedia adapter uses only provider-ready retrieval queries and does not 
     investigationQueries: [retrievalQuery],
   });
 
+  const searchRequests = observed.filter((url) => url.searchParams.get("generator") === "search");
+  assert.equal(searchRequests.length, 2);
   assert.equal(initial.sources[0]?.canonicalUri, "https://en.wikipedia.org/wiki/Retrieved_topic");
   assert.equal(initial.claims[0]?.text, initial.claims[0]?.evidence[0]?.excerpt);
   assert.equal(sources.claims[0]?.text, initial.claims[0]?.text);
-  assert.equal(observed[0]?.searchParams.get("gsrsearch"), retrievalQuery);
-  assert.equal(observed[1]?.searchParams.get("gsrsearch"), retrievalQuery);
-  assert.equal(observed[0]?.searchParams.get("gsrlimit"), "4");
-  assert.equal(observed[1]?.searchParams.get("gsrlimit"), "4");
+  assert.equal(searchRequests[0]?.searchParams.get("gsrsearch"), retrievalQuery);
+  assert.equal(searchRequests[1]?.searchParams.get("gsrsearch"), retrievalQuery);
+  assert.equal(searchRequests[0]?.searchParams.get("gsrlimit"), "4");
+  assert.equal(searchRequests[1]?.searchParams.get("gsrlimit"), "4");
 });
 
 test("unsupported, conflicting, insufficient, and failed acquisition remain honest V36 outcomes", async () => {
