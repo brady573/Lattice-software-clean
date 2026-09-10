@@ -68,7 +68,7 @@ export function explicitConsultationObjectiveCorrection(
   hasObjective: boolean,
 ): string | undefined {
   if (!hasObjective) return undefined;
-  const match = /^(?:no\s*[,;:-]?\s*actually\s*[,;:-]?\s*|actually\s*[,;:-]?\s*i\s+meant\s+|actually\s*[,;:-]?\s*(?:my|the)\s+objective\s+(?:is|should be)\s+|i\s+mean(?:t)?\s+|(?:change|replace|update)\s+(?:the\s+)?objective\s+(?:to\s+)?|instead\s*[,;:-]?\s*)(.+)$/iu.exec(message.trim());
+  const match = /^(?:no\s*[,;:-]?\s*actually\s*[,;:-]?\s*|actually\s*[,;:-]?\s*i\s+mean(?:t)?\s+|actually\s*[,;:-]?\s*(?:my|the)\s+objective\s+(?:is|should be)\s+|i\s+mean(?:t)?\s+|(?:change|replace|update)\s+(?:the\s+)?objective\s+(?:to\s+)?|instead\s*[,;:-]?\s*)(.+)$/iu.exec(message.trim());
   return match?.[1]?.trim() || undefined;
 }
 
