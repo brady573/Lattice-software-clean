@@ -7,7 +7,12 @@ import type {
   KnowledgeAcquisitionRequest,
   KnowledgeAcquisitionResult,
 } from "../src/knowledge/acquisition.js";
-import { RelevantKnowledgeAcquisitionProvider } from "../src/knowledge/investigation.js";
+import {
+  RelevantKnowledgeAcquisitionProvider,
+  type KnowledgeInvestigationPlanningInput,
+  type KnowledgeInvestigator,
+  type KnowledgeResponsivenessInput,
+} from "../src/knowledge/investigation.js";
 import type { ModelInvocationProvenance } from "../src/model/types.js";
 import { createRuntimeApp } from "../src/runtime-app.js";
 import { resolveRuntimeConfig } from "../src/runtime-config.js";
@@ -25,8 +30,10 @@ import type {
 import { KnowledgeAcquisitionTruthPipeline } from "../src/truth/knowledge-acquisition-pipeline.js";
 
 const USER_OBJECTIVE = "I'm trying to understand why a public software interface can make client upgrades less brittle.";
-const FIRST_NEED = "public software interface upgrade coupling compatibility";
-const FRESH_NEED = "public interface versioning compatibility contracts";
+const FIRST_NEED = "Understand which compatibility properties reduce upgrade coupling.";
+const FRESH_NEED = "Refresh the evidence about versioned compatibility contracts.";
+const FIRST_QUERY = "public API compatibility contracts client upgrade coupling";
+const FRESH_QUERY = "versioned public API compatibility contracts client upgrades";
 const FIRST_FINDING = "A stable public software interface can make client upgrades less brittle because clients depend on the public contract rather than implementation details.";
 const FRESH_FINDING = "A versioned public interface can reduce client upgrade coupling because compatibility changes are made explicit at the contract boundary.";
 const MODEL_ONLY_GUESS = "The model guesses that public interfaces always eliminate upgrade failures.";
@@ -114,13 +121,36 @@ class JourneyCognition implements SolandraCognitiveRuntime {
   }
 }
 
+class RecordingInvestigator implements KnowledgeInvestigator {
+  readonly kind = "m1-recording-solandra-investigator";
+  readonly planningInputs: KnowledgeInvestigationPlanningInput[] = [];
+  readonly responsivenessInputs: KnowledgeResponsivenessInput[] = [];
+
+  async plan(input: KnowledgeInvestigationPlanningInput) {
+    this.planningInputs.push(structuredClone(input));
+    return {
+      retrievalQueries: input.knowledgeNeeds.includes(FRESH_NEED) ? [FRESH_QUERY] : [FIRST_QUERY],
+    };
+  }
+
+  async selectResponsive(input: KnowledgeResponsivenessInput) {
+    this.responsivenessInputs.push(structuredClone(input));
+    return {
+      selections: input.claims.map((claim) => ({
+        claimId: claim.claimId,
+        sourceIds: claim.evidence.map((item) => item.sourceId),
+      })),
+    };
+  }
+}
+
 class RecordingAcquisitionProvider implements KnowledgeAcquisitionProvider {
   readonly kind = "m1-recording-source";
   readonly requests: KnowledgeAcquisitionRequest[] = [];
 
   async acquire(request: KnowledgeAcquisitionRequest): Promise<KnowledgeAcquisitionResult> {
     this.requests.push(structuredClone(request));
-    const fresh = request.investigationQueries?.includes(FRESH_NEED) === true;
+    const fresh = request.investigationQueries?.includes(FRESH_QUERY) === true;
     const text = fresh ? FRESH_FINDING : FIRST_FINDING;
     const suffix = fresh ? "fresh" : "initial";
     return {
@@ -185,11 +215,12 @@ async function waitForOutcome(app: FastifyInstance, runId: string) {
   throw new Error("M1 Knowledge-need Run did not complete.");
 }
 
-test("Solandra Knowledge need drives acquisition while USER objective and V36 authority remain separate", async () => {
+test("Solandra Knowledge needs remain conceptual while Solandra investigation owns retrieval and responsiveness", async () => {
   const cognition = new JourneyCognition();
+  const investigator = new RecordingInvestigator();
   const rawProvider = new RecordingAcquisitionProvider();
   const truthPipeline = new KnowledgeAcquisitionTruthPipeline(
-    new RelevantKnowledgeAcquisitionProvider(rawProvider),
+    new RelevantKnowledgeAcquisitionProvider(rawProvider, investigator),
   );
   const app = await createRuntimeApp(config, {
     memoryDispatchDelayMs: 1,
@@ -228,9 +259,14 @@ test("Solandra Knowledge need drives acquisition while USER objective and V36 au
     assert.deepEqual(request.investigationQueries, [FIRST_NEED]);
 
     const outcome = await waitForOutcome(app, accepted.runId);
+    assert.equal(investigator.planningInputs.length, 1);
+    assert.deepEqual(investigator.planningInputs[0]?.knowledgeNeeds, [FIRST_NEED]);
     assert.equal(rawProvider.requests.length, 1);
     assert.equal(rawProvider.requests[0]?.objective, USER_OBJECTIVE);
-    assert.deepEqual(rawProvider.requests[0]?.investigationQueries, [FIRST_NEED]);
+    assert.deepEqual(rawProvider.requests[0]?.investigationQueries, [FIRST_QUERY]);
+    assert.notDeepEqual(rawProvider.requests[0]?.investigationQueries, request.investigationQueries);
+    assert.equal(investigator.responsivenessInputs.length, 1);
+    assert.deepEqual(investigator.responsivenessInputs[0]?.retrievalQueries, [FIRST_QUERY]);
     const initial = outcome.json<{
       outcome: { objective: string; findings: Array<{ text: string }> };
       knowledgeReference: { knowledgeId: string; referenceId: string };
@@ -277,7 +313,8 @@ test("Solandra Knowledge need drives acquisition while USER objective and V36 au
     assert.deepEqual(freshRun.json<{ request: { investigationQueries: string[] } }>().request.investigationQueries, [FRESH_NEED]);
     const freshOutcome = await waitForOutcome(app, freshAccepted.runId);
     assert.equal(rawProvider.requests.length, 2);
-    assert.deepEqual(rawProvider.requests[1]?.investigationQueries, [FRESH_NEED]);
+    assert.deepEqual(investigator.planningInputs[1]?.knowledgeNeeds, [FRESH_NEED]);
+    assert.deepEqual(rawProvider.requests[1]?.investigationQueries, [FRESH_QUERY]);
     const fresh = freshOutcome.json<{
       outcome: { findings: Array<{ text: string }> };
       knowledgeReference: { knowledgeId: string };
