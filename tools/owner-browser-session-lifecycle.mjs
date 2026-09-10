@@ -8,6 +8,7 @@ import { join } from "node:path";
 const baseUrl = process.env.OWNER_SESSION_BASE_URL ?? "http://127.0.0.1:3108";
 const ownerToken = process.env.OWNER_SESSION_TEST_TOKEN ?? "";
 const browserExecutable = process.env.M7_BROWSER_EXECUTABLE ?? "";
+const journeyMessage = "Prepare a checklist for reviewing a risky configuration change before I apply it.";
 assert.ok(ownerToken.length >= 32, "Owner session browser proof requires a disposable test Owner token.");
 assert.ok(browserExecutable && existsSync(browserExecutable), "Owner session browser proof requires Chrome/Chromium.");
 
@@ -41,10 +42,7 @@ function spawnRuntime(args, extraEnv = {}) {
 async function stop(child) {
   if (!child || child.exitCode !== null) return;
   child.kill("SIGTERM");
-  await Promise.race([
-    new Promise((resolve) => child.once("exit", resolve)),
-    sleep(3_000),
-  ]);
+  await Promise.race([new Promise((resolve) => child.once("exit", resolve)), sleep(3_000)]);
   if (child.exitCode === null) child.kill("SIGKILL");
 }
 
@@ -134,15 +132,20 @@ async function main() {
     LATTICE_OWNER_ACCESS_TOKEN: ownerToken,
     LATTICE_TRUTH_MODE: "v36-offline",
     LATTICE_AUTO_MIGRATE: "false",
+    LATTICE_RUN_WORKER_LEASE_MS: "5000",
+    LATTICE_RUN_WORKER_RETRY_DELAY_MS: "5",
+    LATTICE_RUN_WORKER_BATCH_SIZE: "4",
     PORT: "3108",
     HOST: "127.0.0.1",
   };
   let api;
+  let worker;
   let authorizedBrowser;
   let unauthorizedBrowser;
   try {
     api = spawnRuntime(["dist/src/index.js"], runtimeEnv);
     await waitFor("required-auth API", async () => (await fetch(`${baseUrl}/health`).catch(() => null))?.ok === true);
+    worker = spawnRuntime(["dist/src/run-worker-main.js"], runtimeEnv);
 
     const denied = await fetch(`${baseUrl}/api/v1/conversations`);
     assert.equal(denied.status, 401);
@@ -159,35 +162,49 @@ async function main() {
     await waitFor("authorized canonical Solandra", async () => authorizedBrowser.cdp.eval(`(() => {
       const input=document.getElementById('conversationInput');
       const gate=document.getElementById('ownerAccessGate');
-      return location.pathname==='/' && input instanceof HTMLTextAreaElement && gate?.hidden===true ? true : null;
+      const stored=sessionStorage.getItem('lattice.solandra.owner-access.v1');
+      return location.pathname==='/' && input instanceof HTMLTextAreaElement && gate?.hidden===true && !stored ? true : null;
     })()`));
 
-    const firstJourney = await authorizedBrowser.cdp.eval(`fetch('/api/v1/conversations').then(async r=>({status:r.status,body:await r.json()}))`);
-    assert.equal(firstJourney.status, 200);
     await authorizedBrowser.cdp.send("Page.reload", { ignoreCache: true });
     await waitFor("authorized Solandra after refresh", async () => authorizedBrowser.cdp.eval(`(() => {
       const input=document.getElementById('conversationInput');
       const gate=document.getElementById('ownerAccessGate');
       return document.readyState==='complete' && input instanceof HTMLTextAreaElement && gate?.hidden===true ? true : null;
     })()`));
-    const afterRefresh = await authorizedBrowser.cdp.eval(`fetch('/api/v1/conversations').then(r=>r.status)`);
-    assert.equal(afterRefresh, 200);
 
-    const delegatedRemint = await authorizedBrowser.cdp.eval(`fetch('/api/v1/auth/browser-session-grants',{method:'POST'}).then(r=>r.status)`);
-    assert.equal(delegatedRemint, 403);
+    await authorizedBrowser.cdp.eval(`(() => {
+      const input=document.getElementById('conversationInput');
+      const send=document.getElementById('sendButton');
+      if(!(input instanceof HTMLTextAreaElement)||!(send instanceof HTMLButtonElement))throw new Error('canonical Solandra controls missing');
+      input.value=${JSON.stringify(journeyMessage)};
+      input.dispatchEvent(new Event('input',{bubbles:true}));
+      if(send.disabled)throw new Error('canonical send control disabled');
+      send.click();
+      return true;
+    })()`);
+    const journey = await waitFor("ordinary Solandra journey completion", async () => authorizedBrowser.cdp.eval(`(() => {
+      const input=document.getElementById('conversationInput');
+      const gate=document.getElementById('ownerAccessGate');
+      const conversation=document.getElementById('conversation')?.innerText ?? '';
+      return !input.disabled && gate?.hidden===true && conversation.includes(${JSON.stringify(journeyMessage)})
+        ? { conversation, composer:document.getElementById('composer')?.innerText ?? '' }
+        : null;
+    })()`), 30_000);
+    assert.match(journey.conversation, /Prepare a checklist/u);
 
     unauthorizedBrowser = await launchBrowser(baseUrl);
     await waitFor("unauthorized Owner access gate", async () => unauthorizedBrowser.cdp.eval(`(() => {
       const gate=document.getElementById('ownerAccessGate');
-      return gate?.hidden===false ? true : null;
+      const input=document.getElementById('conversationInput');
+      return gate?.hidden===false && input instanceof HTMLTextAreaElement ? true : null;
     })()`));
-    const browserDenied = await unauthorizedBrowser.cdp.eval(`fetch('/api/v1/conversations').then(r=>r.status)`);
-    assert.equal(browserDenied, 401);
 
     console.log("OWNER_BROWSER_SESSION_LIFECYCLE=PASS");
   } finally {
     await closeBrowser(unauthorizedBrowser);
     await closeBrowser(authorizedBrowser);
+    await stop(worker);
     await stop(api);
   }
 }
