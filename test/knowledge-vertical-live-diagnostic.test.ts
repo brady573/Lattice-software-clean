@@ -12,13 +12,13 @@ const QUESTIONS = [
   "Does drinking exactly 137 milliliters of water every morning guarantee that I will never get a headache?",
 ] as const;
 
-async function request(app: Awaited<ReturnType<typeof createRuntimeApp>>, options: Parameters<typeof app.inject>[0]) {
+async function request(app: any, options: any): Promise<any> {
   const response = await app.inject(options);
   assert.ok(response.statusCode >= 200 && response.statusCode < 300, response.body);
   return response.json();
 }
 
-async function waitForOutcome(app: Awaited<ReturnType<typeof createRuntimeApp>>, runId: string) {
+async function waitForOutcome(app: any, runId: string): Promise<any> {
   const deadline = Date.now() + 45_000;
   while (Date.now() < deadline) {
     const run = await request(app, { method: "GET", url: `/api/v1/runs/${runId}` });
