@@ -28,11 +28,14 @@ async function createSessionProbeApp() {
   return { app, broker };
 }
 
-function sessionCookie(response: { headers: Record<string, unknown> }): string {
-  const raw = response.headers["set-cookie"];
-  const value = Array.isArray(raw) ? raw[0] : raw;
-  assert.equal(typeof value, "string");
-  return value.split(";", 1)[0]!;
+function headerString(value: string | string[] | undefined): string {
+  const resolved = Array.isArray(value) ? value[0] : value;
+  assert.equal(typeof resolved, "string");
+  return resolved;
+}
+
+function sessionCookie(response: { headers: Record<string, string | string[] | undefined> }): string {
+  return headerString(response.headers["set-cookie"]).split(";", 1)[0]!;
 }
 
 test("one-time browser grant establishes a revocable Owner session without exposing the Owner credential", async () => {
@@ -74,8 +77,7 @@ test("one-time browser grant establishes a revocable Owner session without expos
       payload: { grant: grant.grant },
     });
     assert.equal(exchanged.statusCode, 204, exchanged.body);
-    const setCookie = exchanged.headers["set-cookie"];
-    assert.equal(typeof setCookie, "string");
+    const setCookie = headerString(exchanged.headers["set-cookie"]);
     assert.match(setCookie, /lattice_owner_session=[A-Za-z0-9_-]{43}/u);
     assert.match(setCookie, /HttpOnly/u);
     assert.match(setCookie, /Secure/u);
