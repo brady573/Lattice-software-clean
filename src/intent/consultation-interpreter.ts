@@ -63,6 +63,15 @@ export function inferConsultationResourceNeed(message: string): ConsultationReso
   return "NONE";
 }
 
+export function explicitConsultationObjectiveCorrection(
+  message: string,
+  hasObjective: boolean,
+): string | undefined {
+  if (!hasObjective) return undefined;
+  const match = /^(?:no\s*[,;:-]?\s*actually\s*[,;:-]?\s*|actually\s*[,;:-]?\s*i\s+meant\s+|actually\s*[,;:-]?\s*(?:my|the)\s+objective\s+(?:is|should be)\s+|i\s+mean(?:t)?\s+|(?:change|replace|update)\s+(?:the\s+)?objective\s+(?:to\s+)?|instead\s*[,;:-]?\s*)(.+)$/iu.exec(message.trim());
+  return match?.[1]?.trim() || undefined;
+}
+
 const SHORT_FORM_PATTERN = /\b[A-Z]{3}\b/gu;
 
 function escapeRegex(value: string): string {
@@ -111,13 +120,11 @@ export class ConservativeConsultationInterpreter implements ConsultationInterpre
     const existingObjective = input.currentIntentVersion?.state.objective;
     const hasObjective = existingObjective?.value.state === "VALUE"
       && typeof existingObjective.value.value === "string";
-    const explicitCorrection = hasObjective
-      ? /^(?:no\s*[,;:-]?\s*actually\s*[,;:-]?\s*|actually\s*[,;:-]?\s*i\s+meant\s+|actually\s*[,;:-]?\s*(?:my|the)\s+objective\s+(?:is|should be)\s+|i\s+mean(?:t)?\s+|(?:change|replace|update)\s+(?:the\s+)?objective\s+(?:to\s+)?|instead\s*[,;:-]?\s*)(.+)$/iu.exec(message)
-      : null;
+    const explicitCorrection = explicitConsultationObjectiveCorrection(message, hasObjective);
     const objectiveEffect: ConsultationObjectiveEffect = !hasObjective
       ? { kind: "ESTABLISH", value: message }
-      : explicitCorrection?.[1]?.trim()
-        ? { kind: "REPLACE_EXPLICIT", value: explicitCorrection[1].trim() }
+      : explicitCorrection
+        ? { kind: "REPLACE_EXPLICIT", value: explicitCorrection }
         : { kind: "PRESERVE" };
     if (input.explicitResourceNeed) {
       return {
