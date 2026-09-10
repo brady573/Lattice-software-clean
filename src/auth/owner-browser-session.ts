@@ -1,12 +1,12 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type { FastifyInstance, FastifyRequest } from "fastify";
-import { getAuthenticatedSubject, type AuthenticatedSubject, type AuthenticatedSubjectResolver } from "./authenticated-subject.js";
+import type { AuthenticatedSubject, AuthenticatedSubjectResolver } from "./authenticated-subject.js";
 import { OWNER_SUBJECT_ID } from "./owner-access.js";
 
 const GRANT_TTL_MS = 5 * 60 * 1_000;
 const SESSION_TTL_MS = 60 * 60 * 1_000;
 const MAX_ACTIVE_AUTHORIZATIONS = 32;
-const SESSION_COOKIE_NAME = "lattice_owner_session";
+const SESSION_COOKIE_NAME = "__Host-lattice_owner_session";
 const OWNER_ACCESS_STORAGE_KEY = "lattice.solandra.owner-access.v1";
 const OPAQUE_TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/u;
 
@@ -174,6 +174,17 @@ export function createOwnerBrowserSessionSubjectResolver(
   return async (request) => (await ownerResolver(request)) ?? broker.resolveSubject(request);
 }
 
+async function hasDirectOwnerCredential(
+  request: FastifyRequest,
+  ownerResolver: AuthenticatedSubjectResolver,
+): Promise<boolean> {
+  try {
+    return (await ownerResolver(request))?.subjectId === OWNER_SUBJECT_ID;
+  } catch {
+    return false;
+  }
+}
+
 function authorizationPage(): string {
   return `<!doctype html>
 <html lang="en">
@@ -268,6 +279,7 @@ function bootstrapPage(): string {
 export function registerOwnerBrowserSessionRoutes(
   app: FastifyInstance,
   broker: OwnerBrowserSessionBroker,
+  directOwnerResolver: AuthenticatedSubjectResolver,
 ): void {
   app.get("/auth/session/authorize", async (_request, reply) => reply
     .header("cache-control", "no-store")
@@ -282,7 +294,7 @@ export function registerOwnerBrowserSessionRoutes(
     .send(bootstrapPage()));
 
   app.post("/api/v1/auth/browser-session-grants", async (request, reply) => {
-    if (getAuthenticatedSubject(request).subjectId !== OWNER_SUBJECT_ID) {
+    if (!(await hasDirectOwnerCredential(request, directOwnerResolver))) {
       return reply.status(403).send({ error: "OWNER_AUTHENTICATION_REQUIRED" });
     }
     try {
@@ -296,7 +308,7 @@ export function registerOwnerBrowserSessionRoutes(
   app.delete<{ Params: { authorizationId: string } }>(
     "/api/v1/auth/browser-sessions/:authorizationId",
     async (request, reply) => {
-      if (getAuthenticatedSubject(request).subjectId !== OWNER_SUBJECT_ID) {
+      if (!(await hasDirectOwnerCredential(request, directOwnerResolver))) {
         return reply.status(403).send({ error: "OWNER_AUTHENTICATION_REQUIRED" });
       }
       broker.revokeAuthorization(request.params.authorizationId);
