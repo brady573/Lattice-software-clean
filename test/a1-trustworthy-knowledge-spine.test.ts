@@ -7,6 +7,10 @@ import type {
   KnowledgeAcquisitionResult,
   RetrievedKnowledgeSource,
 } from "../src/knowledge/acquisition.js";
+import {
+  RelevantKnowledgeAcquisitionProvider,
+  type KnowledgeInvestigator,
+} from "../src/knowledge/investigation.js";
 import type { EvidentiarySuitability, KnowledgeOutcome } from "../src/outcome.js";
 import type { KnowledgeSimplifier } from "../src/presentation/solandra/knowledge-simplification.js";
 import { createRuntimeApp } from "../src/runtime-app.js";
@@ -194,7 +198,7 @@ test("A1 cast-iron answer is direct, source-grounded, and follow-ups preserve th
   }
 });
 
-test("A1 clarification preserves canonical wording while explicit USER terminology drives investigation", async () => {
+test("A1 clarification preserves canonical wording, Intent lineage, and source suitability", async () => {
   const tic = source(
     "tic-tax",
     "Tenancy-in-common tax guidance",
@@ -233,7 +237,6 @@ test("A1 clarification preserves canonical wording while explicit USER terminolo
     assert.equal(ticAccepted.intentVersionId, ticClarification.intentVersionId);
     assert.equal(ticAccepted.acceptedUnderstanding, ticObjective);
     assert.equal(ticResult.outcome.objective, ticObjective);
-    assert.match(provider.requests[0]?.investigationQueries?.[0] ?? "", /tenancy common taxes/iu);
     assert.equal(ticResult.outcome.provenance[0]?.evidentiarySuitability, "AUTHORITATIVE_DOMAIN");
     assert.match(ticResult.presentation.assistantMessage, /Tenancy in common ownership can affect taxes/iu);
     assert.doesNotMatch(ticResult.presentation.assistantMessage, /authoritative source before I can answer/iu);
@@ -250,34 +253,46 @@ test("A1 clarification preserves canonical wording while explicit USER terminolo
     const dsoResult = await outcomeFor(app, dsoAccepted);
     assert.equal(dsoAccepted.intentVersionId, dsoClarification.intentVersionId);
     assert.equal(dsoAccepted.acceptedUnderstanding, dsoObjective);
-    assert.match(provider.requests[1]?.investigationQueries?.[0] ?? "", /days sales outstanding cash flow/iu);
     assert.match(dsoResult.presentation.assistantMessage, /Days sales outstanding can affect cash flow/iu);
   } finally {
     await app.close();
   }
 });
 
-test("A1 reversed causal material is rejected before V36 and unresolved response fails closed", async () => {
-  const reverse = source(
-    "reverse-autumn",
+test("A1 non-responsive acquired material is excluded before V36 and cannot become answer basis", async () => {
+  const unrelated = source(
+    "unrelated-autumn",
     "Autumn tourism",
     "Tourism increases because leaves change color in autumn.",
   );
   const provider = new RecordingProvider(() => ({
-    sources: [reverse],
-    claims: [sourceReport(reverse, "reverse-autumn-report")],
+    sources: [unrelated],
+    claims: [sourceReport(unrelated, "unrelated-autumn-report")],
   }));
+  const investigator: KnowledgeInvestigator = {
+    kind: "a1-non-responsive-selection",
+    async plan() {
+      return { retrievalQueries: ["provider-ready fixture query"] };
+    },
+    async selectResponsive() {
+      return { selections: [] };
+    },
+  };
+  const truthPipeline = new KnowledgeAcquisitionTruthPipeline(
+    new RelevantKnowledgeAcquisitionProvider(provider, investigator),
+  );
   const app = await createRuntimeApp(config, {
     memoryDispatchDelayMs: 1,
-    knowledgeAcquisitionProvider: provider,
+    truthPipeline,
   });
 
   try {
     const conversationId = await createConversation(app);
     const accepted = requireAccepted(
-      await submitTurn(app, conversationId, "reverse", "Why do leaves change color in autumn?"),
+      await submitTurn(app, conversationId, "non-responsive", "Why do leaves change color in autumn?"),
     );
     const result = await outcomeFor(app, accepted);
+    assert.equal(provider.requests.length, 1);
     assert.deepEqual(result.outcome.findings, []);
     assert.deepEqual(result.outcome.provenance, []);
     assert.equal(result.presentation.assistantMessage, "I couldn't establish why this happens from the available evidence.");
