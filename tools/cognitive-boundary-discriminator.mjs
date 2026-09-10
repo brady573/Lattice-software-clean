@@ -20,9 +20,9 @@ const config = resolveRuntimeConfig({
   LATTICE_TRUTH_MODE: "v36-live",
   LATTICE_SOLANDRA_COGNITION_ROUTE: "groq-gpt-oss-120b",
 });
-const cognition = createConfiguredSolandraCognition(config);
+const solandra = createConfiguredSolandraCognition(config);
 const realInvestigator = createConfiguredSolandraKnowledgeInvestigator(config);
-assert.ok(cognition, "Configured real Solandra cognition is required.");
+assert.ok(solandra, "Configured real Solandra cognition is required.");
 assert.ok(realInvestigator, "Configured real Solandra Knowledge investigator is required.");
 
 const planning = [];
@@ -79,7 +79,8 @@ const truthPipeline = new KnowledgeAcquisitionTruthPipeline(
 const app = await createRuntimeApp(config, {
   memoryDispatchDelayMs: 1,
   truthPipeline,
-  solandraCognition: cognition,
+  solandraCognition: solandra.cognition,
+  solandraKnowledgePresenter: solandra.knowledgePresenter,
 });
 
 async function waitForOutcome(runId) {
