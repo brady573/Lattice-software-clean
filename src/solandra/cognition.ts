@@ -156,6 +156,7 @@ function buildCognitionRequest(model: string, input: SolandraCognitionInput): Ca
           "Do not answer the factual question. Do not establish truth, canonical intent, a recommendation, authorization, or action.",
           "Canonical USER intent is written elsewhere. Your proposedObjective is advisory and must never be treated as USER-authored merely because you generated it.",
           "Classify objectiveRelation by the semantic relationship between the CURRENT USER message and the current canonical objective, not merely because both occur in the same Conversation.",
+          "The Current USER message field is the turn being classified. If that same text also appears in Recent USER messages, treat the duplicate only as conversation context; repetition there is not evidence that the turn CONTINUEs the prior objective.",
           "Use NEW_OBJECTIVE when the current message independently asks for a materially different topic, outcome, task, or decision from the current objective. An abrupt but clear topic change is NEW_OBJECTIVE even when prior messages remain visible in the same Conversation.",
           "Use CONTINUE when the current message is a same-objective follow-up, elaboration, request for explanation/sources/simplification, or contextual continuation whose meaning materially depends on the current objective or supplied governed state.",
           "Use CORRECTION when the USER is revising, retracting, narrowing, expanding, or otherwise correcting the meaning of the current objective. Do not use CORRECTION merely because the USER starts an unrelated objective.",
@@ -180,7 +181,7 @@ function buildCognitionRequest(model: string, input: SolandraCognitionInput): Ca
         content: [
           `Conversation ID: ${input.conversationId}`,
           `Current canonical objective: ${input.currentObjective ?? "none"}`,
-          `Recent prior USER messages: ${input.recentUserMessages.join(" | ") || "none"}`,
+          `Recent USER messages: ${input.recentUserMessages.join(" | ") || "none"}`,
           "Addressable governed Knowledge:",
           knowledge,
           "",
