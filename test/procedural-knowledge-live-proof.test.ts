@@ -1,238 +1,170 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
+import type { FastifyInstance, InjectOptions } from "fastify";
 import type {
   KnowledgeAcquisitionProvider,
   KnowledgeAcquisitionRequest,
   KnowledgeAcquisitionResult,
 } from "../src/knowledge/acquisition.js";
-import {
-  DeterministicKnowledgeInvestigationQueryDeriver,
-  ObjectiveKnowledgeRelevanceQualifier,
-  RelevantKnowledgeAcquisitionProvider,
-} from "../src/knowledge/investigation.js";
 import { WikimediaKnowledgeAcquisitionProvider } from "../src/knowledge/wikimedia-acquisition.js";
-import { buildKnowledgeOutcome } from "../src/outcome.js";
-import type { LatticeRun, LatticeRunRequest } from "../src/domain.js";
-import { KnowledgeAcquisitionTruthPipeline } from "../src/truth/knowledge-acquisition-pipeline.js";
+import { createRuntimeApp } from "../src/runtime-app.js";
+import { resolveRuntimeConfig } from "../src/runtime-config.js";
 
-const OBJECTIVE = "I need to know how to prepare my soil for sod.";
-const CANDIDATE = "72d75b821c907e7bb408e93344fd455a9e7ed5f4";
+const OWNER_REQUEST = "I need to know how to prepare my soil for sod.";
+const EVIDENCE_FOLLOW_UP = "What evidence do you have?";
+const CANDIDATE = "09a7a1c111f02de86798a46e013184eb5de64e18";
 
-class ReplayProvider implements KnowledgeAcquisitionProvider {
-  readonly kind = "procedural-diagnostic-replay";
-  readonly requests: KnowledgeAcquisitionRequest[] = [];
+interface RecordedAcquisition {
+  request: KnowledgeAcquisitionRequest;
+  result: KnowledgeAcquisitionResult | null;
+  error: string | null;
+}
 
-  constructor(private readonly result: KnowledgeAcquisitionResult) {}
+class RecordingWikimediaProvider implements KnowledgeAcquisitionProvider {
+  readonly kind = "procedural-e2e-recording-wikimedia";
+  readonly calls: RecordedAcquisition[] = [];
+  private readonly delegate = new WikimediaKnowledgeAcquisitionProvider();
 
   async acquire(request: KnowledgeAcquisitionRequest): Promise<KnowledgeAcquisitionResult> {
-    this.requests.push(structuredClone(request));
-    return structuredClone(this.result);
+    const entry: RecordedAcquisition = {
+      request: structuredClone(request),
+      result: null,
+      error: null,
+    };
+    this.calls.push(entry);
+    try {
+      const result = await this.delegate.acquire(request);
+      entry.result = structuredClone(result);
+      return result;
+    } catch (error) {
+      entry.error = error instanceof Error ? error.message : String(error);
+      throw error;
+    }
   }
 }
 
-function bounded(value: string, max = 1_200): string {
-  return value.replace(/\s+/gu, " ").trim().slice(0, max);
+async function request(app: FastifyInstance, options: InjectOptions): Promise<any> {
+  const response = await app.inject(options);
+  assert.ok(response.statusCode >= 200 && response.statusCode < 300, response.body);
+  return response.json();
 }
 
-test("trace where responsive sod information disappears before governed Knowledge", { timeout: 120_000 }, async () => {
-  const runId = randomUUID();
-  const deriver = new DeterministicKnowledgeInvestigationQueryDeriver();
-  const qualifier = new ObjectiveKnowledgeRelevanceQualifier();
-  const queries = [...deriver.derive({ objective: OBJECTIVE, context: [] })];
+async function waitForOutcome(app: FastifyInstance, runId: string): Promise<any> {
+  const deadline = Date.now() + 45_000;
+  while (Date.now() < deadline) {
+    const run = await request(app, { method: "GET", url: `/api/v1/runs/${runId}` });
+    if (run.status === "FAILED" || run.status === "CANCELLED") {
+      throw new Error(`Run ${runId} reached ${run.status}.`);
+    }
+    if (run.status === "COMPLETED") {
+      return request(app, { method: "GET", url: `/api/v1/runs/${runId}/outcome` });
+    }
+    await new Promise((resolveWait) => setTimeout(resolveWait, 25));
+  }
+  throw new Error(`Run ${runId} did not complete within 45 seconds.`);
+}
 
-  const rawProvider = new WikimediaKnowledgeAcquisitionProvider();
-  const raw = await rawProvider.acquire({
-    runId,
-    objective: OBJECTIVE,
-    context: [],
-    investigationQueries: queries,
+function compactAcquisition(call: RecordedAcquisition) {
+  return {
+    objective: call.request.objective,
+    queries: call.request.investigationQueries ?? [],
+    error: call.error,
+    sources: (call.result?.sources ?? []).map((source) => ({
+      title: source.title,
+      canonicalUri: source.canonicalUri,
+      excerpt: source.content.replace(/\s+/gu, " ").trim().slice(0, 900),
+    })),
+  };
+}
+
+test("frozen procedural candidate gives the Owner useful governed sod guidance and historical evidence", { timeout: 120_000 }, async () => {
+  const config = resolveRuntimeConfig({
+    LATTICE_DEPLOYMENT_MODE: "development",
+    LATTICE_TRUTH_MODE: "v36-live",
+  });
+  const provider = new RecordingWikimediaProvider();
+  const app = await createRuntimeApp(config, {
+    memoryDispatchDelayMs: 1,
+    knowledgeAcquisitionProvider: provider,
   });
 
-  const sourceById = new Map(raw.sources.map((source) => [source.sourceId, source]));
-  const relevance = raw.claims.map((claim) => {
-    const evidence = claim.evidence.map((item) => {
-      const source = sourceById.get(item.sourceId);
-      if (!source) {
-        return {
-          sourceId: item.sourceId,
-          sourceTitle: null,
-          admitted: false,
-          rationale: "Claim evidence referenced a missing acquired source.",
-          matchedTerms: [] as string[],
-        };
-      }
-      const disposition = qualifier.disposition({
-        objective: OBJECTIVE,
-        context: [],
-        queries,
-        source,
-        claim,
-      });
-      return {
-        sourceId: item.sourceId,
-        sourceTitle: source.title,
-        admitted: disposition.relevant,
-        rationale: disposition.rationale,
-        matchedTerms: [...disposition.matchedTerms],
-      };
+  try {
+    const created = await request(app, { method: "POST", url: "/api/v1/conversations" });
+    const conversationId = created.conversation.id as string;
+
+    const accepted = await request(app, {
+      method: "POST",
+      url: `/api/v1/conversations/${conversationId}/turns`,
+      payload: { turnId: randomUUID(), message: OWNER_REQUEST },
     });
-    return {
-      claimId: claim.claimId,
-      claimText: bounded(claim.text),
-      evidence,
+    assert.equal(accepted.status, "RUN_ACCEPTED");
+    const outcomeEnvelope = await waitForOutcome(app, accepted.runId as string);
+
+    const beforeEvidenceCalls = provider.calls.length;
+    const evidenceFollowUp = await request(app, {
+      method: "POST",
+      url: `/api/v1/conversations/${conversationId}/turns`,
+      payload: { turnId: randomUUID(), message: EVIDENCE_FOLLOW_UP },
+    });
+
+    const report = {
+      candidate: CANDIDATE,
+      userRequest: OWNER_REQUEST,
+      acceptedUnderstanding: accepted.acceptedUnderstanding ?? null,
+      intentVersionId: accepted.intentVersionId ?? null,
+      interpretation: accepted.interpretation ?? null,
+      acquisitions: provider.calls.map(compactAcquisition),
+      outcome: {
+        kind: outcomeEnvelope.outcome?.kind ?? null,
+        findings: outcomeEnvelope.outcome?.findings ?? [],
+        evidence: outcomeEnvelope.outcome?.evidence ?? [],
+        provenance: outcomeEnvelope.outcome?.provenance ?? [],
+        uncertainties: outcomeEnvelope.outcome?.uncertainties ?? [],
+      },
+      visibleSolandraResponse: outcomeEnvelope.presentation?.assistantMessage ?? null,
+      evidenceFollowUp: {
+        status: evidenceFollowUp.status ?? null,
+        acceptedUnderstanding: evidenceFollowUp.acceptedUnderstanding ?? null,
+        knowledgeReference: evidenceFollowUp.knowledgeReference ?? null,
+        visibleSolandraResponse: evidenceFollowUp.presentation?.assistantMessage ?? null,
+        provenance: evidenceFollowUp.knowledge?.provenance ?? [],
+        reacquired: provider.calls.length !== beforeEvidenceCalls,
+      },
     };
-  });
+    console.log(`PROCEDURAL_KNOWLEDGE_E2E=${JSON.stringify(report)}`);
 
-  const rawReplay = new ReplayProvider(raw);
-  const relevanceProvider = new RelevantKnowledgeAcquisitionProvider(rawReplay, deriver, qualifier);
-  const relevant = await relevanceProvider.acquire({
-    runId,
-    objective: OBJECTIVE,
-    context: [],
-    investigationQueries: queries,
-  });
+    assert.equal(accepted.acceptedUnderstanding, OWNER_REQUEST);
+    assert.equal(accepted.decisionNeed, "NONE");
+    assert.equal(accepted.interpretation?.authority, "NON_AUTHORITATIVE_PROPOSAL");
+    assert.ok(provider.calls.length > 0, "Expected the ordinary Knowledge path to acquire information.");
+    assert.ok(provider.calls.every((call) => call.error === null), "Expected live Wikimedia acquisition to return normally.");
+    assert.ok(provider.calls.every((call) => call.request.objective === OWNER_REQUEST), "Acquisition must preserve the authoritative objective.");
+    assert.ok(
+      provider.calls.flatMap((call) => call.request.investigationQueries ?? [])
+        .some((query) => /prepare/iu.test(query) && /soil/iu.test(query) && /sod/iu.test(query)),
+      "Expected task-specific investigation for the Owner request.",
+    );
 
-  const v36Replay = new ReplayProvider(relevant);
-  const pipeline = new KnowledgeAcquisitionTruthPipeline(v36Replay);
-  const request: LatticeRunRequest = {
-    kind: "consultation",
-    objective: OBJECTIVE,
-    context: [],
-    decisionNeed: "NONE",
-    resourceNeed: "NONE",
-    sourceMessageId: "procedural-diagnostic-message",
-    sourceMessageDigest: "d".repeat(64),
-    intentVersion: 1,
-    intentScopeId: "procedural-diagnostic-scope",
-    intentVersionId: "procedural-diagnostic-intent",
-  };
+    assert.equal(outcomeEnvelope.outcome?.kind, "KNOWLEDGE");
+    assert.ok((outcomeEnvelope.outcome?.findings ?? []).length > 0, "Expected governed Knowledge findings.");
+    assert.ok((outcomeEnvelope.outcome?.evidence ?? []).length > 0, "Expected governed evidence.");
+    assert.ok((outcomeEnvelope.outcome?.provenance ?? []).length > 0, "Expected governed provenance.");
 
-  const investigated = await pipeline.investigate(runId, request);
-  const validated = await pipeline.validate(investigated.snapshot);
-  const run: LatticeRun = {
-    id: runId,
-    conversationId: "procedural-diagnostic-conversation",
-    status: "COMPLETED",
-    version: 1,
-    request,
-    decision: null,
-    explanation: null,
-    truthAssessmentIds: validated.bundle.assessments.map((assessment) => assessment.id),
-    events: [
-      { sequence: 1, type: "CREATED" },
-      { sequence: 2, type: "INVESTIGATING" },
-      { sequence: 3, type: "VALIDATING" },
-      { sequence: 4, type: "COMPLETED" },
-    ],
-  };
-  const knowledge = buildKnowledgeOutcome(run, validated.bundle);
-  const validatedClaimById = new Map(validated.bundle.claims.map((claim) => [claim.id, claim]));
+    const assistantMessage = outcomeEnvelope.presentation?.assistantMessage ?? "";
+    assert.doesNotMatch(assistantMessage, /couldn't establish enough relevant evidence/iu);
+    assert.match(assistantMessage, /soil|sod|turf|tillage/iu);
+    assert.match(assistantMessage, /prepar|dig|stir|overturn|loosen|till|plant|cultivat/iu);
+    assert.doesNotMatch(assistantMessage, /V36|run state|retrieval mode|investigation quer/iu);
 
-  const report = {
-    candidate: CANDIDATE,
-    userRequest: OBJECTIVE,
-    investigationQueries: queries,
-    acquisition: {
-      sourceCount: raw.sources.length,
-      claimCount: raw.claims.length,
-      sources: raw.sources.map((source) => ({
-        sourceId: source.sourceId,
-        title: source.title,
-        canonicalUri: source.canonicalUri,
-        boundedSourceExcerpt: bounded(source.content),
-      })),
-      claimProposals: raw.claims.map((claim) => ({
-        claimId: claim.claimId,
-        claimType: claim.claimType,
-        text: bounded(claim.text),
-        evidence: claim.evidence.map((item) => ({
-          sourceId: item.sourceId,
-          relation: item.relation,
-          excerpt: bounded(item.excerpt),
-        })),
-      })),
-    },
-    relevance,
-    materialReachingV36: {
-      sourceCount: relevant.sources.length,
-      claimCount: relevant.claims.length,
-      sources: relevant.sources.map((source) => ({
-        sourceId: source.sourceId,
-        title: source.title,
-        canonicalUri: source.canonicalUri,
-        boundedSourceExcerpt: bounded(source.content),
-      })),
-      claims: relevant.claims.map((claim) => ({
-        claimId: claim.claimId,
-        claimType: claim.claimType,
-        text: bounded(claim.text),
-        evidence: claim.evidence.map((item) => ({
-          sourceId: item.sourceId,
-          relation: item.relation,
-          excerpt: bounded(item.excerpt),
-        })),
-      })),
-    },
-    v36: {
-      investigated: {
-        sources: investigated.snapshot.bundle.sources.map((source) => ({
-          id: source.id,
-          title: source.metadata.title,
-          canonicalUri: source.canonicalUri,
-        })),
-        claims: investigated.snapshot.bundle.claims.map((claim) => ({
-          id: claim.id,
-          text: bounded(claim.text),
-        })),
-        evidence: investigated.snapshot.bundle.claimEvidence.map((item) => ({
-          claimId: item.claimId,
-          verification: item.verification,
-          admitted: item.admitted,
-          rejectionReason: item.rejectionReason,
-          excerpt: bounded(item.specificEvidence),
-        })),
-        assessments: investigated.snapshot.bundle.assessments.map((assessment) => ({
-          claimId: assessment.claimId,
-          text: bounded(validatedClaimById.get(assessment.claimId)?.text ?? ""),
-          atomicDisposition: assessment.atomicDisposition,
-          verdict: assessment.verdict,
-          confidence: assessment.confidence,
-          contradictoryEvidenceIds: assessment.contradictoryEvidenceIds,
-          unresolvedObligationIds: assessment.unresolvedObligationIds,
-          rationale: assessment.rationale,
-        })),
-      },
-      validated: {
-        evidence: validated.bundle.claimEvidence.map((item) => ({
-          claimId: item.claimId,
-          verification: item.verification,
-          admitted: item.admitted,
-          rejectionReason: item.rejectionReason,
-          excerpt: bounded(item.specificEvidence),
-        })),
-        assessments: validated.bundle.assessments.map((assessment) => ({
-          claimId: assessment.claimId,
-          text: bounded(validatedClaimById.get(assessment.claimId)?.text ?? ""),
-          atomicDisposition: assessment.atomicDisposition,
-          verdict: assessment.verdict,
-          confidence: assessment.confidence,
-          contradictoryEvidenceIds: assessment.contradictoryEvidenceIds,
-          unresolvedObligationIds: assessment.unresolvedObligationIds,
-          rationale: assessment.rationale,
-        })),
-      },
-    },
-    governedKnowledge: {
-      findings: knowledge.findings,
-      uncertainties: knowledge.uncertainties,
-      provenance: knowledge.provenance,
-      evidence: knowledge.evidence,
-    },
-  };
-
-  console.log(`PROCEDURAL_KNOWLEDGE_STAGE_TRACE=${JSON.stringify(report)}`);
-
-  assert.ok(queries.some((query) => /prepare/iu.test(query) && /soil/iu.test(query) && /sod/iu.test(query)));
-  assert.ok(queries.every((query) => !/\bneed\b/iu.test(query)));
+    assert.equal(evidenceFollowUp.status, "REFERENCE_RESOLVED");
+    assert.equal(evidenceFollowUp.acceptedUnderstanding, OWNER_REQUEST);
+    assert.equal(provider.calls.length, beforeEvidenceCalls, "Historical evidence follow-up must not reacquire information.");
+    assert.deepEqual(
+      (evidenceFollowUp.knowledge?.provenance ?? []).map((source: any) => source.canonicalUri).sort(),
+      (outcomeEnvelope.outcome?.provenance ?? []).map((source: any) => source.canonicalUri).sort(),
+    );
+  } finally {
+    await app.close();
+  }
 });
