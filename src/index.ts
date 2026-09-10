@@ -53,8 +53,8 @@ try {
     await Promise.allSettled([modelAssistance.close(), capabilityComposition.broker.close()]);
     throw error;
   }
-  if (ownerBrowserSessions !== undefined) {
-    registerOwnerBrowserSessionRoutes(app, ownerBrowserSessions);
+  if (ownerBrowserSessions !== undefined && ownerSubjectResolver !== undefined) {
+    registerOwnerBrowserSessionRoutes(app, ownerBrowserSessions, ownerSubjectResolver);
   }
   registerModelAssistanceApi(app, modelAssistance);
   registerCapabilityBrokerApi(app, capabilityComposition.broker);
