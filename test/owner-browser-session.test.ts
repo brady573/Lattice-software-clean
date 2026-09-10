@@ -14,6 +14,8 @@ import {
 
 const OWNER_TOKEN = `owner-access-${"x".repeat(40)}`;
 
+type HeaderValue = string | string[] | number | undefined;
+
 async function createSessionProbeApp() {
   const broker = new OwnerBrowserSessionBroker();
   const app = Fastify({ logger: false });
@@ -28,13 +30,13 @@ async function createSessionProbeApp() {
   return { app, broker };
 }
 
-function headerString(value: string | string[] | undefined): string {
+function headerString(value: HeaderValue): string {
   const resolved = Array.isArray(value) ? value[0] : value;
-  assert.equal(typeof resolved, "string");
+  if (typeof resolved !== "string") throw new Error("Expected string response header.");
   return resolved;
 }
 
-function sessionCookie(response: { headers: Record<string, string | string[] | undefined> }): string {
+function sessionCookie(response: { headers: { [key: string]: HeaderValue } }): string {
   return headerString(response.headers["set-cookie"]).split(";", 1)[0]!;
 }
 
