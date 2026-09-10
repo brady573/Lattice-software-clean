@@ -62,7 +62,7 @@ jobs:
             {
               id: 'same-topic-followup',
               previous: 'Why do leaves change color in autumn?',
-              turn: 'Explain that more simply.',
+              turn: 'Which part of that process causes the green color to disappear first?',
               history: ['Why do leaves change color in autumn?'],
               expectRelation: 'CONTINUE',
             },
