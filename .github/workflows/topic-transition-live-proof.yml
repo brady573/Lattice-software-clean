@@ -1,0 +1,118 @@
+name: Topic Transition Live Proof
+
+on:
+  push:
+    branches:
+      - evidence/topic-transition-live-667f006
+
+permissions:
+  contents: read
+
+jobs:
+  proof:
+    runs-on: ubuntu-24.04
+    env:
+      SUBJECT_SHA: 667f006f40da56c74d9d69e3435874b1b494321a
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ env.SUBJECT_SHA }}
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '24'
+      - run: test "$(git rev-parse HEAD)" = "$SUBJECT_SHA"
+      - run: npm ci --no-audit --no-fund
+      - run: npm run build
+      - name: Run configured Solandra cognition proof
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${GROQ_API_KEY:-}"
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import { createConfiguredSolandraCognition } from './dist/src/solandra/cognition-composition.js';
+          import { resolveRuntimeConfig } from './dist/src/runtime-config.js';
+
+          const config = resolveRuntimeConfig({
+            ...process.env,
+            LATTICE_DEPLOYMENT_MODE: 'development',
+            LATTICE_TRUTH_MODE: 'v36-offline',
+            LATTICE_SOLANDRA_COGNITION_ROUTE: 'groq-gpt-oss-120b',
+          });
+          const composition = createConfiguredSolandraCognition(config);
+          assert.ok(composition);
+
+          const cases = [
+            {
+              id: 'science-to-gardening',
+              previous: 'What causes ocean waves to form?',
+              turn: 'What herbs grow well on a shaded apartment balcony?',
+              history: ['What causes ocean waves to form?'],
+              expectRelation: 'NEW_OBJECTIVE',
+            },
+            {
+              id: 'writing-to-consumer-decision',
+              previous: 'Rewrite my meeting note so it sounds warmer.',
+              turn: 'Help me choose a compact scanner for occasional receipts.',
+              history: ['Rewrite my meeting note so it sounds warmer.'],
+              expectRelation: 'NEW_OBJECTIVE',
+            },
+            {
+              id: 'same-topic-followup',
+              previous: 'Why do leaves change color in autumn?',
+              turn: 'Explain that more simply.',
+              history: ['Why do leaves change color in autumn?'],
+              expectRelation: 'CONTINUE',
+            },
+            {
+              id: 'explicit-correction',
+              previous: 'Plan a weekend visit to Portland, Maine.',
+              turn: 'Actually, I meant Portland, Oregon.',
+              history: ['Plan a weekend visit to Portland, Maine.'],
+              expectRelation: 'CORRECTION',
+            },
+            {
+              id: 'material-ambiguity',
+              previous: 'Help me plan a small herb garden for my patio.',
+              turn: 'Would that work for the other spot too?',
+              history: ['Help me plan a small herb garden for my patio.'],
+              expectAmbiguity: true,
+            },
+          ];
+
+          const results = [];
+          for (let index = 0; index < cases.length; index += 1) {
+            const item = cases[index];
+            const result = await composition.cognition.interpret({
+              conversationId: `topic-proof-${index}`,
+              messageId: `topic-proof-message-${index}`,
+              message: item.turn,
+              currentObjective: item.previous,
+              recentUserMessages: item.history,
+              governedKnowledge: [],
+              governedRecommendations: [],
+            });
+            const observed = {
+              id: item.id,
+              previous: item.previous,
+              turn: item.turn,
+              objectiveRelation: result.proposal.objectiveRelation,
+              proposedObjective: result.proposal.proposedObjective,
+              materialAmbiguity: result.proposal.materialAmbiguity,
+              requestedHelp: result.proposal.requestedHelp,
+              provider: result.invocationProvenance.actualProvider,
+              model: result.invocationProvenance.actualModel,
+            };
+            results.push(observed);
+            console.log(`TOPIC_TRANSITION_CASE=${JSON.stringify(observed)}`);
+            if (item.expectRelation) assert.equal(result.proposal.objectiveRelation, item.expectRelation, item.id);
+            if (item.expectAmbiguity) {
+              assert.ok(result.proposal.materialAmbiguity?.couldChangeObjective, item.id);
+            }
+          }
+          assert.ok(results.every((item) => item.provider === 'groq'));
+          assert.ok(results.every((item) => item.model === 'openai/gpt-oss-120b'));
+          console.log('LATTICE_TOPIC_TRANSITION_LIVE_COGNITION=PASS');
+          NODE
