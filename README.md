@@ -24,7 +24,7 @@ Start the application and open:
 http://127.0.0.1:3000/
 ```
 
-Free-form turns use `POST /api/v1/conversations/:conversationId/turns`. The server records exact USER provenance, interprets the turn against the current IntentVersion, and changes canonical intent only when the USER establishes or explicitly corrects the objective or confirms material proposed meaning. Ordinary follow-ups preserve the objective and IntentVersion while remaining non-authoritative conversational/work context for the exact Run handling that turn. V36 then supports Knowledge, conditional Decision Support, or Action Preparation at `/api/v1/runs/:runId/outcome`.
+Free-form turns use `POST /api/v1/conversations/:conversationId/turns`. The server records exact USER provenance and interprets each turn against the current IntentVersion. A clear materially new USER objective creates a successor IntentVersion through Intent Authority; explicit corrections preserve the existing correction/lineage boundary; genuinely material ambiguity asks for clarification; and same-topic follow-ups preserve the current objective when appropriate. V36 then supports Knowledge, conditional Decision Support, or Action Preparation at `/api/v1/runs/:runId/outcome`.
 
 ## Requirements
 
@@ -88,7 +88,7 @@ npm run benchmark:local-model -- run \
 
 A successful local-model benchmark is development evidence for the exact model/runtime tested. It is not live-provider qualification, Product acceptance, V36 truth, or production readiness. This local/offline qualification does not satisfy M9-4, which remains the separate pinned zero-cost **live** provider qualification Work Item.
 
-M8-A establishes a provider-neutral request security context whose Product-facing contract is only `AuthenticatedSubject { subjectId }`. Development defaults to the explicit local fixture mode `LATTICE_AUTHENTICATION_MODE=development-fixture` with `LATTICE_DEVELOPMENT_FIXTURE_SUBJECT_ID=fixture-user`; the fixture subject can be changed for local/test execution. `LATTICE_AUTHENTICATION_MODE=required` removes that fallback and authoritative `/api/v1/*` requests fail closed with `401 AUTHENTICATION_REQUIRED` until runtime composition injects an authenticated-subject resolver. Provider tokens, cookies, JWT claims, OAuth schemas, and other provider-specific identity mechanisms are intentionally outside this Product contract.
+M8-A establishes a provider-neutral request security context whose Product-facing contract is only `AuthenticatedSubject { subjectId }`. Development defaults to the explicit local fixture mode `LATTICE_AUTHENTICATION_MODE=development-fixture` with `LATTICE_DEVELOPMENT_FIXTURE_SUBJECT_ID=fixture-user`; the fixture subject can be changed for local/test execution. In canonical durable `required` authentication, runtime startup composes the bounded single-owner resolver from runtime-only `LATTICE_OWNER_ACCESS_TOKEN`, producing the stable non-secret subject `owner` only for a valid Bearer credential. Missing, malformed, or wrong credentials establish no subject and authoritative `/api/v1/*` requests fail closed with `401 AUTHENTICATION_REQUIRED`. Authentication remains distinct from downstream capability and consequential authorization.
 
 Create a canonical free-form consultation turn after creating a conversation:
 
@@ -124,7 +124,7 @@ LATTICE_AUTO_MIGRATE=false
 npm start
 ```
 
-Durable mode rejects development-fixture authentication. No production identity provider is selected by M8-A, so the repository startup composition intentionally has no provider-derived resolver and therefore fails closed on authoritative authenticated API requests. A separately qualified later integration can map validated provider identity into the stable `AuthenticatedSubject.subjectId` boundary without exposing provider schemas to Intent Authority, V36, Decision Engine, or Solandra.
+Durable mode rejects development-fixture authentication. Canonical startup now includes the bounded single-owner authenticated-subject resolver when `LATTICE_OWNER_ACCESS_TOKEN` is configured, mapping a valid Owner Bearer credential to stable `AuthenticatedSubject { subjectId: "owner" }`. The credential remains runtime-only, and authentication does not grant capability authorization, decision authority, or consequential authorization.
 
 The repository PostgreSQL validation lane exercises restart survival, Run epoch/CAS behavior, transactional outbox persistence, V36 truth persistence, durable orchestration, asynchronous API handoff/idempotency, cancellation, conversation/decision-plan continuity, subject isolation/deletion behavior, and rollback of partial truth-state writes on the supported development PostgreSQL surface. This development validation is not production database or production-readiness evidence.
 

@@ -13,6 +13,12 @@ This roadmap records the Owner-directed execution sequence for reaching a functi
 
 The roadmap exists to sequence implementation and validation. Repository code, tests, milestone history, architecture documents, provider qualifications, PRs, and this roadmap itself remain subordinate evidence or working Product state.
 
+## Current status reconciliation — 2026-09-09
+
+Substantial A1–A5 capability and A6-candidate composition now exist in canonical Product history. The Alpha sequence below remains the acceptance model, but its original `PENDING` labels must not be read as a claim that those Product surfaces are still unimplemented.
+
+Current Product-first black-box reconciliation has identified Conversation -> Intent topic-transition reliability as the active acceptance blocker: a later clearly unrelated USER turn can be bound to an earlier canonical objective. PR #33 is the bounded repair candidate for that defect. Until that exact candidate is independently reviewed and integrated, this blocker remains open; it does not reopen the completed A1–A5 implementation work or authorize new Alpha architecture.
+
 ## Product direction
 
 Lattice exists to make trustworthy expertise and decision capability accessible without making the user operate the machinery required to produce it.
@@ -70,18 +76,22 @@ Fresh canonical state before this roadmap change establishes substantial reusabl
 
 These mechanisms are retained infrastructure. They are not a forward staircase that must be generalized or completed in subsystem order before Solandra becomes useful.
 
-### Current black-box Product findings
+### Historical black-box Product findings that drove Alpha work
 
-Owner black-box use of canonical Solandra has exposed the current highest-value gaps:
+Earlier Owner black-box use of canonical Solandra exposed these high-value gaps:
 
-1. Useful governed evidence can exist without Solandra synthesizing it into a direct answer to the user's question.
-2. Ordinary human terminology and context are not yet reliably resolved into effective investigation concepts.
-3. Current live Knowledge acquisition is too narrow for domains where authoritative primary or otherwise appropriate sources materially matter.
-4. Internal epistemic/retrieval machinery can become visible user content rather than remaining behind meaningful Product boundaries.
-5. Fail-closed truth behavior is functioning and must be preserved.
-6. User-controlled model/service authorization through Solandra is not yet established as an end-to-end Product capability.
+1. Useful governed evidence could exist without Solandra synthesizing it into a direct answer to the user's question.
+2. Ordinary human terminology and context were not reliably resolved into effective investigation concepts.
+3. Live Knowledge acquisition was too narrow for domains where authoritative primary or otherwise appropriate sources materially matter.
+4. Internal epistemic/retrieval machinery could become visible user content rather than remaining behind meaningful Product boundaries.
+5. Fail-closed truth behavior was functioning and had to be preserved.
+6. User-controlled model/service authorization through Solandra had not yet been established as an end-to-end Product capability.
 
-These observations govern Alpha sequencing more strongly than historical subsystem ordering because they reveal whether Lattice actually removes barriers at the Product surface.
+Subsequent Product work has materially advanced or established these surfaces, including user-authorized cognitive capability, generalized Knowledge/Decision/Action Preparation paths, durable hosted composition, and continuity/recovery evidence. These historical findings remain provenance for why work was selected; they are not the current frontier list.
+
+### Current black-box acceptance blocker
+
+Current hosted/Product reconciliation exposed one concrete cross-capability defect: clearly unrelated USER turns in the same Conversation can remain bound to stale canonical Intent. That defect can cause downstream governed work to answer or fail against the wrong objective even while remaining fail-closed. The current bounded repair is Conversation -> Intent topic-transition reliability, preserving Intent Authority and successor lineage rather than bypassing them.
 
 ---
 
@@ -118,7 +128,7 @@ PASS when substantial work is being selected by Product barrier or necessary bou
 
 ## A1 — Trustworthy Knowledge spine
 
-Status: **CURRENT PRODUCT FRONTIER / NEXT IMPLEMENTATION OBJECTIVE**
+Status: **SUBSTANTIALLY IMPLEMENTED — CONTINUES THROUGH PRODUCT-FIRST BLACK-BOX RECONCILIATION**
 
 ### Product outcome
 
@@ -190,7 +200,7 @@ PASS when ordinary Knowledge consultation reliably converts supported governed e
 
 ## A2 — User-authorized model/service capability
 
-Status: **PENDING A1 OR EARLIER ONLY IF A1 ESTABLISHES A HARD DEPENDENCY**
+Status: **IMPLEMENTED AND PRODUCT-PROVEN IN BOUNDED CANONICAL SCOPE**
 
 ### Product outcome
 
@@ -224,7 +234,7 @@ PASS when the user can authorize a real model/service capability and Solandra/La
 
 ## A3 — End-to-end Decision capability
 
-Status: **PENDING**
+Status: **IMPLEMENTED IN SUBSTANTIAL BOUNDED SCOPE — RETAINED FOR WHOLE-PRODUCT RECONCILIATION**
 
 ### Product outcome
 
@@ -264,7 +274,7 @@ PASS when at least one realistic decision journey works completely through Solan
 
 ## A4 — End-to-end Action Preparation
 
-Status: **PENDING**
+Status: **IMPLEMENTED IN BOUNDED EDITABLE-RESOURCE SCOPE — EXECUTION REMAINS OUT OF SCOPE**
 
 ### Product outcome
 
@@ -291,7 +301,7 @@ PASS when Solandra can prepare genuinely useful material from the governed Produ
 
 ## A5 — Continuity, interruption, failure, and recovery as one Product
 
-Status: **PENDING**
+Status: **SUBSTANTIALLY IMPLEMENTED AND EXERCISED — CURRENT TOPIC-TRANSITION DEFECT IS THE ACTIVE RECONCILIATION GAP**
 
 ### Product outcome
 
@@ -324,7 +334,7 @@ PASS when the Alpha Product spine survives ordinary interruption and failure wit
 
 ## A6 — Lattice 1.0 Alpha release candidate
 
-Status: **PENDING**
+Status: **CANDIDATE CAPABILITIES SUBSTANTIALLY COMPOSED — NOT YET PROMOTED; TOPIC-TRANSITION RELIABILITY UNDER FINAL PRODUCT REVIEW**
 
 Freeze one exact candidate and validate the Product as a whole.
 
@@ -477,13 +487,11 @@ For Alpha promotion, the strongest evidence is reproducible end-to-end behavior 
 
 # Current Product frontier
 
-**A1 — Trustworthy Knowledge spine**
+**Conversation -> Intent topic-transition reliability and Product-first black-box reconciliation**
 
-This is the highest-value current objective because canonical black-box use has already established that Lattice possesses substantial truth/runtime machinery while ordinary users can still be forced to perform terminology translation, evidence synthesis, and proof-state interpretation themselves.
+Substantial A1–A5 implementation and A6-candidate composition are already present. The active Product defect is narrower: a clearly unrelated USER turn must establish a successor canonical objective before downstream work begins, while genuine same-topic follow-up, explicit correction lineage, and material ambiguity continue to behave correctly.
 
-The next implementation work should therefore make the existing governed Knowledge path complete enough to deliver useful understanding without sacrificing provenance, uncertainty, semantic authority, fail-closed behavior, or human control.
-
-Do not automatically resume M9-5 or another historical milestone simply because it was previously next in sequence.
+PR #33 is the bounded candidate for that repair. Independent Product-first review of its exact frozen revision is required before the blocker is considered integrated. No new Knowledge, Decision, Action Preparation, hosting, M5/M6, provider-routing, or architecture work should be inferred from this frontier.
 
 ---
 
