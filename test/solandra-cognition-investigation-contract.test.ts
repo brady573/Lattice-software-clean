@@ -75,6 +75,29 @@ class EmptyKnowledgeNeedProvider implements ModelProvider {
   }
 }
 
+class OverBudgetKnowledgeNeedProvider implements ModelProvider {
+  readonly kind = "over-budget-knowledge-need-fixture";
+
+  async generate(request: CanonicalModelRequest, _context: ModelCallContext): Promise<ModelProviderResult> {
+    const message = currentUserMessage(request);
+    return {
+      response: {
+        id: "over-budget-needs",
+        model: request.model,
+        output: [{
+          type: "text",
+          text: JSON.stringify(semanticProposal(message, [
+            "surface preparation requirements",
+            "application procedure",
+            "post-application care",
+          ])),
+        }],
+      },
+      metadata: {},
+    };
+  }
+}
+
 function input(message: string, suffix: string): SolandraCognitionInput {
   return {
     conversationId: `conversation-${suffix}`,
@@ -107,8 +130,9 @@ test("Solandra cognition contract keeps equivalent ordinary Knowledge requests o
   assert.deepEqual(results[3]?.proposal.knowledgeNeeds, [COOKWARE_NEED]);
 
   const systemPrompt = provider.requests[0]?.messages.find((message) => message.role === "system")?.content ?? "";
-  assert.match(systemPrompt, /knowledgeNeeds must contain one to four concise task-bearing investigation needs/iu);
-  assert.match(systemPrompt, /Semantically equivalent ordinary paraphrases should produce materially equivalent knowledgeNeeds/iu);
+  assert.match(systemPrompt, /knowledgeNeeds must contain one to 2 concise task-bearing investigation needs/iu);
+  assert.match(systemPrompt, /together preserve the full material answer burden/iu);
+  assert.match(systemPrompt, /may use different wording or decomposition, but they must preserve materially equivalent investigation opportunity/iu);
   assert.doesNotMatch(systemPrompt, /How do I prepare my soil|cast iron skillet/iu);
 });
 
@@ -121,5 +145,17 @@ test("configured model cognition fails closed instead of silently handing an emp
   await assert.rejects(
     () => cognition.interpret(input("How can I prepare this surface?", "empty")),
     /task-bearing Knowledge investigation need/iu,
+  );
+});
+
+test("configured model cognition fails closed instead of allowing downstream query truncation to drop investigation burden", async () => {
+  const cognition = new ModelSolandraCognitiveRuntime(
+    new ModelRuntime(new OverBudgetKnowledgeNeedProvider()),
+    "semantic-test-model",
+  );
+
+  await assert.rejects(
+    () => cognition.interpret(input("How should I prepare and finish this surface?", "over-budget")),
+    /full material Knowledge investigation burden within 2 task-bearing needs/iu,
   );
 });
