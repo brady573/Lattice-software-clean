@@ -11,17 +11,20 @@ import { createRuntimeApp } from "../src/runtime-app.js";
 import { resolveRuntimeConfig } from "../src/runtime-config.js";
 
 const fixedTime = "2026-09-04T18:00:00.000Z";
+const RETRIEVAL_QUERY = "retrieved topic source material";
 
 function wikimediaFixture(observed: URL[], extract: string): typeof fetch {
   return async (input) => {
-    observed.push(new URL(String(input)));
+    const url = new URL(String(input));
+    observed.push(url);
+    const pageLookup = url.searchParams.get("pageids") === "42";
     return new Response(JSON.stringify({
       query: {
         pages: [{
           pageid: 42,
-          index: 1,
+          ...(pageLookup ? {} : { index: 1 }),
           title: "Retrieved topic",
-          fullurl: "https://en.wikipedia.org/wiki/Retrieved_topic",
+          ...(pageLookup ? {} : { fullurl: "https://en.wikipedia.org/wiki/Retrieved_topic" }),
           touched: "2026-09-01T00:00:00.000Z",
           extract,
         }],
@@ -102,7 +105,7 @@ async function ask(app: FastifyInstance, conversationId: string, turnId: string,
   return { accepted, outcome: body.outcome, presentation: body.presentation };
 }
 
-test("simplification follow-up does not simulate simplification by truncating source text", async () => {
+test("Wikimedia transport does not simulate simplification from conversational context", async () => {
   const observed: URL[] = [];
   const extract = Array.from(
     { length: 18 },
@@ -115,20 +118,27 @@ test("simplification follow-up does not simulate simplification by truncating so
     resultLimit: 4,
   });
   const objective = "Explain the retrieved topic.";
-  const initial = await provider.acquire({ runId: "run-initial", objective, context: [] });
+  const initial = await provider.acquire({
+    runId: "run-initial",
+    objective,
+    context: [],
+    investigationQueries: [RETRIEVAL_QUERY],
+  });
   const simpler = await provider.acquire({
     runId: "run-simpler",
     objective,
     context: ["Explain the second point more simply."],
+    investigationQueries: [RETRIEVAL_QUERY],
   });
 
   assert.equal(simpler.claims[0]?.text, initial.claims[0]?.text);
   assert.ok((simpler.claims[0]?.text.length ?? 0) > 480);
-  assert.equal(observed[0]?.searchParams.get("gsrlimit"), "4");
-  assert.equal(observed[1]?.searchParams.get("gsrlimit"), "4");
+  const searchRequests = observed.filter((url) => url.searchParams.has("gsrsearch"));
+  assert.deepEqual(searchRequests.map((url) => url.searchParams.get("gsrsearch")), [RETRIEVAL_QUERY, RETRIEVAL_QUERY]);
+  assert.deepEqual(searchRequests.map((url) => url.searchParams.get("gsrlimit")), ["4", "4"]);
 });
 
-test("disagreement follow-up does not simulate semantic contradiction detection", async () => {
+test("Wikimedia transport does not simulate semantic contradiction detection", async () => {
   const observed: URL[] = [];
   const provider = new WikimediaKnowledgeAcquisitionProvider({
     fetchImpl: wikimediaFixture(observed, "A source-grounded report with no contradiction semantics."),
@@ -138,9 +148,12 @@ test("disagreement follow-up does not simulate semantic contradiction detection"
     runId: "run-disagreement",
     objective: "Explain the retrieved topic.",
     context: ["Is there evidence that disagrees?"],
+    investigationQueries: [RETRIEVAL_QUERY],
   });
 
-  assert.equal(observed[0]?.searchParams.get("gsrlimit"), "4");
+  const searchRequests = observed.filter((url) => url.searchParams.has("gsrsearch"));
+  assert.equal(searchRequests[0]?.searchParams.get("gsrlimit"), "4");
+  assert.equal(searchRequests[0]?.searchParams.get("gsrsearch"), RETRIEVAL_QUERY);
   assert.ok(result.claims.length > 0);
   assert.ok(result.claims.every((claim) => claim.evidence.every((item) => item.relation === "SUPPORTS")));
 });
