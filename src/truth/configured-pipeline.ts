@@ -16,11 +16,21 @@ import {
 import { KnowledgeAcquisitionTruthPipeline } from "./knowledge-acquisition-pipeline.js";
 import { AlphaDecisionKnowledgeEvidenceAdmissionPolicy } from "./npm-decision-admission.js";
 
+const unavailableGeneralKnowledgeProvider: KnowledgeAcquisitionProvider = Object.freeze({
+  kind: "solandra-investigation-unavailable",
+  async acquire() {
+    throw new Error("Live general Knowledge requires configured Solandra semantic investigation.");
+  },
+});
+
 /**
  * Explicit runtime composition. Live general Knowledge uses Solandra for
  * non-authoritative investigation planning and semantic responsiveness before
  * candidate information enters the unchanged V36 admission boundary.
  *
+ * Runtime surfaces that do not invoke general Knowledge may still be composed
+ * without a Solandra investigator. If general Knowledge is later requested,
+ * that path fails closed rather than falling back to deterministic semantics.
  * An explicitly injected acquisition provider without an investigator remains
  * an integration/test seam rather than the canonical live Product composition.
  */
@@ -35,11 +45,11 @@ export function createConfiguredTruthPipeline(
     ?? (provider === undefined
       ? createConfiguredSolandraKnowledgeInvestigator(resolveRuntimeConfig())
       : undefined);
-  if (provider === undefined && semanticInvestigator === undefined) {
-    throw new Error("Live general Knowledge requires configured Solandra semantic investigation.");
-  }
 
-  const rawFallback = provider ?? new WikimediaKnowledgeAcquisitionProvider();
+  const rawFallback = provider
+    ?? (semanticInvestigator === undefined
+      ? unavailableGeneralKnowledgeProvider
+      : new WikimediaKnowledgeAcquisitionProvider());
   const fallback = semanticInvestigator
     ? new RelevantKnowledgeAcquisitionProvider(rawFallback, semanticInvestigator)
     : rawFallback;
