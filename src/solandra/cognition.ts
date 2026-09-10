@@ -1,5 +1,4 @@
 import { z } from "zod";
-import { explicitConsultationObjectiveCorrection } from "../intent/consultation-interpreter.js";
 import { ModelProviderError } from "../model/errors.js";
 import { ModelRuntime } from "../model/runtime.js";
 import type { CanonicalModelRequest, ModelInvocationProvenance } from "../model/types.js";
@@ -160,6 +159,7 @@ function buildCognitionRequest(model: string, input: SolandraCognitionInput): Ca
           "Use NEW_OBJECTIVE when the Current USER message starts a materially different question, task, goal, or decision that can stand on its own and would make downstream Knowledge or decision work target something different. Do this even when the USER does not say 'new topic', 'instead', or similar transition words.",
           "Use CONTINUE only when the Current USER message materially depends on the current objective or its supplied context, such as a follow-up question, explanation request, source request, elaboration, constraint, or referential continuation.",
           "Use CORRECTION when the USER is revising, correcting, narrowing, or replacing the meaning of the current objective while still addressing the same underlying task. Do not use CORRECTION merely because a new objective replaces the old one in time.",
+          "For CORRECTION, use the exact Current USER message as proposedObjective when that message itself fully represents the corrected objective. If the corrected objective requires materially reconstructed meaning, propose that meaning and let Lattice require USER confirmation before it can become canonical.",
           "If it is genuinely unclear whether the Current USER message continues the current objective or starts a materially different objective, and choosing incorrectly could materially change downstream Knowledge, Recommendation, decision, or action-preparation work, return materialAmbiguity with the minimum question needed to distinguish them instead of defaulting to CONTINUE.",
           "For a clear NEW_OBJECTIVE, proposedObjective should be the Current USER message itself. For a clear CONTINUE, proposedObjective should normally be null. Conversation history may help resolve references, but it must not make an unrelated current request sticky to an earlier objective.",
           "Use materialAmbiguity only when uncertainty could materially change the objective or requested work. Do not treat acronyms, technical tokens, or unfamiliar terms as ambiguous merely because of their surface form when context makes the request clear.",
@@ -170,6 +170,7 @@ function buildCognitionRequest(model: string, input: SolandraCognitionInput): Ca
           "Use EXPLAIN_OPTION when the user refers conversationally to one exact supplied option and asks about it without choosing it. Use ACCEPT_CHOICE only when the USER actually chooses one supplied option and exact choice identity matters. For either, return both its exact supplied Recommendation ID and option ID. Resolve references from context and supplied option identity, not from a phrase-specific command. If the intended option is materially ambiguous, ask a precise clarification instead of guessing.",
           "Use COGNITIVE_ASSISTANCE for bounded non-consequential help such as brainstorming, analyzing USER-authored material, rewriting, or transforming material when the request does not require new factual Knowledge, a governed Recommendation, a formal Decision, or Action Preparation.",
           "COGNITIVE_ASSISTANCE is only a request for a capability. It does not itself authorize that capability and it does not turn generated content into Knowledge.",
+          "For KNOWLEDGE, FRESH_RESEARCH, or DECISION, knowledgeNeeds describe material information that should be learned or refreshed. They are semantic needs, not provider search queries; downstream Solandra investigation formulates retrieval work separately.",
           "requestedHelp is the sole classification of the requested work. Do not add a separate next-step or workflow field.",
           "Return exactly one JSON object and no prose. The required shape is:",
           schemaExample,
@@ -226,19 +227,7 @@ export class ModelSolandraCognitiveRuntime implements SolandraCognitiveRuntime {
     if (result.response.output.length !== 1 || result.response.output[0]?.type !== "text") {
       throw new ModelProviderError("invalid_output", "Solandra cognition requires exactly one semantic text output.");
     }
-    const parsedProposal = solandraSemanticProposalSchema.parse(parseJsonObject(result.response.output[0].text));
-    const explicitCorrection = explicitConsultationObjectiveCorrection(
-      input.message,
-      input.currentObjective !== undefined,
-    );
-    const proposal: SolandraSemanticProposal = explicitCorrection
-      ? {
-        ...parsedProposal,
-        objectiveRelation: "CORRECTION",
-        proposedObjective: input.message.trim(),
-        materialAmbiguity: null,
-      }
-      : parsedProposal;
+    const proposal = solandraSemanticProposalSchema.parse(parseJsonObject(result.response.output[0].text));
     const allowedKnowledgeIds = new Set(input.governedKnowledge.map((item) => item.knowledgeId));
     if (proposal.referencedKnowledgeId !== null && !allowedKnowledgeIds.has(proposal.referencedKnowledgeId)) {
       throw new ModelProviderError(
