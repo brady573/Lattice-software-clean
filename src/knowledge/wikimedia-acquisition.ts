@@ -14,6 +14,14 @@ const MAX_CLAIM_CHARS = 1_200;
 const MAX_TOTAL_RESULTS = 12;
 const MAX_INVESTIGATION_QUERIES = 2;
 
+const PASSAGE_STOP_WORDS = new Set([
+  "about", "after", "again", "also", "and", "are", "because", "before", "being", "can", "could", "does",
+  "from", "have", "how", "into", "its", "more", "that", "the", "their", "then", "there", "these", "they",
+  "this", "through", "what", "when", "where", "which", "who", "why", "with", "would", "your",
+]);
+const EXPLANATORY_OBJECTIVE_PATTERN = /\b(?:why|cause|causes|caused|causing|mechanism)\b|^\s*how\s+(?:do|does|did|can|could|is|are|was|were)\b/iu;
+const EXPLANATORY_PASSAGE_PATTERN = /\b(?:because|due\s+to|cause|causes|caused|causing|lead|leads|led|leading|result|results|resulted|resulting|require|requires|required|requiring|react|reacts|reacted|reacting|trigger|triggers|triggered|triggering|produce|produces|produced|producing|drive|drives|drove|driven|driving|transfer|transfers|transferred|transferring|lower|lowers|lowered|lowering|reduce|reduces|reduced|reducing|allow|allows|allowed|allowing|depend|depends|depended|depending|break\s+down|breaks\s+down|broke\s+down|broken\s+down)\b/iu;
+
 export interface WikimediaKnowledgeAcquisitionOptions {
   readonly endpoint?: string;
   readonly resultLimit?: number;
@@ -91,12 +99,56 @@ function investigationQueries(request: KnowledgeAcquisitionRequest): string[] {
   return derived.length > 0 ? [...new Set(derived)] : [queryMaterial(request)];
 }
 
-function sourceClaimText(content: string): string {
-  const firstParagraph = content.split(/\n\s*\n/u).find((part) => part.trim().length > 0)?.trim() ?? "";
-  if (firstParagraph.length <= MAX_CLAIM_CHARS) return firstParagraph;
-  const bounded = firstParagraph.slice(0, MAX_CLAIM_CHARS);
+function passageTokens(value: string): string[] {
+  return [...new Set(
+    value
+      .normalize("NFKC")
+      .toLocaleLowerCase("en-US")
+      .match(/[\p{L}\p{N}]+/gu)
+      ?.filter((token) => token.length >= 3 && !PASSAGE_STOP_WORDS.has(token))
+      ?? [],
+  )];
+}
+
+function boundedClaimText(value: string): string {
+  const trimmed = value.trim();
+  if (trimmed.length <= MAX_CLAIM_CHARS) return trimmed;
+  const bounded = trimmed.slice(0, MAX_CLAIM_CHARS);
   const sentenceEnd = Math.max(bounded.lastIndexOf(". "), bounded.lastIndexOf(".\n"));
   return (sentenceEnd >= 160 ? bounded.slice(0, sentenceEnd + 1) : bounded).trim();
+}
+
+function sourceClaimText(content: string, objective: string, searchQuery: string): string {
+  const paragraphs = content
+    .split(/\n\s*\n/u)
+    .map((part) => boundedClaimText(part))
+    .filter(Boolean);
+  if (paragraphs.length === 0) return "";
+
+  const explanatory = EXPLANATORY_OBJECTIVE_PATTERN.test(objective);
+  if (!explanatory) return paragraphs[0]!;
+
+  const objectiveTerms = passageTokens(objective);
+  const queryTerms = passageTokens(searchQuery);
+  const minimumObjectiveMatches = Math.min(2, objectiveTerms.length);
+  const ranked = paragraphs.map((text, index) => {
+    const tokens = new Set(passageTokens(text));
+    const objectiveMatches = objectiveTerms.filter((term) => tokens.has(term)).length;
+    const queryMatches = queryTerms.filter((term) => tokens.has(term)).length;
+    const explanatoryRelation = EXPLANATORY_PASSAGE_PATTERN.test(text);
+    const eligibleExplanation = explanatoryRelation
+      && objectiveMatches >= minimumObjectiveMatches;
+    return { text, index, objectiveMatches, queryMatches, eligibleExplanation };
+  });
+  const candidates = ranked.some((item) => item.eligibleExplanation)
+    ? ranked.filter((item) => item.eligibleExplanation)
+    : ranked;
+  candidates.sort((left, right) =>
+    right.objectiveMatches - left.objectiveMatches
+    || right.queryMatches - left.queryMatches
+    || left.index - right.index
+  );
+  return candidates[0]?.text ?? paragraphs[0]!;
 }
 
 async function readBoundedJson(response: Response): Promise<unknown> {
@@ -133,9 +185,10 @@ async function readBoundedJson(response: Response): Promise<unknown> {
 
 /**
  * Zero-cost development adapter for Wikimedia's public search API. It returns
- * source text and exact source-bound claim proposals only. It does not summarize,
- * simplify, detect semantic contradictions, assess reliability, assign confidence,
- * determine relevance, or admit anything as knowledge. Its source metadata marks
+ * source text and exact source-bound claim proposals only. For explanatory work,
+ * it may select one bounded candidate passage from the retrieved source using
+ * lexical/request cues; the downstream relevance qualifier and V36 still own
+ * material relevance, evidence admission, and truth. Its source metadata marks
  * Wikimedia as GENERAL_REFERENCE so higher-risk Product presentation can require
  * an appropriate authoritative source without treating this adapter as authority.
  */
@@ -153,11 +206,46 @@ export class WikimediaKnowledgeAcquisitionProvider implements KnowledgeAcquisiti
     this.clock = options.clock ?? (() => new Date());
   }
 
+  private async fullPageExtract(pageId: string, fallback: string): Promise<string> {
+    const url = new URL(this.endpoint.href);
+    for (const [key, value] of Object.entries({
+      action: "query",
+      pageids: pageId,
+      prop: "extracts",
+      explaintext: "1",
+      format: "json",
+      formatversion: "2",
+      origin: "*",
+    })) {
+      url.searchParams.set(key, value);
+    }
+
+    try {
+      const response = await this.fetchImpl(url, {
+        method: "GET",
+        redirect: "error",
+        headers: {
+          accept: "application/json",
+          "user-agent": "Lattice-Knowledge-Consultation/0.1 (source retrieval; no truth authority)",
+        },
+      });
+      const root = record(await readBoundedJson(response));
+      const query = record(root?.query);
+      const rawPage = Array.isArray(query?.pages) ? query.pages[0] : undefined;
+      const page = record(rawPage) as WikimediaPage | null;
+      const extract = typeof page?.extract === "string" ? page.extract.trim() : "";
+      return (extract || fallback).slice(0, MAX_SOURCE_CONTENT_CHARS);
+    } catch {
+      return fallback.slice(0, MAX_SOURCE_CONTENT_CHARS);
+    }
+  }
+
   async acquire(request: KnowledgeAcquisitionRequest): Promise<KnowledgeAcquisitionResult> {
     if (!request.runId.trim() || !request.objective.trim()) {
       throw new Error("Knowledge acquisition requires an exact Run and objective.");
     }
     const emphasis = workEmphasis(request.context);
+    const explanatoryObjective = EXPLANATORY_OBJECTIVE_PATTERN.test(request.objective);
     const resultLimit = emphasis === "SOURCES" || emphasis === "UNCERTAINTY"
       ? Math.min(8, this.resultLimit + 2)
       : emphasis === "EXPLANATION"
@@ -218,10 +306,8 @@ export class WikimediaKnowledgeAcquisitionProvider implements KnowledgeAcquisiti
         const pageId = typeof page?.pageid === "number" ? String(page.pageid) : null;
         const title = typeof page?.title === "string" ? page.title.trim() : "";
         const fullurl = typeof page?.fullurl === "string" ? page.fullurl : "";
-        const extract = typeof page.extract === "string"
-          ? page.extract.trim().slice(0, MAX_SOURCE_CONTENT_CHARS)
-          : "";
-        if (!pageId || seenPageIds.has(pageId) || !title || !extract) continue;
+        const introExtract = typeof page.extract === "string" ? page.extract.trim() : "";
+        if (!pageId || seenPageIds.has(pageId) || !title || !introExtract) continue;
         let canonicalUri: string;
         try {
           const canonical = new URL(fullurl);
@@ -230,6 +316,10 @@ export class WikimediaKnowledgeAcquisitionProvider implements KnowledgeAcquisiti
         } catch {
           continue;
         }
+        const extract = explanatoryObjective
+          ? await this.fullPageExtract(pageId, introExtract)
+          : introExtract.slice(0, MAX_SOURCE_CONTENT_CHARS);
+        if (!extract) continue;
         const sourceId = `page:${pageId}`;
         const source: RetrievedKnowledgeSource = {
           sourceId,
@@ -248,7 +338,7 @@ export class WikimediaKnowledgeAcquisitionProvider implements KnowledgeAcquisiti
             evidentiarySuitability: "GENERAL_REFERENCE",
           },
         };
-        const text = sourceClaimText(extract);
+        const text = sourceClaimText(extract, request.objective, searchQuery);
         if (!text) continue;
         seenPageIds.add(pageId);
         sources.push(source);
