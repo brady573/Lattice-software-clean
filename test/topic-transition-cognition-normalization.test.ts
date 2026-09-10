@@ -9,6 +9,10 @@ class NullCorrectionObjectiveProvider implements ModelProvider {
   readonly kind = "topic-transition-null-correction";
 
   async generate(request: CanonicalModelRequest, _context: ModelCallContext): Promise<ModelProviderResult> {
+    const userContent = request.messages.findLast((message) => message.role === "user")?.content ?? "";
+    const knowledgeNeeds = userContent.includes("Current USER message: Actually, I mean cameras")
+      ? ["indoor low-light camera comparison evidence"]
+      : ["maple leaf color explanation evidence"];
     return {
       response: {
         id: "topic-transition-null-correction-response",
@@ -24,7 +28,7 @@ class NullCorrectionObjectiveProvider implements ModelProvider {
             referents: [],
             constraints: [],
             preferences: [],
-            knowledgeNeeds: [],
+            knowledgeNeeds,
             materialAmbiguity: null,
             referencedKnowledgeId: null,
             referencedRecommendationId: null,
