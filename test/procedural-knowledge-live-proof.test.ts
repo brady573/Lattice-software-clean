@@ -41,8 +41,6 @@ test("trace where responsive sod information disappears before governed Knowledg
   const qualifier = new ObjectiveKnowledgeRelevanceQualifier();
   const queries = [...deriver.derive({ objective: OBJECTIVE, context: [] })];
 
-  // One real external acquisition only. Everything after this point replays the exact
-  // captured result through existing Product boundaries without changing retrieval.
   const rawProvider = new WikimediaKnowledgeAcquisitionProvider();
   const raw = await rawProvider.acquire({
     runId,
@@ -95,8 +93,6 @@ test("trace where responsive sod information disappears before governed Knowledg
     investigationQueries: queries,
   });
 
-  // Feed exactly what survived the existing relevance wrapper into V36. This is a
-  // replay of Product material, not a new retrieval or a new admission policy.
   const v36Replay = new ReplayProvider(relevant);
   const pipeline = new KnowledgeAcquisitionTruthPipeline(v36Replay);
   const request: LatticeRunRequest = {
@@ -202,7 +198,9 @@ test("trace where responsive sod information disappears before governed Knowledg
           atomicDisposition: assessment.atomicDisposition,
           verdict: assessment.verdict,
           confidence: assessment.confidence,
+          contradictoryEvidenceIds: assessment.contradictoryEvidenceIds,
           unresolvedObligationIds: assessment.unresolvedObligationIds,
+          rationale: assessment.rationale,
         })),
       },
       validated: {
@@ -219,7 +217,6 @@ test("trace where responsive sod information disappears before governed Knowledg
           atomicDisposition: assessment.atomicDisposition,
           verdict: assessment.verdict,
           confidence: assessment.confidence,
-          supportingEvidenceIds: assessment.supportingEvidenceIds,
           contradictoryEvidenceIds: assessment.contradictoryEvidenceIds,
           unresolvedObligationIds: assessment.unresolvedObligationIds,
           rationale: assessment.rationale,
@@ -236,7 +233,6 @@ test("trace where responsive sod information disappears before governed Knowledg
 
   console.log(`PROCEDURAL_KNOWLEDGE_STAGE_TRACE=${JSON.stringify(report)}`);
 
-  // Mechanical guard only: this diagnostic must be tracing the unchanged repaired query.
   assert.ok(queries.some((query) => /prepare/iu.test(query) && /soil/iu.test(query) && /sod/iu.test(query)));
   assert.ok(queries.every((query) => !/\bneed\b/iu.test(query)));
 });
