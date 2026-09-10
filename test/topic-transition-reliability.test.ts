@@ -125,7 +125,7 @@ async function runRequest(app: FastifyInstance, runId: string) {
 
 test("clear unrelated topic creates successor Intent and exact Run binding to the new USER task", async () => {
   const cognition = new TransitionCognition();
-  const app = await createRuntimeApp(config, { solandraCognition: cognition, memoryDispatchDelayMs: 60_000 });
+  const app = await createRuntimeApp(config, { solandraCognition: cognition, memoryDispatchDelayMs: 1 });
   try {
     const conversationId = await createConversation(app);
     const firstMessage = "Why does iron rust?";
@@ -165,7 +165,7 @@ test("clear unrelated topic creates successor Intent and exact Run binding to th
 
 test("same-topic follow-up preserves current objective and IntentVersion", async () => {
   const cognition = new TransitionCognition();
-  const app = await createRuntimeApp(config, { solandraCognition: cognition, memoryDispatchDelayMs: 60_000 });
+  const app = await createRuntimeApp(config, { solandraCognition: cognition, memoryDispatchDelayMs: 1 });
   try {
     const conversationId = await createConversation(app);
     const firstMessage = "Why do leaves change color in autumn?";
@@ -185,7 +185,7 @@ test("same-topic follow-up preserves current objective and IntentVersion", async
 
 test("explicit correction creates successor Intent without rewriting historical objective", async () => {
   const cognition = new TransitionCognition();
-  const app = await createRuntimeApp(config, { solandraCognition: cognition, memoryDispatchDelayMs: 60_000 });
+  const app = await createRuntimeApp(config, { solandraCognition: cognition, memoryDispatchDelayMs: 1 });
   try {
     const conversationId = await createConversation(app);
     const firstMessage = "Help me compare compact cameras for hiking.";
@@ -207,7 +207,7 @@ test("explicit correction creates successor Intent without rewriting historical 
 
 test("materially ambiguous topic relation asks the minimum clarification instead of guessing", async () => {
   const cognition = new TransitionCognition();
-  const app = await createRuntimeApp(config, { solandraCognition: cognition, memoryDispatchDelayMs: 60_000 });
+  const app = await createRuntimeApp(config, { solandraCognition: cognition, memoryDispatchDelayMs: 1 });
   try {
     const conversationId = await createConversation(app);
     const first = await submit(app, conversationId, "Help me understand my garden drainage problem.");
@@ -227,7 +227,7 @@ test("materially ambiguous topic relation asks the minimum clarification instead
 
 test("unrelated-domain topic changes are generic rather than tied to one example domain", async () => {
   const cognition = new TransitionCognition();
-  const app = await createRuntimeApp(config, { solandraCognition: cognition, memoryDispatchDelayMs: 60_000 });
+  const app = await createRuntimeApp(config, { solandraCognition: cognition, memoryDispatchDelayMs: 1 });
   try {
     const firstConversation = await createConversation(app);
     await submit(app, firstConversation, "Explain why the Moon has phases.");
