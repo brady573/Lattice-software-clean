@@ -6,6 +6,7 @@ on:
       - "src/**"
       - "migrations/**"
       - "tools/m7-browser-lifecycle.mjs"
+      - "tools/owner-browser-session-lifecycle.mjs"
       - "package.json"
       - "package-lock.json"
       - ".github/workflows/browser-lifecycle-validation.yml"
@@ -16,6 +17,7 @@ on:
       - "src/**"
       - "migrations/**"
       - "tools/m7-browser-lifecycle.mjs"
+      - "tools/owner-browser-session-lifecycle.mjs"
       - "package.json"
       - "package-lock.json"
       - ".github/workflows/browser-lifecycle-validation.yml"
@@ -84,8 +86,10 @@ jobs:
       - name: Install locked dependencies
         run: npm ci --no-audit --no-fund
 
-      - name: Syntax-check browser lifecycle harness
-        run: node --check tools/m7-browser-lifecycle.mjs
+      - name: Syntax-check browser lifecycle harnesses
+        run: |
+          node --check tools/m7-browser-lifecycle.mjs
+          node --check tools/owner-browser-session-lifecycle.mjs
 
       - name: Build browser validation subject
         run: npm run build
@@ -130,6 +134,19 @@ jobs:
           node tools/m7-browser-lifecycle.mjs
           test "$(git rev-parse HEAD)" = "$SUBJECT_SOURCE_SHA"
           echo "BROWSER_LIFECYCLE=PASS sha=$SUBJECT_SOURCE_SHA"
+          echo 'PRODUCTION_DEPLOYMENT=NOT_PERFORMED'
+          echo 'PRODUCTION_DATABASE=NOT_TOUCHED'
+
+      - name: Execute required-auth browser session validation
+        env:
+          SUBJECT_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          export OWNER_SESSION_TEST_TOKEN="$(node --input-type=module -e "import { randomBytes } from 'node:crypto'; process.stdout.write(randomBytes(32).toString('base64url'))")"
+          node tools/owner-browser-session-lifecycle.mjs
+          test "$(git rev-parse HEAD)" = "$SUBJECT_SOURCE_SHA"
+          echo "OWNER_BROWSER_SESSION=PASS sha=$SUBJECT_SOURCE_SHA"
+          echo 'OWNER_LONG_LIVED_TOKEN=NOT_EXPOSED_TO_BROWSER'
           echo 'PRODUCTION_DEPLOYMENT=NOT_PERFORMED'
           echo 'PRODUCTION_DATABASE=NOT_TOUCHED'
 
