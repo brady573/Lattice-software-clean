@@ -151,10 +151,19 @@ export interface KnowledgeRelevanceQualifier {
   disposition(input: KnowledgeRelevanceQualificationInput): KnowledgeRelevanceDisposition;
 }
 
+function silentESuffixMatch(shorter: string, longer: string): boolean {
+  if (shorter.length < 5 || !shorter.endsWith("e")) return false;
+  const stem = shorter.slice(0, -1);
+  if (!longer.startsWith(stem)) return false;
+  const suffix = longer.slice(stem.length);
+  return suffix === "ed" || suffix === "ing" || suffix === "ation";
+}
+
 function tokenMatches(term: string, candidate: string): boolean {
   if (term === candidate) return true;
   if (term.length < 5 || candidate.length < 5) return false;
-  return term.startsWith(candidate) || candidate.startsWith(term);
+  if (term.startsWith(candidate) || candidate.startsWith(term)) return true;
+  return silentESuffixMatch(term, candidate) || silentESuffixMatch(candidate, term);
 }
 
 function matchingTerms(terms: readonly string[], candidateTokens: readonly string[]): string[] {
