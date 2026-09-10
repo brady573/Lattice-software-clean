@@ -165,6 +165,8 @@ function buildCognitionRequest(model: string, input: SolandraCognitionInput): Ca
           "Use materialAmbiguity only when uncertainty could materially change the objective or requested work. Do not treat acronyms, technical tokens, or unfamiliar terms as ambiguous merely because of their surface form when context makes the request clear.",
           "Use SOURCES_REFERENCE, EXPLAIN_REFERENCE, or SIMPLIFY_REFERENCE when the user clearly refers to an existing supplied Knowledge object. referencedKnowledgeId must be exactly one supplied Knowledge ID or null.",
           "Use FRESH_RESEARCH only when the user asks for new, updated, additional, or otherwise external Knowledge beyond the supplied object. A historical provenance request is not fresh research.",
+          "For KNOWLEDGE or FRESH_RESEARCH without material ambiguity, knowledgeNeeds must contain one to four concise task-bearing investigation needs that express what information would answer the user's actual request. Remove conversational scaffolding rather than turning the USER's surface phrasing into search syntax.",
+          "Semantically equivalent ordinary paraphrases should produce materially equivalent knowledgeNeeds even when their wording differs. Preserve the task subject, relationships, conditions, and requested practical or explanatory burden rather than copying filler words.",
           "Use DECISION only when the user is actually asking for help choosing/deciding, not merely asking for differences or information.",
           "Use EXPLAIN_RECOMMENDATION when the user asks why a supplied historical Recommendation was made. Use SOURCES_RECOMMENDATION when the user asks for the evidence/sources behind it. referencedRecommendationId must be exactly one supplied Recommendation ID or null.",
           "Use EXPLAIN_OPTION when the user refers conversationally to one exact supplied option and asks about it without choosing it. Use ACCEPT_CHOICE only when the USER actually chooses one supplied option and exact choice identity matters. For either, return both its exact supplied Recommendation ID and option ID. Resolve references from context and supplied option identity, not from a phrase-specific command. If the intended option is materially ambiguous, ask a precise clarification instead of guessing.",
@@ -208,6 +210,10 @@ function recommendationReferenceHelp(help: SolandraRequestedHelp): boolean {
   return help === "EXPLAIN_RECOMMENDATION" || help === "SOURCES_RECOMMENDATION";
 }
 
+function requiresInvestigationNeeds(help: SolandraRequestedHelp): boolean {
+  return help === "KNOWLEDGE" || help === "FRESH_RESEARCH";
+}
+
 export class ModelSolandraCognitiveRuntime implements SolandraCognitiveRuntime {
   constructor(
     private readonly runtime: ModelRuntime,
@@ -239,6 +245,16 @@ export class ModelSolandraCognitiveRuntime implements SolandraCognitiveRuntime {
         materialAmbiguity: null,
       }
       : parsedProposal;
+    if (
+      requiresInvestigationNeeds(proposal.requestedHelp)
+      && proposal.materialAmbiguity === null
+      && proposal.knowledgeNeeds.length === 0
+    ) {
+      throw new ModelProviderError(
+        "invalid_output",
+        "Solandra cognition must identify at least one task-bearing Knowledge investigation need or surface material ambiguity.",
+      );
+    }
     const allowedKnowledgeIds = new Set(input.governedKnowledge.map((item) => item.knowledgeId));
     if (proposal.referencedKnowledgeId !== null && !allowedKnowledgeIds.has(proposal.referencedKnowledgeId)) {
       throw new ModelProviderError(
