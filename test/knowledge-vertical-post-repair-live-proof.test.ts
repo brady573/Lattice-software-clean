@@ -14,10 +14,10 @@ const EXPLANATORY_CASES = [
     answerPattern: /chlorophyll|daylight|temperatures|pigment/iu,
   },
   {
-    question: "Why does salt melt ice on roads?",
-    expectedTitle: "Road salt",
-    passagePattern: /freezing point|melting point|ice to melt/iu,
-    answerPattern: /freezing point|melting point|ice.*melt|melt.*ice/iu,
+    question: "How does a refrigerator keep food cold?",
+    expectedTitle: "Refrigerator",
+    passagePattern: /heat pump|transfers heat|transfer heat/iu,
+    answerPattern: /heat pump|transfers heat|transfer heat/iu,
   },
 ] as const;
 
@@ -109,7 +109,7 @@ test("post-repair live Knowledge proof", { timeout: 240_000 }, async () => {
       assert.ok(expectedSource, `Expected live Wikimedia source ${scenario.expectedTitle}.`);
       assert.match(expectedSource.content, scenario.passagePattern);
       assert.ok(rawClaims.some((claim) => scenario.passagePattern.test(claim.text)),
-        `Expected a responsive non-intro claim for ${scenario.question}`);
+        `Expected a responsive claim for ${scenario.question}`);
 
       const outcome = result.envelope.outcome;
       const assistantMessage = result.envelope.presentation?.assistantMessage ?? "";
