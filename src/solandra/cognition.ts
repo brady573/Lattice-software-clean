@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { explicitConsultationObjectiveCorrection } from "../intent/consultation-interpreter.js";
 import { ModelProviderError } from "../model/errors.js";
 import { ModelRuntime } from "../model/runtime.js";
 import type { CanonicalModelRequest, ModelInvocationProvenance } from "../model/types.js";
@@ -225,7 +226,19 @@ export class ModelSolandraCognitiveRuntime implements SolandraCognitiveRuntime {
     if (result.response.output.length !== 1 || result.response.output[0]?.type !== "text") {
       throw new ModelProviderError("invalid_output", "Solandra cognition requires exactly one semantic text output.");
     }
-    const proposal = solandraSemanticProposalSchema.parse(parseJsonObject(result.response.output[0].text));
+    const parsedProposal = solandraSemanticProposalSchema.parse(parseJsonObject(result.response.output[0].text));
+    const explicitCorrection = explicitConsultationObjectiveCorrection(
+      input.message,
+      input.currentObjective !== undefined,
+    );
+    const proposal: SolandraSemanticProposal = explicitCorrection
+      ? {
+        ...parsedProposal,
+        objectiveRelation: "CORRECTION",
+        proposedObjective: input.message.trim(),
+        materialAmbiguity: null,
+      }
+      : parsedProposal;
     const allowedKnowledgeIds = new Set(input.governedKnowledge.map((item) => item.knowledgeId));
     if (proposal.referencedKnowledgeId !== null && !allowedKnowledgeIds.has(proposal.referencedKnowledgeId)) {
       throw new ModelProviderError(
