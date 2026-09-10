@@ -6,336 +6,139 @@ import type {
   RetrievedKnowledgeSource,
 } from "./acquisition.js";
 
-const MAX_QUERIES = 2;
-const MAX_QUERY_CHARS = 240;
-const MAX_RELEVANCE_TEXT_CHARS = 16_000;
-
-const STOP_WORDS = new Set([
-  "about", "after", "again", "also", "and", "are", "before", "being", "can", "could", "does",
-  "for", "from", "have", "how", "into", "its", "know", "mean", "means", "meant", "more", "need", "should", "stands",
-  "that", "the", "their", "then", "there", "these", "they", "this", "through", "understand", "using", "want",
-  "what", "when", "where", "which", "who", "why", "with", "would", "your",
-]);
-
-const GENERIC_RELATION_TERMS = new Set([
-  "cause", "causes", "caused", "causing", "direction", "directions", "east", "effect", "effects", "find",
-  "happen", "happens", "happened", "happening", "location", "make", "makes", "made", "mechanism", "navigate",
-  "navigation", "north", "occur", "occurs", "occurred", "occurring", "orient", "orientation", "sense", "sensing",
-  "south", "west", "affect", "affects", "affected", "affecting",
-]);
-
-const CAUSE_SEEKING_OBJECTIVE_PATTERN = /\b(?:why|cause|causes|caused|causing|mechanism)\b/iu;
-const CAUSE_SEEKING_FOLLOW_UP_PATTERN = /^(?:why\??|explain(?:\s+that)?(?:\s+more)?|tell\s+me\s+more)\.?$/iu;
-const LOCAL_CAUSAL_RELATION_PATTERN = /\b(?:because|cause|causes|caused|causing|due|affect|affects|affected|affecting|lead|leads|led|leading|result|results|resulted|resulting|require|requires|required|requiring|react|reacts|reacted|reacting|trigger|triggers|triggered|triggering|produce|produces|produced|producing|create|creates|created|creating|make|makes|made|making|drive|drives|drove|driven|driving)\b/iu;
-const EXPLANATION_FOLLOWS_PATTERN = /\b(?:because|due\s+to)\b/iu;
-const SUBJECT_ANCHORED_MECHANISM_PATTERN = /\b(?:require|requires|required|requiring|react|reacts|reacted|reacting)\b/iu;
-const EXPLAINED_SUBJECT_PATTERN = /\b(?:(?:is|are|was|were|be|been|being)\s+(?:caused|affected)\s+by|(?:result|results|resulted|resulting)\s+from)\b/iu;
-const EFFECT_FOLLOWS_PATTERN = /\b(?:cause|causes|caused|causing|affect|affects|affected|affecting|lead|leads|led|leading|result|results|resulted|resulting|trigger|triggers|triggered|triggering|produce|produces|produced|producing|create|creates|created|creating|make|makes|made|making|drive|drives|drove|driven|driving)\b/iu;
-const SHORT_FORM_PATTERN = /\b[A-Z]{3}\b/gu;
-
-function normalizedTokens(value: string): string[] {
-  return value
-    .normalize("NFKC")
-    .toLocaleLowerCase("en-US")
-    .match(/[\p{L}\p{N}]+/gu)
-    ?.filter((token) => token.length >= 3 && !STOP_WORDS.has(token))
-    ?? [];
-}
-
-function unique(values: readonly string[]): string[] {
-  return [...new Set(values)];
-}
-
-function conceptExpansion(value: string): string[] {
-  const concepts: string[] = [];
-  if (/\b(?:direction|directions|north|south|east|west|orient|orientation|locate|location|navigate|navigation|find|sense|sensing)\b/iu.test(value)) {
-    concepts.push("navigation", "orientation");
-  }
-  if (/\b(?:why|cause|causes|caused|causing|mechanism|effect|effects|make|makes|made|slower|faster)\b/iu.test(value)) {
-    concepts.push("mechanism", "causes");
-  }
-  if (/\b(?:before|prepare|preparing|preparation|consider|considerations|should|understand)\b/iu.test(value)) {
-    concepts.push("preparation", "considerations");
-  }
-  if (/\b(?:compare|comparison|difference|differences|versus)\b/iu.test(value)) {
-    concepts.push("comparison");
-  }
-  return unique(concepts);
-}
-
-function boundedQuery(parts: readonly string[]): string {
-  return parts.join(" ").replace(/\s+/gu, " ").trim().slice(0, MAX_QUERY_CHARS);
-}
-
-function objectiveShortFormTerms(objective: string): string[] {
-  return unique([...objective.matchAll(SHORT_FORM_PATTERN)].map((match) => match[0]!.toLocaleLowerCase("en-US")));
-}
-
-function clarificationContextTerms(objective: string, latestContext: string): string[] {
-  if (objectiveShortFormTerms(objective).length === 0 || !latestContext) return [];
-  if (CAUSE_SEEKING_FOLLOW_UP_PATTERN.test(latestContext)) return [];
-  if (/\b(?:source|sources|citation|citations|evidence|simpler|simply|plain language)\b/iu.test(latestContext)) return [];
-  return unique(normalizedTokens(latestContext)).slice(0, 6);
-}
-
-export interface KnowledgeInvestigationQueryInput {
+export interface KnowledgeInvestigationPlanningInput {
+  readonly runId: string;
   readonly objective: string;
   readonly context: readonly string[];
+  /** Non-authoritative statements of what information is still needed. */
+  readonly knowledgeNeeds: readonly string[];
 }
 
-/** Non-authoritative operational query derivation. It never changes accepted USER meaning. */
-export interface KnowledgeInvestigationQueryDeriver {
-  readonly kind: string;
-  derive(input: KnowledgeInvestigationQueryInput): readonly string[];
+export interface KnowledgeInvestigationPlan {
+  /** Provider-ready retrieval work proposed by Solandra; never USER intent or truth. */
+  readonly retrievalQueries: readonly string[];
 }
 
-/**
- * Small deterministic baseline for turning natural objectives into bounded search concepts.
- * It deliberately uses only general language cues rather than domain-specific ontology.
- */
-export class DeterministicKnowledgeInvestigationQueryDeriver implements KnowledgeInvestigationQueryDeriver {
-  readonly kind = "deterministic-language-query-v1";
-
-  derive(input: KnowledgeInvestigationQueryInput): readonly string[] {
-    const objective = input.objective.trim();
-    if (!objective) throw new Error("Knowledge investigation query derivation requires an objective.");
-
-    const objectiveTerms = unique(normalizedTokens(objective)).slice(0, 8);
-    const latestContext = input.context.at(-1)?.trim() ?? "";
-    const contextTerms = unique(normalizedTokens(latestContext)).slice(0, 4);
-    const clarificationTerms = clarificationContextTerms(objective, latestContext);
-    const shortFormTerms = new Set(objectiveShortFormTerms(objective));
-    const concepts = conceptExpansion(`${objective}\n${latestContext}`);
-    const specificTerms = objectiveTerms.filter((term) => !GENERIC_RELATION_TERMS.has(term));
-    const specificWithoutShortForm = specificTerms.filter((term) => !shortFormTerms.has(term));
-    const relationTerms = objectiveTerms.filter((term) => GENERIC_RELATION_TERMS.has(term));
-    const anchor = specificTerms[0] ?? objectiveTerms[0];
-
-    const candidates: string[] = [];
-    if (clarificationTerms.length > 0) {
-      candidates.push(boundedQuery([...clarificationTerms, ...specificWithoutShortForm, ...concepts]));
-    }
-    if (anchor && concepts.length > 0) {
-      candidates.push(boundedQuery([anchor, ...concepts]));
-    }
-    if (objectiveTerms.length > 0) {
-      if (concepts.length > 0 && specificTerms.length <= 1 && relationTerms.length > 0) {
-        candidates.push(boundedQuery([...concepts, ...relationTerms]));
-      } else {
-        candidates.push(boundedQuery([...objectiveTerms, ...contextTerms]));
-      }
-    }
-    if (candidates.length === 0) candidates.push(objective.slice(0, MAX_QUERY_CHARS));
-
-    return unique(candidates.filter(Boolean)).slice(0, MAX_QUERIES);
-  }
+export interface KnowledgeResponsivenessSelection {
+  readonly claimId: string;
+  readonly sourceIds: readonly string[];
 }
 
-export interface KnowledgeRelevanceQualificationInput {
+export interface KnowledgeResponsivenessInput {
+  readonly runId: string;
   readonly objective: string;
   readonly context: readonly string[];
-  readonly queries: readonly string[];
-  readonly source: RetrievedKnowledgeSource;
-  readonly claim: RetrievedKnowledgeClaim;
+  readonly knowledgeNeeds: readonly string[];
+  readonly retrievalQueries: readonly string[];
+  readonly sources: readonly RetrievedKnowledgeSource[];
+  readonly claims: readonly RetrievedKnowledgeClaim[];
 }
 
-export interface KnowledgeRelevanceDisposition {
-  readonly relevant: boolean;
-  readonly rationale: string;
-  readonly matchedTerms: readonly string[];
-}
-
-/** Operational relevance only. It must never answer whether a claim is true. */
-export interface KnowledgeRelevanceQualifier {
-  readonly kind: string;
-  disposition(input: KnowledgeRelevanceQualificationInput): KnowledgeRelevanceDisposition;
-}
-
-function silentESuffixMatch(shorter: string, longer: string): boolean {
-  if (shorter.length < 5 || !shorter.endsWith("e")) return false;
-  const stem = shorter.slice(0, -1);
-  if (!longer.startsWith(stem)) return false;
-  const suffix = longer.slice(stem.length);
-  return suffix === "ed" || suffix === "ing" || suffix === "ation";
-}
-
-function tokenMatches(term: string, candidate: string): boolean {
-  if (term === candidate) return true;
-  if (term.length < 5 || candidate.length < 5) return false;
-  if (term.startsWith(candidate) || candidate.startsWith(term)) return true;
-  return silentESuffixMatch(term, candidate) || silentESuffixMatch(candidate, term);
-}
-
-function matchingTerms(terms: readonly string[], candidateTokens: readonly string[]): string[] {
-  return unique(terms.filter((term) => candidateTokens.some((candidate) => tokenMatches(term, candidate))));
-}
-
-function relevanceSegments(input: KnowledgeRelevanceQualificationInput): string[] {
-  const values = [
-    input.source.title,
-    input.claim.text,
-    input.source.content.slice(0, MAX_RELEVANCE_TEXT_CHARS),
-  ];
-  return unique(values.flatMap((value) =>
-    value.match(/[^.!?\n]+(?:[.!?]+|$)/gu)?.map((segment) => segment.trim()).filter(Boolean) ?? []
-  ));
-}
-
-function causeSeeking(input: KnowledgeRelevanceQualificationInput): boolean {
-  return CAUSE_SEEKING_OBJECTIVE_PATTERN.test(input.objective)
-    || CAUSE_SEEKING_FOLLOW_UP_PATTERN.test(input.context.at(-1)?.trim() ?? "");
-}
-
-function locallyAnswersCauseSeekingObjective(
-  input: KnowledgeRelevanceQualificationInput,
-  specificObjectiveTerms: readonly string[],
-): boolean {
-  if (!causeSeeking(input)) return true;
-  const minimumSpecificMatches = Math.min(2, specificObjectiveTerms.length);
-  if (minimumSpecificMatches === 0) return false;
-
-  return relevanceSegments(input).some((segment) => {
-    if (!LOCAL_CAUSAL_RELATION_PATTERN.test(segment)) return false;
-    const segmentTokens = unique(normalizedTokens(segment));
-    if (matchingTerms(specificObjectiveTerms, segmentTokens).length < minimumSpecificMatches) return false;
-
-    const explanationFollows = EXPLANATION_FOLLOWS_PATTERN.exec(segment);
-    if (explanationFollows?.index !== undefined) {
-      const explainedSide = segment.slice(0, explanationFollows.index);
-      const explainedTokens = unique(normalizedTokens(explainedSide));
-      return matchingTerms(specificObjectiveTerms, explainedTokens).length >= 1;
-    }
-
-    const subjectAnchoredMechanism = SUBJECT_ANCHORED_MECHANISM_PATTERN.exec(segment);
-    if (subjectAnchoredMechanism?.index !== undefined) {
-      const subjectSide = segment.slice(0, subjectAnchoredMechanism.index);
-      const subjectTokens = unique(normalizedTokens(subjectSide));
-      return matchingTerms(specificObjectiveTerms, subjectTokens).length >= minimumSpecificMatches;
-    }
-
-    const explainedSubject = EXPLAINED_SUBJECT_PATTERN.exec(segment);
-    if (explainedSubject?.index !== undefined) {
-      const subjectSide = segment.slice(0, explainedSubject.index);
-      const subjectTokens = unique(normalizedTokens(subjectSide));
-      return matchingTerms(specificObjectiveTerms, subjectTokens).length >= minimumSpecificMatches;
-    }
-
-    const effectFollows = EFFECT_FOLLOWS_PATTERN.exec(segment);
-    if (effectFollows?.index === undefined) return false;
-    const effectSide = segment.slice(effectFollows.index + effectFollows[0].length);
-    const effectTokens = unique(normalizedTokens(effectSide));
-    return matchingTerms(specificObjectiveTerms, effectTokens).length >= 1;
-  });
+export interface KnowledgeResponsivenessResult {
+  /** Exact acquired claim/source identities Solandra considers responsive to the work. */
+  readonly selections: readonly KnowledgeResponsivenessSelection[];
 }
 
 /**
- * Conservative lexical/concept gate. Passing this gate means only that a source materially
- * overlaps the current investigation objective; V36 still owns evidence admission and truth.
+ * Non-authoritative semantic investigation boundary. Implementations may decide
+ * where to look and which acquired candidates respond to the USER's work, but
+ * they cannot establish USER intent, provenance, truth, a decision, or authority.
  */
-export class ObjectiveKnowledgeRelevanceQualifier implements KnowledgeRelevanceQualifier {
-  readonly kind = "objective-concept-relevance-v1";
+export interface KnowledgeInvestigator {
+  readonly kind: string;
+  plan(input: KnowledgeInvestigationPlanningInput): Promise<KnowledgeInvestigationPlan>;
+  selectResponsive(input: KnowledgeResponsivenessInput): Promise<KnowledgeResponsivenessResult>;
+}
 
-  disposition(input: KnowledgeRelevanceQualificationInput): KnowledgeRelevanceDisposition {
-    const objectiveTerms = unique(normalizedTokens(input.objective));
-    const queryTerms = unique(input.queries.flatMap((query) => normalizedTokens(query)))
-      .filter((term) => !objectiveTerms.includes(term));
-    const latestContext = input.context.at(-1)?.trim() ?? "";
-    const clarifiedShortFormTerms = clarificationContextTerms(input.objective, latestContext).length > 0
-      ? new Set(objectiveShortFormTerms(input.objective))
-      : new Set<string>();
-    const specificObjectiveTerms = objectiveTerms.filter(
-      (term) => !GENERIC_RELATION_TERMS.has(term) && !clarifiedShortFormTerms.has(term),
-    );
-    const anchorTerms = specificObjectiveTerms.slice(0, 3);
-    const candidateText = [
-      input.source.title,
-      input.claim.text,
-      input.source.content.slice(0, MAX_RELEVANCE_TEXT_CHARS),
-    ].join("\n");
-    const candidateTokens = unique(normalizedTokens(candidateText));
-
-    const objectiveMatches = matchingTerms(objectiveTerms, candidateTokens);
-    const queryMatches = matchingTerms(queryTerms, candidateTokens);
-    const specificObjectiveMatches = matchingTerms(specificObjectiveTerms, candidateTokens);
-    const anchorMatches = matchingTerms(anchorTerms, candidateTokens);
-    const singleSpecificObjective = specificObjectiveTerms.length <= 1;
-
-    const existingRelevance = objectiveTerms.length <= 1
-      ? objectiveMatches.length >= 1
-      : singleSpecificObjective
-        ? anchorMatches.length >= 1 && queryMatches.length >= 1
-        : specificObjectiveMatches.length >= 2;
-    const answerRelevant = existingRelevance
-      && locallyAnswersCauseSeekingObjective(input, specificObjectiveTerms);
-
-    return {
-      relevant: answerRelevant,
-      rationale: !existingRelevance
-        ? "Retrieved material lacks enough objective-specific overlap to enter visible Knowledge."
-        : answerRelevant
-          ? causeSeeking(input)
-            ? "Retrieved material locally links causal/mechanistic relation evidence with enough objective-specific terms and addresses the requested explanatory relationship."
-            : clarifiedShortFormTerms.size > 0
-              ? "Retrieved material overlaps the objective-specific or USER-clarified investigation concepts."
-              : "Retrieved material overlaps the objective-specific or derived investigation concepts."
-          : "Topic/concept overlap is insufficient because the causal relation is not locally addressed in the required direction for the requested explanatory relationship.",
-      matchedTerms: unique([...objectiveMatches, ...queryMatches]),
-    };
-  }
+function uniqueNonBlank(values: readonly string[]): string[] {
+  return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
 }
 
 /**
- * Provider-neutral operational wrapper: use an explicit non-authoritative
- * investigation proposal when supplied; otherwise derive where to look. It
- * retrieves, then excludes material that is not relevant enough to the
- * authoritative objective before V36 truth qualification.
+ * Solandra-owned semantic bridge around a source acquisition adapter.
+ *
+ * Incoming investigationQueries are legacy transport for Solandra's conceptual
+ * knowledgeNeeds. They are never issued directly to the provider. The semantic
+ * investigator first formulates provider-ready retrieval work, then evaluates
+ * candidate responsiveness. Lattice only validates that selected identities
+ * actually came from the acquisition result before V36 sees them.
  */
 export class RelevantKnowledgeAcquisitionProvider implements KnowledgeAcquisitionProvider {
   readonly kind: string;
 
   constructor(
     private readonly provider: KnowledgeAcquisitionProvider,
-    private readonly queryDeriver: KnowledgeInvestigationQueryDeriver = new DeterministicKnowledgeInvestigationQueryDeriver(),
-    private readonly relevanceQualifier: KnowledgeRelevanceQualifier = new ObjectiveKnowledgeRelevanceQualifier(),
+    private readonly investigator: KnowledgeInvestigator,
   ) {
-    if (!provider.kind.trim() || !queryDeriver.kind.trim() || !relevanceQualifier.kind.trim()) {
-      throw new Error("Knowledge investigation components require non-blank kinds.");
+    if (!provider.kind.trim() || !investigator.kind.trim()) {
+      throw new Error("Knowledge acquisition and semantic investigation require non-blank kinds.");
     }
-    this.kind = `relevant:${provider.kind}:${queryDeriver.kind}:${relevanceQualifier.kind}`;
+    this.kind = `solandra-responsive:${provider.kind}:${investigator.kind}`;
   }
 
   async acquire(request: KnowledgeAcquisitionRequest): Promise<KnowledgeAcquisitionResult> {
-    const proposedQueries = unique((request.investigationQueries ?? [])
-      .map((query) => query.trim())
-      .filter(Boolean))
-      .slice(0, MAX_QUERIES);
-    const queries = proposedQueries.length > 0
-      ? proposedQueries
-      : this.queryDeriver.derive({ objective: request.objective, context: request.context });
-    const acquired = await this.provider.acquire({ ...request, investigationQueries: queries });
-    const sourceById = new Map(acquired.sources.map((source) => [source.sourceId, source]));
-    const relevantSourceIds = new Set<string>();
-    const claims: RetrievedKnowledgeClaim[] = [];
+    const knowledgeNeeds = uniqueNonBlank(request.investigationQueries ?? []);
+    const plan = await this.investigator.plan({
+      runId: request.runId,
+      objective: request.objective,
+      context: request.context,
+      knowledgeNeeds,
+    });
+    const retrievalQueries = uniqueNonBlank(plan.retrievalQueries);
+    if (retrievalQueries.length === 0) {
+      throw new Error("Solandra investigation produced no provider-ready retrieval work.");
+    }
 
-    for (const claim of acquired.claims) {
-      const evidence = claim.evidence.filter((item) => {
-        const source = sourceById.get(item.sourceId);
-        if (!source) return false;
-        const disposition = this.relevanceQualifier.disposition({
-          objective: request.objective,
-          context: request.context,
-          queries,
-          source,
-          claim,
-        });
-        if (disposition.relevant) relevantSourceIds.add(item.sourceId);
-        return disposition.relevant;
-      });
-      if (evidence.length > 0) claims.push({ ...claim, evidence });
+    const acquired = await this.provider.acquire({
+      ...request,
+      investigationQueries: retrievalQueries,
+    });
+    const selected = await this.investigator.selectResponsive({
+      runId: request.runId,
+      objective: request.objective,
+      context: request.context,
+      knowledgeNeeds,
+      retrievalQueries,
+      sources: acquired.sources,
+      claims: acquired.claims,
+    });
+
+    const sourceById = new Map(acquired.sources.map((source) => [source.sourceId, source]));
+    const claimById = new Map(acquired.claims.map((claim) => [claim.claimId, claim]));
+    const selectedSourceIds = new Set<string>();
+    const claims: RetrievedKnowledgeClaim[] = [];
+    const seenClaimIds = new Set<string>();
+
+    for (const selection of selected.selections) {
+      if (seenClaimIds.has(selection.claimId)) {
+        throw new Error(`Solandra responsiveness selection duplicated claim ${selection.claimId}.`);
+      }
+      seenClaimIds.add(selection.claimId);
+      const claim = claimById.get(selection.claimId);
+      if (!claim) {
+        throw new Error(`Solandra responsiveness selection referenced unknown claim ${selection.claimId}.`);
+      }
+      const requestedSourceIds = new Set(uniqueNonBlank(selection.sourceIds));
+      if (requestedSourceIds.size === 0) {
+        throw new Error(`Solandra responsiveness selection for ${selection.claimId} requires acquired source identity.`);
+      }
+
+      for (const sourceId of requestedSourceIds) {
+        if (!sourceById.has(sourceId)) {
+          throw new Error(`Solandra responsiveness selection referenced unknown source ${sourceId}.`);
+        }
+      }
+
+      const evidence = claim.evidence.filter((item) => requestedSourceIds.has(item.sourceId));
+      if (evidence.length !== requestedSourceIds.size) {
+        throw new Error(`Solandra responsiveness selection referenced a source not bound to claim ${selection.claimId}.`);
+      }
+      for (const item of evidence) selectedSourceIds.add(item.sourceId);
+      claims.push({ ...claim, evidence });
     }
 
     return {
-      sources: acquired.sources.filter((source) => relevantSourceIds.has(source.sourceId)),
+      sources: acquired.sources.filter((source) => selectedSourceIds.has(source.sourceId)),
       claims,
     };
   }
