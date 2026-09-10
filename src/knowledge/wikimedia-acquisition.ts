@@ -125,21 +125,22 @@ function sourceClaimText(content: string, objective: string, searchQuery: string
     .filter(Boolean);
   if (paragraphs.length === 0) return "";
 
+  const explanatory = EXPLANATORY_OBJECTIVE_PATTERN.test(objective);
+  if (!explanatory) return paragraphs[0]!;
+
   const objectiveTerms = passageTokens(objective);
   const queryTerms = passageTokens(searchQuery);
   const minimumObjectiveMatches = Math.min(2, objectiveTerms.length);
-  const explanatory = EXPLANATORY_OBJECTIVE_PATTERN.test(objective);
   const ranked = paragraphs.map((text, index) => {
     const tokens = new Set(passageTokens(text));
     const objectiveMatches = objectiveTerms.filter((term) => tokens.has(term)).length;
     const queryMatches = queryTerms.filter((term) => tokens.has(term)).length;
     const explanatoryRelation = EXPLANATORY_PASSAGE_PATTERN.test(text);
-    const eligibleExplanation = explanatory
-      && explanatoryRelation
+    const eligibleExplanation = explanatoryRelation
       && objectiveMatches >= minimumObjectiveMatches;
     return { text, index, objectiveMatches, queryMatches, eligibleExplanation };
   });
-  const candidates = explanatory && ranked.some((item) => item.eligibleExplanation)
+  const candidates = ranked.some((item) => item.eligibleExplanation)
     ? ranked.filter((item) => item.eligibleExplanation)
     : ranked;
   candidates.sort((left, right) =>
@@ -244,6 +245,7 @@ export class WikimediaKnowledgeAcquisitionProvider implements KnowledgeAcquisiti
       throw new Error("Knowledge acquisition requires an exact Run and objective.");
     }
     const emphasis = workEmphasis(request.context);
+    const explanatoryObjective = EXPLANATORY_OBJECTIVE_PATTERN.test(request.objective);
     const resultLimit = emphasis === "SOURCES" || emphasis === "UNCERTAINTY"
       ? Math.min(8, this.resultLimit + 2)
       : emphasis === "EXPLANATION"
@@ -314,7 +316,9 @@ export class WikimediaKnowledgeAcquisitionProvider implements KnowledgeAcquisiti
         } catch {
           continue;
         }
-        const extract = await this.fullPageExtract(pageId, introExtract);
+        const extract = explanatoryObjective
+          ? await this.fullPageExtract(pageId, introExtract)
+          : introExtract.slice(0, MAX_SOURCE_CONTENT_CHARS);
         if (!extract) continue;
         const sourceId = `page:${pageId}`;
         const source: RetrievedKnowledgeSource = {
