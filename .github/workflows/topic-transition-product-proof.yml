@@ -1,0 +1,74 @@
+name: Validation — Topic Transition Product Proof
+
+on:
+  push:
+    branches:
+      - validation/topic-transition-4550
+    paths:
+      - "tools/topic-transition-product-proof.mjs"
+      - ".github/workflows/topic-transition-product-proof.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  topic-transition-product:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      DATABASE_URL: postgresql://lattice:lattice@127.0.0.1:55437/lattice_test
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+    services:
+      postgres:
+        image: postgres:18.6
+        env:
+          POSTGRES_USER: lattice
+          POSTGRES_PASSWORD: lattice
+          POSTGRES_DB: lattice_test
+        ports:
+          - 55437:5432
+        options: >-
+          --health-cmd "pg_isready -U lattice -d lattice_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - name: Checkout validation wrapper
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Verify exact Product subject and validation-only delta
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected=455008b91ae898192c82ba69215990d52158eba5
+          git merge-base --is-ancestor "$expected" HEAD
+          files="$(git diff --name-only "$expected"..HEAD | sort)"
+          expected_files=$'.github/workflows/topic-transition-product-proof.yml\ntools/topic-transition-product-proof.mjs'
+          test "$files" = "$expected_files"
+          for path in src/solandra/cognition.ts src/intent/consultation-interpreter.ts src/consultation-intake.ts test/topic-transition-reliability.test.ts test/topic-transition-postgres-reload.test.ts test/topic-transition-cognition-normalization.test.ts; do
+            test "$(git rev-parse "$expected:$path")" = "$(git rev-parse "HEAD:$path")"
+          done
+          echo "TOPIC_TRANSITION_PRODUCT_SUBJECT=$expected"
+      - name: Provision Node 24
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '24'
+      - name: Verify provider and browser capability
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$GROQ_API_KEY"
+          browser="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
+          test -n "$browser"
+          echo "M7_BROWSER_EXECUTABLE=$browser" >> "$GITHUB_ENV"
+      - name: Install and build
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+      - name: Migrate disposable PostgreSQL
+        run: node dist/src/migrate.js
+      - name: Execute real cognition and Chrome Product proof
+        run: node tools/topic-transition-product-proof.mjs
