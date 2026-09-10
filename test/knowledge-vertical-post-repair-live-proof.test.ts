@@ -9,13 +9,11 @@ import { resolveRuntimeConfig } from "../src/runtime-config.js";
 const EXPLANATORY_CASES = [
   {
     question: "Why do leaves change color in autumn?",
-    expectedTitle: "Autumn leaf color",
     passagePattern: /chlorophyll|shorter daylight|daylight hours shortening/iu,
     answerPattern: /chlorophyll|daylight|temperatures|pigment/iu,
   },
   {
     question: "How does a refrigerator keep food cold?",
-    expectedTitle: "Refrigerator",
     passagePattern: /heat pump|transfers heat|transfer heat/iu,
     answerPattern: /heat pump|transfers heat|transfer heat/iu,
   },
@@ -102,21 +100,26 @@ test("post-repair live Knowledge proof", { timeout: 240_000 }, async () => {
       const acquisitionStart = acquisitions.length;
       const result = await ask(app, scenario.question);
       const acquired = acquisitions.slice(acquisitionStart);
+      assert.ok(acquired.length > 0, `Expected acquisition for ${scenario.question}`);
+      assert.ok(acquired.every((item) => item.objective === scenario.question),
+        `Expected exact USER objective to remain authoritative for ${scenario.question}`);
+
       const rawSources = acquired.flatMap((item) => item.sources);
       const rawClaims = acquired.flatMap((item) => item.claims);
-
-      const expectedSource = rawSources.find((source) => source.title === scenario.expectedTitle);
-      assert.ok(expectedSource, `Expected live Wikimedia source ${scenario.expectedTitle}.`);
-      assert.match(expectedSource.content, scenario.passagePattern);
+      const responsiveSource = rawSources.find((source) => scenario.passagePattern.test(source.content));
+      assert.ok(responsiveSource,
+        `Expected at least one live Wikimedia source with responsive explanatory content for ${scenario.question}`);
       assert.ok(rawClaims.some((claim) => scenario.passagePattern.test(claim.text)),
-        `Expected a responsive claim for ${scenario.question}`);
+        `Expected acquisition to select responsive explanatory content for ${scenario.question}`);
 
       const outcome = result.envelope.outcome;
       const assistantMessage = result.envelope.presentation?.assistantMessage ?? "";
       assert.ok(outcome.findings.length > 0, `Expected governed Knowledge for ${scenario.question}`);
       assert.ok(outcome.evidence.length > 0, `Expected governed evidence for ${scenario.question}`);
-      assert.ok(outcome.provenance.some((source: any) => source.title === scenario.expectedTitle),
-        `Expected governed provenance for ${scenario.expectedTitle}`);
+      assert.ok(outcome.findings.some((finding: any) => scenario.passagePattern.test(finding.text ?? "")),
+        `Expected responsive acquired content to survive relevance and V36 for ${scenario.question}`);
+      assert.ok(outcome.provenance.some((source: any) => source.canonicalUri === responsiveSource.canonicalUri),
+        `Expected governed provenance to identify the responsive source actually used for ${scenario.question}`);
       assert.doesNotMatch(assistantMessage, /couldn't establish|doesn't contain a direct explanation/iu);
       assert.match(assistantMessage, scenario.answerPattern);
 
@@ -124,6 +127,10 @@ test("post-repair live Knowledge proof", { timeout: 240_000 }, async () => {
         question: scenario.question,
         acceptedUnderstanding: result.accepted.acceptedUnderstanding,
         queries: acquired.flatMap((item) => item.queries),
+        responsiveSource: {
+          title: responsiveSource.title,
+          canonicalUri: responsiveSource.canonicalUri,
+        },
         rawSources: rawSources.map((source) => ({ title: source.title, canonicalUri: source.canonicalUri })),
         selectedClaims: rawClaims.slice(0, 4).map((claim) => claim.text.slice(0, 500)),
         findings: outcome.findings.map((finding: any) => ({
