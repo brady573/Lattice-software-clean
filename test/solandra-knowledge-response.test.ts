@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { FastifyInstance } from "fastify";
+import type { KnowledgeAcquisitionProvider } from "../src/knowledge/acquisition.js";
 import type { KnowledgeFinding, KnowledgeOutcome } from "../src/outcome.js";
 import { renderKnowledgeResponse } from "../src/presentation/solandra/knowledge-response.js";
 import { createRuntimeApp } from "../src/runtime-app.js";
@@ -154,6 +155,79 @@ test("completed canonical Knowledge response adds downstream assistantMessage wi
       "I couldn't establish enough relevant evidence to answer that reliably.",
     );
     assert.doesNotMatch(body.presentation.assistantMessage, /I found \d+ supported source report/u);
+  } finally {
+    await app.close();
+  }
+});
+
+test("bounded non-causal source reports expose useful governed detail without becoming broader truth", async () => {
+  const text = [
+    "Preparing a wooden surface for paint can include cleaning away dirt and loose material.",
+    "Sanding can smooth rough areas before paint is applied.",
+    "A third source sentence remains governed but outside the concise direct answer.",
+  ].join(" ");
+  const provider: KnowledgeAcquisitionProvider = {
+    kind: "fixture-procedural-source-report",
+    async acquire() {
+      return {
+        sources: [{
+          sourceId: "fixture-paint-source",
+          canonicalUri: "https://example.com/paint-preparation",
+          title: "Paint preparation reference",
+          publisher: "Fixture reference",
+          retrievedAt: "2026-09-10T16:00:00.000Z",
+          publishedAt: null,
+          contentType: "text/plain; charset=utf-8",
+          content: text,
+          metadata: { evidentiarySuitability: "GENERAL_REFERENCE" },
+        }],
+        claims: [{
+          claimId: "source-report:paint-preparation",
+          text,
+          claimType: "INTERPRETIVE",
+          evidence: [{ sourceId: "fixture-paint-source", relation: "SUPPORTS", excerpt: text }],
+        }],
+      };
+    },
+  };
+  const config = resolveRuntimeConfig({
+    LATTICE_DEPLOYMENT_MODE: "development",
+    LATTICE_TRUTH_MODE: "v36-live",
+  } as NodeJS.ProcessEnv);
+  const app = await createRuntimeApp(config, {
+    knowledgeAcquisitionProvider: provider,
+    memoryDispatchDelayMs: 5,
+  });
+
+  try {
+    const created = await app.inject({ method: "POST", url: "/api/v1/conversations" });
+    assert.equal(created.statusCode, 201, created.body);
+    const conversationId = created.json<{ conversation: { id: string } }>().conversation.id;
+    const accepted = await app.inject({
+      method: "POST",
+      url: `/api/v1/conversations/${conversationId}/turns`,
+      payload: {
+        turnId: "bounded-source-report-guidance",
+        message: "I need to know how to prepare a wooden surface for paint.",
+      },
+    });
+    assert.equal(accepted.statusCode, 202, accepted.body);
+    const runId = accepted.json<{ runId: string }>().runId;
+    await waitForCompletedRun(app, runId);
+
+    const response = await app.inject({ method: "GET", url: `/api/v1/runs/${runId}/outcome` });
+    assert.equal(response.statusCode, 200, response.body);
+    const body = response.json<{
+      outcome: KnowledgeOutcome;
+      presentation: { assistantMessage: string };
+    }>();
+    assert.equal(body.outcome.findings.length, 1);
+    assert.equal(body.outcome.findings[0]?.basis, "SOURCE_REPORT");
+    assert.equal(body.outcome.findings[0]?.status, "UNRESOLVED");
+    assert.match(body.presentation.assistantMessage, /cleaning away dirt and loose material/u);
+    assert.match(body.presentation.assistantMessage, /Sanding can smooth rough areas/u);
+    assert.doesNotMatch(body.presentation.assistantMessage, /third source sentence/u);
+    assert.match(body.presentation.assistantMessage, /does not by itself independently verify the broader real-world claim/u);
   } finally {
     await app.close();
   }
