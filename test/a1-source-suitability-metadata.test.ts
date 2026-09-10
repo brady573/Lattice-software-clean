@@ -23,6 +23,7 @@ test("A1 Wikimedia retrieval declares general-reference suitability without clai
     runId: "a1-source-suitability",
     objective: "Explain example topic material.",
     context: [],
+    investigationQueries: ["example topic material"],
   });
 
   assert.equal(result.sources[0]?.metadata?.evidentiarySuitability, "GENERAL_REFERENCE");
