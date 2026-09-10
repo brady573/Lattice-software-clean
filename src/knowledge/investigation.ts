@@ -12,7 +12,7 @@ const MAX_RELEVANCE_TEXT_CHARS = 16_000;
 
 const STOP_WORDS = new Set([
   "about", "after", "again", "also", "and", "are", "before", "being", "can", "could", "does",
-  "from", "have", "how", "into", "its", "know", "mean", "means", "meant", "more", "should", "stands",
+  "for", "from", "have", "how", "into", "its", "know", "mean", "means", "meant", "more", "need", "should", "stands",
   "that", "the", "their", "then", "there", "these", "they", "this", "through", "understand", "using", "want",
   "what", "when", "where", "which", "who", "why", "with", "would", "your",
 ]);
