@@ -1,0 +1,71 @@
+name: Validation — Final Topic Transition Product Proof
+
+on:
+  push:
+    branches:
+      - validation/topic-transition-6912
+    paths:
+      - ".github/workflows/topic-transition-product-proof-6912.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  topic-transition-product:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      DATABASE_URL: postgresql://lattice:lattice@127.0.0.1:55437/lattice_test
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+    services:
+      postgres:
+        image: postgres:18.6
+        env:
+          POSTGRES_USER: lattice
+          POSTGRES_PASSWORD: lattice
+          POSTGRES_DB: lattice_test
+        ports:
+          - 55437:5432
+        options: >-
+          --health-cmd "pg_isready -U lattice -d lattice_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - name: Checkout validation wrapper
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Verify exact Product subject and materialize validation-only proof
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected=69122ade365a596e08e3abe8a1f177b721d41068
+          test "$(git rev-parse HEAD^)" = "$expected"
+          files="$(git diff --name-only "$expected"..HEAD)"
+          test "$files" = ".github/workflows/topic-transition-product-proof-6912.yml"
+          git show origin/validation/topic-transition-4550:tools/topic-transition-product-proof.mjs > tools/topic-transition-product-proof.mjs
+          sed -i "s/455008b91ae898192c82ba69215990d52158eba5/$expected/g" tools/topic-transition-product-proof.mjs
+          echo "TOPIC_TRANSITION_PRODUCT_SUBJECT=$expected"
+      - name: Provision Node 24
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '24'
+      - name: Verify provider and browser capability
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$GROQ_API_KEY"
+          browser="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
+          test -n "$browser"
+          echo "M7_BROWSER_EXECUTABLE=$browser" >> "$GITHUB_ENV"
+      - name: Install and build
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+      - name: Migrate disposable PostgreSQL
+        run: node dist/src/migrate.js
+      - name: Execute real cognition and Chrome Product proof
+        run: node tools/topic-transition-product-proof.mjs
