@@ -16,6 +16,7 @@ const SOURCE_REQUEST_PATTERN = /\b(?:source|sources|citation|citations|evidence)
 const HIGH_STAKES_SOURCE_PATTERN = /\b(?:tax|taxes|taxation|taxable|legal|law|laws|regulation|regulatory|regulated|compliance|license|licensing|permit|statute|statutory)\b/iu;
 const SOURCE_SUITABILITY_LIMITATION =
   "I found relevant background material, but I need an appropriate authoritative source before I can answer this kind of question reliably.";
+const MAX_DIRECT_SOURCE_REPORT_SENTENCES = 2;
 
 function renderSourceReportFinding(finding: KnowledgeFinding, text = finding.text): string {
   const statusLabel: Record<KnowledgeFinding["status"], string> = {
@@ -76,11 +77,21 @@ function faithfulSentences(value: string): string[] {
     ?? [];
 }
 
-function directFragment(finding: KnowledgeFinding, causal: boolean): string | undefined {
+function directFragments(finding: KnowledgeFinding, causal: boolean): string[] {
   const sentences = faithfulSentences(finding.text);
-  if (sentences.length === 0) return undefined;
-  if (!causal) return sentences[0];
-  return sentences.find((sentence) => DIRECT_CAUSAL_SENTENCE_PATTERN.test(sentence));
+  if (sentences.length === 0) return [];
+  if (causal) {
+    const direct = sentences.find((sentence) => DIRECT_CAUSAL_SENTENCE_PATTERN.test(sentence));
+    return direct ? [direct] : [];
+  }
+  if (finding.basis === "SOURCE_REPORT") {
+    return sentences.slice(0, MAX_DIRECT_SOURCE_REPORT_SENTENCES);
+  }
+  return [sentences[0]!];
+}
+
+function directFragment(finding: KnowledgeFinding, causal: boolean): string | undefined {
+  return directFragments(finding, causal)[0];
 }
 
 function renderSourceList(knowledge: KnowledgeOutcome): string {
@@ -131,8 +142,7 @@ function renderGovernedAnswer(knowledge: KnowledgeOutcome, context: readonly str
     || (finding.basis === "SOURCE_REPORT" && finding.evidenceIds.length > 0)
   );
   const fragments = answerable
-    .map((finding) => directFragment(finding, causal))
-    .filter((fragment): fragment is string => fragment !== undefined)
+    .flatMap((finding) => directFragments(finding, causal))
     .filter((fragment, index, values) => values.indexOf(fragment) === index)
     .slice(0, 2);
 
