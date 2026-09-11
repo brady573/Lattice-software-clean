@@ -16,7 +16,7 @@ export interface RuntimeConfig {
   /** Development-only fixture identity; resolved config sets it only in development-fixture mode. */
   developmentFixtureSubjectId?: string;
   /** Hosted validator role reusing isolated in-memory state and the fixed development subject boundary. */
-  validatorDeployment: boolean;
+  validatorDeployment?: boolean;
   autoMigrate: boolean;
   /** First-class zero-cost development provider. Omitted only by older programmatic fixtures. */
   localModelProviderBaseUrl?: string | undefined;
