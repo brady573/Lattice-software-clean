@@ -17,30 +17,36 @@ const CLAIM_ID = "candidate-claim";
 const KNOWLEDGE_NEED = "Determine the material relationship involved.";
 const RETRIEVAL_QUERY = "material relationship mechanism evidence";
 
+function validAcquisition(): KnowledgeAcquisitionResult {
+  return {
+    sources: [{
+      sourceId: SOURCE_ID,
+      canonicalUri: "https://example.test/candidate",
+      title: "Candidate source",
+      publisher: "Example",
+      retrievedAt: "2026-09-10T00:00:00.000Z",
+      publishedAt: null,
+      contentType: "text/plain",
+      content: "Candidate source material.",
+    }],
+    claims: [{
+      claimId: CLAIM_ID,
+      text: "Candidate source material.",
+      claimType: "INTERPRETIVE",
+      evidence: [{ sourceId: SOURCE_ID, relation: "SUPPORTS", excerpt: "Candidate source material." }],
+    }],
+  };
+}
+
 class CandidateProvider implements KnowledgeAcquisitionProvider {
   readonly kind = "candidate-provider";
   readonly requests: KnowledgeAcquisitionRequest[] = [];
 
+  constructor(private readonly result: KnowledgeAcquisitionResult = validAcquisition()) {}
+
   async acquire(request: KnowledgeAcquisitionRequest): Promise<KnowledgeAcquisitionResult> {
     this.requests.push(structuredClone(request));
-    return {
-      sources: [{
-        sourceId: SOURCE_ID,
-        canonicalUri: "https://example.test/candidate",
-        title: "Candidate source",
-        publisher: "Example",
-        retrievedAt: "2026-09-10T00:00:00.000Z",
-        publishedAt: null,
-        contentType: "text/plain",
-        content: "Candidate source material.",
-      }],
-      claims: [{
-        claimId: CLAIM_ID,
-        text: "Candidate source material.",
-        claimType: "INTERPRETIVE",
-        evidence: [{ sourceId: SOURCE_ID, relation: "SUPPORTS", excerpt: "Candidate source material." }],
-      }],
-    };
+    return structuredClone(this.result);
   }
 }
 
@@ -80,6 +86,67 @@ test("conceptual Knowledge needs are not issued directly as provider retrieval q
   assert.deepEqual(investigator.responsivenessInputs[0]?.retrievalQueries, [RETRIEVAL_QUERY]);
   assert.deepEqual(result.sources.map((source) => source.sourceId), [SOURCE_ID]);
   assert.deepEqual(result.claims.map((claim) => claim.claimId), [CLAIM_ID]);
+  assert.deepEqual(result.claims[0]?.evidence.map((item) => item.sourceId), [SOURCE_ID]);
+});
+
+test("Issue #53: duplicate acquired claim IDs fail before Solandra responsiveness selection", async () => {
+  const base = validAcquisition();
+  const firstClaim = base.claims[0]!;
+  const duplicateClaims: KnowledgeAcquisitionResult = {
+    ...base,
+    claims: [
+      firstClaim,
+      {
+        ...firstClaim,
+        text: "A different acquired object with the same claim identity.",
+      },
+    ],
+  };
+  const provider = new CandidateProvider(duplicateClaims);
+  const investigator = new RecordingInvestigator({ claimId: CLAIM_ID, sourceIds: [SOURCE_ID] });
+  const acquisition = new RelevantKnowledgeAcquisitionProvider(provider, investigator);
+
+  await assert.rejects(
+    acquisition.acquire({
+      runId: "duplicate-claim-run",
+      objective: "Evaluate acquired candidates.",
+      context: [],
+      investigationQueries: [KNOWLEDGE_NEED],
+    }),
+    /Retrieved claim IDs must be unique before Solandra responsiveness selection/u,
+  );
+  assert.equal(investigator.responsivenessInputs.length, 0);
+});
+
+test("Issue #53: duplicate acquired source IDs fail before Solandra responsiveness selection", async () => {
+  const base = validAcquisition();
+  const firstSource = base.sources[0]!;
+  const duplicateSources: KnowledgeAcquisitionResult = {
+    ...base,
+    sources: [
+      firstSource,
+      {
+        ...firstSource,
+        canonicalUri: "https://example.test/different-source-object",
+        title: "Different source object with duplicate identity",
+        content: "Different source material under the same source identity.",
+      },
+    ],
+  };
+  const provider = new CandidateProvider(duplicateSources);
+  const investigator = new RecordingInvestigator({ claimId: CLAIM_ID, sourceIds: [SOURCE_ID] });
+  const acquisition = new RelevantKnowledgeAcquisitionProvider(provider, investigator);
+
+  await assert.rejects(
+    acquisition.acquire({
+      runId: "duplicate-source-run",
+      objective: "Evaluate acquired candidates.",
+      context: [],
+      investigationQueries: [KNOWLEDGE_NEED],
+    }),
+    /Retrieved source IDs must be unique before Solandra responsiveness selection/u,
+  );
+  assert.equal(investigator.responsivenessInputs.length, 0);
 });
 
 test("Solandra responsiveness cannot invent claim or source provenance", async () => {
