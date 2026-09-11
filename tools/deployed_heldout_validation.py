@@ -17,7 +17,6 @@ CASES_JSON = os.environ.get("HELDOUT_CASES_JSON", "")
 ARTIFACT_DIR = Path(os.environ.get("HELDOUT_ARTIFACT_DIR", "artifacts/deployed-heldout"))
 SCREENSHOT_DIR = ARTIFACT_DIR / "screenshots"
 RESULT_PATH = ARTIFACT_DIR / "black-box-evidence.json"
-STORAGE_KEY = "lattice.solandra.owner-access.v1"
 
 MAX_PAYLOAD_BYTES = 30_000
 MAX_CASES = 6
@@ -26,6 +25,7 @@ MAX_FOLLOW_UPS = 3
 CASE_TIMEOUT_MS = 90_000
 MAX_CAPTURE_CHARS = 16_000
 CASE_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+OWNER_ACCESS_REQUIRED = "Owner access is required."
 
 
 def _utc_now() -> str:
@@ -98,16 +98,33 @@ def _load_cases() -> list[dict[str, Any]]:
     return validated
 
 
+def _assert_authorized(page: Page) -> None:
+    gate = page.locator("#ownerAccessGate")
+    if gate.is_visible():
+        raise AssertionError("held-out Product execution lost Owner authorization")
+    error = page.locator("#ownerAccessError")
+    if error.is_visible() and OWNER_ACCESS_REQUIRED in error.inner_text():
+        raise AssertionError("held-out Product execution reported Owner access is required")
+
+
 def _authenticate(page: Page) -> bool:
     authenticated = False
     try:
         page.goto(f"{BASE_URL}/", wait_until="domcontentloaded", timeout=30_000)
         gate = page.locator("#ownerAccessGate")
-        if gate.is_visible():
-            page.locator("#ownerAccessInput").fill(OWNER_TOKEN)
-            with page.expect_navigation(wait_until="domcontentloaded", timeout=30_000):
-                page.locator("#ownerAccessSubmit").click()
+        expect(gate).to_be_visible(timeout=15_000)
+        page.locator("#ownerAccessInput").fill(OWNER_TOKEN)
+        with page.expect_navigation(wait_until="domcontentloaded", timeout=30_000):
+            page.locator("#ownerAccessSubmit").click()
         expect(gate).to_be_hidden(timeout=15_000)
+        probe = page.evaluate(
+            """async () => {
+                const response = await window.ownerFetch('/api/v1/capabilities/model-assistance');
+                return response.status;
+            }"""
+        )
+        assert probe == 200, f"Owner authorization probe returned HTTP {probe}"
+        _assert_authorized(page)
         assert OWNER_TOKEN not in page.url
         assert OWNER_TOKEN not in page.content()
         authenticated = True
@@ -145,13 +162,39 @@ def _visible_sources(page: Page) -> list[dict[str, str]]:
     return sources
 
 
+def _visible_assistant_messages(page: Page) -> list[str]:
+    values: list[str] = []
+    for node in page.locator("#conversation .turn.solandra:visible").all():
+        text = _bounded_text(node.inner_text())
+        if text:
+            values.append(text)
+    return values
+
+
 def _submit_turn(page: Page, message: str, deadline: float) -> str:
+    _assert_authorized(page)
     assistant_turns = page.locator("#conversation .turn.solandra")
     before_count = assistant_turns.count()
     composer = page.locator("#conversationInput")
     expect(composer).to_be_visible(timeout=10_000)
     composer.fill(message)
-    page.locator("#conversationForm").evaluate("form => form.requestSubmit()")
+
+    remaining_ms = max(1_000, int((deadline - time.monotonic()) * 1_000))
+    try:
+        with page.expect_response(
+            lambda response: "/api/v1/conversations/" in response.url
+            and "/turns" in response.url
+            and response.request.method == "POST",
+            timeout=remaining_ms,
+        ) as pending:
+            page.locator("#conversationForm").evaluate("form => form.requestSubmit()")
+        turn_response = pending.value
+    except PlaywrightTimeoutError:
+        raise AssertionError("held-out Product turn did not produce an observable turn response before its case timeout") from None
+
+    if not 200 <= turn_response.status < 300:
+        raise AssertionError(f"held-out Product turn was not accepted: HTTP {turn_response.status}")
+    _assert_authorized(page)
 
     remaining_ms = max(1_000, int((deadline - time.monotonic()) * 1_000))
     try:
@@ -162,7 +205,12 @@ def _submit_turn(page: Page, message: str, deadline: float) -> str:
         )
     except PlaywrightTimeoutError:
         raise AssertionError("held-out case did not reach a visible Solandra response before its case timeout") from None
-    return _bounded_text(assistant_turns.last.inner_text())
+
+    _assert_authorized(page)
+    visible_response = _bounded_text(assistant_turns.last.inner_text())
+    if OWNER_ACCESS_REQUIRED in visible_response:
+        raise AssertionError("unauthorized fallback cannot count as a successful held-out Product response")
+    return visible_response
 
 
 def _new_result(started_at: str) -> dict[str, Any]:
@@ -207,11 +255,14 @@ def _capture_observation(
 
     composer = page.locator("#composer")
     visible_status = _bounded_text(composer.inner_text()) if composer.count() else ""
+    observed_messages = _visible_assistant_messages(page)
+    if not observed_messages:
+        observed_messages = visible_assistant_messages
     return {
         "id": case["id"],
         "session": case["session"],
         "userMessages": [_scrub(message) for message in user_messages],
-        "visibleAssistantMessages": visible_assistant_messages,
+        "visibleAssistantMessages": observed_messages,
         "visibleSources": _visible_sources(page),
         "visibleStatus": visible_status,
         "visibleErrors": _visible_errors(page),
