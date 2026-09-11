@@ -98,16 +98,28 @@ def _load_cases() -> list[dict[str, Any]]:
     return validated
 
 
-def _authenticate(page: Page) -> None:
-    page.goto(f"{BASE_URL}/", wait_until="domcontentloaded", timeout=30_000)
-    gate = page.locator("#ownerAccessGate")
-    if gate.is_visible():
-        page.locator("#ownerAccessInput").fill(OWNER_TOKEN)
-        with page.expect_navigation(wait_until="domcontentloaded", timeout=30_000):
-            page.locator("#ownerAccessSubmit").click()
-    expect(gate).to_be_hidden(timeout=15_000)
-    assert OWNER_TOKEN not in page.url
-    assert OWNER_TOKEN not in page.content()
+def _authenticate(page: Page) -> bool:
+    authenticated = False
+    try:
+        page.goto(f"{BASE_URL}/", wait_until="domcontentloaded", timeout=30_000)
+        gate = page.locator("#ownerAccessGate")
+        if gate.is_visible():
+            page.locator("#ownerAccessInput").fill(OWNER_TOKEN)
+            with page.expect_navigation(wait_until="domcontentloaded", timeout=30_000):
+                page.locator("#ownerAccessSubmit").click()
+        expect(gate).to_be_hidden(timeout=15_000)
+        assert OWNER_TOKEN not in page.url
+        assert OWNER_TOKEN not in page.content()
+        authenticated = True
+        return authenticated
+    finally:
+        if not authenticated:
+            try:
+                candidate = page.locator("#ownerAccessInput")
+                if candidate.count():
+                    candidate.fill("")
+            except Exception:
+                pass
 
 
 def _visible_errors(page: Page) -> list[str]:
@@ -181,15 +193,17 @@ def _capture_observation(
     user_messages: list[str],
     visible_assistant_messages: list[str],
     case_started: float,
+    authenticated: bool,
 ) -> dict[str, Any]:
-    screenshot_name = f"screenshots/{case['id']}.png"
     screenshots: list[str] = []
-    try:
-        screenshot_path = ARTIFACT_DIR / screenshot_name
-        page.screenshot(path=str(screenshot_path), full_page=True)
-        screenshots.append(screenshot_name)
-    except Exception:
-        pass
+    if authenticated:
+        screenshot_name = f"screenshots/{case['id']}.png"
+        try:
+            screenshot_path = ARTIFACT_DIR / screenshot_name
+            page.screenshot(path=str(screenshot_path), full_page=True)
+            screenshots.append(screenshot_name)
+        except Exception:
+            pass
 
     composer = page.locator("#composer")
     visible_status = _bounded_text(composer.inner_text()) if composer.count() else ""
@@ -222,8 +236,9 @@ def test_validator_selected_heldout_cases(browser: Browser) -> None:
             page = context.new_page()
             user_messages = [case["message"], *case["followUps"]]
             visible_assistant_messages: list[str] = []
+            authenticated = False
             try:
-                _authenticate(page)
+                authenticated = _authenticate(page)
                 for message in user_messages:
                     if time.monotonic() >= deadline:
                         raise AssertionError("held-out case exceeded its case timeout")
@@ -235,6 +250,7 @@ def test_validator_selected_heldout_cases(browser: Browser) -> None:
                     user_messages,
                     visible_assistant_messages,
                     case_started,
+                    authenticated,
                 )
                 result["cases"].append(observation)
                 _write_result(result)
