@@ -1,13 +1,9 @@
 import type { FastifyInstance } from "fastify";
-import type { LatticeRun } from "./domain.js";
 import { createHttpCore, type HttpCoreOptions } from "./http-core.js";
 import type { ModelAssistanceCapabilityService } from "./model-assistance-capability.js";
-import type { KnowledgeOutcome } from "./outcome.js";
+import { buildRunOutcome } from "./outcome.js";
 import type { KnowledgeSimplifier } from "./presentation/solandra/knowledge-simplification.js";
-import {
-  renderKnowledgeResponse,
-  renderKnowledgeResponseForRun,
-} from "./presentation/solandra/knowledge-response.js";
+import { renderKnowledgeResponseForRun } from "./presentation/solandra/knowledge-response.js";
 import { renderSolandraAuthoritativeConversationPage } from "./ui/solandra-authoritative-conversation-page.js";
 
 export interface CanonicalAppOptions extends HttpCoreOptions {
@@ -17,32 +13,13 @@ export interface CanonicalAppOptions extends HttpCoreOptions {
   modelAssistanceService?: ModelAssistanceCapabilityService | undefined;
 }
 
-async function withKnowledgePresentation(
-  payload: unknown,
-  run: LatticeRun | undefined,
-  simplifier: KnowledgeSimplifier | undefined,
-): Promise<unknown> {
-  if (!payload || typeof payload !== "object") return payload;
-  const envelope = payload as { outcome?: unknown };
-  if (!envelope.outcome || typeof envelope.outcome !== "object") return payload;
-  const outcome = envelope.outcome as { kind?: unknown };
-  if (outcome.kind !== "KNOWLEDGE") return payload;
-
-  const existingPresentation = (envelope as { presentation?: unknown }).presentation;
-  if (existingPresentation && typeof existingPresentation === "object") {
-    const assistantMessage = (existingPresentation as { assistantMessage?: unknown }).assistantMessage;
-    if (typeof assistantMessage === "string" && assistantMessage.trim().length > 0) return payload;
+function hasAssistantPresentation(payload: unknown): boolean {
+  if (payload === null || typeof payload !== "object" || !("presentation" in payload)) return false;
+  const presentation = payload.presentation;
+  if (presentation === null || typeof presentation !== "object" || !("assistantMessage" in presentation)) {
+    return false;
   }
-
-  const knowledge = outcome as KnowledgeOutcome;
-  const assistantMessage = run
-    ? await renderKnowledgeResponseForRun(knowledge, run, simplifier)
-    : renderKnowledgeResponse(knowledge);
-
-  return {
-    ...envelope,
-    presentation: { assistantMessage },
-  };
+  return typeof presentation.assistantMessage === "string" && presentation.assistantMessage.trim().length > 0;
 }
 
 /**
@@ -54,12 +31,27 @@ export function buildCanonicalApp(options: CanonicalAppOptions = {}): FastifyIns
   const { app, runStore, apiSubjectForRequest } = createHttpCore(coreOptions);
   app.addHook("preSerialization", async (request, _reply, payload) => {
     if (request.routeOptions.url !== "/api/v1/runs/:runId/outcome") return payload;
+    if (hasAssistantPresentation(payload)) return payload;
+
     const runId = (request.params as { runId?: string }).runId;
-    const run = runId === undefined ? undefined : await runStore.get(runId);
+    if (runId === undefined) return payload;
+    const run = await runStore.get(runId);
+    if (run?.status !== "COMPLETED") return payload;
+    const truth = await runStore.getTruthBundle(run.id);
+    if (truth === undefined) return payload;
+
+    const canonicalOutcome = buildRunOutcome(run, truth);
+    if (canonicalOutcome.kind !== "KNOWLEDGE") return payload;
+
     const simplifier = modelAssistanceService === undefined
       ? knowledgeSimplifier
       : modelAssistanceService.simplifierFor(apiSubjectForRequest(request));
-    return await withKnowledgePresentation(payload, run, simplifier);
+    const assistantMessage = await renderKnowledgeResponseForRun(canonicalOutcome, run, simplifier);
+    if (payload === null || typeof payload !== "object") return payload;
+    return {
+      ...payload,
+      presentation: { assistantMessage },
+    };
   });
   app.get("/", async (_request, reply) =>
     reply.type("text/html; charset=utf-8").send(renderSolandraAuthoritativeConversationPage())
