@@ -28,8 +28,6 @@ const limits = Object.freeze({
 });
 
 const toolNamePattern = /^[A-Za-z0-9_-]+$/;
-const roles = new Set(["system", "user", "assistant", "tool"]);
-const scalarTypes = new Set(["string", "number", "integer", "boolean"]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -77,41 +75,95 @@ function optionalBoundedString(
   return requireBoundedString(value, label, maxChars);
 }
 
+function validateEnum<T extends string | number | boolean>(
+  value: unknown,
+  label: string,
+  compatible: (entry: unknown) => entry is T,
+  expected: string,
+): readonly T[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value) || value.length === 0 || value.length > 64) {
+    throw new ModelProviderError("invalid_output", `${label}.enum must contain 1-64 values.`);
+  }
+  const parsed: T[] = [];
+  for (const entry of value) {
+    if (!compatible(entry)) {
+      throw new ModelProviderError(
+        "invalid_output",
+        `${label}.enum values must match declared ${expected} type.`,
+      );
+    }
+    parsed.push(entry);
+  }
+  return Object.freeze(parsed);
+}
+
 function validateToolProperty(value: unknown, label: string): CanonicalModelToolProperty {
   if (!isRecord(value)) {
     throw new ModelProviderError("invalid_output", `${label} must be an object.`);
   }
   assertOnlyKeys(value, ["type", "description", "enum"], label);
-  if (typeof value.type !== "string" || !scalarTypes.has(value.type)) {
-    throw new ModelProviderError("unsupported_capability", `${label}.type is unsupported.`);
-  }
   const description = optionalBoundedString(
     value.description,
     `${label}.description`,
     limits.toolDescriptionChars,
   );
-  let enumValues: readonly (string | number | boolean)[] | undefined;
-  if (value.enum !== undefined) {
-    if (!Array.isArray(value.enum) || value.enum.length === 0 || value.enum.length > 64) {
-      throw new ModelProviderError("invalid_output", `${label}.enum must contain 1-64 values.`);
+  switch (value.type) {
+    case "string": {
+      const enumValues = validateEnum(
+        value.enum,
+        label,
+        (entry): entry is string => typeof entry === "string",
+        "string",
+      );
+      return Object.freeze({
+        type: "string",
+        ...(description === undefined ? {} : { description }),
+        ...(enumValues === undefined ? {} : { enum: enumValues }),
+      });
     }
-    const parsed = value.enum.map((entry) => {
-      if (
-        typeof entry !== "string"
-        && typeof entry !== "number"
-        && typeof entry !== "boolean"
-      ) {
-        throw new ModelProviderError("invalid_output", `${label}.enum contains a non-scalar value.`);
-      }
-      return entry;
-    });
-    enumValues = Object.freeze(parsed);
+    case "number": {
+      const enumValues = validateEnum(
+        value.enum,
+        label,
+        (entry): entry is number => typeof entry === "number" && Number.isFinite(entry),
+        "number",
+      );
+      return Object.freeze({
+        type: "number",
+        ...(description === undefined ? {} : { description }),
+        ...(enumValues === undefined ? {} : { enum: enumValues }),
+      });
+    }
+    case "integer": {
+      const enumValues = validateEnum(
+        value.enum,
+        label,
+        (entry): entry is number => typeof entry === "number" && Number.isSafeInteger(entry),
+        "integer",
+      );
+      return Object.freeze({
+        type: "integer",
+        ...(description === undefined ? {} : { description }),
+        ...(enumValues === undefined ? {} : { enum: enumValues }),
+      });
+    }
+    case "boolean": {
+      const enumValues = validateEnum(
+        value.enum,
+        label,
+        (entry): entry is boolean => typeof entry === "boolean",
+        "boolean",
+      );
+      return Object.freeze({
+        type: "boolean",
+        ...(description === undefined ? {} : { description }),
+        ...(enumValues === undefined ? {} : { enum: enumValues }),
+      });
+    }
+    default:
+      throw new ModelProviderError("unsupported_capability", `${label}.type is unsupported.`);
   }
-  return Object.freeze({
-    type: value.type as CanonicalModelToolProperty["type"],
-    ...(description === undefined ? {} : { description }),
-    ...(enumValues === undefined ? {} : { enum: enumValues }),
-  });
 }
 
 function validateToolInputSchema(value: unknown, label: string): CanonicalModelToolInputSchema {
@@ -211,36 +263,52 @@ function validateToolDefinition(value: unknown, index: number): CanonicalModelTo
 }
 
 function validateMessage(value: unknown, index: number): CanonicalModelMessage {
+  const label = `messages[${index}]`;
   if (!isRecord(value)) {
-    throw new ModelProviderError("invalid_output", `messages[${index}] must be an object.`);
+    throw new ModelProviderError("invalid_output", `${label} must be an object.`);
   }
-  assertOnlyKeys(value, ["role", "content", "name", "toolCallId"], `messages[${index}]`);
-  if (typeof value.role !== "string" || !roles.has(value.role)) {
-    throw new ModelProviderError("invalid_output", `messages[${index}].role is invalid.`);
+  if (typeof value.role !== "string") {
+    throw new ModelProviderError("invalid_output", `${label}.role is invalid.`);
   }
   const content = requireBoundedString(
     value.content,
-    `messages[${index}].content`,
+    `${label}.content`,
     limits.messageChars,
   );
-  const name = optionalBoundedString(value.name, `messages[${index}].name`, limits.toolNameChars);
-  const toolCallId = optionalBoundedString(
-    value.toolCallId,
-    `messages[${index}].toolCallId`,
-    limits.toolNameChars,
-  );
-  if (value.role === "tool" && toolCallId === undefined) {
-    throw new ModelProviderError(
-      "invalid_output",
-      `messages[${index}].toolCallId is required for tool messages.`,
-    );
+  switch (value.role) {
+    case "system":
+      assertOnlyKeys(value, ["role", "content"], label);
+      return Object.freeze({ role: "system", content });
+    case "user":
+      assertOnlyKeys(value, ["role", "content"], label);
+      return Object.freeze({ role: "user", content });
+    case "assistant": {
+      assertOnlyKeys(value, ["role", "content", "name"], label);
+      const name = optionalBoundedString(value.name, `${label}.name`, limits.toolNameChars);
+      return Object.freeze({
+        role: "assistant",
+        content,
+        ...(name === undefined ? {} : { name }),
+      });
+    }
+    case "tool": {
+      assertOnlyKeys(value, ["role", "content", "toolCallId"], label);
+      if (value.toolCallId === undefined) {
+        throw new ModelProviderError(
+          "invalid_output",
+          `${label}.toolCallId is required for tool messages.`,
+        );
+      }
+      const toolCallId = requireBoundedString(
+        value.toolCallId,
+        `${label}.toolCallId`,
+        limits.toolNameChars,
+      );
+      return Object.freeze({ role: "tool", content, toolCallId });
+    }
+    default:
+      throw new ModelProviderError("invalid_output", `${label}.role is invalid.`);
   }
-  return Object.freeze({
-    role: value.role as CanonicalModelMessage["role"],
-    content,
-    ...(name === undefined ? {} : { name }),
-    ...(toolCallId === undefined ? {} : { toolCallId }),
-  });
 }
 
 export function validateCanonicalModelRequest(value: unknown): CanonicalModelRequest {
@@ -325,28 +393,40 @@ function validateToolArgumentValue(
   value: unknown,
   label: string,
 ): string | number | boolean {
-  let validType = false;
   switch (property.type) {
     case "string":
-      validType = typeof value === "string";
-      break;
+      if (typeof value !== "string") {
+        throw new ModelProviderError("invalid_output", `${label} does not match declared type.`);
+      }
+      if (property.enum !== undefined && !property.enum.includes(value)) {
+        throw new ModelProviderError("invalid_output", `${label} is outside the declared enum.`);
+      }
+      return value;
     case "number":
-      validType = typeof value === "number" && Number.isFinite(value);
-      break;
+      if (typeof value !== "number" || !Number.isFinite(value)) {
+        throw new ModelProviderError("invalid_output", `${label} does not match declared type.`);
+      }
+      if (property.enum !== undefined && !property.enum.some((entry) => Object.is(entry, value))) {
+        throw new ModelProviderError("invalid_output", `${label} is outside the declared enum.`);
+      }
+      return value;
     case "integer":
-      validType = typeof value === "number" && Number.isSafeInteger(value);
-      break;
+      if (typeof value !== "number" || !Number.isSafeInteger(value)) {
+        throw new ModelProviderError("invalid_output", `${label} does not match declared type.`);
+      }
+      if (property.enum !== undefined && !property.enum.includes(value)) {
+        throw new ModelProviderError("invalid_output", `${label} is outside the declared enum.`);
+      }
+      return value;
     case "boolean":
-      validType = typeof value === "boolean";
-      break;
+      if (typeof value !== "boolean") {
+        throw new ModelProviderError("invalid_output", `${label} does not match declared type.`);
+      }
+      if (property.enum !== undefined && !property.enum.includes(value)) {
+        throw new ModelProviderError("invalid_output", `${label} is outside the declared enum.`);
+      }
+      return value;
   }
-  if (!validType) {
-    throw new ModelProviderError("invalid_output", `${label} does not match declared type.`);
-  }
-  if (property.enum !== undefined && !property.enum.some((entry) => Object.is(entry, value))) {
-    throw new ModelProviderError("invalid_output", `${label} is outside the declared enum.`);
-  }
-  return value as string | number | boolean;
 }
 
 function validateToolArguments(
