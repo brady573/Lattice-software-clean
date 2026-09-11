@@ -13,6 +13,13 @@ function validatorConfig() {
   });
 }
 
+function normalConfig() {
+  return resolveRuntimeConfig({
+    LATTICE_DEPLOYMENT_MODE: "development",
+    LATTICE_AUTO_MIGRATE: "false",
+  });
+}
+
 test("validator deployment reuses the fixed development subject boundary without Owner or database state", () => {
   const config = validatorConfig();
   assert.equal(config.validatorDeployment, true);
@@ -90,14 +97,38 @@ test("validator page clears only browser conversation restoration state before c
   assert.match(validator, /const postTurnRecord = async \(record\) =>/u);
 });
 
-test("canonical root selects the fresh-session wrapper only for the validator deployment environment", async () => {
-  const previous = process.env.LATTICE_VALIDATOR_DEPLOYMENT;
-  process.env.LATTICE_VALIDATOR_DEPLOYMENT = "true";
+test("resolved validator runtime composition selects the fresh-session wrapper", async () => {
   const app = await createRuntimeApp(validatorConfig(), { memoryDispatchDelayMs: 5_000 });
   try {
     const root = await app.inject({ method: "GET", url: "/" });
     assert.equal(root.statusCode, 200);
     assert.match(root.body, /window\.localStorage\.removeItem\(key\)/u);
+  } finally {
+    await app.close();
+  }
+});
+
+test("normal runtime composition selects the authoritative wrapper", async () => {
+  const app = await createRuntimeApp(normalConfig(), { memoryDispatchDelayMs: 5_000 });
+  try {
+    const root = await app.inject({ method: "GET", url: "/" });
+    assert.equal(root.statusCode, 200);
+    assert.doesNotMatch(root.body, /window\.localStorage\.removeItem\(key\)/u);
+  } finally {
+    await app.close();
+  }
+});
+
+test("ambient validator environment cannot override an explicitly supplied normal runtime composition", async () => {
+  const previous = process.env.LATTICE_VALIDATOR_DEPLOYMENT;
+  process.env.LATTICE_VALIDATOR_DEPLOYMENT = "true";
+  const config = normalConfig();
+  const app = await createRuntimeApp(config, { memoryDispatchDelayMs: 5_000 });
+  try {
+    const root = await app.inject({ method: "GET", url: "/" });
+    assert.equal(root.statusCode, 200);
+    assert.equal(config.validatorDeployment, false);
+    assert.doesNotMatch(root.body, /window\.localStorage\.removeItem\(key\)/u);
   } finally {
     await app.close();
     if (previous === undefined) delete process.env.LATTICE_VALIDATOR_DEPLOYMENT;
