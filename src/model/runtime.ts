@@ -29,6 +29,12 @@ interface ModelRuntimeOptions {
   readonly maxStateEntries?: number;
 }
 
+interface SharedModelOperation {
+  readonly promise: Promise<ModelRuntimeResult>;
+  readonly controller: AbortController;
+  waiters: number;
+}
+
 class KeyedExecutionLock {
   private readonly tails = new Map<string, Promise<void>>();
 
@@ -79,12 +85,12 @@ class KeyedExecutionLock {
   }
 }
 
-class BoundedPromiseStore<T> {
-  private readonly entries = new Map<string, Promise<T>>();
+class BoundedStore<T> {
+  private readonly entries = new Map<string, T>();
 
   constructor(private readonly maxEntries: number) {}
 
-  get(key: string): Promise<T> | null {
+  get(key: string): T | null {
     const value = this.entries.get(key);
     if (value === undefined) return null;
     this.entries.delete(key);
@@ -92,7 +98,7 @@ class BoundedPromiseStore<T> {
     return value;
   }
 
-  set(key: string, value: Promise<T>): void {
+  set(key: string, value: T): void {
     this.entries.delete(key);
     this.entries.set(key, value);
     while (this.entries.size > this.maxEntries) {
@@ -102,7 +108,7 @@ class BoundedPromiseStore<T> {
     }
   }
 
-  deleteIfSame(key: string, value: Promise<T>): void {
+  deleteIfSame(key: string, value: T): void {
     if (this.entries.get(key) === value) this.entries.delete(key);
   }
 }
@@ -269,7 +275,7 @@ export class ModelRuntime {
   private readonly maxRequestBytes: number;
   private readonly maxResponseBytes: number;
   private readonly lock = new KeyedExecutionLock();
-  private readonly idempotency: BoundedPromiseStore<ModelRuntimeResult>;
+  private readonly idempotency: BoundedStore<SharedModelOperation>;
   private readonly attempts: BoundedAttemptLedger;
 
   constructor(
@@ -290,7 +296,7 @@ export class ModelRuntime {
         throw new Error(`${label} must be a positive safe integer.`);
       }
     }
-    this.idempotency = new BoundedPromiseStore(maxStateEntries);
+    this.idempotency = new BoundedStore(maxStateEntries);
     this.attempts = new BoundedAttemptLedger(maxStateEntries);
   }
 
@@ -322,6 +328,8 @@ export class ModelRuntime {
       if (existing !== null) {
         return await this.awaitShared(existing, options.signal);
       }
+
+      const controller = new AbortController();
       const promise = this.executeSerialized(
         request,
         requestIdentity,
@@ -329,13 +337,18 @@ export class ModelRuntime {
         correlationId,
         invocation,
         maxAttempts,
-        undefined,
+        controller.signal,
       );
-      this.idempotency.set(cacheKey, promise);
+      const operation: SharedModelOperation = {
+        promise,
+        controller,
+        waiters: 0,
+      };
+      this.idempotency.set(cacheKey, operation);
       void promise.catch(() => {
-        this.idempotency.deleteIfSame(cacheKey, promise);
+        this.idempotency.deleteIfSame(cacheKey, operation);
       });
-      return await this.awaitShared(promise, options.signal);
+      return await this.awaitShared(operation, options.signal);
     }
 
     return await this.executeSerialized(
@@ -350,21 +363,29 @@ export class ModelRuntime {
   }
 
   private async awaitShared(
-    promise: Promise<ModelRuntimeResult>,
+    operation: SharedModelOperation,
     signal: AbortSignal | undefined,
   ): Promise<ModelRuntimeResult> {
-    if (signal === undefined) return await promise;
+    operation.waiters += 1;
     try {
-      return await raceWithAbort(promise, signal);
-    } catch (error) {
-      if (signal.aborted) {
-        throw new ModelProviderError(
-          "cancelled",
-          "Model duplicate-delivery wait was cancelled by caller.",
-          { cause: error },
-        );
+      if (signal === undefined) return await operation.promise;
+      try {
+        return await raceWithAbort(operation.promise, signal);
+      } catch (error) {
+        if (signal.aborted) {
+          throw new ModelProviderError(
+            "cancelled",
+            "Model duplicate-delivery wait was cancelled by caller.",
+            { cause: error },
+          );
+        }
+        throw error;
       }
-      throw error;
+    } finally {
+      operation.waiters -= 1;
+      if (operation.waiters === 0) {
+        operation.controller.abort(new Error("Shared model call has no active waiters."));
+      }
     }
   }
 
