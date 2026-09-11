@@ -3,7 +3,7 @@ name: Validation — Deployed Solandra Owner Auth
 on:
   push:
     branches:
-      - validation/deployed-owner-auth
+      - main
     paths:
       - "tools/deployed_owner_auth_validation.py"
       - ".github/workflows/deployed-functional-validation.yml"
