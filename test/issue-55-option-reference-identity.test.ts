@@ -169,4 +169,4 @@ test("Issue #55: existing unique-option reference behavior remains valid", async
 
   assert.equal(resolved.result.proposal.referencedRecommendationId, recommendationB.recommendationId);
   assert.equal(resolved.result.proposal.referencedOptionId, "unique-option-b");
-}
+});
