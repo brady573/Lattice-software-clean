@@ -8,6 +8,8 @@ import type {
 
 const DEFAULT_ENDPOINT = "https://en.wikipedia.org/w/api.php";
 const DEFAULT_RESULT_LIMIT = 4;
+const DEFAULT_TIMEOUT_MS = 30_000;
+const MAX_TIMEOUT_MS = 120_000;
 const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
 const MAX_SOURCE_CONTENT_CHARS = 24_000;
 const MAX_CLAIM_CHARS = 1_200;
@@ -18,6 +20,7 @@ const MAX_INVESTIGATION_QUERIES = 8;
 export interface WikimediaKnowledgeAcquisitionOptions {
   readonly endpoint?: string;
   readonly resultLimit?: number;
+  readonly timeoutMs?: number;
   readonly fetchImpl?: typeof fetch;
   readonly clock?: () => Date;
 }
@@ -28,7 +31,6 @@ type WikimediaPage = {
   title?: unknown;
   extract?: unknown;
   fullurl?: unknown;
-  touched?: unknown;
 };
 
 function record(value: unknown): Record<string, unknown> | null {
@@ -54,6 +56,13 @@ function normalizeEndpoint(raw: string): URL {
 function boundedResultLimit(value: number): number {
   if (!Number.isSafeInteger(value) || value < 1 || value > 8) {
     throw new Error("Wikimedia acquisition resultLimit must be an integer between 1 and 8.");
+  }
+  return value;
+}
+
+function boundedTimeoutMs(value: number): number {
+  if (!Number.isSafeInteger(value) || value < 1 || value > MAX_TIMEOUT_MS) {
+    throw new Error(`Wikimedia acquisition timeoutMs must be an integer between 1 and ${MAX_TIMEOUT_MS}.`);
   }
   return value;
 }
@@ -134,17 +143,39 @@ export class WikimediaKnowledgeAcquisitionProvider implements KnowledgeAcquisiti
   readonly kind = "wikimedia-search";
   private readonly endpoint: URL;
   private readonly resultLimit: number;
+  private readonly timeoutMs: number;
   private readonly fetchImpl: typeof fetch;
   private readonly clock: () => Date;
 
   constructor(options: WikimediaKnowledgeAcquisitionOptions = {}) {
     this.endpoint = normalizeEndpoint(options.endpoint ?? DEFAULT_ENDPOINT);
     this.resultLimit = boundedResultLimit(options.resultLimit ?? DEFAULT_RESULT_LIMIT);
+    this.timeoutMs = boundedTimeoutMs(options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
     this.fetchImpl = options.fetchImpl ?? fetch;
     this.clock = options.clock ?? (() => new Date());
   }
 
-  private async fullPageExtract(pageId: string, fallback: string): Promise<string> {
+  private async requestJson(url: URL, signal: AbortSignal): Promise<unknown> {
+    try {
+      const response = await this.fetchImpl(url, {
+        method: "GET",
+        redirect: "error",
+        headers: {
+          accept: "application/json",
+          "user-agent": "Lattice-Knowledge-Consultation/0.1 (source retrieval; no truth authority)",
+        },
+        signal,
+      });
+      return await readBoundedJson(response);
+    } catch (error) {
+      if (signal.aborted) {
+        throw new Error(`Knowledge source request exceeded ${this.timeoutMs} ms`, { cause: error });
+      }
+      throw error;
+    }
+  }
+
+  private async fullPageExtract(pageId: string, fallback: string, signal: AbortSignal): Promise<string> {
     const url = new URL(this.endpoint.href);
     for (const [key, value] of Object.entries({
       action: "query",
@@ -159,21 +190,14 @@ export class WikimediaKnowledgeAcquisitionProvider implements KnowledgeAcquisiti
     }
 
     try {
-      const response = await this.fetchImpl(url, {
-        method: "GET",
-        redirect: "error",
-        headers: {
-          accept: "application/json",
-          "user-agent": "Lattice-Knowledge-Consultation/0.1 (source retrieval; no truth authority)",
-        },
-      });
-      const root = record(await readBoundedJson(response));
+      const root = record(await this.requestJson(url, signal));
       const query = record(root?.query);
       const rawPage = Array.isArray(query?.pages) ? query.pages[0] : undefined;
       const page = record(rawPage) as WikimediaPage | null;
       const extract = typeof page?.extract === "string" ? page.extract.trim() : "";
       return (extract || fallback).slice(0, MAX_SOURCE_CONTENT_CHARS);
-    } catch {
+    } catch (error) {
+      if (signal.aborted) throw error;
       return fallback.slice(0, MAX_SOURCE_CONTENT_CHARS);
     }
   }
@@ -184,6 +208,7 @@ export class WikimediaKnowledgeAcquisitionProvider implements KnowledgeAcquisiti
     }
     const queries = retrievalQueries(request);
     const retrievedAt = this.clock().toISOString();
+    const signal = AbortSignal.timeout(this.timeoutMs);
     const sources: RetrievedKnowledgeSource[] = [];
     const claims: RetrievedKnowledgeClaim[] = [];
     const seenPageIds = new Set<string>();
@@ -207,21 +232,13 @@ export class WikimediaKnowledgeAcquisitionProvider implements KnowledgeAcquisiti
         url.searchParams.set(key, value);
       }
 
-      let response: Response;
+      let root: Record<string, unknown> | null;
       try {
-        response = await this.fetchImpl(url, {
-          method: "GET",
-          redirect: "error",
-          headers: {
-            accept: "application/json",
-            "user-agent": "Lattice-Knowledge-Consultation/0.1 (source retrieval; no truth authority)",
-          },
-        });
+        root = record(await this.requestJson(url, signal));
       } catch (error) {
         throw new Error(`Knowledge source was unavailable: ${error instanceof Error ? error.message : "request failed"}.`);
       }
 
-      const root = record(await readBoundedJson(response));
       const query = record(root?.query);
       const pages = Array.isArray(query?.pages) ? query.pages : [];
 
@@ -248,7 +265,7 @@ export class WikimediaKnowledgeAcquisitionProvider implements KnowledgeAcquisiti
           continue;
         }
 
-        const extract = await this.fullPageExtract(pageId, introExtract);
+        const extract = await this.fullPageExtract(pageId, introExtract, signal);
         if (!extract) continue;
         const sourceId = `page:${pageId}`;
         const source: RetrievedKnowledgeSource = {
@@ -257,7 +274,7 @@ export class WikimediaKnowledgeAcquisitionProvider implements KnowledgeAcquisiti
           title,
           publisher: "Wikipedia contributors",
           retrievedAt,
-          publishedAt: typeof page.touched === "string" ? page.touched : null,
+          publishedAt: null,
           contentType: "text/plain; charset=utf-8",
           content: extract,
           metadata: {
