@@ -51,6 +51,14 @@ test('deployed functional validation is manual-only', () => {
   assert.doesNotMatch(text, /^\s*pull_request:\s*$/mu);
 });
 
+test('manual deployed validation accepts only optional held-out case input and keeps it outside Product code', () => {
+  const text = workflowText(manualDeployedWorkflowName);
+  assert.match(text, /^\s+heldout_cases_json:\s*$/mu);
+  assert.match(text, /tools\/deployed_heldout_validation\.py/u);
+  assert.match(text, /deployed-heldout-black-box-/u);
+  assert.doesNotMatch(text, /repository_dispatch|issue_comment|workflow_run|schedule:/u);
+});
+
 test('Core PR validation is the single ordinary full repository gate', () => {
   const core = workflowText(coreWorkflowName);
   assert.match(core, /^name: CI — Core Validation$/mu);
