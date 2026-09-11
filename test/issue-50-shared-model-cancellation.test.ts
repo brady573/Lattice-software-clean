@@ -106,8 +106,8 @@ test("Issue #50: duplicate caller cancellation does not cancel the creator waite
   assert.equal(provider.aborts, 0);
 });
 
-test("Issue #50: all cancelled waiters leave bounded shared work to finish and cache normally", async () => {
-  const provider = new DelayedProvider(50);
+test("Issue #50: final waiter cancellation cancels shared provider work and permits later retry", async () => {
+  const provider = new DelayedProvider(100);
   const runtime = new ModelRuntime(provider, { timeoutMs: 500 });
   const firstController = new AbortController();
   const secondController = new AbortController();
@@ -119,12 +119,14 @@ test("Issue #50: all cancelled waiters leave bounded shared work to finish and c
   secondController.abort(new Error("second caller left"));
 
   await Promise.all([expectCancelled(first), expectCancelled(second)]);
-  await new Promise((resolve) => setTimeout(resolve, 70));
-
-  const replay = await runtime.call(request, sharedOptions());
-  assert.equal(replay.response.output[0]?.type, "text");
+  await new Promise((resolve) => setTimeout(resolve, 10));
   assert.equal(provider.calls, 1);
-  assert.equal(provider.aborts, 0);
+  assert.equal(provider.aborts, 1);
+
+  const retry = await runtime.call(request, sharedOptions());
+  assert.equal(retry.response.output[0]?.type, "text");
+  assert.equal(provider.calls, 2);
+  assert.deepEqual(provider.attempts, [0, 1]);
 });
 
 test("Issue #50: shared provider failure reaches active waiters and is evicted for later retry", async () => {
