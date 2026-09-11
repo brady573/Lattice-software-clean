@@ -28,14 +28,14 @@ export interface KnowledgeFinding {
 export interface OutcomeProvenance {
   sourceId: string;
   canonicalUri: string;
-  title?: string;
+  title: string;
   publisher: string | null;
   provenanceConfidence: string;
   authoritativePrimary: boolean;
   /** Product-facing source suitability metadata; it is not truth authority. */
   evidentiarySuitability?: EvidentiarySuitability;
   retrievedAt: string;
-  publishedAt?: string | null;
+  publishedAt: string | null;
 }
 
 export interface KnowledgeEvidence {
