@@ -5,12 +5,14 @@ import test from 'node:test';
 
 const workflowDirectory = join(process.cwd(), '.github', 'workflows');
 const coreWorkflowName = 'core-validation.yml';
-const expectedWorkflowNames = [
+const manualDeployedWorkflowName = 'deployed-functional-validation.yml';
+const expectedDurableWorkflowNames = [
   'browser-lifecycle-validation.yml',
   'core-validation.yml',
   'postgres-integration-validation.yml',
   'render-blueprint-validation.yml',
 ];
+const expectedWorkflowNames = [...expectedDurableWorkflowNames, manualDeployedWorkflowName].sort();
 
 function workflowText(name: string): string {
   return readFileSync(join(workflowDirectory, name), 'utf8');
@@ -34,8 +36,19 @@ const workflowNames = readdirSync(workflowDirectory)
   .sort();
 const workflowEntries = workflowNames.map((name) => ({ name, text: workflowText(name) }));
 
-test('CI has only the four durable hosted validation workflows', () => {
+test('CI retains four durable hosted lanes plus one separate manual deployed-validation lane', () => {
   assert.deepEqual(workflowNames, expectedWorkflowNames);
+  assert.deepEqual(
+    workflowNames.filter((name) => name !== manualDeployedWorkflowName),
+    [...expectedDurableWorkflowNames].sort(),
+  );
+});
+
+test('deployed functional validation is manual-only', () => {
+  const text = workflowText(manualDeployedWorkflowName);
+  assert.match(text, /^\s*workflow_dispatch:\s*$/mu);
+  assert.doesNotMatch(text, /^\s*push:\s*$/mu);
+  assert.doesNotMatch(text, /^\s*pull_request:\s*$/mu);
 });
 
 test('Core PR validation is the single ordinary full repository gate', () => {
@@ -58,7 +71,7 @@ test('specialist workflows report bounded evidence only', () => {
   }
 });
 
-test('durable workflow identities are responsibility-based rather than milestone-based', () => {
+test('workflow identities are responsibility-based rather than milestone-based', () => {
   for (const { name, text } of workflowEntries) {
     assert.doesNotMatch(topLevelWorkflowName(text), /\bM\d+\b/u, `${name} must not use a milestone identity`);
   }

@@ -1,13 +1,6 @@
 name: Validation — Deployed Solandra Functional
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - "tools/deployed_owner_auth_validation.py"
-      - "tools/deployed_product_journey_validation.py"
-      - ".github/workflows/deployed-functional-validation.yml"
   workflow_dispatch:
 
 permissions:
