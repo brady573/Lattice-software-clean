@@ -1,7 +1,7 @@
 export type DeploymentMode = "development" | "durable";
 /** Runtime truth capability only; Product decision criteria are supplied by qualified adapters. */
 export type TruthMode = "v36-offline" | "v36-live";
-export type AuthenticationMode = "development-fixture" | "required";
+export type AuthenticationMode = "development-fixture" | "required" | "validator-public";
 export type KnowledgeSimplifierRoute = "groq-gpt-oss-120b";
 export type SolandraCognitionRoute = "groq-gpt-oss-120b";
 
@@ -158,11 +158,14 @@ function parseAuthenticationMode(
   deploymentMode: DeploymentMode,
 ): AuthenticationMode {
   const mode = value ?? (deploymentMode === "development" ? "development-fixture" : "required");
-  if (mode !== "development-fixture" && mode !== "required") {
+  if (mode !== "development-fixture" && mode !== "required" && mode !== "validator-public") {
     throw new Error(`Unsupported LATTICE_AUTHENTICATION_MODE: ${mode}`);
   }
   if (deploymentMode !== "development" && mode === "development-fixture") {
     throw new Error("Development fixture authentication cannot be enabled in durable deployment mode.");
+  }
+  if (deploymentMode !== "development" && mode === "validator-public") {
+    throw new Error("Validator public authentication requires development deployment mode.");
   }
   return mode;
 }
@@ -212,6 +215,9 @@ export function resolveRuntimeConfig(
     env.LATTICE_AUTHENTICATION_MODE,
     deploymentMode,
   );
+  if (authenticationMode === "validator-public" && databaseUrl !== undefined) {
+    throw new Error("Validator public authentication requires isolated in-memory state; DATABASE_URL must be unset.");
+  }
   const developmentFixtureSubjectId = parseDevelopmentFixtureSubjectId(
     env.LATTICE_DEVELOPMENT_FIXTURE_SUBJECT_ID,
     authenticationMode,
@@ -275,7 +281,7 @@ export function resolveRuntimeConfig(
     androidModelRelayModel: parseModelName(
       env.LATTICE_ANDROID_MODEL_RELAY_MODEL,
       "android-local-prototype",
-      "LATTICE_ANDROID_MODEL_RELAY_MODEL",
+      modernConfigured ? "LATTICE_ANDROID_MODEL_RELAY_MODEL" : "LATTICE_MODEL_SIMULATOR_MODEL",
     ),
     androidModelRelayTimeoutMs: parseAndroidRelayTimeout(env.LATTICE_ANDROID_MODEL_RELAY_TIMEOUT_MS),
   };
