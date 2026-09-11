@@ -90,14 +90,18 @@ test("conceptual Knowledge needs are not issued directly as provider retrieval q
 });
 
 test("Issue #53: duplicate acquired claim IDs fail before Solandra responsiveness selection", async () => {
-  const duplicateClaims = validAcquisition();
-  duplicateClaims.claims = [
-    duplicateClaims.claims[0]!,
-    {
-      ...duplicateClaims.claims[0]!,
-      text: "A different acquired object with the same claim identity.",
-    },
-  ];
+  const base = validAcquisition();
+  const firstClaim = base.claims[0]!;
+  const duplicateClaims: KnowledgeAcquisitionResult = {
+    ...base,
+    claims: [
+      firstClaim,
+      {
+        ...firstClaim,
+        text: "A different acquired object with the same claim identity.",
+      },
+    ],
+  };
   const provider = new CandidateProvider(duplicateClaims);
   const investigator = new RecordingInvestigator({ claimId: CLAIM_ID, sourceIds: [SOURCE_ID] });
   const acquisition = new RelevantKnowledgeAcquisitionProvider(provider, investigator);
@@ -115,16 +119,20 @@ test("Issue #53: duplicate acquired claim IDs fail before Solandra responsivenes
 });
 
 test("Issue #53: duplicate acquired source IDs fail before Solandra responsiveness selection", async () => {
-  const duplicateSources = validAcquisition();
-  duplicateSources.sources = [
-    duplicateSources.sources[0]!,
-    {
-      ...duplicateSources.sources[0]!,
-      canonicalUri: "https://example.test/different-source-object",
-      title: "Different source object with duplicate identity",
-      content: "Different source material under the same source identity.",
-    },
-  ];
+  const base = validAcquisition();
+  const firstSource = base.sources[0]!;
+  const duplicateSources: KnowledgeAcquisitionResult = {
+    ...base,
+    sources: [
+      firstSource,
+      {
+        ...firstSource,
+        canonicalUri: "https://example.test/different-source-object",
+        title: "Different source object with duplicate identity",
+        content: "Different source material under the same source identity.",
+      },
+    ],
+  };
   const provider = new CandidateProvider(duplicateSources);
   const investigator = new RecordingInvestigator({ claimId: CLAIM_ID, sourceIds: [SOURCE_ID] });
   const acquisition = new RelevantKnowledgeAcquisitionProvider(provider, investigator);
