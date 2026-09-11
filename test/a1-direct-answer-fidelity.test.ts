@@ -40,6 +40,7 @@ function knowledge(objective: string, text: string): KnowledgeOutcome {
       authoritativePrimary: true,
       evidentiarySuitability: "GENERAL_REFERENCE",
       retrievedAt: "2026-09-06T17:00:00.000Z",
+      publishedAt: null,
     }],
     evidence: [],
     truthAssessmentIds: ["assessment-a"],

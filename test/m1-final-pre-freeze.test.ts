@@ -373,10 +373,12 @@ test("ModelSolandraKnowledgePresenter rejects unsupported factual additions with
     provenance: [{
       sourceId: "presenter-source",
       canonicalUri: "https://presenter.example/governed",
+      title: "Presenter governed source",
       publisher: "Presenter Example",
       provenanceConfidence: "HIGH",
       authoritativePrimary: true,
       retrievedAt: FIXED_TIME,
+      publishedAt: null,
     }],
     evidence: [{
       evidenceId: "presenter-evidence",
