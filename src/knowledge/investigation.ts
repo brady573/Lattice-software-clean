@@ -142,8 +142,11 @@ export class RelevantKnowledgeAcquisitionProvider implements KnowledgeAcquisitio
       }
 
       const evidence = claim.evidence.filter((item) => requestedSourceIds.has(item.sourceId));
-      if (evidence.length !== requestedSourceIds.size) {
-        throw new Error(`Solandra responsiveness selection referenced a source not bound to claim ${selection.claimId}.`);
+      const evidencedSourceIds = new Set(evidence.map((item) => item.sourceId));
+      for (const sourceId of requestedSourceIds) {
+        if (!evidencedSourceIds.has(sourceId)) {
+          throw new Error(`Solandra responsiveness selection referenced a source not bound to claim ${selection.claimId}.`);
+        }
       }
       for (const item of evidence) selectedSourceIds.add(item.sourceId);
       claims.push({ ...claim, evidence });
