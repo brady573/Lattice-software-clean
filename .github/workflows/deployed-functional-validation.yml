@@ -52,6 +52,7 @@ jobs:
           python -m playwright install --with-deps chromium
 
       - name: Run deployed owner-auth functional validation
+        id: owner_auth
         env:
           PYTHONUNBUFFERED: '1'
         run: |
@@ -74,7 +75,7 @@ jobs:
             --video off
 
       - name: Run validator-selected held-out Product cases
-        if: ${{ inputs.heldout_cases_json != '' }}
+        if: ${{ always() && !cancelled() && inputs.heldout_cases_json != '' && steps.owner_auth.outcome == 'success' }}
         env:
           PYTHONUNBUFFERED: '1'
           HELDOUT_CASES_JSON: ${{ inputs.heldout_cases_json }}
