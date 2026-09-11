@@ -137,7 +137,7 @@ function groundingRequest(
   model: string,
   input: SolandraActionPreparationInput,
   body: string,
-  selected: readonly SolandraGovernedKnowledgeContext[],
+  groundingBasis: readonly SolandraGovernedKnowledgeContext[],
 ): CanonicalModelRequest {
   return {
     model,
@@ -160,7 +160,7 @@ function groundingRequest(
           `Current authoritative USER objective: ${input.authoritativeObjective}`,
           `Current exact USER request: ${input.userMessage}`,
           "Explicitly selected governed Knowledge basis:",
-          knowledgePrompt(selected),
+          knowledgePrompt(groundingBasis),
         ].join("\n\n"),
       },
     ],
@@ -174,10 +174,10 @@ function unique(values: readonly string[]): string[] {
   return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
 }
 
-function validateBasis(
+function validateAndProjectPreparationBasis(
   requested: readonly z.infer<typeof basisSchema>[],
   knowledge: readonly SolandraGovernedKnowledgeContext[],
-): { basis: PreparedResourceBasis[]; selected: SolandraGovernedKnowledgeContext[] } | null {
+): { basis: PreparedResourceBasis[]; groundingBasis: SolandraGovernedKnowledgeContext[] } | null {
   const available = new Map(knowledge.map((item) => [item.knowledgeId, item]));
   const merged = new Map<string, Set<string>>();
   for (const entry of requested) {
@@ -191,11 +191,25 @@ function validateBasis(
     }
     merged.set(entry.knowledgeId, claims);
   }
+
   const basis = [...merged.entries()]
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([knowledgeId, claimIds]) => ({ knowledgeId, claimIds: [...claimIds].sort() }));
-  const selected = basis.map((entry) => available.get(entry.knowledgeId)!).filter(Boolean);
-  return { basis, selected };
+  const groundingBasis: SolandraGovernedKnowledgeContext[] = [];
+  for (const entry of basis) {
+    const item = available.get(entry.knowledgeId);
+    if (!item) return null;
+    const permittedClaims = new Set(entry.claimIds);
+    groundingBasis.push({
+      knowledgeId: item.knowledgeId,
+      objective: item.objective,
+      findings: item.findings.filter((finding) => permittedClaims.has(finding.claimId)),
+      sourceCount: item.sourceCount,
+      uncertainties: item.uncertainties,
+    });
+  }
+
+  return { basis, groundingBasis };
 }
 
 export class ModelSolandraActionPreparer implements SolandraActionPreparer {
@@ -232,7 +246,7 @@ export class ModelSolandraActionPreparer implements SolandraActionPreparer {
       });
     }
 
-    const validated = validateBasis(parsed.basis, input.knowledge);
+    const validated = validateAndProjectPreparationBasis(parsed.basis, input.knowledge);
     if (!validated) {
       return Object.freeze({
         result: {
@@ -245,7 +259,7 @@ export class ModelSolandraActionPreparer implements SolandraActionPreparer {
     }
 
     const grounded = await this.runtime.call(
-      groundingRequest(this.model, input, parsed.body, validated.selected),
+      groundingRequest(this.model, input, parsed.body, validated.groundingBasis),
       {
         correlationId: `solandra-action-ground:${input.runId}:${input.userMessageId}`,
         idempotencyKey: `PREPARED_MESSAGE_GROUND:${input.intentVersionId}:${input.userMessageId}`,
@@ -285,7 +299,7 @@ export class ModelSolandraActionPreparer implements SolandraActionPreparer {
         status: "PREPARED" as const,
         body: parsed.body.trim(),
         basis: validated.basis,
-        preservedUncertainties: unique(validated.selected.flatMap((item) => [...item.uncertainties])),
+        preservedUncertainties: unique(validated.groundingBasis.flatMap((item) => [...item.uncertainties])),
       },
       generationProvenance,
       groundingProvenance,
