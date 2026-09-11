@@ -41,6 +41,8 @@ Validator mode reuses the existing development fixed-subject composition and fix
 
 Validator mode is mechanically in-memory: attaching any `DATABASE_URL` is a startup error. This prevents the service from reading or mutating the Owner PostgreSQL state. Conversation, Intent, Knowledge, Recommendation, prepared-resource, capability-authorization, and related stores therefore exist only inside the validator service process.
 
+The validator surface is canonical for ordinary Product journeys, but it does not establish durable/PostgreSQL/restart behavior. Those durability properties remain owned by the canonical durable deployment path and its PostgreSQL validation evidence.
+
 The Owner service remains unchanged: it continues to use durable state and the existing Owner Bearer credential mapped to subject `owner`.
 
 ## Browser session policy
