@@ -8,6 +8,7 @@ const workflowDirectory = join(process.cwd(), '.github', 'workflows');
 const expectedActionPins = new Map<string, string>([
   ['actions/checkout', '3d3c42e5aac5ba805825da76410c181273ba90b1'],
   ['actions/setup-node', '820762786026740c76f36085b0efc47a31fe5020'],
+  ['actions/setup-python', 'a26af69be951a213d495a4c3e4e4022e16d87065'],
   ['actions/upload-artifact', '043fb46d1a93c77aae656e7c1c64a875d1fc6a0a'],
 ]);
 
@@ -16,6 +17,7 @@ const expectedRunners = new Map<string, string>([
   ['postgres-integration-validation.yml', 'ubuntu-latest'],
   ['browser-lifecycle-validation.yml', 'ubuntu-latest'],
   ['render-blueprint-validation.yml', 'ubuntu-latest'],
+  ['deployed-functional-validation.yml', 'ubuntu-latest'],
 ]);
 
 const workflowNames = readdirSync(workflowDirectory)
@@ -57,7 +59,7 @@ test('all external GitHub Actions are qualified full-SHA pins', () => {
   }
 });
 
-test('automatic CI uses only standard GitHub-hosted runners', () => {
+test('all validation workflows use only standard GitHub-hosted runners', () => {
   assert.deepEqual(workflowNames, [...expectedRunners.keys()].sort());
   for (const [workflowName, runner] of expectedRunners) {
     const text = workflowText(workflowName);
