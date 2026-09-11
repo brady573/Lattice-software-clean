@@ -1,19 +1,70 @@
 export type CanonicalModelRole = "system" | "user" | "assistant" | "tool";
 
-export interface CanonicalModelMessage {
-  readonly role: CanonicalModelRole;
+interface CanonicalModelSystemMessage {
+  readonly role: "system";
+  readonly content: string;
+  readonly name?: never;
+  readonly toolCallId?: never;
+}
+
+interface CanonicalModelUserMessage {
+  readonly role: "user";
+  readonly content: string;
+  readonly name?: never;
+  readonly toolCallId?: never;
+}
+
+interface CanonicalModelAssistantMessage {
+  readonly role: "assistant";
   readonly content: string;
   readonly name?: string;
-  readonly toolCallId?: string;
+  readonly toolCallId?: never;
 }
+
+interface CanonicalModelToolMessage {
+  readonly role: "tool";
+  readonly content: string;
+  readonly name?: never;
+  readonly toolCallId: string;
+}
+
+export type CanonicalModelMessage =
+  | CanonicalModelSystemMessage
+  | CanonicalModelUserMessage
+  | CanonicalModelAssistantMessage
+  | CanonicalModelToolMessage;
 
 export type CanonicalModelScalarType = "string" | "number" | "integer" | "boolean";
 
-export interface CanonicalModelToolProperty {
-  readonly type: CanonicalModelScalarType;
+interface CanonicalModelStringToolProperty {
+  readonly type: "string";
   readonly description?: string;
-  readonly enum?: readonly (string | number | boolean)[];
+  readonly enum?: readonly string[];
 }
+
+interface CanonicalModelNumberToolProperty {
+  readonly type: "number";
+  readonly description?: string;
+  readonly enum?: readonly number[];
+}
+
+interface CanonicalModelIntegerToolProperty {
+  readonly type: "integer";
+  readonly description?: string;
+  readonly enum?: readonly number[];
+}
+
+interface CanonicalModelBooleanToolProperty {
+  readonly type: "boolean";
+  readonly description?: string;
+  readonly enum?: readonly boolean[];
+}
+
+export type CanonicalModelToolProperty =
+  | CanonicalModelStringToolProperty
+  | CanonicalModelNumberToolProperty
+  | CanonicalModelIntegerToolProperty
+  | CanonicalModelBooleanToolProperty;
 
 export interface CanonicalModelToolInputSchema {
   readonly type: "object";
