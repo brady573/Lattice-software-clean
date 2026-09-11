@@ -170,7 +170,40 @@ def _new_result(started_at: str) -> dict[str, Any]:
 
 def _write_result(result: dict[str, Any]) -> None:
     ARTIFACT_DIR.mkdir(parents=True, exist_ok=True)
-    RESULT_PATH.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    serialized = json.dumps(result, ensure_ascii=False, indent=2) + "\n"
+    assert not OWNER_TOKEN or OWNER_TOKEN not in serialized, "Owner token must never enter black-box evidence JSON"
+    RESULT_PATH.write_text(serialized, encoding="utf-8")
+
+
+def _capture_observation(
+    page: Page,
+    case: dict[str, Any],
+    user_messages: list[str],
+    visible_assistant_messages: list[str],
+    case_started: float,
+) -> dict[str, Any]:
+    screenshot_name = f"screenshots/{case['id']}.png"
+    screenshots: list[str] = []
+    try:
+        screenshot_path = ARTIFACT_DIR / screenshot_name
+        page.screenshot(path=str(screenshot_path), full_page=True)
+        screenshots.append(screenshot_name)
+    except Exception:
+        pass
+
+    composer = page.locator("#composer")
+    visible_status = _bounded_text(composer.inner_text()) if composer.count() else ""
+    return {
+        "id": case["id"],
+        "session": case["session"],
+        "userMessages": [_scrub(message) for message in user_messages],
+        "visibleAssistantMessages": visible_assistant_messages,
+        "visibleSources": _visible_sources(page),
+        "visibleStatus": visible_status,
+        "visibleErrors": _visible_errors(page),
+        "timingMs": round((time.monotonic() - case_started) * 1_000),
+        "screenshots": screenshots,
+    }
 
 
 def test_validator_selected_heldout_cases(browser: Browser) -> None:
@@ -189,37 +222,26 @@ def test_validator_selected_heldout_cases(browser: Browser) -> None:
             page = context.new_page()
             user_messages = [case["message"], *case["followUps"]]
             visible_assistant_messages: list[str] = []
-            screenshot_name = f"screenshots/{case['id']}.png"
             try:
                 _authenticate(page)
                 for message in user_messages:
                     if time.monotonic() >= deadline:
                         raise AssertionError("held-out case exceeded its case timeout")
                     visible_assistant_messages.append(_submit_turn(page, message, deadline))
-
-                composer_text = _bounded_text(page.locator("#composer").inner_text())
-                screenshot_path = ARTIFACT_DIR / screenshot_name
-                page.screenshot(path=str(screenshot_path), full_page=True)
-                observation = {
-                    "id": case["id"],
-                    "session": case["session"],
-                    "userMessages": user_messages,
-                    "visibleAssistantMessages": visible_assistant_messages,
-                    "visibleSources": _visible_sources(page),
-                    "visibleStatus": composer_text,
-                    "visibleErrors": _visible_errors(page),
-                    "timingMs": round((time.monotonic() - case_started) * 1_000),
-                    "screenshots": [screenshot_name],
-                }
+            finally:
+                observation = _capture_observation(
+                    page,
+                    case,
+                    user_messages,
+                    visible_assistant_messages,
+                    case_started,
+                )
                 result["cases"].append(observation)
                 _write_result(result)
-                print(f"HELDOUT_CASE_OBSERVED id={case['id']} timing_ms={observation['timingMs']}")
-            finally:
                 context.close()
+                print(f"HELDOUT_CASE_OBSERVED id={case['id']} timing_ms={observation['timingMs']}")
     finally:
         result["run"]["completedAt"] = _utc_now()
         _write_result(result)
 
-    serialized = RESULT_PATH.read_text(encoding="utf-8")
-    assert OWNER_TOKEN not in serialized, "Owner token must never enter black-box evidence JSON"
     print(f"HELDOUT_BLACK_BOX_EVIDENCE={RESULT_PATH}")
