@@ -5,6 +5,8 @@ import { resolveRuntimeConfig } from "../src/runtime-config.js";
 import { renderSolandraAuthoritativeConversationPage } from "../src/ui/solandra-authoritative-conversation-page.js";
 import { renderSolandraValidatorConversationPage } from "../src/ui/solandra-validator-conversation-page.js";
 
+const validatorResetMarker = /const keys = \[\s*"lattice\.solandra\.conversation\.v1"/u;
+
 function validatorConfig() {
   return resolveRuntimeConfig({
     LATTICE_DEPLOYMENT_MODE: "development",
@@ -88,7 +90,7 @@ test("validator page clears only browser conversation restoration state before c
     "lattice.solandra.draft.v1",
   ];
 
-  assert.doesNotMatch(canonical, /for \(const key of keys\)/u);
+  assert.doesNotMatch(canonical, validatorResetMarker);
   for (const key of storageKeys) assert.match(validator, new RegExp(key.replaceAll(".", "\\."), "u"));
   const resetIndex = validator.indexOf("window.localStorage.removeItem(key)");
   const recoveryIndex = validator.indexOf("void recoverSession()");
@@ -102,7 +104,7 @@ test("resolved validator runtime composition selects the fresh-session wrapper",
   try {
     const root = await app.inject({ method: "GET", url: "/" });
     assert.equal(root.statusCode, 200);
-    assert.match(root.body, /window\.localStorage\.removeItem\(key\)/u);
+    assert.match(root.body, validatorResetMarker);
   } finally {
     await app.close();
   }
@@ -113,7 +115,7 @@ test("normal runtime composition selects the authoritative wrapper", async () =>
   try {
     const root = await app.inject({ method: "GET", url: "/" });
     assert.equal(root.statusCode, 200);
-    assert.doesNotMatch(root.body, /window\.localStorage\.removeItem\(key\)/u);
+    assert.doesNotMatch(root.body, validatorResetMarker);
   } finally {
     await app.close();
   }
@@ -128,7 +130,7 @@ test("ambient validator environment cannot override an explicitly supplied norma
     const root = await app.inject({ method: "GET", url: "/" });
     assert.equal(root.statusCode, 200);
     assert.equal(config.validatorDeployment, false);
-    assert.doesNotMatch(root.body, /window\.localStorage\.removeItem\(key\)/u);
+    assert.doesNotMatch(root.body, validatorResetMarker);
   } finally {
     await app.close();
     if (previous === undefined) delete process.env.LATTICE_VALIDATOR_DEPLOYMENT;
