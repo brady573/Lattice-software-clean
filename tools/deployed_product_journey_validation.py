@@ -177,12 +177,23 @@ def _restore_cognitive_assistance(page: Page, changed: bool) -> None:
     dialog.get_by_role("button", name="Close").click()
 
 
-def test_deployed_solandra_product_journeys(browser: Browser) -> None:
+def _session(browser: Browser):
     context = browser.new_context(viewport={"width": 1440, "height": 1000})
     page = context.new_page()
     _authenticate(page)
+    changed = _connect_cognitive_assistance_if_available(page)
+    return context, page, changed
 
-    changed_capability = _connect_cognitive_assistance_if_available(page)
+
+def _close_session(context, page: Page, changed: bool) -> None:
+    try:
+        _restore_cognitive_assistance(page, changed)
+    finally:
+        context.close()
+
+
+def test_knowledge_journey(browser: Browser) -> None:
+    context, page, changed = _session(browser)
     try:
         knowledge = _submit_turn(
             page,
@@ -198,7 +209,13 @@ def test_deployed_solandra_product_journeys(browser: Browser) -> None:
         assert re.search(r"heat|thermal|conduct", knowledge, re.I), (
             "Knowledge journey did not materially explain the temperature-perception mechanism"
         )
+    finally:
+        _close_session(context, page, changed)
 
+
+def test_ambiguity_journey(browser: Browser) -> None:
+    context, page, changed = _session(browser)
+    try:
         setup = _submit_turn(
             page,
             "I need to get to an important appointment tomorrow. Driving is faster, but the train is cheaper and I have not told you which matters more to me.",
@@ -211,7 +228,13 @@ def test_deployed_solandra_product_journeys(browser: Browser) -> None:
         assert re.search(r"speed|cost|priority|prioritize|prefer|important|trade.?off|clarif", ambiguity, re.I), (
             "Material ambiguity follow-up was not visibly clarified or qualified"
         )
+    finally:
+        _close_session(context, page, changed)
 
+
+def test_decision_journey(browser: Browser) -> None:
+    context, page, changed = _session(browser)
+    try:
         decision = _submit_turn(
             page,
             "I have a $1,200 budget for a work laptop. I mainly compile code and run containers, while photo editing is occasional. Should I prioritize 32 GB of RAM or a higher-resolution display, and why?",
@@ -219,28 +242,51 @@ def test_deployed_solandra_product_journeys(browser: Browser) -> None:
         )
         assert re.search(r"RAM|memory", decision, re.I), "Decision response did not visibly address RAM/memory"
         assert re.search(r"display|resolution|screen", decision, re.I), "Decision response did not visibly address display tradeoff"
-        assert not re.search(r"workerId|runId|queue|provider routing|V36", decision, re.I), (
+        assert re.search(r"compile|container|workload|because|priority|prioritize", decision, re.I), (
+            "Decision response did not visibly explain its basis"
+        )
+        assert not re.search(r"workerId|runId|queue|provider routing|V36|Decision Engine", decision, re.I), (
             "Decision journey exposed internal machinery"
         )
+    finally:
+        _close_session(context, page, changed)
 
+
+def test_action_preparation_journey(browser: Browser) -> None:
+    context, page, changed = _session(browser)
+    try:
+        _submit_turn(
+            page,
+            "For this purchase, I have decided to prioritize 32 GB of RAM because my main work is compiling code and running containers.",
+            "ACTION_CONTEXT",
+        )
         action = _submit_turn(
             page,
-            "Draft a short message to my manager recommending the RAM-first option and asking for approval. Do not send it.",
+            "Draft a short message to my manager explaining that choice and asking for approval. Do not send it.",
             "ACTION_PREPARATION",
         )
-        assert re.search(r"RAM|memory", action, re.I), "Prepared message did not preserve the selected recommendation"
+        assert re.search(r"RAM|memory", action, re.I), "Prepared message did not preserve the established choice"
         assert re.search(r"approval|approve", action, re.I), "Prepared message did not ask for approval"
         assert not re.search(r"I sent|message has been sent|sent it", action, re.I), (
             "Action preparation falsely implied external execution"
         )
+    finally:
+        _close_session(context, page, changed)
 
+
+def test_reload_continuity(browser: Browser) -> None:
+    context, page, changed = _session(browser)
+    try:
+        marker = "Cedar Lantern"
+        _submit_turn(
+            page,
+            f"For this planning conversation, remember that the project codename is {marker}.",
+            "CONTINUITY_SETUP",
+        )
         page.reload(wait_until="domcontentloaded")
         expect(page.locator("#ownerAccessGate")).to_be_hidden()
         continuity = _visible_text(page)
-        assert re.search(r"RAM|memory", continuity, re.I), "Reload did not visibly preserve conversation context"
+        assert marker in continuity, "Reload did not visibly preserve established conversation context"
         print("JOURNEY_RELOAD_CONTINUITY=PASS")
     finally:
-        _restore_cognitive_assistance(page, changed_capability)
-        context.close()
-
-    print("DEPLOYED_PRODUCT_JOURNEYS=PASS")
+        _close_session(context, page, changed)
