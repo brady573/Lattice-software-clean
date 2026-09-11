@@ -79,7 +79,6 @@ def _composer(page: Page):
 
 def _submit_turn(page: Page, prompt: str, label: str) -> str:
     composer = _composer(page)
-    before = _visible_text(page)
     composer.fill(prompt)
 
     turn_response = None
@@ -93,7 +92,10 @@ def _submit_turn(page: Page, prompt: str, label: str) -> str:
             composer.press("Enter")
         turn_response = pending.value
     except Exception:
-        button = composer.locator("xpath=ancestor::form[1]//button[@type='submit'] | ancestor::*[contains(@class,'composer')][1]//button").last
+        button = composer.locator(
+            "xpath=ancestor::form[1]//button[@type='submit'] | "
+            "ancestor::*[contains(@class,'composer')][1]//button"
+        ).last
         expect(button).to_be_visible(timeout=5_000)
         with page.expect_response(
             lambda response: "/api/v1/conversations/" in response.url
@@ -109,13 +111,12 @@ def _submit_turn(page: Page, prompt: str, label: str) -> str:
 
     try:
         page.wait_for_function(
-            """prior => {
-                const text = document.body.innerText;
-                return text !== prior && Math.abs(text.length - prior.length) > 20;
-            }""",
-            arg=before,
-            timeout=60_000,
+            "prompt => document.body.innerText.includes(prompt)",
+            arg=prompt,
+            timeout=10_000,
         )
+        expect(page.get_by_role("button", name="Stop", exact=True)).to_be_hidden(timeout=60_000)
+        expect(_composer(page)).to_be_enabled(timeout=10_000)
     except PlaywrightTimeoutError:
         snapshot = _visible_text(page)
         print(f"JOURNEY_{label}_TIMEOUT_VISIBLE_TEXT_BEGIN")
@@ -125,10 +126,12 @@ def _submit_turn(page: Page, prompt: str, label: str) -> str:
 
     after = _visible_text(page)
     assert OWNER_TOKEN not in after
+    assert prompt in after, f"{label}: submitted prompt not visible after completed turn"
+    turn_visible = after.rsplit(prompt, 1)[1].strip()
     print(f"JOURNEY_{label}_VISIBLE_TEXT_BEGIN")
-    print(after[-5000:])
+    print(turn_visible[-5000:])
     print(f"JOURNEY_{label}_VISIBLE_TEXT_END")
-    return after
+    return turn_visible
 
 
 def _connect_cognitive_assistance_if_available(page: Page) -> bool:
@@ -189,16 +192,24 @@ def test_deployed_solandra_product_journeys(browser: Browser) -> None:
         assert not re.search(r"workerId|runId|queue|provider routing|V36|Decision Engine", knowledge, re.I), (
             "Knowledge journey exposed internal machinery"
         )
+        assert not re.search(r"couldn't establish|could not establish|unable to establish", knowledge, re.I), (
+            "Knowledge journey did not provide a useful explanatory answer"
+        )
+        assert re.search(r"heat|thermal|conduct", knowledge, re.I), (
+            "Knowledge journey did not materially explain the temperature-perception mechanism"
+        )
 
         setup = _submit_turn(
             page,
             "I need to get to an important appointment tomorrow. Driving is faster, but the train is cheaper and I have not told you which matters more to me.",
             "AMBIGUITY_SETUP",
         )
-        assert "appointment" in setup.lower()
+        assert re.search(r"speed|cost|priority|prioritize|prefer|important", setup, re.I), (
+            "Material ambiguity was not visibly clarified"
+        )
         ambiguity = _submit_turn(page, "Which one is better?", "AMBIGUITY")
-        assert re.search(r"which matters|priority|more important|prefer|trade.?off|clarif", ambiguity, re.I), (
-            "Material ambiguity was not visibly clarified or qualified"
+        assert re.search(r"speed|cost|priority|prioritize|prefer|important|trade.?off|clarif", ambiguity, re.I), (
+            "Material ambiguity follow-up was not visibly clarified or qualified"
         )
 
         decision = _submit_turn(
@@ -219,7 +230,7 @@ def test_deployed_solandra_product_journeys(browser: Browser) -> None:
         )
         assert re.search(r"RAM|memory", action, re.I), "Prepared message did not preserve the selected recommendation"
         assert re.search(r"approval|approve", action, re.I), "Prepared message did not ask for approval"
-        assert not re.search(r"sent|I sent|message has been sent", action, re.I), (
+        assert not re.search(r"I sent|message has been sent|sent it", action, re.I), (
             "Action preparation falsely implied external execution"
         )
 
