@@ -12,6 +12,8 @@ export interface CanonicalAppOptions extends HttpCoreOptions {
   knowledgeSimplifier?: KnowledgeSimplifier | undefined;
   /** Canonical subject-authorized model assistance boundary. */
   modelAssistanceService?: ModelAssistanceCapabilityService | undefined;
+  /** Deployment/session presentation role already resolved by runtime configuration. */
+  validatorDeployment?: boolean;
 }
 
 function hasAssistantPresentation(payload: unknown): boolean {
@@ -23,8 +25,8 @@ function hasAssistantPresentation(payload: unknown): boolean {
   return typeof presentation.assistantMessage === "string" && presentation.assistantMessage.trim().length > 0;
 }
 
-function renderCanonicalConversationPage(): string {
-  return process.env.LATTICE_VALIDATOR_DEPLOYMENT === "true"
+function renderCanonicalConversationPage(validatorDeployment: boolean): string {
+  return validatorDeployment
     ? renderSolandraValidatorConversationPage()
     : renderSolandraAuthoritativeConversationPage();
 }
@@ -34,7 +36,12 @@ function renderCanonicalConversationPage(): string {
  * prototype routes are intentionally unavailable here.
  */
 export function buildCanonicalApp(options: CanonicalAppOptions = {}): FastifyInstance {
-  const { knowledgeSimplifier, modelAssistanceService, ...coreOptions } = options;
+  const {
+    knowledgeSimplifier,
+    modelAssistanceService,
+    validatorDeployment = false,
+    ...coreOptions
+  } = options;
   const { app, runStore, apiSubjectForRequest } = createHttpCore(coreOptions);
   app.addHook("preSerialization", async (request, _reply, payload) => {
     if (request.routeOptions.url !== "/api/v1/runs/:runId/outcome") return payload;
@@ -61,7 +68,7 @@ export function buildCanonicalApp(options: CanonicalAppOptions = {}): FastifyIns
     };
   });
   app.get("/", async (_request, reply) =>
-    reply.type("text/html; charset=utf-8").send(renderCanonicalConversationPage())
+    reply.type("text/html; charset=utf-8").send(renderCanonicalConversationPage(validatorDeployment))
   );
   return app;
 }
