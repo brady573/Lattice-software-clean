@@ -114,7 +114,7 @@ def _submit_turn(page: Page, prompt: str, label: str) -> str:
             const text = document.body.innerText;
             return text !== prior && text.includes(prompt) && text.length > prior.length + prompt.length + 20;
         }""",
-        [before, prompt],
+        arg=[before, prompt],
         timeout=60_000,
     )
     after = _visible_text(page)
