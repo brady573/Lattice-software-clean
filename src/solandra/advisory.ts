@@ -65,6 +65,14 @@ const groundingAuditSchema = z.object({
 
 type GroundingAudit = z.infer<typeof groundingAuditSchema>;
 
+type GroundingFinding = Readonly<{
+  knowledgeId: string;
+  claimId: string;
+  text: string;
+  status: string;
+  confidence: string;
+}>;
+
 export interface SolandraAdvisoryKnowledge {
   readonly knowledgeId: string;
   readonly objective: string;
@@ -214,15 +222,8 @@ function buildGroundingAuditRequest(
   model: string,
   input: SolandraAdvisoryInput,
   recommendation: SolandraRecommendationResult,
+  governedFindings: readonly GroundingFinding[],
 ): CanonicalModelRequest {
-  const governedFindings = input.knowledge.flatMap((knowledge) =>
-    knowledge.findings.map((finding) => ({
-      knowledgeId: knowledge.knowledgeId,
-      claimId: finding.claimId,
-      text: finding.text,
-      status: finding.status,
-      confidence: finding.confidence,
-    })));
   return {
     model,
     messages: [
@@ -261,15 +262,19 @@ function buildGroundingAuditRequest(
   };
 }
 
-function validateRecommendationBasis(input: SolandraAdvisoryInput, result: SolandraRecommendationResult): void {
+function validateAndProjectRecommendationBasis(
+  input: SolandraAdvisoryInput,
+  result: SolandraRecommendationResult,
+): GroundingFinding[] {
   const supplied = new Map(input.knowledge.map((knowledge) => [
     knowledge.knowledgeId,
     {
-      claimIds: new Set(knowledge.findings.map((finding) => finding.claimId)),
+      findings: new Map(knowledge.findings.map((finding) => [finding.claimId, finding])),
       uncertainties: new Set(knowledge.uncertainties),
     },
   ]));
   const usedUncertainties = new Set<string>();
+  const governedFindings: GroundingFinding[] = [];
 
   for (const basis of result.basis) {
     const knowledge = supplied.get(basis.knowledgeId);
@@ -277,9 +282,17 @@ function validateRecommendationBasis(input: SolandraAdvisoryInput, result: Solan
       throw new ModelProviderError("invalid_output", "Solandra advisory reasoning referenced Knowledge that Lattice did not supply.");
     }
     for (const claimId of basis.claimIds) {
-      if (!knowledge.claimIds.has(claimId)) {
+      const finding = knowledge.findings.get(claimId);
+      if (!finding) {
         throw new ModelProviderError("invalid_output", "Solandra advisory reasoning referenced a claim that is not part of the supplied Knowledge.");
       }
+      governedFindings.push({
+        knowledgeId: basis.knowledgeId,
+        claimId: finding.claimId,
+        text: finding.text,
+        status: finding.status,
+        confidence: finding.confidence,
+      });
     }
     for (const uncertainty of knowledge.uncertainties) usedUncertainties.add(uncertainty);
   }
@@ -295,6 +308,8 @@ function validateRecommendationBasis(input: SolandraAdvisoryInput, result: Solan
       throw new ModelProviderError("invalid_output", "Solandra advisory reasoning dropped material governed uncertainty from its recommendation basis.");
     }
   }
+
+  return governedFindings;
 }
 
 function advisoryBasisDigest(input: SolandraAdvisoryInput): string {
@@ -345,12 +360,15 @@ export class ModelSolandraAdvisoryRuntime implements SolandraAdvisoryRuntime {
       return Object.freeze({ result, invocationProvenance: response.audit.invocationProvenance });
     }
 
-    validateRecommendationBasis(input, result);
-    const auditResponse = await this.runtime.call(buildGroundingAuditRequest(this.model, input, result), {
-      correlationId: `solandra-advisory-grounding:${input.conversationId}:${input.userMessageId}`,
-      idempotencyKey: `grounding:${input.userMessageId}:${basisDigest}`,
-      maxAttempts: 1,
-    });
+    const governedFindings = validateAndProjectRecommendationBasis(input, result);
+    const auditResponse = await this.runtime.call(
+      buildGroundingAuditRequest(this.model, input, result, governedFindings),
+      {
+        correlationId: `solandra-advisory-grounding:${input.conversationId}:${input.userMessageId}`,
+        idempotencyKey: `grounding:${input.userMessageId}:${basisDigest}`,
+        maxAttempts: 1,
+      },
+    );
     if (auditResponse.response.output.length !== 1 || auditResponse.response.output[0]?.type !== "text") {
       throw new ModelProviderError("invalid_output", "Solandra advisory grounding verification requires exactly one text output.");
     }
