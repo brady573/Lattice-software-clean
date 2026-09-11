@@ -5,6 +5,7 @@ import { buildRunOutcome } from "./outcome.js";
 import type { KnowledgeSimplifier } from "./presentation/solandra/knowledge-simplification.js";
 import { renderKnowledgeResponseForRun } from "./presentation/solandra/knowledge-response.js";
 import { renderSolandraAuthoritativeConversationPage } from "./ui/solandra-authoritative-conversation-page.js";
+import { renderSolandraValidatorConversationPage } from "./ui/solandra-validator-conversation-page.js";
 
 export interface CanonicalAppOptions extends HttpCoreOptions {
   /** Compatibility-only direct simplifier for explicit test/non-canonical compositions. */
@@ -20,6 +21,12 @@ function hasAssistantPresentation(payload: unknown): boolean {
     return false;
   }
   return typeof presentation.assistantMessage === "string" && presentation.assistantMessage.trim().length > 0;
+}
+
+function renderCanonicalConversationPage(): string {
+  return process.env.LATTICE_VALIDATOR_DEPLOYMENT === "true"
+    ? renderSolandraValidatorConversationPage()
+    : renderSolandraAuthoritativeConversationPage();
 }
 
 /**
@@ -54,7 +61,7 @@ export function buildCanonicalApp(options: CanonicalAppOptions = {}): FastifyIns
     };
   });
   app.get("/", async (_request, reply) =>
-    reply.type("text/html; charset=utf-8").send(renderSolandraAuthoritativeConversationPage())
+    reply.type("text/html; charset=utf-8").send(renderCanonicalConversationPage())
   );
   return app;
 }
