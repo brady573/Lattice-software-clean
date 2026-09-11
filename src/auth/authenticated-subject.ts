@@ -1,7 +1,6 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
 
 export const AUTHENTICATED_SUBJECT_ID_MAX_CHARS = 200;
-export const VALIDATOR_SUBJECT_ID = "validator";
 
 export interface AuthenticatedSubject {
   subjectId: string;
@@ -20,22 +19,14 @@ function normalizeSubject(subject: AuthenticatedSubject | undefined): Authentica
   return Object.freeze({ subjectId });
 }
 
-function createFixedSubjectResolver(subjectId: string, label: string): AuthenticatedSubjectResolver {
-  const subject = normalizeSubject({ subjectId });
-  if (subject === undefined) {
-    throw new Error(`${label} subjectId must contain between 1 and 200 non-whitespace characters.`);
-  }
-  return () => subject;
-}
-
 export function createDevelopmentFixtureSubjectResolver(
   subjectId: string,
 ): AuthenticatedSubjectResolver {
-  return createFixedSubjectResolver(subjectId, "Development fixture");
-}
-
-export function createValidatorSubjectResolver(): AuthenticatedSubjectResolver {
-  return createFixedSubjectResolver(VALIDATOR_SUBJECT_ID, "Validator");
+  const subject = normalizeSubject({ subjectId });
+  if (subject === undefined) {
+    throw new Error("Development fixture subjectId must contain between 1 and 200 non-whitespace characters.");
+  }
+  return () => subject;
 }
 
 export function getAuthenticatedSubject(request: FastifyRequest): AuthenticatedSubject {
