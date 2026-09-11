@@ -168,8 +168,15 @@ function resolveKnowledgeSimplifier(
   );
 }
 
+type DeferredMemoryExecution = {
+  readonly completion: Promise<void>;
+  readonly timer: ReturnType<typeof setTimeout>;
+  readonly finish: () => void;
+  started: boolean;
+};
+
 class DeferredMemoryApiRunControlStore implements ApiRunControlStore {
-  private readonly executions = new Set<Promise<void>>();
+  private readonly executions = new Set<DeferredMemoryExecution>();
   private closed = false;
 
   constructor(
@@ -196,31 +203,41 @@ class DeferredMemoryApiRunControlStore implements ApiRunControlStore {
   }
 
   private scheduleExecution(runId: string): void {
-    let execution: Promise<void>;
-    execution = new Promise<void>((resolve) => {
-      setTimeout(() => {
-        if (this.closed) {
-          resolve();
-          return;
-        }
-        void executePersistedRun(
-          this.runStore,
-          this.truthPipeline,
-          runId,
-          undefined,
-          this.generalizedDecisionAdapter,
-          this.decisionEvidenceProvider,
-        )
-          .then(() => resolve(), () => resolve());
-      }, this.dispatchDelayMs);
+    let finish!: () => void;
+    const completion = new Promise<void>((resolve) => {
+      finish = resolve;
     });
+    let execution!: DeferredMemoryExecution;
+    const timer = setTimeout(() => {
+      execution.started = true;
+      if (this.closed) {
+        finish();
+        return;
+      }
+      void executePersistedRun(
+        this.runStore,
+        this.truthPipeline,
+        runId,
+        undefined,
+        this.generalizedDecisionAdapter,
+        this.decisionEvidenceProvider,
+      )
+        .then(() => finish(), () => finish());
+    }, this.dispatchDelayMs);
+    execution = { completion, timer, finish, started: false };
     this.executions.add(execution);
-    void execution.finally(() => this.executions.delete(execution));
+    void completion.finally(() => this.executions.delete(execution));
   }
 
   async close(): Promise<void> {
     this.closed = true;
-    await Promise.allSettled([...this.executions]);
+    const executions = [...this.executions];
+    for (const execution of executions) {
+      if (execution.started) continue;
+      clearTimeout(execution.timer);
+      execution.finish();
+    }
+    await Promise.allSettled(executions.map((execution) => execution.completion));
     await this.base.close();
   }
 }
