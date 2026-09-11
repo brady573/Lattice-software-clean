@@ -33,6 +33,7 @@ interface SharedModelOperation {
   readonly promise: Promise<ModelRuntimeResult>;
   readonly controller: AbortController;
   waiters: number;
+  settled: boolean;
 }
 
 class KeyedExecutionLock {
@@ -343,8 +344,12 @@ export class ModelRuntime {
         promise,
         controller,
         waiters: 0,
+        settled: false,
       };
       this.idempotency.set(cacheKey, operation);
+      void promise.finally(() => {
+        operation.settled = true;
+      }).catch(() => undefined);
       void promise.catch(() => {
         this.idempotency.deleteIfSame(cacheKey, operation);
       });
@@ -383,7 +388,7 @@ export class ModelRuntime {
       }
     } finally {
       operation.waiters -= 1;
-      if (operation.waiters === 0) {
+      if (operation.waiters === 0 && !operation.settled) {
         operation.controller.abort(new Error("Shared model call has no active waiters."));
       }
     }
