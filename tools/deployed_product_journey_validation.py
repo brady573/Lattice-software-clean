@@ -107,7 +107,10 @@ def _submit_turn(page: Page, prompt: str, label: str) -> str:
         turn_response = pending.value
 
     assert turn_response is not None
-    assert 200 <= turn_response.status < 300, f"{label}: turn POST returned HTTP {turn_response.status}"
+    if not 200 <= turn_response.status < 300:
+        body = turn_response.text().replace(OWNER_TOKEN, "[REDACTED]")
+        print(f"JOURNEY_{label}_HTTP_ERROR status={turn_response.status} body={body[:4000]}")
+        pytest.fail(f"{label}: turn POST returned HTTP {turn_response.status}")
 
     try:
         page.wait_for_function(
