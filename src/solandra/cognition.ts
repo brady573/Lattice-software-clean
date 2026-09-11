@@ -241,9 +241,11 @@ export class ModelSolandraCognitiveRuntime implements SolandraCognitiveRuntime {
         "A referential Solandra proposal must identify supplied Knowledge or surface ambiguity.",
       );
     }
-    const allowedRecommendationIds = new Set((input.governedRecommendations ?? []).map((item) => item.recommendationId));
+    const recommendationById = new Map(
+      (input.governedRecommendations ?? []).map((item) => [item.recommendationId, item] as const),
+    );
     const referencedRecommendationId = proposal.referencedRecommendationId ?? null;
-    if (referencedRecommendationId !== null && !allowedRecommendationIds.has(referencedRecommendationId)) {
+    if (referencedRecommendationId !== null && !recommendationById.has(referencedRecommendationId)) {
       throw new ModelProviderError(
         "invalid_output",
         "Solandra cognition referenced a Recommendation that was not supplied by Lattice.",
@@ -255,20 +257,21 @@ export class ModelSolandraCognitiveRuntime implements SolandraCognitiveRuntime {
         "A Recommendation reference proposal must identify supplied Recommendation or surface ambiguity.",
       );
     }
-    const optionToRecommendation = new Map<string, string>();
-    for (const recommendation of input.governedRecommendations ?? []) {
-      for (const option of recommendation.options) optionToRecommendation.set(option.optionId, recommendation.recommendationId);
-    }
     const referencedOptionId = proposal.referencedOptionId ?? null;
-    if (referencedOptionId !== null && !optionToRecommendation.has(referencedOptionId)) {
-      throw new ModelProviderError("invalid_output", "Solandra cognition referenced an option that Lattice did not supply.");
+    if (referencedOptionId !== null) {
+      const referencedRecommendation = referencedRecommendationId === null
+        ? undefined
+        : recommendationById.get(referencedRecommendationId);
+      if (!referencedRecommendation?.options.some((option) => option.optionId === referencedOptionId)) {
+        throw new ModelProviderError(
+          "invalid_output",
+          "Solandra cognition referenced an option that Lattice did not supply for the referenced Recommendation.",
+        );
+      }
     }
     if ((proposal.requestedHelp === "EXPLAIN_OPTION" || proposal.requestedHelp === "ACCEPT_CHOICE") && proposal.materialAmbiguity === null) {
       if (referencedRecommendationId === null || referencedOptionId === null) {
         throw new ModelProviderError("invalid_output", "An option reference proposal must identify supplied Recommendation and option or surface ambiguity.");
-      }
-      if (optionToRecommendation.get(referencedOptionId) !== referencedRecommendationId) {
-        throw new ModelProviderError("invalid_output", "Solandra cognition bound an option to the wrong Recommendation.");
       }
     }
     return Object.freeze({
