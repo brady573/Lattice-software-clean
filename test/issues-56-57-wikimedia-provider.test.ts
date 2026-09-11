@@ -80,8 +80,9 @@ test("Issue #56: Wikimedia page.touched is not represented as publication time",
     timeoutMs: 2_000,
     clock: () => new Date(fixedTime),
     fetchImpl: async (input, init) => {
-      assert.ok(init?.signal instanceof AbortSignal);
-      observedSignals.push(init.signal);
+      const signal = init?.signal;
+      assert.ok(signal instanceof AbortSignal);
+      observedSignals.push(signal);
       return successfulResponse(input);
     },
   });
@@ -131,10 +132,11 @@ test("Issue #57: stalled Wikimedia search is bounded and a later request still s
     timeoutMs: 20,
     fetchImpl: async (input, init) => {
       calls += 1;
-      assert.ok(init?.signal instanceof AbortSignal);
+      const signal = init?.signal;
+      assert.ok(signal instanceof AbortSignal);
       if (stallFirstRequest) {
         stallFirstRequest = false;
-        return await stallUntilAbort(init.signal);
+        return await stallUntilAbort(signal);
       }
       return successfulResponse(input);
     },
@@ -160,8 +162,9 @@ test("Issue #57: stalled full-page fetch times out instead of becoming successfu
       calls += 1;
       const url = new URL(String(input));
       if (!url.searchParams.has("pageids")) return searchResponse();
-      assert.ok(init?.signal instanceof AbortSignal);
-      return await stallUntilAbort(init.signal);
+      const signal = init?.signal;
+      assert.ok(signal instanceof AbortSignal);
+      return await stallUntilAbort(signal);
     },
   });
 
