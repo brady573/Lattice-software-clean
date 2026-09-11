@@ -329,13 +329,13 @@ export class ModelRuntime {
         correlationId,
         invocation,
         maxAttempts,
-        options.signal,
+        undefined,
       );
       this.idempotency.set(cacheKey, promise);
       void promise.catch(() => {
         this.idempotency.deleteIfSame(cacheKey, promise);
       });
-      return await promise;
+      return await this.awaitShared(promise, options.signal);
     }
 
     return await this.executeSerialized(
