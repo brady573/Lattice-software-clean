@@ -13,6 +13,7 @@ import {
 } from "../src/knowledge/investigation.js";
 
 const SOURCE_ID = "candidate-source";
+const SECOND_SOURCE_ID = "second-source";
 const CLAIM_ID = "candidate-claim";
 const KNOWLEDGE_NEED = "Determine the material relationship involved.";
 const RETRIEVAL_QUERY = "material relationship mechanism evidence";
@@ -87,6 +88,107 @@ test("conceptual Knowledge needs are not issued directly as provider retrieval q
   assert.deepEqual(result.sources.map((source) => source.sourceId), [SOURCE_ID]);
   assert.deepEqual(result.claims.map((claim) => claim.claimId), [CLAIM_ID]);
   assert.deepEqual(result.claims[0]?.evidence.map((item) => item.sourceId), [SOURCE_ID]);
+});
+
+test("Issue #54: one selected source may preserve multiple evidence excerpts", async () => {
+  const base = validAcquisition();
+  const claim = base.claims[0]!;
+  const multiExcerpt: KnowledgeAcquisitionResult = {
+    ...base,
+    claims: [{
+      ...claim,
+      evidence: [
+        { sourceId: SOURCE_ID, relation: "SUPPORTS", excerpt: "First source-bound excerpt." },
+        { sourceId: SOURCE_ID, relation: "SUPPORTS", excerpt: "Second source-bound excerpt." },
+      ],
+    }],
+  };
+  const acquisition = new RelevantKnowledgeAcquisitionProvider(
+    new CandidateProvider(multiExcerpt),
+    new RecordingInvestigator({ claimId: CLAIM_ID, sourceIds: [SOURCE_ID] }),
+  );
+
+  const result = await acquisition.acquire({
+    runId: "multi-excerpt-run",
+    objective: "Evaluate acquired candidates.",
+    context: [],
+    investigationQueries: [KNOWLEDGE_NEED],
+  });
+
+  assert.deepEqual(result.sources.map((source) => source.sourceId), [SOURCE_ID]);
+  assert.deepEqual(result.claims[0]?.evidence, multiExcerpt.claims[0]?.evidence);
+  assert.equal(result.claims[0]?.evidence.length, 2);
+});
+
+test("Issue #54: multiple selected sources are valid when each is bound to the claim", async () => {
+  const base = validAcquisition();
+  const firstSource = base.sources[0]!;
+  const claim = base.claims[0]!;
+  const multipleSources: KnowledgeAcquisitionResult = {
+    sources: [
+      firstSource,
+      {
+        ...firstSource,
+        sourceId: SECOND_SOURCE_ID,
+        canonicalUri: "https://example.test/second",
+        title: "Second source",
+        content: "Second source material.",
+      },
+    ],
+    claims: [{
+      ...claim,
+      evidence: [
+        { sourceId: SOURCE_ID, relation: "SUPPORTS", excerpt: "First source-bound excerpt." },
+        { sourceId: SECOND_SOURCE_ID, relation: "SUPPORTS", excerpt: "Second source-bound excerpt." },
+      ],
+    }],
+  };
+  const acquisition = new RelevantKnowledgeAcquisitionProvider(
+    new CandidateProvider(multipleSources),
+    new RecordingInvestigator({ claimId: CLAIM_ID, sourceIds: [SOURCE_ID, SECOND_SOURCE_ID] }),
+  );
+
+  const result = await acquisition.acquire({
+    runId: "multi-source-run",
+    objective: "Evaluate acquired candidates.",
+    context: [],
+    investigationQueries: [KNOWLEDGE_NEED],
+  });
+
+  assert.deepEqual(result.sources.map((source) => source.sourceId), [SOURCE_ID, SECOND_SOURCE_ID]);
+  assert.deepEqual(result.claims[0]?.evidence.map((item) => item.sourceId), [SOURCE_ID, SECOND_SOURCE_ID]);
+});
+
+test("Issue #54: an acquired source not bound to the selected claim still fails closed", async () => {
+  const base = validAcquisition();
+  const firstSource = base.sources[0]!;
+  const acquisitionWithUnboundSource: KnowledgeAcquisitionResult = {
+    ...base,
+    sources: [
+      firstSource,
+      {
+        ...firstSource,
+        sourceId: SECOND_SOURCE_ID,
+        canonicalUri: "https://example.test/unbound",
+        title: "Unbound source",
+        content: "Acquired but not evidence for the selected claim.",
+      },
+    ],
+  };
+  const acquisition = new RelevantKnowledgeAcquisitionProvider(
+    new CandidateProvider(acquisitionWithUnboundSource),
+    new RecordingInvestigator({ claimId: CLAIM_ID, sourceIds: [SECOND_SOURCE_ID] }),
+  );
+
+  await assert.rejects(
+    acquisition.acquire({
+      runId: "unbound-source-run",
+      objective: "Evaluate acquired candidates.",
+      context: [],
+      investigationQueries: [KNOWLEDGE_NEED],
+    }),
+    /source not bound to claim candidate-claim/u,
+  );
 });
 
 test("Issue #53: duplicate acquired claim IDs fail before Solandra responsiveness selection", async () => {
