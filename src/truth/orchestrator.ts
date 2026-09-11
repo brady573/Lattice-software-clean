@@ -24,6 +24,9 @@ export async function executeEvidencePlan<T>(
   const ids = new Set(tasks.map((task) => task.id));
   if (ids.size !== tasks.length) throw new Error("Evidence task IDs must be unique.");
   for (const task of tasks) {
+    if (task.maxAttempts !== undefined && (!Number.isSafeInteger(task.maxAttempts) || task.maxAttempts < 1)) {
+      throw new Error(`Evidence task ${task.id} maxAttempts must be a positive safe integer.`);
+    }
     for (const dependency of task.dependsOn) {
       if (!ids.has(dependency)) throw new Error(`Unknown evidence task dependency: ${dependency}`);
     }
