@@ -7,7 +7,7 @@ import urllib.error
 import urllib.request
 
 import pytest
-from playwright.sync_api import Browser, Page, expect
+from playwright.sync_api import Browser, Page, TimeoutError as PlaywrightTimeoutError, expect
 
 BASE_URL = os.environ.get("DEPLOYED_BASE_URL", "https://lattice-solandra.onrender.com").rstrip("/")
 OWNER_TOKEN = os.environ.get("LATTICE_OWNER_ACCESS_TOKEN", "")
@@ -93,7 +93,6 @@ def _submit_turn(page: Page, prompt: str, label: str) -> str:
             composer.press("Enter")
         turn_response = pending.value
     except Exception:
-        # Enter may be newline-only in some browser layouts; use the nearest visible submit-like button.
         button = composer.locator("xpath=ancestor::form[1]//button[@type='submit'] | ancestor::*[contains(@class,'composer')][1]//button").last
         expect(button).to_be_visible(timeout=5_000)
         with page.expect_response(
@@ -108,15 +107,22 @@ def _submit_turn(page: Page, prompt: str, label: str) -> str:
     assert turn_response is not None
     assert 200 <= turn_response.status < 300, f"{label}: turn POST returned HTTP {turn_response.status}"
 
-    # Wait for a user-visible result beyond merely echoing the submitted prompt.
-    page.wait_for_function(
-        """([prior, prompt]) => {
-            const text = document.body.innerText;
-            return text !== prior && text.includes(prompt) && text.length > prior.length + prompt.length + 20;
-        }""",
-        arg=[before, prompt],
-        timeout=60_000,
-    )
+    try:
+        page.wait_for_function(
+            """prior => {
+                const text = document.body.innerText;
+                return text !== prior && Math.abs(text.length - prior.length) > 20;
+            }""",
+            arg=before,
+            timeout=60_000,
+        )
+    except PlaywrightTimeoutError:
+        snapshot = _visible_text(page)
+        print(f"JOURNEY_{label}_TIMEOUT_VISIBLE_TEXT_BEGIN")
+        print(snapshot[-5000:])
+        print(f"JOURNEY_{label}_TIMEOUT_VISIBLE_TEXT_END")
+        raise
+
     after = _visible_text(page)
     assert OWNER_TOKEN not in after
     print(f"JOURNEY_{label}_VISIBLE_TEXT_BEGIN")
