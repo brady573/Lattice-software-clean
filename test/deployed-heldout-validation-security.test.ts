@@ -9,11 +9,10 @@ test("held-out validation never captures screenshot evidence before authenticati
   assert.match(source, /def _authenticate\(page: Page\) -> bool:/u);
   assert.match(source, /authenticated = False[\s\S]*?finally:\s*\n\s+if not authenticated:[\s\S]*?candidate\.fill\(""\)/u);
 
-  const captureMatch = source.match(
-    /def _capture_observation\([\s\S]*?authenticated: bool,[\s\S]*?\) -> dict\[str, Any\]:([\s\S]*?)\n\ndef test_validator_selected_heldout_cases/u,
-  );
-  assert.ok(captureMatch, "held-out observation capture function must remain explicit");
-  const captureBody = captureMatch[1] ?? "";
+  const captureStart = source.indexOf("def _capture_observation(");
+  const nextFunction = source.indexOf("\ndef test_validator_selected_heldout_cases", captureStart);
+  assert.ok(captureStart >= 0 && nextFunction > captureStart, "held-out observation capture function must remain explicit");
+  const captureBody = source.slice(captureStart, nextFunction);
 
   assert.equal((captureBody.match(/page\.screenshot\(/gu) ?? []).length, 1);
   assert.match(captureBody, /if authenticated:[\s\S]*?page\.screenshot\(/u);
