@@ -54,6 +54,17 @@ function uniqueNonBlank(values: readonly string[]): string[] {
   return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
 }
 
+function assertUniqueAcquiredIdentities(acquired: KnowledgeAcquisitionResult): void {
+  const sourceIds = acquired.sources.map((source) => source.sourceId);
+  if (new Set(sourceIds).size !== sourceIds.length) {
+    throw new Error("Retrieved source IDs must be unique before Solandra responsiveness selection.");
+  }
+  const claimIds = acquired.claims.map((claim) => claim.claimId);
+  if (new Set(claimIds).size !== claimIds.length) {
+    throw new Error("Retrieved claim IDs must be unique before Solandra responsiveness selection.");
+  }
+}
+
 /**
  * Solandra-owned semantic bridge around a source acquisition adapter.
  *
@@ -93,6 +104,7 @@ export class RelevantKnowledgeAcquisitionProvider implements KnowledgeAcquisitio
       ...request,
       investigationQueries: retrievalQueries,
     });
+    assertUniqueAcquiredIdentities(acquired);
     const selected = await this.investigator.selectResponsive({
       runId: request.runId,
       objective: request.objective,
