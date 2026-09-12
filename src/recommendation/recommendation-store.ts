@@ -3,7 +3,14 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { Pool } from "pg";
 
-const migration = "034_recommendations.sql" as const;
+const migrations = [
+  "034_recommendations.sql",
+  "038_recommendation_structural_representation.sql",
+] as const;
+
+export type RecommendationRepresentationKind =
+  | "LEGACY_FREEFORM"
+  | "STRUCTURAL_USER_MATERIAL_V1";
 
 export interface RecommendationBasis {
   knowledgeId: string;
@@ -29,14 +36,26 @@ export interface RecommendationRecord {
   sourceMessageId: string;
   basis: RecommendationBasis[];
   userMaterialBasis: string[];
-  /**
-   * The only durable premise-authority set for this Recommendation.
-   * Generated advisory prose below is not factual Knowledge and does not add to this set.
-   */
+  /** Exact premise authority. Generated advisory prose cannot add to this set. */
   premiseAuthority: RecommendationPremiseAuthority;
   knowledgeIds: string[];
   claimIds: string[];
-  /** Non-authoritative advisory judgment. These fields never establish factual premise authority. */
+  /**
+   * New records use STRUCTURAL_USER_MATERIAL_V1. LEGACY_FREEFORM records are
+   * read through a fail-closed compatibility projection that never reproduces
+   * their historical free-form Recommendation prose.
+   */
+  representationKind: RecommendationRepresentationKind;
+  /** Stable option identities, including for fail-closed legacy projections. */
+  optionIds: string[];
+  /**
+   * For STRUCTURAL_USER_MATERIAL_V1:
+   * - recommendation/alternatives are exact USER-authored option excerpts;
+   * - rationale is deterministic rendering of exact governed claim content;
+   * - assumptions are exact USER-authored premise excerpts;
+   * - uncertainties are exact governed uncertainty strings;
+   * - tradeoffs remains empty because arbitrary generated tradeoff prose is not durable.
+   */
   recommendation: string;
   rationale: string[];
   tradeoffs: string[];
@@ -59,6 +78,14 @@ export interface RecommendationStore {
 function stableId(prefix: string, ...parts: string[]): string {
   const digest = createHash("sha256").update(parts.join("\u001f")).digest("hex");
   return `${prefix}_${digest.slice(0, 40)}`;
+}
+
+export function recommendationOptionId(recommendationId: string, position: number, text: string): string {
+  const digest = createHash("sha256")
+    .update([recommendationId, String(position), text].join("\u001f"))
+    .digest("hex")
+    .slice(0, 40);
+  return `recommendation_option_${digest}`;
 }
 
 function bounded(value: string, label: string, max = 8_000): string {
@@ -104,13 +131,28 @@ function recommendationPremiseAuthority(
       claimIds: [...entry.claimIds],
     })),
     // intentVersionId/sourceMessageId predate userMaterialBasis on run Recommendations,
-    // so this exact pair also upgrades historical rows structurally without rewriting them.
+    // so this exact pair also preserves historical USER lineage without rewriting identity.
     user: [{ intentVersionId, sourceMessageId }],
   });
 }
 
+function optionIds(recommendationId: string, recommendation: string, alternatives: readonly string[]): string[] {
+  return [recommendation, ...alternatives].map((text, index) =>
+    recommendationOptionId(recommendationId, index + 1, text));
+}
+
 export function buildRecommendationRecord(
-  input: Omit<RecommendationRecord, "recommendationId" | "selectionAuthorized" | "knowledgeIds" | "claimIds" | "userMaterialBasis" | "premiseAuthority"> & { userMaterialBasis?: string[] },
+  input: Omit<
+    RecommendationRecord,
+    | "recommendationId"
+    | "selectionAuthorized"
+    | "knowledgeIds"
+    | "claimIds"
+    | "userMaterialBasis"
+    | "premiseAuthority"
+    | "representationKind"
+    | "optionIds"
+  > & { userMaterialBasis?: string[] },
 ): RecommendationRecord {
   const conversationId = bounded(input.conversationId, "conversationId", 128);
   const runId = input.runId === null ? null : bounded(input.runId, "runId", 200);
@@ -121,7 +163,8 @@ export function buildRecommendationRecord(
     knowledgeId: bounded(entry.knowledgeId, "basis knowledgeId", 128),
     claimIds: unique(entry.claimIds),
   })).filter((entry) => entry.claimIds.length > 0);
-  const userMaterialBasis = unique(input.userMaterialBasis ?? []).map((item) => bounded(item, "user material basis", 200));
+  const userMaterialBasis = unique(input.userMaterialBasis ?? [])
+    .map((item) => bounded(item, "user material basis", 200));
   if (basis.length === 0 && userMaterialBasis.length === 0) {
     throw new Error("Recommendation requires governed Knowledge basis or exact USER-material basis identity.");
   }
@@ -144,10 +187,18 @@ export function buildRecommendationRecord(
   );
   const exactBasisIdentity = normalizedBasis.map((entry) => `${entry.knowledgeId}:${entry.claimIds.join(",")}`);
   const userIdentity = runId === null ? userMaterialBasis : [];
+  const recommendationId = stableId(
+    "recommendation",
+    runId ?? sourceMessageId,
+    intentVersionId,
+    ...exactBasisIdentity,
+    ...userIdentity,
+  );
+  const recommendation = bounded(input.recommendation, "recommendation");
+  const alternatives = input.alternatives.map((item) => bounded(item, "alternative", 2_000));
   return Object.freeze({
-    // Run-based Recommendation identity remains compatible with the pre-#45 derivation.
-    // Exact USER premise lineage is additive authority metadata, not a new identity input.
-    recommendationId: stableId("recommendation", runId ?? sourceMessageId, intentVersionId, ...exactBasisIdentity, ...userIdentity),
+    // Run-based identity remains compatible with the pre-#45 derivation.
+    recommendationId,
     conversationId,
     runId,
     intentScopeId,
@@ -158,12 +209,14 @@ export function buildRecommendationRecord(
     premiseAuthority,
     knowledgeIds,
     claimIds,
-    recommendation: bounded(input.recommendation, "recommendation"),
+    representationKind: "STRUCTURAL_USER_MATERIAL_V1",
+    optionIds: optionIds(recommendationId, recommendation, alternatives),
+    recommendation,
     rationale: input.rationale.map((item) => bounded(item, "rationale item", 2_000)),
     tradeoffs: input.tradeoffs.map((item) => bounded(item, "tradeoff", 2_000)),
     assumptions: input.assumptions.map((item) => bounded(item, "assumption", 2_000)),
     uncertainties: input.uncertainties.map((item) => bounded(item, "uncertainty", 2_000)),
-    alternatives: input.alternatives.map((item) => bounded(item, "alternative", 2_000)),
+    alternatives,
     selectionAuthorized: false,
     createdAt: dateOrThrow(input.createdAt, "createdAt"),
   });
@@ -223,6 +276,7 @@ type RecommendationRow = {
   user_material_basis: unknown;
   knowledge_ids: unknown;
   claim_ids: unknown;
+  representation_kind: string;
   recommendation: string;
   rationale: unknown;
   tradeoffs: unknown;
@@ -255,10 +309,25 @@ function stringArray(value: unknown, label: string): string[] {
   return [...value];
 }
 
+function representationKind(value: string): RecommendationRepresentationKind {
+  if (value === "LEGACY_FREEFORM" || value === "STRUCTURAL_USER_MATERIAL_V1") return value;
+  throw new Error("Persisted Recommendation representation kind is invalid.");
+}
+
+function legacyPlaceholder(position: number): string {
+  return position === 1
+    ? "Earlier Recommendation text is unavailable under the current factual-trust boundary."
+    : `Earlier option ${position} text is unavailable under the current factual-trust boundary.`;
+}
+
 function mapRecommendation(row: RecommendationRow): RecommendationRecord {
   if (row.selection_authorized !== false) throw new Error("Persisted Recommendation cannot authorize selection.");
   const basis = recommendationBasis(row.basis);
   const userMaterialBasis = stringArray(row.user_material_basis, "user_material_basis");
+  const kind = representationKind(row.representation_kind);
+  const rawAlternatives = stringArray(row.alternatives, "alternatives");
+  const ids = optionIds(row.recommendation_id, row.recommendation, rawAlternatives);
+  const legacy = kind === "LEGACY_FREEFORM";
   return {
     recommendationId: row.recommendation_id,
     conversationId: row.conversation_id,
@@ -276,18 +345,22 @@ function mapRecommendation(row: RecommendationRow): RecommendationRecord {
     ),
     knowledgeIds: stringArray(row.knowledge_ids, "knowledge_ids"),
     claimIds: stringArray(row.claim_ids, "claim_ids"),
-    recommendation: row.recommendation,
-    rationale: stringArray(row.rationale, "rationale"),
-    tradeoffs: stringArray(row.tradeoffs, "tradeoffs"),
-    assumptions: stringArray(row.assumptions, "assumptions"),
-    uncertainties: stringArray(row.uncertainties, "uncertainties"),
-    alternatives: stringArray(row.alternatives, "alternatives"),
+    representationKind: kind,
+    optionIds: ids,
+    recommendation: legacy ? legacyPlaceholder(1) : row.recommendation,
+    rationale: legacy ? [] : stringArray(row.rationale, "rationale"),
+    tradeoffs: legacy ? [] : stringArray(row.tradeoffs, "tradeoffs"),
+    assumptions: legacy ? [] : stringArray(row.assumptions, "assumptions"),
+    uncertainties: legacy ? [] : stringArray(row.uncertainties, "uncertainties"),
+    alternatives: legacy
+      ? rawAlternatives.map((_, index) => legacyPlaceholder(index + 2))
+      : rawAlternatives,
     selectionAuthorized: false,
     createdAt: dateOrThrow(row.created_at instanceof Date ? row.created_at.toISOString() : row.created_at, "created_at"),
   };
 }
 
-async function applyMigration(pool: Pool): Promise<void> {
+async function applyMigration(pool: Pool, migration: typeof migrations[number]): Promise<void> {
   await pool.query("CREATE TABLE IF NOT EXISTS schema_migrations (name text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())");
   const existing = await pool.query<{ name: string }>("SELECT name FROM schema_migrations WHERE name=$1", [migration]);
   if ((existing.rowCount ?? 0) > 0) return;
@@ -307,11 +380,18 @@ async function applyMigration(pool: Pool): Promise<void> {
 }
 
 async function assertReady(pool: Pool): Promise<void> {
-  const result = await pool.query<{ count: string }>("SELECT count(*)::text AS count FROM schema_migrations WHERE name=$1", [migration]);
-  if (result.rows[0]?.count !== "1") throw new Error(`Recommendation schema is not ready; required migration ${migration} is missing.`);
+  const result = await pool.query<{ name: string }>(
+    "SELECT name FROM schema_migrations WHERE name = ANY($1::text[])",
+    [migrations],
+  );
+  const applied = new Set(result.rows.map((row) => row.name));
+  const missing = migrations.filter((migration) => !applied.has(migration));
+  if (missing.length > 0) {
+    throw new Error(`Recommendation schema is not ready; required migration ${missing.join(", ")} is missing.`);
+  }
 }
 
-const columns = "recommendation_id,conversation_id,run_id,intent_scope_id,intent_version_id,source_message_id,basis,user_material_basis,knowledge_ids,claim_ids,recommendation,rationale,tradeoffs,assumptions,uncertainties,alternatives,selection_authorized,created_at";
+const columns = "recommendation_id,conversation_id,run_id,intent_scope_id,intent_version_id,source_message_id,basis,user_material_basis,knowledge_ids,claim_ids,representation_kind,recommendation,rationale,tradeoffs,assumptions,uncertainties,alternatives,selection_authorized,created_at";
 
 export class PostgresRecommendationStore implements RecommendationStore {
   readonly kind = "postgres" as const;
@@ -321,7 +401,7 @@ export class PostgresRecommendationStore implements RecommendationStore {
     const pool = new Pool({ connectionString: databaseUrl });
     try {
       await pool.query("SELECT 1");
-      await applyMigration(pool);
+      for (const migration of migrations) await applyMigration(pool, migration);
       await assertReady(pool);
     } finally {
       await pool.end();
@@ -343,7 +423,7 @@ export class PostgresRecommendationStore implements RecommendationStore {
   async putRecommendation(record: RecommendationRecord): Promise<RecommendationRecord> {
     const result = await this.pool.query<RecommendationRow>(
       `INSERT INTO recommendations(${columns})
-       VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9::jsonb,$10::jsonb,$11,$12::jsonb,$13::jsonb,$14::jsonb,$15::jsonb,$16::jsonb,$17,$18)
+       VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9::jsonb,$10::jsonb,$11,$12,$13::jsonb,$14::jsonb,$15::jsonb,$16::jsonb,$17::jsonb,$18,$19)
        ON CONFLICT(recommendation_id) DO NOTHING
        RETURNING ${columns}`,
       [
@@ -357,6 +437,7 @@ export class PostgresRecommendationStore implements RecommendationStore {
         JSON.stringify(record.userMaterialBasis),
         JSON.stringify(record.knowledgeIds),
         JSON.stringify(record.claimIds),
+        record.representationKind,
         record.recommendation,
         JSON.stringify(record.rationale),
         JSON.stringify(record.tradeoffs),
