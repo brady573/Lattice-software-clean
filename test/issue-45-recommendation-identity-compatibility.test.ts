@@ -9,7 +9,10 @@ const USER_PREMISE = [{
   sourceMessageId: "message-issue-45-identity",
 }];
 
-function build(userMaterialBasis?: string[]) {
+function build(
+  recommendedProposal = "Prefer option A.",
+  userMaterialBasis?: string[],
+) {
   return buildRecommendationRecord({
     conversationId: "issue-45-identity",
     runId: "run-issue-45-identity",
@@ -18,25 +21,45 @@ function build(userMaterialBasis?: string[]) {
     sourceMessageId: "message-issue-45-identity",
     basis: [{ knowledgeId: "knowledge-issue-45-identity", claimIds: ["claim-identity"] }],
     ...(userMaterialBasis ? { userMaterialBasis } : {}),
-    recommendation: "Prefer option A.",
+    recommendedProposal,
+    alternativeProposals: ["Option B"],
     rationale: ["Advisory judgment over the declared premise."],
     tradeoffs: [],
     assumptions: [],
     uncertainties: [],
-    alternatives: ["Option B"],
     createdAt: FIXED_TIME,
   });
 }
 
-test("Issue #45: exact USER premise projection preserves historical run Recommendation and option identity", () => {
-  const historicalShape = build();
-  const candidateShape = build([
+test("Issue #45: exact USER premise projection preserves run Recommendation identity", () => {
+  const withoutExplicitUserMaterial = build();
+  const withExactUserMaterial = build("Prefer option A.", [
     "intent-issue-45-identity-v1",
     "message-issue-45-identity",
   ]);
 
-  assert.equal(candidateShape.recommendationId, historicalShape.recommendationId);
-  assert.deepEqual(recommendationOptions(candidateShape), recommendationOptions(historicalShape));
-  assert.deepEqual(historicalShape.premiseAuthority.user, USER_PREMISE);
-  assert.deepEqual(candidateShape.premiseAuthority.user, USER_PREMISE);
+  assert.equal(withExactUserMaterial.recommendationId, withoutExplicitUserMaterial.recommendationId);
+  assert.deepEqual(withoutExplicitUserMaterial.premiseAuthority.user, USER_PREMISE);
+  assert.deepEqual(withExactUserMaterial.premiseAuthority.user, USER_PREMISE);
+});
+
+test("Issue #45: V2 proposal identity is stable independently of arbitrary proposal wording", () => {
+  const original = build("Prefer option A.", [
+    "intent-issue-45-identity-v1",
+    "message-issue-45-identity",
+  ]);
+  const reworded = build("Choose option A for now.", [
+    "intent-issue-45-identity-v1",
+    "message-issue-45-identity",
+  ]);
+
+  assert.equal(reworded.recommendationId, original.recommendationId);
+  assert.deepEqual(
+    recommendationOptions(reworded).map((option) => option.optionId),
+    recommendationOptions(original).map((option) => option.optionId),
+  );
+  assert.notDeepEqual(
+    recommendationOptions(reworded).map((option) => option.text),
+    recommendationOptions(original).map((option) => option.text),
+  );
 });
