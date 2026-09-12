@@ -40,10 +40,10 @@ class UserMaterialAdvisory implements SolandraAdvisoryRuntime {
     this.calls.push(structuredClone(input));
     return {
       result: {
-        status: "RECOMMENDATION", recommendation: "Use a lightweight weekly review.", basis: [],
+        status: "RECOMMENDATION", recommendation: "lightweight weekly review", basis: [],
         rationale: ["It directly matches the USER preference for lower upkeep."], tradeoffs: ["Less structure may mean occasional manual cleanup."],
-        assumptions: ["The USER values lower maintenance over tighter daily structure."], uncertainties: [], preservedUncertainties: [],
-        alternatives: ["Keep the current ad-hoc approach.", "Use a structured daily review."],
+        assumptions: ["keeping upkeep light"], uncertainties: [], preservedUncertainties: [],
+        alternatives: ["current ad-hoc approach", "structured daily review"],
       },
       invocationProvenance: PROVENANCE,
     };
@@ -57,13 +57,15 @@ const config = resolveRuntimeConfig({
   LATTICE_DEVELOPMENT_FIXTURE_SUBJECT_ID: "m4-user",
 } as NodeJS.ProcessEnv);
 
+const FIRST_MESSAGE = "Help me choose between a lightweight weekly review, the current ad-hoc approach, and a structured daily review for my rough project notes; I care most about keeping upkeep light.";
+
 test("ordinary USER-value decision reaches durable advisory Recommendation without formal run/Decision Engine and preserves exact option choice", async () => {
   const advisory = new UserMaterialAdvisory();
   const app = await createRuntimeApp(config, { memoryDispatchDelayMs: 1, solandraCognition: new GeneralDecisionCognition(), solandraAdvisory: advisory });
   try {
     const created = await app.inject({ method: "POST", url: "/api/v1/conversations" });
     const conversationId = created.json().conversation.id as string;
-    const first = await app.inject({ method: "POST", url: `/api/v1/conversations/${conversationId}/turns`, payload: { turnId: "m4-turn-1", message: "Help me choose a simple way to review my rough project notes; I care most about keeping upkeep light." } });
+    const first = await app.inject({ method: "POST", url: `/api/v1/conversations/${conversationId}/turns`, payload: { turnId: "m4-turn-1", message: FIRST_MESSAGE } });
     assert.equal(first.statusCode, 200, first.body);
     const firstBody = first.json();
     assert.equal(firstBody.status, "RECOMMENDATION_ESTABLISHED");
@@ -99,7 +101,7 @@ test("ordinary USER-value decision reaches durable advisory Recommendation witho
     assert.equal(continuity.acceptedChoices.length, 1);
     assert.equal(continuity.acceptedChoices[0].sourceMessageId, choice.sourceMessageId);
     assert.deepEqual(continuity.messages.map((message: { content: string }) => message.content), [
-      "Help me choose a simple way to review my rough project notes; I care most about keeping upkeep light.",
+      FIRST_MESSAGE,
       "Tell me more about the second option.",
       "I'll go with that one.",
     ]);
