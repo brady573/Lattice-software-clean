@@ -73,22 +73,15 @@ function exactUserExcerpt(value: string, material: readonly string[]): string | 
   return material.some((item) => item.includes(candidate)) ? candidate : undefined;
 }
 
-function userOptionProjection(
+function advisoryProjection(
   advisory: SolandraRecommendationResult,
   userMaterial: readonly string[],
 ): Readonly<{ recommendation: string; alternatives: string[]; assumptions: string[] }> {
-  const recommendation = exactUserExcerpt(advisory.recommendation, userMaterial);
-  if (!recommendation) {
-    throw new Error(
-      "Recommendation durable option text must be an exact excerpt of authoritative USER material; generated option prose is non-durable.",
-    );
-  }
-
+  const recommendation = advisory.recommendation.trim();
   const alternatives = advisory.alternatives
-    .map((item) => exactUserExcerpt(item, userMaterial))
-    .filter((item): item is string => item !== undefined)
+    .map((item) => item.trim())
+    .filter(Boolean)
     .filter((item, index, values) => item !== recommendation && values.indexOf(item) === index);
-
   const assumptions = advisory.assumptions
     .map((item) => exactUserExcerpt(item, userMaterial))
     .filter((item): item is string => item !== undefined)
@@ -194,7 +187,7 @@ export async function establishRecommendation(input: {
   }));
   const governed = projectGovernedRecommendationMaterial(input.knowledge, basis, input.run.conversationId);
   assertPreservedGovernedUncertainty(input.advisory, governed.uncertainties);
-  const user = userOptionProjection(input.advisory, runUserMaterial(input.run));
+  const proposal = advisoryProjection(input.advisory, runUserMaterial(input.run));
 
   const draft = buildRecommendationRecord({
     conversationId: input.run.conversationId,
@@ -204,12 +197,12 @@ export async function establishRecommendation(input: {
     sourceMessageId: input.run.request.sourceMessageId,
     basis,
     userMaterialBasis: [input.intentVersion.intentVersionId, input.run.request.sourceMessageId],
-    recommendation: user.recommendation,
+    recommendation: proposal.recommendation,
     rationale: governed.rationale,
     tradeoffs: [],
-    assumptions: user.assumptions,
+    assumptions: proposal.assumptions,
     uncertainties: governed.uncertainties,
-    alternatives: user.alternatives,
+    alternatives: proposal.alternatives,
     createdAt: input.createdAt
       ?? (input.knowledge.length > 0 ? latestKnowledgeCreationTime(input.knowledge) : input.intentVersion.createdAt),
   });
@@ -242,7 +235,7 @@ export async function establishConversationalRecommendation(input: {
   }));
   const governed = projectGovernedRecommendationMaterial(input.knowledge, basis, input.conversationId);
   assertPreservedGovernedUncertainty(input.advisory, governed.uncertainties);
-  const user = userOptionProjection(input.advisory, [input.sourceMessage.content]);
+  const proposal = advisoryProjection(input.advisory, [input.sourceMessage.content]);
 
   const draft = buildRecommendationRecord({
     conversationId: input.conversationId,
@@ -252,12 +245,12 @@ export async function establishConversationalRecommendation(input: {
     sourceMessageId: input.sourceMessage.messageId,
     basis,
     userMaterialBasis: [input.intentVersion.intentVersionId, input.sourceMessage.messageId],
-    recommendation: user.recommendation,
+    recommendation: proposal.recommendation,
     rationale: governed.rationale,
     tradeoffs: [],
-    assumptions: user.assumptions,
+    assumptions: proposal.assumptions,
     uncertainties: governed.uncertainties,
-    alternatives: user.alternatives,
+    alternatives: proposal.alternatives,
     createdAt: input.sourceMessage.createdAt,
   });
   return input.store.putRecommendation(draft);
@@ -304,7 +297,7 @@ export async function loadRecommendation(
     }
   }
 
-  if (record.representationKind === "STRUCTURAL_USER_MATERIAL_V1") {
+  if (record.representationKind === "STRUCTURAL_ADVISORY_V1") {
     const governed = projectGovernedRecommendationMaterial(loaded, record.basis, record.conversationId);
     if (!equalArray(record.rationale, governed.rationale) || !equalArray(record.uncertainties, governed.uncertainties)) {
       throw new Error("Recommendation durable factual presentation no longer matches its exact governed premise material.");
@@ -327,14 +320,11 @@ export async function loadRecommendation(
     ) {
       throw new Error("Recommendation exact Run/Intent/USER-source binding changed.");
     }
-    if (record.representationKind === "STRUCTURAL_USER_MATERIAL_V1") {
+    if (record.representationKind === "STRUCTURAL_ADVISORY_V1") {
       const material = runUserMaterial(run);
-      if (!exactUserExcerpt(record.recommendation, material)) {
-        throw new Error("Recommendation durable option no longer resolves to exact USER material.");
-      }
-      for (const value of [...record.alternatives, ...record.assumptions]) {
+      for (const value of record.assumptions) {
         if (!exactUserExcerpt(value, material)) {
-          throw new Error("Recommendation durable USER-derived material no longer resolves to exact USER material.");
+          throw new Error("Recommendation durable USER-derived premise no longer resolves to exact USER material.");
         }
       }
     }
@@ -383,13 +373,13 @@ export function renderRecommendation(record: RecommendationRecord): string {
     return "This earlier Recommendation predates the current structural factual-trust boundary, so I won't reproduce its free-form text. Revisit the decision to establish a current Recommendation.";
   }
 
-  const sections = [`I favor: ${record.recommendation}`];
+  const sections = [`Advisory recommendation: ${record.recommendation}`];
   if (record.alternatives.length > 0) {
     const ranked = recommendationOptions(record)
       .slice(1)
       .map((item) => `${item.position}. ${item.text}`)
       .join("\n");
-    sections.push(`I would rank the other USER-supplied options next:\n${ranked}`);
+    sections.push(`Other advisory options:\n${ranked}`);
   }
   if (record.assumptions.length > 0) {
     sections.push(`From your message:\n${record.assumptions.map((item) => `- ${item}`).join("\n")}`);
@@ -400,7 +390,7 @@ export function renderRecommendation(record: RecommendationRecord): string {
   if (record.uncertainties.length > 0) {
     sections.push(`Known uncertainty:\n${record.uncertainties.map((item) => `- ${item}`).join("\n")}`);
   }
-  sections.push("This ranking is advisory judgment over the USER premises and governed support above. If your stated priorities or premises change, the recommendation may change.");
+  sections.push("The recommendation and option ranking are Solandra advisory judgment over the USER premises and governed support above; they are not factual Knowledge or action authorization. If your stated priorities or premises change, the recommendation may change.");
   return sections.join("\n\n");
 }
 
