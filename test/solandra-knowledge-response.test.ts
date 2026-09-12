@@ -226,8 +226,9 @@ test("bounded non-causal source reports expose useful governed detail without be
     assert.equal(body.outcome.findings[0]?.status, "UNRESOLVED");
     assert.match(body.presentation.assistantMessage, /cleaning away dirt and loose material/u);
     assert.match(body.presentation.assistantMessage, /Sanding can smooth rough areas/u);
-    assert.doesNotMatch(body.presentation.assistantMessage, /third source sentence/u);
+    assert.match(body.presentation.assistantMessage, /third source sentence/u);
     assert.match(body.presentation.assistantMessage, /does not by itself independently verify the broader real-world claim/u);
+    assert.doesNotMatch(body.presentation.assistantMessage, /V36|proof obligation|UNRESOLVED/iu);
   } finally {
     await app.close();
   }
