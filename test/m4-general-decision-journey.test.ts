@@ -40,10 +40,10 @@ class UserMaterialAdvisory implements SolandraAdvisoryRuntime {
     this.calls.push(structuredClone(input));
     return {
       result: {
-        status: "RECOMMENDATION", recommendation: "lightweight weekly review", basis: [],
+        status: "RECOMMENDATION", recommendation: "Use a lightweight weekly review.", basis: [],
         rationale: ["It directly matches the USER preference for lower upkeep."], tradeoffs: ["Less structure may mean occasional manual cleanup."],
         assumptions: ["keeping upkeep light"], uncertainties: [], preservedUncertainties: [],
-        alternatives: ["current ad-hoc approach", "structured daily review"],
+        alternatives: ["Keep the current ad-hoc approach.", "Use a structured daily review."],
       },
       invocationProvenance: PROVENANCE,
     };
@@ -57,9 +57,9 @@ const config = resolveRuntimeConfig({
   LATTICE_DEVELOPMENT_FIXTURE_SUBJECT_ID: "m4-user",
 } as NodeJS.ProcessEnv);
 
-const FIRST_MESSAGE = "Help me choose between a lightweight weekly review, the current ad-hoc approach, and a structured daily review for my rough project notes; I care most about keeping upkeep light.";
+const FIRST_MESSAGE = "Help me choose a simple way to review my rough project notes; I care most about keeping upkeep light.";
 
-test("ordinary USER-value decision reaches durable advisory Recommendation without formal run/Decision Engine and preserves exact option choice", async () => {
+test("ordinary USER-value decision reaches durable Solandra-originated advisory Recommendation without formal run/Decision Engine and preserves option choice", async () => {
   const advisory = new UserMaterialAdvisory();
   const app = await createRuntimeApp(config, { memoryDispatchDelayMs: 1, solandraCognition: new GeneralDecisionCognition(), solandraAdvisory: advisory });
   try {
@@ -72,6 +72,7 @@ test("ordinary USER-value decision reaches durable advisory Recommendation witho
     assert.equal(firstBody.interpretation.requestedHelp, "DECISION");
     assert.equal(firstBody.recommendationReference.selectionAuthorized, false);
     assert.equal(firstBody.recommendationReference.options.length, 3);
+    assert.equal(firstBody.recommendationReference.options[0].text, "Use a lightweight weekly review.");
     assert.equal(advisory.calls.length, 1);
     assert.deepEqual(advisory.calls[0]?.knowledge, []);
 
