@@ -51,6 +51,31 @@ test('deployed functional validation is manual-only', () => {
   assert.doesNotMatch(text, /^\s*pull_request:\s*$/mu);
 });
 
+test('manual deployed validation accepts only optional held-out case input and keeps it outside Product code', () => {
+  const text = workflowText(manualDeployedWorkflowName);
+  assert.match(text, /^\s+heldout_cases_json:\s*$/mu);
+  assert.match(text, /tools\/deployed_heldout_validation\.py/u);
+  assert.match(text, /deployed-heldout-black-box-/u);
+  assert.doesNotMatch(text, /repository_dispatch|issue_comment|workflow_run|schedule:/u);
+});
+
+test('held-out deployed evidence is independent of fixed Product-journey success but remains setup-gated', () => {
+  const text = workflowText(manualDeployedWorkflowName);
+  assert.match(text, /- name: Run deployed owner-auth functional validation\s+id: owner_auth/u);
+  assert.match(
+    text,
+    /- name: Run validator-selected held-out Product cases\s+if: \$\{\{ always\(\) && !cancelled\(\) && inputs\.heldout_cases_json != '' && steps\.owner_auth\.outcome == 'success' \}\}/u,
+  );
+  assert.doesNotMatch(
+    text,
+    /Run validator-selected held-out Product cases[\s\S]*?steps\.[A-Za-z0-9_-]*product[A-Za-z0-9_-]*\.outcome/u,
+  );
+  assert.match(
+    text,
+    /- name: Upload held-out black-box evidence\s+if: \$\{\{ always\(\) && inputs\.heldout_cases_json != '' \}\}/u,
+  );
+});
+
 test('Core PR validation is the single ordinary full repository gate', () => {
   const core = workflowText(coreWorkflowName);
   assert.match(core, /^name: CI — Core Validation$/mu);
