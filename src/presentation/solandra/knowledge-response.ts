@@ -92,8 +92,47 @@ function renderGovernedAnswer(knowledge: KnowledgeOutcome): string {
     return [SOURCE_SUITABILITY_LIMITATION, sourceLabel(knowledge)].filter(Boolean).join("\n\n");
   }
 
+  const conflicted = knowledge.findings.filter((finding) => finding.status === "CONFLICTED");
+  if (conflicted.length > 0) {
+    return [
+      `The available evidence conflicts on this point, so I can't give a single reliable answer: ${conflicted.map((finding) => finding.text).join(" ")}`,
+      uncertaintyLabel(knowledge),
+      sourceLabel(knowledge),
+    ].filter(Boolean).join("\n\n");
+  }
+
+  const refuted = knowledge.findings.filter((finding) => finding.status === "REFUTED");
+  if (refuted.length > 0) {
+    return [
+      `The available governed evidence refutes this claim: ${refuted.map((finding) => finding.text).join(" ")}`,
+      uncertaintyLabel(knowledge),
+      sourceLabel(knowledge),
+    ].filter(Boolean).join("\n\n");
+  }
+
+  const answerable = knowledge.findings.filter((finding) =>
+    finding.status === "SUPPORTED"
+    || (finding.basis === "SOURCE_REPORT" && finding.evidenceIds.length > 0)
+  );
+  if (answerable.length === 0) {
+    return [
+      knowledge.findings.map((finding) => renderFinding(finding)).join("\n\n"),
+      uncertaintyLabel(knowledge),
+      sourceLabel(knowledge),
+    ].filter(Boolean).join("\n\n");
+  }
+
+  const sourceReportOnly = answerable.every((finding) => finding.basis === "SOURCE_REPORT");
+  const answer = sourceReportOnly
+    ? `The retrieved source material reports: ${answerable.map((finding) => finding.text).join(" ")}`
+    : answerable.map((finding) => finding.text).join(" ");
+  const qualification = sourceReportOnly
+    ? "That establishes what the cited source reports; it does not by itself independently verify the broader real-world claim."
+    : "";
+
   return [
-    knowledge.findings.map((finding) => renderFinding(finding)).join("\n\n"),
+    answer,
+    qualification,
     uncertaintyLabel(knowledge),
     sourceLabel(knowledge),
   ].filter(Boolean).join("\n\n");
