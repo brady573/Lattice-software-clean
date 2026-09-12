@@ -8,16 +8,24 @@ export interface RecommendationOption {
 }
 
 export function recommendationOptions(record: RecommendationRecord): RecommendationOption[] {
-  const texts = [record.recommendation, ...record.alternatives];
-  if (record.optionIds.length !== texts.length) {
-    throw new Error("Recommendation option identity no longer matches its durable option set.");
+  const byId = new Map(record.proposals.map((proposal) => [proposal.proposalId, proposal]));
+  if (
+    record.rankedProposalIds.length !== record.proposals.length
+    || record.rankedProposalIds[0] !== record.recommendedProposalId
+    || new Set(record.rankedProposalIds).size !== record.rankedProposalIds.length
+  ) {
+    throw new Error("Recommendation proposal ranking no longer matches its durable proposal set.");
   }
-  return texts.map((text, index) => Object.freeze({
-    optionId: record.optionIds[index]!,
-    position: index + 1,
-    text,
-    recommended: index === 0,
-  }));
+  return record.rankedProposalIds.map((proposalId, index) => {
+    const proposal = byId.get(proposalId);
+    if (!proposal) throw new Error("Recommendation proposal identity no longer resolves to durable proposal material.");
+    return Object.freeze({
+      optionId: proposal.proposalId,
+      position: index + 1,
+      text: proposal.text,
+      recommended: proposal.proposalId === record.recommendedProposalId,
+    });
+  });
 }
 
 export function recommendationOption(

@@ -76,18 +76,18 @@ function exactUserExcerpt(value: string, material: readonly string[]): string | 
 function advisoryProjection(
   advisory: SolandraRecommendationResult,
   userMaterial: readonly string[],
-): Readonly<{ recommendation: string; alternatives: string[]; assumptions: string[] }> {
-  const recommendation = advisory.recommendation.trim();
-  const alternatives = advisory.alternatives
+): Readonly<{ recommendedProposal: string; alternativeProposals: string[]; assumptions: string[] }> {
+  const recommendedProposal = advisory.recommendation.trim();
+  const alternativeProposals = advisory.alternatives
     .map((item) => item.trim())
     .filter(Boolean)
-    .filter((item, index, values) => item !== recommendation && values.indexOf(item) === index);
+    .filter((item, index, values) => item !== recommendedProposal && values.indexOf(item) === index);
   const assumptions = advisory.assumptions
     .map((item) => exactUserExcerpt(item, userMaterial))
     .filter((item): item is string => item !== undefined)
     .filter((item, index, values) => values.indexOf(item) === index);
 
-  return { recommendation, alternatives, assumptions };
+  return { recommendedProposal, alternativeProposals, assumptions };
 }
 
 function normalizedBasis(basis: readonly RecommendationBasis[]): RecommendationBasis[] {
@@ -159,6 +159,11 @@ function runUserMaterial(run: LatticeRun): string[] {
   return [run.request.objective, ...run.request.context].map((item) => item.trim()).filter(Boolean);
 }
 
+function structuralRecommendation(record: RecommendationRecord): boolean {
+  return record.representationKind === "STRUCTURAL_ADVISORY_V1"
+    || record.representationKind === "STRUCTURAL_PROPOSAL_V2";
+}
+
 export async function establishRecommendation(input: {
   store: RecommendationStore;
   run: LatticeRun;
@@ -197,12 +202,12 @@ export async function establishRecommendation(input: {
     sourceMessageId: input.run.request.sourceMessageId,
     basis,
     userMaterialBasis: [input.intentVersion.intentVersionId, input.run.request.sourceMessageId],
-    recommendation: proposal.recommendation,
+    recommendedProposal: proposal.recommendedProposal,
+    alternativeProposals: proposal.alternativeProposals,
     rationale: governed.rationale,
     tradeoffs: [],
     assumptions: proposal.assumptions,
     uncertainties: governed.uncertainties,
-    alternatives: proposal.alternatives,
     createdAt: input.createdAt
       ?? (input.knowledge.length > 0 ? latestKnowledgeCreationTime(input.knowledge) : input.intentVersion.createdAt),
   });
@@ -245,12 +250,12 @@ export async function establishConversationalRecommendation(input: {
     sourceMessageId: input.sourceMessage.messageId,
     basis,
     userMaterialBasis: [input.intentVersion.intentVersionId, input.sourceMessage.messageId],
-    recommendation: proposal.recommendation,
+    recommendedProposal: proposal.recommendedProposal,
+    alternativeProposals: proposal.alternativeProposals,
     rationale: governed.rationale,
     tradeoffs: [],
     assumptions: proposal.assumptions,
     uncertainties: governed.uncertainties,
-    alternatives: proposal.alternatives,
     createdAt: input.sourceMessage.createdAt,
   });
   return input.store.putRecommendation(draft);
@@ -297,13 +302,19 @@ export async function loadRecommendation(
     }
   }
 
-  if (record.representationKind === "STRUCTURAL_ADVISORY_V1") {
+  if (structuralRecommendation(record)) {
     const governed = projectGovernedRecommendationMaterial(loaded, record.basis, record.conversationId);
     if (!equalArray(record.rationale, governed.rationale) || !equalArray(record.uncertainties, governed.uncertainties)) {
       throw new Error("Recommendation durable factual presentation no longer matches its exact governed premise material.");
     }
     if (record.tradeoffs.length !== 0) {
       throw new Error("Structural Recommendation cannot persist arbitrary free-form tradeoff prose.");
+    }
+    if (
+      record.representationKind === "STRUCTURAL_PROPOSAL_V2"
+      && record.proposals.some((proposal) => proposal.origin !== "SOLANDRA" || proposal.factualAuthority !== false)
+    ) {
+      throw new Error("Structural Recommendation proposal origin/authority classification changed.");
     }
   }
 
@@ -320,7 +331,7 @@ export async function loadRecommendation(
     ) {
       throw new Error("Recommendation exact Run/Intent/USER-source binding changed.");
     }
-    if (record.representationKind === "STRUCTURAL_ADVISORY_V1") {
+    if (structuralRecommendation(record)) {
       const material = runUserMaterial(run);
       for (const value of record.assumptions) {
         if (!exactUserExcerpt(value, material)) {
@@ -373,13 +384,13 @@ export function renderRecommendation(record: RecommendationRecord): string {
     return "This earlier Recommendation predates the current structural factual-trust boundary, so I won't reproduce its free-form text. Revisit the decision to establish a current Recommendation.";
   }
 
-  const sections = [`Advisory recommendation: ${record.recommendation}`];
-  if (record.alternatives.length > 0) {
-    const ranked = recommendationOptions(record)
-      .slice(1)
-      .map((item) => `${item.position}. ${item.text}`)
-      .join("\n");
-    sections.push(`Other advisory options:\n${ranked}`);
+  const options = recommendationOptions(record);
+  const recommended = options[0];
+  if (!recommended) throw new Error("Recommendation has no advisory proposal to present.");
+  const sections = [`Solandra recommends:\n${recommended.text}`];
+  if (options.length > 1) {
+    const ranked = options.slice(1).map((item) => `${item.position}. ${item.text}`).join("\n");
+    sections.push(`Other options Solandra considered:\n${ranked}`);
   }
   if (record.assumptions.length > 0) {
     sections.push(`From your message:\n${record.assumptions.map((item) => `- ${item}`).join("\n")}`);
@@ -390,7 +401,7 @@ export function renderRecommendation(record: RecommendationRecord): string {
   if (record.uncertainties.length > 0) {
     sections.push(`Known uncertainty:\n${record.uncertainties.map((item) => `- ${item}`).join("\n")}`);
   }
-  sections.push("The recommendation and option ranking are Solandra advisory judgment over the USER premises and governed support above; they are not factual Knowledge or action authorization. If your stated priorities or premises change, the recommendation may change.");
+  sections.push("Solandra's proposal wording and ranking are advisory judgment. Only the facts listed under Established support are governed factual support; choosing an option does not make proposal wording factual Knowledge or authorize action.");
   return sections.join("\n\n");
 }
 
@@ -422,12 +433,15 @@ export function recommendationContext(record: RecommendationRecord): Readonly<{
   createdAt: string;
   options: ReturnType<typeof recommendationOptions>;
 }> {
+  const options = recommendationOptions(record);
+  const recommended = options.find((option) => option.recommended);
+  if (!recommended) throw new Error("Recommendation context has no recommended proposal.");
   return Object.freeze({
     recommendationId: record.recommendationId,
-    recommendation: record.recommendation,
+    recommendation: recommended.text,
     intentVersionId: record.intentVersionId,
     knowledgeIds: [...record.knowledgeIds],
     createdAt: record.createdAt,
-    options: recommendationOptions(record),
+    options,
   });
 }
