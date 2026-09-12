@@ -12,15 +12,22 @@ function proposal(overrides: Partial<SolandraSemanticProposal> = {}): SolandraSe
 class C implements SolandraCognitiveRuntime { async interpret(input: Parameters<SolandraCognitiveRuntime["interpret"]>[0]) { const r = input.governedRecommendations?.at(-1); if (/choose/iu.test(input.message)) return { proposal: proposal({ requestedHelp: "ACCEPT_CHOICE", referencedRecommendationId: r?.recommendationId ?? null, referencedOptionId: r?.options[1]?.optionId ?? null }), invocationProvenance: P }; return { proposal: proposal({ objectiveRelation: input.currentObjective ? "CONTINUE" : "NEW_OBJECTIVE", proposedObjective: input.currentObjective ? null : input.message }), invocationProvenance: P }; } }
 const advisory: SolandraAdvisoryRuntime = { async advise() { return { result: { status: "RECOMMENDATION", recommendation: "Keep the lighter routine.", basis: [], rationale: ["Matches USER preference."], tradeoffs: [], assumptions: [], uncertainties: [], preservedUncertainties: [], alternatives: ["Use the more structured routine."] }, invocationProvenance: P }; } };
 
-test("PostgreSQL persists run-free Recommendation and AcceptedChoice across restart", { skip: !databaseUrl }, async () => {
+const USER_MESSAGE = "Help me pick a low-upkeep routine.";
+
+test("PostgreSQL persists Solandra-originated run-free Recommendation and AcceptedChoice across restart", { skip: !databaseUrl }, async () => {
   const config = resolveRuntimeConfig({ DATABASE_URL: databaseUrl!, LATTICE_DEPLOYMENT_MODE: "development", LATTICE_TRUTH_MODE: "v36-offline", LATTICE_AUTO_MIGRATE: "true", LATTICE_AUTHENTICATION_MODE: "development-fixture", LATTICE_DEVELOPMENT_FIXTURE_SUBJECT_ID: "m4-pg-user" } as NodeJS.ProcessEnv);
   let first = await createRuntimeApp(config, { solandraCognition: new C(), solandraAdvisory: advisory });
   let conversationId = "";
   let choiceId = "";
+  let recommendationId = "";
+  let optionIds: string[] = [];
   try {
     const created = await first.inject({ method: "POST", url: "/api/v1/conversations" }); conversationId = created.json().conversation.id;
-    const rec = await first.inject({ method: "POST", url: `/api/v1/conversations/${conversationId}/turns`, payload: { turnId: "pg-1", message: "Help me pick a low-upkeep routine." } });
+    const rec = await first.inject({ method: "POST", url: `/api/v1/conversations/${conversationId}/turns`, payload: { turnId: "pg-1", message: USER_MESSAGE } });
     assert.equal(rec.statusCode, 200, rec.body);
+    assert.equal(rec.json().recommendationReference.options[0].text, "Keep the lighter routine.");
+    recommendationId = rec.json().recommendationReference.recommendationId;
+    optionIds = rec.json().recommendationReference.options.map((item: { optionId: string }) => item.optionId);
     const chosen = await first.inject({ method: "POST", url: `/api/v1/conversations/${conversationId}/turns`, payload: { turnId: "pg-2", message: "I choose the other option." } });
     assert.equal(chosen.statusCode, 200, chosen.body); choiceId = chosen.json().acceptedChoice.acceptedChoiceId;
   } finally { await first.close(); }
@@ -32,8 +39,15 @@ test("PostgreSQL persists run-free Recommendation and AcceptedChoice across rest
     assert.equal(continuity.statusCode, 200, continuity.body);
     assert.equal(continuity.json().recommendations.length, 1);
     assert.equal(continuity.json().recommendations[0].runId, null);
+    assert.equal(continuity.json().recommendations[0].options[0].text, "Keep the lighter routine.");
+    assert.deepEqual(continuity.json().recommendations[0].options.map((item: { optionId: string }) => item.optionId), optionIds);
     assert.equal(continuity.json().acceptedChoices.length, 1);
     assert.equal(continuity.json().acceptedChoices[0].acceptedChoiceId, choiceId);
     assert.equal(continuity.json().acceptedChoices[0].authorizationGranted, false);
+    assert.equal(continuity.json().acceptedChoices[0].executionAuthorized, false);
+
+    const raw = await second.inject({ method: "GET", url: `/api/v1/recommendations/${recommendationId}` });
+    assert.equal(raw.statusCode, 200, raw.body);
+    assert.ok(raw.json().proposals.every((item: { origin: string; factualAuthority: boolean }) => item.origin === "SOLANDRA" && item.factualAuthority === false));
   } finally { await second.close(); }
 });

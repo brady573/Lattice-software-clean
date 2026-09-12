@@ -42,7 +42,7 @@ class UserMaterialAdvisory implements SolandraAdvisoryRuntime {
       result: {
         status: "RECOMMENDATION", recommendation: "Use a lightweight weekly review.", basis: [],
         rationale: ["It directly matches the USER preference for lower upkeep."], tradeoffs: ["Less structure may mean occasional manual cleanup."],
-        assumptions: ["The USER values lower maintenance over tighter daily structure."], uncertainties: [], preservedUncertainties: [],
+        assumptions: ["keeping upkeep light"], uncertainties: [], preservedUncertainties: [],
         alternatives: ["Keep the current ad-hoc approach.", "Use a structured daily review."],
       },
       invocationProvenance: PROVENANCE,
@@ -57,19 +57,22 @@ const config = resolveRuntimeConfig({
   LATTICE_DEVELOPMENT_FIXTURE_SUBJECT_ID: "m4-user",
 } as NodeJS.ProcessEnv);
 
-test("ordinary USER-value decision reaches durable advisory Recommendation without formal run/Decision Engine and preserves exact option choice", async () => {
+const FIRST_MESSAGE = "Help me choose a simple way to review my rough project notes; I care most about keeping upkeep light.";
+
+test("ordinary USER-value decision reaches durable Solandra-originated advisory Recommendation without formal run/Decision Engine and preserves option choice", async () => {
   const advisory = new UserMaterialAdvisory();
   const app = await createRuntimeApp(config, { memoryDispatchDelayMs: 1, solandraCognition: new GeneralDecisionCognition(), solandraAdvisory: advisory });
   try {
     const created = await app.inject({ method: "POST", url: "/api/v1/conversations" });
     const conversationId = created.json().conversation.id as string;
-    const first = await app.inject({ method: "POST", url: `/api/v1/conversations/${conversationId}/turns`, payload: { turnId: "m4-turn-1", message: "Help me choose a simple way to review my rough project notes; I care most about keeping upkeep light." } });
+    const first = await app.inject({ method: "POST", url: `/api/v1/conversations/${conversationId}/turns`, payload: { turnId: "m4-turn-1", message: FIRST_MESSAGE } });
     assert.equal(first.statusCode, 200, first.body);
     const firstBody = first.json();
     assert.equal(firstBody.status, "RECOMMENDATION_ESTABLISHED");
     assert.equal(firstBody.interpretation.requestedHelp, "DECISION");
     assert.equal(firstBody.recommendationReference.selectionAuthorized, false);
     assert.equal(firstBody.recommendationReference.options.length, 3);
+    assert.equal(firstBody.recommendationReference.options[0].text, "Use a lightweight weekly review.");
     assert.equal(advisory.calls.length, 1);
     assert.deepEqual(advisory.calls[0]?.knowledge, []);
 
@@ -99,7 +102,7 @@ test("ordinary USER-value decision reaches durable advisory Recommendation witho
     assert.equal(continuity.acceptedChoices.length, 1);
     assert.equal(continuity.acceptedChoices[0].sourceMessageId, choice.sourceMessageId);
     assert.deepEqual(continuity.messages.map((message: { content: string }) => message.content), [
-      "Help me choose a simple way to review my rough project notes; I care most about keeping upkeep light.",
+      FIRST_MESSAGE,
       "Tell me more about the second option.",
       "I'll go with that one.",
     ]);

@@ -28,7 +28,7 @@ import type { ModelInvocationProvenance } from "../src/model/types.js";
 import { KnowledgeAcquisitionTruthPipeline } from "../src/truth/knowledge-acquisition-pipeline.js";
 
 const databaseUrl = process.env.DATABASE_URL;
-const USER = "Help me choose an approach that keeps ongoing maintenance manageable.";
+const USER = "Help me choose between Approach Cedar and Approach Flint while keeping ongoing maintenance manageable.";
 const NEED = "governed evidence about ongoing maintenance burden for the available approaches";
 const FINDING = "A smaller maintenance surface can reduce the amount of ongoing work required to keep an implementation usable.";
 const EXTRA_FINDING = "A broader dependency surface can increase the number of components requiring routine attention.";
@@ -148,14 +148,14 @@ class RacingAdvisory implements SolandraAdvisoryRuntime {
     return {
       result: {
         status: "RECOMMENDATION",
-        recommendation: "Prefer the approach that best fits the USER's stated maintenance objective.",
+        recommendation: "Approach Cedar",
         basis: [{ knowledgeId: knowledge.knowledgeId, claimIds: [claim.claimId] }],
         rationale: ["The governed finding supplies the factual basis; the preference-sensitive conclusion remains advisory."],
         tradeoffs: ["The recommendation is conditional on the USER's stated objective."],
-        assumptions: ["The USER's stated maintenance objective remains controlling."],
+        assumptions: ["ongoing maintenance manageable"],
         uncertainties: [...knowledge.uncertainties],
         preservedUncertainties: [...knowledge.uncertainties],
-        alternatives: ["Keep alternatives open if the remaining uncertainty is material."],
+        alternatives: ["Approach Flint"],
       },
       invocationProvenance: PROVENANCE,
     };
@@ -258,6 +258,7 @@ test("M2 PostgreSQL restart preserves exact Recommendation identity, claim prove
     assert.equal(before.basis.length, 1);
     assert.deepEqual(before.basis[0]?.claimIds, before.claimIds);
     assert.deepEqual(before.factualBasis[0]?.claimIds, before.claimIds);
+    assert.deepEqual(before.rationale, [`Source report (unresolved): ${FINDING}`]);
     const establishedKnowledge = await first.inject({
       method: "GET",
       url: `/api/v1/knowledge/${before.basis[0]!.knowledgeId}`,
@@ -324,7 +325,7 @@ test("M2 PostgreSQL restart preserves exact Recommendation identity, claim prove
     });
     assert.equal(why.statusCode, 200, why.body);
     assert.equal(why.json<{ recommendationReference: { recommendationId: string } }>().recommendationReference.recommendationId, recommendationId);
-    assert.match(why.json<{ presentation: { assistantMessage: string } }>().presentation.assistantMessage, /Why:/u);
+    assert.match(why.json<{ presentation: { assistantMessage: string } }>().presentation.assistantMessage, /Established support:/u);
     assert.equal(advisory.calls, callsAtPersistence);
     assert.equal(acquisition.requests.length, 1);
 

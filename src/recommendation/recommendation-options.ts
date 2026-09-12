@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import type { RecommendationRecord } from "./recommendation-store.js";
 
 export interface RecommendationOption {
@@ -8,22 +7,25 @@ export interface RecommendationOption {
   recommended: boolean;
 }
 
-function stableOptionId(recommendationId: string, position: number, text: string): string {
-  const digest = createHash("sha256")
-    .update([recommendationId, String(position), text].join("\u001f"))
-    .digest("hex")
-    .slice(0, 40);
-  return `recommendation_option_${digest}`;
-}
-
 export function recommendationOptions(record: RecommendationRecord): RecommendationOption[] {
-  const texts = [record.recommendation, ...record.alternatives];
-  return texts.map((text, index) => Object.freeze({
-    optionId: stableOptionId(record.recommendationId, index + 1, text),
-    position: index + 1,
-    text,
-    recommended: index === 0,
-  }));
+  const byId = new Map(record.proposals.map((proposal) => [proposal.proposalId, proposal]));
+  if (
+    record.rankedProposalIds.length !== record.proposals.length
+    || record.rankedProposalIds[0] !== record.recommendedProposalId
+    || new Set(record.rankedProposalIds).size !== record.rankedProposalIds.length
+  ) {
+    throw new Error("Recommendation proposal ranking no longer matches its durable proposal set.");
+  }
+  return record.rankedProposalIds.map((proposalId, index) => {
+    const proposal = byId.get(proposalId);
+    if (!proposal) throw new Error("Recommendation proposal identity no longer resolves to durable proposal material.");
+    return Object.freeze({
+      optionId: proposal.proposalId,
+      position: index + 1,
+      text: proposal.text,
+      recommended: proposal.proposalId === record.recommendedProposalId,
+    });
+  });
 }
 
 export function recommendationOption(

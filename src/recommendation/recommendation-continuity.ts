@@ -38,6 +38,10 @@ function equalSet(left: readonly string[], right: readonly string[]): boolean {
   return l.every((value, index) => value === r[index]);
 }
 
+function equalArray(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
 function latestKnowledgeCreationTime(knowledge: readonly LoadedKnowledge[]): string {
   const dates = knowledge
     .map((item) => new Date(item.record.createdAt))
@@ -63,6 +67,103 @@ export function advisoryKnowledge(loaded: LoadedKnowledge): SolandraAdvisoryKnow
   });
 }
 
+function exactUserExcerpt(value: string, material: readonly string[]): string | undefined {
+  const candidate = value.trim();
+  if (!candidate) return undefined;
+  return material.some((item) => item.includes(candidate)) ? candidate : undefined;
+}
+
+function advisoryProjection(
+  advisory: SolandraRecommendationResult,
+  userMaterial: readonly string[],
+): Readonly<{ recommendedProposal: string; alternativeProposals: string[]; assumptions: string[] }> {
+  const recommendedProposal = advisory.recommendation.trim();
+  const alternativeProposals = advisory.alternatives
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .filter((item, index, values) => item !== recommendedProposal && values.indexOf(item) === index);
+  const assumptions = advisory.assumptions
+    .map((item) => exactUserExcerpt(item, userMaterial))
+    .filter((item): item is string => item !== undefined)
+    .filter((item, index, values) => values.indexOf(item) === index);
+
+  return { recommendedProposal, alternativeProposals, assumptions };
+}
+
+function normalizedBasis(basis: readonly RecommendationBasis[]): RecommendationBasis[] {
+  const byKnowledge = new Map<string, Set<string>>();
+  for (const entry of basis) {
+    const claims = byKnowledge.get(entry.knowledgeId) ?? new Set<string>();
+    for (const claimId of entry.claimIds) claims.add(claimId);
+    byKnowledge.set(entry.knowledgeId, claims);
+  }
+  return [...byKnowledge.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([knowledgeId, claimIds]) => ({ knowledgeId, claimIds: [...claimIds].sort() }));
+}
+
+function governedSupportLine(finding: LoadedKnowledge["knowledge"]["findings"][number]): string {
+  if (finding.basis === "SOURCE_REPORT") {
+    return `Source report (${finding.status.toLocaleLowerCase("en-US")}): ${finding.text}`;
+  }
+  switch (finding.status) {
+    case "SUPPORTED": return finding.text;
+    case "REFUTED": return `The governed evidence refutes this claim: ${finding.text}`;
+    case "CONFLICTED": return `The governed evidence remains materially conflicted on this claim: ${finding.text}`;
+    case "UNRESOLVED": return `The governed evidence does not establish this claim strongly enough: ${finding.text}`;
+  }
+}
+
+function projectGovernedRecommendationMaterial(
+  knowledge: readonly LoadedKnowledge[],
+  basis: readonly RecommendationBasis[],
+  conversationId: string,
+): Readonly<{ rationale: string[]; uncertainties: string[] }> {
+  const byId = new Map(knowledge.map((item) => [item.record.knowledgeId, item]));
+  const rationale: string[] = [];
+  const uncertainties: string[] = [];
+
+  for (const basisItem of normalizedBasis(basis)) {
+    const loaded = byId.get(basisItem.knowledgeId);
+    if (!loaded || loaded.record.conversationId !== conversationId) {
+      throw new Error("Recommendation basis must reference governed Knowledge supplied for the same conversation.");
+    }
+    const findings = new Map(loaded.knowledge.findings.map((finding) => [finding.claimId, finding]));
+    for (const claimId of basisItem.claimIds) {
+      if (!loaded.record.claimIds.includes(claimId)) {
+        throw new Error("Recommendation basis contains a claim outside its governed Knowledge.");
+      }
+      const finding = findings.get(claimId);
+      if (!finding) throw new Error("Recommendation exact claim basis cannot be projected from governed Knowledge.");
+      rationale.push(governedSupportLine(finding));
+    }
+    for (const uncertainty of loaded.knowledge.uncertainties) {
+      if (!uncertainties.includes(uncertainty)) uncertainties.push(uncertainty);
+    }
+  }
+  return { rationale, uncertainties };
+}
+
+function assertPreservedGovernedUncertainty(
+  advisory: SolandraRecommendationResult,
+  governedUncertainties: readonly string[],
+): void {
+  const preserved = [...new Set(advisory.preservedUncertainties)];
+  if (!equalSet(preserved, governedUncertainties)) {
+    throw new Error("Solandra advisory reasoning dropped or invented material governed uncertainty from its Recommendation basis.");
+  }
+}
+
+function runUserMaterial(run: LatticeRun): string[] {
+  if (!isConsultationRunRequest(run.request)) return [];
+  return [run.request.objective, ...run.request.context].map((item) => item.trim()).filter(Boolean);
+}
+
+function structuralRecommendation(record: RecommendationRecord): boolean {
+  return record.representationKind === "STRUCTURAL_ADVISORY_V1"
+    || record.representationKind === "STRUCTURAL_PROPOSAL_V2";
+}
+
 export async function establishRecommendation(input: {
   store: RecommendationStore;
   run: LatticeRun;
@@ -85,21 +186,14 @@ export async function establishRecommendation(input: {
   const existing = await input.store.getRecommendationByRunId(input.run.id);
   if (existing) return existing;
 
-  const loadedById = new Map(input.knowledge.map((item) => [item.record.knowledgeId, item]));
   const basis: RecommendationBasis[] = input.advisory.basis.map((item) => ({
     knowledgeId: item.knowledgeId,
     claimIds: [...item.claimIds],
   }));
-  for (const basisItem of basis) {
-    const loaded = loadedById.get(basisItem.knowledgeId);
-    if (!loaded || loaded.record.conversationId !== input.run.conversationId) {
-      throw new Error("Recommendation basis must reference governed Knowledge supplied for the same conversation.");
-    }
-    const allowedClaims = new Set(loaded.record.claimIds);
-    if (basisItem.claimIds.some((claimId) => !allowedClaims.has(claimId))) {
-      throw new Error("Recommendation basis contains a claim outside its governed Knowledge.");
-    }
-  }
+  const governed = projectGovernedRecommendationMaterial(input.knowledge, basis, input.run.conversationId);
+  assertPreservedGovernedUncertainty(input.advisory, governed.uncertainties);
+  const proposal = advisoryProjection(input.advisory, runUserMaterial(input.run));
+
   const draft = buildRecommendationRecord({
     conversationId: input.run.conversationId,
     runId: input.run.id,
@@ -107,17 +201,15 @@ export async function establishRecommendation(input: {
     intentVersionId: input.intentVersion.intentVersionId,
     sourceMessageId: input.run.request.sourceMessageId,
     basis,
-    userMaterialBasis: [],
-    recommendation: input.advisory.recommendation,
-    rationale: input.advisory.rationale,
-    tradeoffs: input.advisory.tradeoffs,
-    assumptions: input.advisory.assumptions,
-    uncertainties: [...new Set([...input.advisory.preservedUncertainties, ...input.advisory.uncertainties])],
-    alternatives: input.advisory.alternatives,
-    // The latest immutable Knowledge establishment time is a deterministic
-    // recommendation-establishment timestamp. Concurrent first reads therefore
-    // construct byte-identical records instead of racing on wall-clock time.
-    createdAt: input.createdAt ?? latestKnowledgeCreationTime(input.knowledge),
+    userMaterialBasis: [input.intentVersion.intentVersionId, input.run.request.sourceMessageId],
+    recommendedProposal: proposal.recommendedProposal,
+    alternativeProposals: proposal.alternativeProposals,
+    rationale: governed.rationale,
+    tradeoffs: [],
+    assumptions: proposal.assumptions,
+    uncertainties: governed.uncertainties,
+    createdAt: input.createdAt
+      ?? (input.knowledge.length > 0 ? latestKnowledgeCreationTime(input.knowledge) : input.intentVersion.createdAt),
   });
   try {
     return await input.store.putRecommendation(draft);
@@ -142,21 +234,14 @@ export async function establishConversationalRecommendation(input: {
   if (input.sourceMessage.conversationId !== input.conversationId) {
     throw new Error("Conversational Recommendation USER source binding changed.");
   }
-  const loadedById = new Map(input.knowledge.map((item) => [item.record.knowledgeId, item]));
   const basis: RecommendationBasis[] = input.advisory.basis.map((item) => ({
     knowledgeId: item.knowledgeId,
     claimIds: [...item.claimIds],
   }));
-  for (const basisItem of basis) {
-    const loaded = loadedById.get(basisItem.knowledgeId);
-    if (!loaded || loaded.record.conversationId !== input.conversationId) {
-      throw new Error("Recommendation basis must reference governed Knowledge supplied for the same conversation.");
-    }
-    const allowedClaims = new Set(loaded.record.claimIds);
-    if (basisItem.claimIds.some((claimId) => !allowedClaims.has(claimId))) {
-      throw new Error("Recommendation basis contains a claim outside its governed Knowledge.");
-    }
-  }
+  const governed = projectGovernedRecommendationMaterial(input.knowledge, basis, input.conversationId);
+  assertPreservedGovernedUncertainty(input.advisory, governed.uncertainties);
+  const proposal = advisoryProjection(input.advisory, [input.sourceMessage.content]);
+
   const draft = buildRecommendationRecord({
     conversationId: input.conversationId,
     runId: null,
@@ -165,12 +250,12 @@ export async function establishConversationalRecommendation(input: {
     sourceMessageId: input.sourceMessage.messageId,
     basis,
     userMaterialBasis: [input.intentVersion.intentVersionId, input.sourceMessage.messageId],
-    recommendation: input.advisory.recommendation,
-    rationale: input.advisory.rationale,
-    tradeoffs: input.advisory.tradeoffs,
-    assumptions: input.advisory.assumptions,
-    uncertainties: [...new Set([...input.advisory.preservedUncertainties, ...input.advisory.uncertainties])],
-    alternatives: input.advisory.alternatives,
+    recommendedProposal: proposal.recommendedProposal,
+    alternativeProposals: proposal.alternativeProposals,
+    rationale: governed.rationale,
+    tradeoffs: [],
+    assumptions: proposal.assumptions,
+    uncertainties: governed.uncertainties,
     createdAt: input.sourceMessage.createdAt,
   });
   return input.store.putRecommendation(draft);
@@ -185,8 +270,20 @@ export async function loadRecommendation(
   const record = await store.getRecommendation(recommendationId);
   if (!record) return undefined;
 
-  const basisKnowledgeIds = [...new Set(record.basis.map((item) => item.knowledgeId))];
-  const basisClaimIds = [...new Set(record.basis.flatMap((item) => item.claimIds))];
+  const authoritativeKnowledgeBasis = record.premiseAuthority.knowledge;
+  if (JSON.stringify(authoritativeKnowledgeBasis) !== JSON.stringify(record.basis)) {
+    throw new Error("Recommendation factual premise authority no longer matches its exact Knowledge/claim basis.");
+  }
+  const expectedUserPremises = [{
+    intentVersionId: record.intentVersionId,
+    sourceMessageId: record.sourceMessageId,
+  }];
+  if (JSON.stringify(record.premiseAuthority.user) !== JSON.stringify(expectedUserPremises)) {
+    throw new Error("Recommendation USER premise authority no longer matches its exact USER-material lineage.");
+  }
+
+  const basisKnowledgeIds = [...new Set(authoritativeKnowledgeBasis.map((item) => item.knowledgeId))];
+  const basisClaimIds = [...new Set(authoritativeKnowledgeBasis.flatMap((item) => item.claimIds))];
   if (!equalSet(record.knowledgeIds, basisKnowledgeIds) || !equalSet(record.claimIds, basisClaimIds)) {
     throw new Error("Recommendation flattened basis no longer matches its exact Knowledge/claim relationship.");
   }
@@ -198,10 +295,26 @@ export async function loadRecommendation(
     throw new Error("Recommendation Knowledge conversation binding changed.");
   }
   const loadedById = new Map(loaded.map((item) => [item.record.knowledgeId, item]));
-  for (const basis of record.basis) {
+  for (const basis of authoritativeKnowledgeBasis) {
     const item = loadedById.get(basis.knowledgeId);
     if (!item || basis.claimIds.some((claimId) => !item.record.claimIds.includes(claimId))) {
       throw new Error("Recommendation exact claim basis no longer resolves through its governed Knowledge.");
+    }
+  }
+
+  if (structuralRecommendation(record)) {
+    const governed = projectGovernedRecommendationMaterial(loaded, record.basis, record.conversationId);
+    if (!equalArray(record.rationale, governed.rationale) || !equalArray(record.uncertainties, governed.uncertainties)) {
+      throw new Error("Recommendation durable factual presentation no longer matches its exact governed premise material.");
+    }
+    if (record.tradeoffs.length !== 0) {
+      throw new Error("Structural Recommendation cannot persist arbitrary free-form tradeoff prose.");
+    }
+    if (
+      record.representationKind === "STRUCTURAL_PROPOSAL_V2"
+      && record.proposals.some((proposal) => proposal.origin !== "SOLANDRA" || proposal.factualAuthority !== false)
+    ) {
+      throw new Error("Structural Recommendation proposal origin/authority classification changed.");
     }
   }
 
@@ -218,8 +331,16 @@ export async function loadRecommendation(
     ) {
       throw new Error("Recommendation exact Run/Intent/USER-source binding changed.");
     }
-  } else if (record.userMaterialBasis.length === 0) {
-    throw new Error("Run-free Recommendation is missing exact USER-material basis identity.");
+    if (structuralRecommendation(record)) {
+      const material = runUserMaterial(run);
+      for (const value of record.assumptions) {
+        if (!exactUserExcerpt(value, material)) {
+          throw new Error("Recommendation durable USER-derived premise no longer resolves to exact USER material.");
+        }
+      }
+    }
+  } else if (record.premiseAuthority.user.length === 0) {
+    throw new Error("Run-free Recommendation is missing exact USER-material premise authority.");
   }
   return { record, knowledge: loaded };
 }
@@ -236,7 +357,7 @@ export async function loadRecommendationByRunId(
 
 export function recommendationBasisTrace(loaded: LoadedRecommendation): RecommendationBasisTrace[] {
   const byId = new Map(loaded.knowledge.map((item) => [item.record.knowledgeId, item]));
-  return loaded.record.basis.map((basis) => {
+  return loaded.record.premiseAuthority.knowledge.map((basis) => {
     const knowledge = byId.get(basis.knowledgeId);
     if (!knowledge) throw new Error("Recommendation basis Knowledge is unavailable for provenance traversal.");
     const claims = new Set(basis.claimIds);
@@ -259,24 +380,33 @@ export function recommendationBasisTrace(loaded: LoadedRecommendation): Recommen
 }
 
 export function renderRecommendation(record: RecommendationRecord): string {
-  const sections = [record.recommendation];
-  if (record.rationale.length > 0) sections.push(`Why:\n${record.rationale.map((item) => `- ${item}`).join("\n")}`);
-  if (record.tradeoffs.length > 0) sections.push(`Tradeoffs:\n${record.tradeoffs.map((item) => `- ${item}`).join("\n")}`);
-  if (record.assumptions.length > 0) sections.push(`Assumptions that could change the answer:\n${record.assumptions.map((item) => `- ${item}`).join("\n")}`);
-  if (record.uncertainties.length > 0) sections.push(`Uncertainty:\n${record.uncertainties.map((item) => `- ${item}`).join("\n")}`);
-  if (record.alternatives.length > 0) sections.push(`Options discussed:\n${recommendationOptions(record).map((item) => `${item.position}. ${item.text}${item.recommended ? " (recommended)" : ""}`).join("\n")}`);
+  if (record.representationKind === "LEGACY_FREEFORM") {
+    return "This earlier Recommendation predates the current structural factual-trust boundary, so I won't reproduce its free-form text. Revisit the decision to establish a current Recommendation.";
+  }
+
+  const options = recommendationOptions(record);
+  const recommended = options[0];
+  if (!recommended) throw new Error("Recommendation has no advisory proposal to present.");
+  const sections = [`Solandra recommends:\n${recommended.text}`];
+  if (options.length > 1) {
+    const ranked = options.slice(1).map((item) => `${item.position}. ${item.text}`).join("\n");
+    sections.push(`Other options Solandra considered:\n${ranked}`);
+  }
+  if (record.assumptions.length > 0) {
+    sections.push(`From your message:\n${record.assumptions.map((item) => `- ${item}`).join("\n")}`);
+  }
+  if (record.rationale.length > 0) {
+    sections.push(`Established support:\n${record.rationale.map((item) => `- ${item}`).join("\n")}`);
+  }
+  if (record.uncertainties.length > 0) {
+    sections.push(`Known uncertainty:\n${record.uncertainties.map((item) => `- ${item}`).join("\n")}`);
+  }
+  sections.push("Solandra's proposal wording and ranking are advisory judgment. Only the facts listed under Established support are governed factual support; choosing an option does not make proposal wording factual Knowledge or authorize action.");
   return sections.join("\n\n");
 }
 
 export function renderHistoricalRecommendationExplanation(loaded: LoadedRecommendation): string {
-  const record = loaded.record;
-  return [
-    `I recommended: ${record.recommendation}`,
-    record.rationale.length > 0 ? `Why:\n${record.rationale.map((item) => `- ${item}`).join("\n")}` : "",
-    record.tradeoffs.length > 0 ? `Tradeoffs:\n${record.tradeoffs.map((item) => `- ${item}`).join("\n")}` : "",
-    record.assumptions.length > 0 ? `Assumptions:\n${record.assumptions.map((item) => `- ${item}`).join("\n")}` : "",
-    record.uncertainties.length > 0 ? `Uncertainty:\n${record.uncertainties.map((item) => `- ${item}`).join("\n")}` : "",
-  ].filter(Boolean).join("\n\n");
+  return renderRecommendation(loaded.record);
 }
 
 export function renderHistoricalRecommendationSources(loaded: LoadedRecommendation): string {
@@ -303,12 +433,15 @@ export function recommendationContext(record: RecommendationRecord): Readonly<{
   createdAt: string;
   options: ReturnType<typeof recommendationOptions>;
 }> {
+  const options = recommendationOptions(record);
+  const recommended = options.find((option) => option.recommended);
+  if (!recommended) throw new Error("Recommendation context has no recommended proposal.");
   return Object.freeze({
     recommendationId: record.recommendationId,
-    recommendation: record.recommendation,
+    recommendation: recommended.text,
     intentVersionId: record.intentVersionId,
     knowledgeIds: [...record.knowledgeIds],
     createdAt: record.createdAt,
-    options: recommendationOptions(record),
+    options,
   });
 }
