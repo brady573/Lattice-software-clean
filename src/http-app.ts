@@ -5,12 +5,15 @@ import { buildRunOutcome } from "./outcome.js";
 import type { KnowledgeSimplifier } from "./presentation/solandra/knowledge-simplification.js";
 import { renderKnowledgeResponseForRun } from "./presentation/solandra/knowledge-response.js";
 import { renderSolandraAuthoritativeConversationPage } from "./ui/solandra-authoritative-conversation-page.js";
+import { renderSolandraValidatorConversationPage } from "./ui/solandra-validator-conversation-page.js";
 
 export interface CanonicalAppOptions extends HttpCoreOptions {
   /** Compatibility-only direct simplifier for explicit test/non-canonical compositions. */
   knowledgeSimplifier?: KnowledgeSimplifier | undefined;
   /** Canonical subject-authorized model assistance boundary. */
   modelAssistanceService?: ModelAssistanceCapabilityService | undefined;
+  /** Deployment/session presentation role already resolved by runtime configuration. */
+  validatorDeployment?: boolean;
 }
 
 function hasAssistantPresentation(payload: unknown): boolean {
@@ -22,12 +25,23 @@ function hasAssistantPresentation(payload: unknown): boolean {
   return typeof presentation.assistantMessage === "string" && presentation.assistantMessage.trim().length > 0;
 }
 
+function renderCanonicalConversationPage(validatorDeployment: boolean): string {
+  return validatorDeployment
+    ? renderSolandraValidatorConversationPage()
+    : renderSolandraAuthoritativeConversationPage();
+}
+
 /**
  * Canonical Product HTTP composition. Legacy structured intake and simulated
  * prototype routes are intentionally unavailable here.
  */
 export function buildCanonicalApp(options: CanonicalAppOptions = {}): FastifyInstance {
-  const { knowledgeSimplifier, modelAssistanceService, ...coreOptions } = options;
+  const {
+    knowledgeSimplifier,
+    modelAssistanceService,
+    validatorDeployment = false,
+    ...coreOptions
+  } = options;
   const { app, runStore, apiSubjectForRequest } = createHttpCore(coreOptions);
   app.addHook("preSerialization", async (request, _reply, payload) => {
     if (request.routeOptions.url !== "/api/v1/runs/:runId/outcome") return payload;
@@ -54,7 +68,7 @@ export function buildCanonicalApp(options: CanonicalAppOptions = {}): FastifyIns
     };
   });
   app.get("/", async (_request, reply) =>
-    reply.type("text/html; charset=utf-8").send(renderSolandraAuthoritativeConversationPage())
+    reply.type("text/html; charset=utf-8").send(renderCanonicalConversationPage(validatorDeployment))
   );
   return app;
 }

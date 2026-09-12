@@ -15,6 +15,8 @@ export interface RuntimeConfig {
   authenticationMode?: AuthenticationMode;
   /** Development-only fixture identity; resolved config sets it only in development-fixture mode. */
   developmentFixtureSubjectId?: string;
+  /** Hosted validator role reusing isolated in-memory state and the fixed development subject boundary. */
+  validatorDeployment?: boolean;
   autoMigrate: boolean;
   /** First-class zero-cost development provider. Omitted only by older programmatic fixtures. */
   localModelProviderBaseUrl?: string | undefined;
@@ -203,19 +205,38 @@ export function resolveRuntimeConfig(
     throw new Error(`Unsupported LATTICE_TRUTH_MODE: ${truthMode}`);
   }
 
+  const validatorDeployment = parseBoolean(env.LATTICE_VALIDATOR_DEPLOYMENT, false);
   const databaseUrl = env.DATABASE_URL;
   if (deploymentMode === "durable" && !databaseUrl) {
     throw new Error("Durable deployment requires DATABASE_URL; refusing to fall back to in-memory state.");
   }
+  if (validatorDeployment) {
+    if (deploymentMode !== "development") {
+      throw new Error("LATTICE_VALIDATOR_DEPLOYMENT requires development deployment mode.");
+    }
+    if (databaseUrl !== undefined) {
+      throw new Error("LATTICE_VALIDATOR_DEPLOYMENT requires isolated in-memory state; DATABASE_URL must be unset.");
+    }
+    if (env.LATTICE_OWNER_ACCESS_TOKEN !== undefined) {
+      throw new Error("LATTICE_VALIDATOR_DEPLOYMENT forbids LATTICE_OWNER_ACCESS_TOKEN.");
+    }
+    if (env.LATTICE_AUTHENTICATION_MODE !== undefined && env.LATTICE_AUTHENTICATION_MODE !== "development-fixture") {
+      throw new Error("LATTICE_VALIDATOR_DEPLOYMENT reuses development-fixture authentication only.");
+    }
+    if (env.LATTICE_DEVELOPMENT_FIXTURE_SUBJECT_ID !== undefined) {
+      throw new Error("LATTICE_VALIDATOR_DEPLOYMENT fixes the authenticated subject to validator.");
+    }
+  }
 
-  const authenticationMode = parseAuthenticationMode(
-    env.LATTICE_AUTHENTICATION_MODE,
-    deploymentMode,
-  );
-  const developmentFixtureSubjectId = parseDevelopmentFixtureSubjectId(
-    env.LATTICE_DEVELOPMENT_FIXTURE_SUBJECT_ID,
-    authenticationMode,
-  );
+  const authenticationMode = validatorDeployment
+    ? "development-fixture"
+    : parseAuthenticationMode(env.LATTICE_AUTHENTICATION_MODE, deploymentMode);
+  const developmentFixtureSubjectId = validatorDeployment
+    ? "validator"
+    : parseDevelopmentFixtureSubjectId(
+      env.LATTICE_DEVELOPMENT_FIXTURE_SUBJECT_ID,
+      authenticationMode,
+    );
 
   const autoMigrate = parseBoolean(
     env.LATTICE_AUTO_MIGRATE,
@@ -262,6 +283,7 @@ export function resolveRuntimeConfig(
     truthMode,
     authenticationMode,
     ...(developmentFixtureSubjectId === undefined ? {} : { developmentFixtureSubjectId }),
+    validatorDeployment,
     autoMigrate,
     localModelProviderBaseUrl: localModelProvider.baseUrl,
     localModelProviderModel: localModelProvider.model,

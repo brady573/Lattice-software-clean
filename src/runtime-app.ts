@@ -479,6 +479,7 @@ export async function createRuntimeApp(
     apiSubject: authenticatedApiSubject,
     knowledgeSimplifier: resolveKnowledgeSimplifier(config, options.knowledgeSimplifier),
     modelAssistanceService: options.modelAssistanceService,
+    validatorDeployment: config.validatorDeployment === true,
   });
 
   registerAuthenticatedSubjectBoundary(app, {
