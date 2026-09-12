@@ -17,6 +17,8 @@ const SOURCE_REQUEST_PATTERN = /\b(?:source|sources|citation|citations|evidence)
 const HIGH_STAKES_SOURCE_PATTERN = /\b(?:tax|taxes|taxation|taxable|legal|law|laws|regulation|regulatory|regulated|compliance|license|licensing|permit|statute|statutory)\b/iu;
 const SOURCE_SUITABILITY_LIMITATION =
   "I found relevant background material, but I need an appropriate authoritative source before I can answer this kind of question reliably.";
+const GENERIC_INSUFFICIENT_KNOWLEDGE_MESSAGE =
+  "I couldn't establish enough relevant evidence to answer that reliably.";
 
 function renderSourceReportFinding(finding: KnowledgeFinding, text = finding.text): string {
   const statusLabel: Record<KnowledgeFinding["status"], string> = {
@@ -64,9 +66,17 @@ function sourceLabel(knowledge: KnowledgeOutcome): string {
   return `Sources: ${labels.join("; ")}.`;
 }
 
+function isInternalKnowledgeLimitation(item: string): boolean {
+  return item.startsWith("UNRESOLVED:")
+    || item.startsWith("CONFLICTED:")
+    || item.startsWith("Source-report evidence establishes only what the retrieved sources report;")
+    || item.startsWith("This v0.1 ");
+}
+
 function uncertaintyLabel(knowledge: KnowledgeOutcome): string {
-  if (knowledge.uncertainties.length === 0) return "";
-  return `Known uncertainty:\n${knowledge.uncertainties.map((item) => `- ${item}`).join("\n")}`;
+  const uncertainties = knowledge.uncertainties.filter((item) => !isInternalKnowledgeLimitation(item));
+  if (uncertainties.length === 0) return "";
+  return `Known uncertainty:\n${uncertainties.map((item) => `- ${item}`).join("\n")}`;
 }
 
 function renderSourceList(knowledge: KnowledgeOutcome): string {
@@ -83,10 +93,7 @@ function renderSourceList(knowledge: KnowledgeOutcome): string {
 }
 
 function renderGovernedAnswer(knowledge: KnowledgeOutcome): string {
-  if (knowledge.findings.length === 0) {
-    return knowledge.uncertainties.find((item) => item.includes("No validated external findings"))
-      ?? "I couldn't establish enough relevant evidence to answer that reliably.";
-  }
+  if (knowledge.findings.length === 0) return GENERIC_INSUFFICIENT_KNOWLEDGE_MESSAGE;
 
   if (requiresAuthoritativeDomainSource(knowledge) && !hasAuthoritativeDomainSource(knowledge)) {
     return [SOURCE_SUITABILITY_LIMITATION, sourceLabel(knowledge)].filter(Boolean).join("\n\n");
