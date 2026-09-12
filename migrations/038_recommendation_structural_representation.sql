@@ -3,4 +3,4 @@ ALTER TABLE recommendations
 
 ALTER TABLE recommendations
   ADD CONSTRAINT recommendations_representation_kind
-  CHECK (representation_kind IN ('LEGACY_FREEFORM', 'STRUCTURAL_USER_MATERIAL_V1'));
+  CHECK (representation_kind IN ('LEGACY_FREEFORM', 'STRUCTURAL_ADVISORY_V1'));
