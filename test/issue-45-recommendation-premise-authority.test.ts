@@ -34,6 +34,7 @@ const DECLARED_FACT = "Option A has fewer required maintenance steps.";
 const SECOND_DECLARED_FACT = "Option A has a documented rollback procedure.";
 const SIBLING_FACT = "Option B had lower measured downtime last quarter.";
 const UNSUPPORTED_FACT = "its vendor guarantees zero outages forever";
+const GENERATED_PROPOSAL = "Use a staged canary rollout.";
 
 const INTENT: IntentVersion = {
   intentScopeId: INTENT_SCOPE_ID,
@@ -194,14 +195,14 @@ class GroundedButUnsupportedProseProvider implements ModelProvider {
       ? JSON.stringify({ status: "GROUNDED", unsupportedExternalPremises: [], knowledgeNeeds: [] })
       : JSON.stringify({
         status: "RECOMMENDATION",
-        recommendation: `Prefer option A because ${UNSUPPORTED_FACT}.`,
+        recommendation: GENERATED_PROPOSAL,
         basis: [{ knowledgeId: "knowledge-issue-45", claimIds: ["claim-declared-a"] }],
-        rationale: [`The vendor claim means option A is safer.`],
-        tradeoffs: [],
+        rationale: [`Prefer the proposal because ${UNSUPPORTED_FACT}.`],
+        tradeoffs: [`The vendor guarantee makes this risk-free.`],
         assumptions: ["My deployment window is flexible."],
         uncertainties: [GOVERNED_UNCERTAINTY],
         preservedUncertainties: [GOVERNED_UNCERTAINTY],
-        alternatives: ["option B"],
+        alternatives: ["Keep a reversible manual fallback."],
       });
     return {
       response: {
@@ -241,7 +242,7 @@ function groundingInput(): SolandraAdvisoryInput {
   };
 }
 
-test("Issue #45: false-positive GROUNDED cannot make unsupported factual draft prose durable", async () => {
+test("Issue #45: false-positive GROUNDED cannot promote unsupported generated rationale into durable factual support", async () => {
   const provider = new GroundedButUnsupportedProseProvider();
   const runtime = new ModelSolandraAdvisoryRuntime(new ModelRuntime(provider), "issue-45-model");
   const generated = await runtime.advise(groundingInput());
@@ -251,17 +252,22 @@ test("Issue #45: false-positive GROUNDED cannot make unsupported factual draft p
 
   const store = new MemoryRecommendationStore();
   try {
-    await assert.rejects(
-      establishRecommendation({
-        store,
-        run: completedAdvisoryRun(),
-        intentVersion: INTENT,
-        knowledge: [governedKnowledge()],
-        advisory: generated.result,
-      }),
-      /exact excerpt of authoritative USER material/iu,
-    );
-    assert.deepEqual(await store.listRecommendationsByConversation(CONVERSATION_ID), []);
+    const record = await establishRecommendation({
+      store,
+      run: completedAdvisoryRun(),
+      intentVersion: INTENT,
+      knowledge: [governedKnowledge()],
+      advisory: generated.result,
+    });
+    assert.equal(record.recommendation, GENERATED_PROPOSAL);
+    assert.deepEqual(record.rationale, [DECLARED_FACT]);
+    assert.deepEqual(record.tradeoffs, []);
+    assert.deepEqual(record.premiseAuthority.knowledge, [{
+      knowledgeId: "knowledge-issue-45",
+      claimIds: ["claim-declared-a"],
+    }]);
+    assert.doesNotMatch(JSON.stringify(record.rationale), new RegExp(UNSUPPORTED_FACT, "u"));
+    assert.doesNotMatch(renderRecommendation(record), new RegExp(UNSUPPORTED_FACT, "u"));
   } finally {
     await store.close();
   }
@@ -286,7 +292,7 @@ test("Issue #45: governed factual support is rendered from exact declared claim 
     assert.deepEqual(record.rationale, [DECLARED_FACT]);
     assert.deepEqual(record.tradeoffs, []);
     assert.deepEqual(record.uncertainties, [GOVERNED_UNCERTAINTY]);
-    assert.doesNotMatch(JSON.stringify(record), new RegExp(UNSUPPORTED_FACT, "u"));
+    assert.doesNotMatch(JSON.stringify(record.rationale), new RegExp(UNSUPPORTED_FACT, "u"));
     const rendered = renderRecommendation(record);
     assert.match(rendered, new RegExp(DECLARED_FACT.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "u"));
     assert.doesNotMatch(rendered, new RegExp(UNSUPPORTED_FACT, "u"));
@@ -316,14 +322,14 @@ test("Issue #45: USER premise remains exact USER-derived material and invented a
       { intentVersionId: INTENT_VERSION_ID, sourceMessageId: SOURCE_MESSAGE_ID },
     ]);
     assert.deepEqual(record.assumptions, ["My deployment window is flexible."]);
-    assert.doesNotMatch(JSON.stringify(record), /vendor has never had an outage/iu);
+    assert.doesNotMatch(JSON.stringify(record.assumptions), /vendor has never had an outage/iu);
     assert.match(renderRecommendation(record), /From your message:/u);
   } finally {
     await store.close();
   }
 });
 
-test("Issue #45: preference-sensitive advisory ranking remains available over exact USER options", async () => {
+test("Issue #45: Solandra-originated advisory proposal does not require a verbatim USER-authored option", async () => {
   const store = new MemoryRecommendationStore();
   try {
     const record = await establishRecommendation({
@@ -331,13 +337,18 @@ test("Issue #45: preference-sensitive advisory ranking remains available over ex
       run: completedAdvisoryRun(),
       intentVersion: INTENT,
       knowledge: [],
-      advisory: advisory(),
+      advisory: advisory({
+        recommendation: GENERATED_PROPOSAL,
+        alternatives: ["Keep a reversible manual fallback."],
+      }),
     });
 
+    assert.equal(record.recommendation, GENERATED_PROPOSAL);
+    assert.deepEqual(record.basis, []);
     const rendered = renderRecommendation(record);
-    assert.match(rendered, /I favor: option A/u);
-    assert.match(rendered, /2\. option B/u);
-    assert.match(rendered, /If your stated priorities or premises change/u);
+    assert.match(rendered, /Advisory recommendation: Use a staged canary rollout\./u);
+    assert.match(rendered, /Other advisory options:/u);
+    assert.match(rendered, /not factual Knowledge or action authorization/u);
   } finally {
     await store.close();
   }
@@ -401,12 +412,12 @@ test("Issue #45: USER-only Recommendation establishes without external Knowledge
       run: completedAdvisoryRun(),
       intentVersion: INTENT,
       knowledge: [],
-      advisory: advisory(),
+      advisory: advisory({ recommendation: GENERATED_PROPOSAL }),
     });
     assert.deepEqual(record.basis, []);
     assert.deepEqual(record.knowledgeIds, []);
     assert.deepEqual(record.claimIds, []);
-    assert.equal(record.representationKind, "STRUCTURAL_USER_MATERIAL_V1");
+    assert.equal(record.representationKind, "STRUCTURAL_ADVISORY_V1");
     assert.equal(record.createdAt, FIXED_TIME);
   } finally {
     await store.close();
