@@ -33,8 +33,8 @@ import type {
 } from "../src/solandra/cognition.js";
 import { KnowledgeAcquisitionTruthPipeline } from "../src/truth/knowledge-acquisition-pipeline.js";
 
-const FIRST_USER = "Help me choose between two implementation approaches while keeping maintenance burden low.";
-const SECOND_USER = "Change the objective: choose the approach that is easiest to reverse later.";
+const FIRST_USER = "Help me choose between Approach Atlas and Approach Birch while keeping maintenance burden low.";
+const SECOND_USER = "Change the objective: between Approach Atlas and Approach Birch, choose the one that is easiest to reverse later.";
 const FIRST_NEED = "maintenance burden and reversibility evidence for the available implementation approaches";
 const SECOND_NEED = "reversibility evidence for the available implementation approaches";
 const FINDING = "A smaller maintenance surface can reduce the amount of ongoing work required to keep an implementation usable.";
@@ -171,16 +171,14 @@ class RecordingAdvisory implements SolandraAdvisoryRuntime {
     return {
       result: {
         status: "RECOMMENDATION",
-        recommendation: changed
-          ? "Prefer the approach with the cleaner reversal path, subject to the governed evidence and uncertainty below."
-          : "Prefer the approach with the lower ongoing maintenance burden, subject to the governed evidence and uncertainty below.",
+        recommendation: changed ? "Approach Birch" : "Approach Atlas",
         basis: [{ knowledgeId: knowledge.knowledgeId, claimIds: [claim.claimId] }],
         rationale: [changed ? SECOND_FINDING : FINDING],
         tradeoffs: ["The preferred approach may sacrifice benefits that were not established by the supplied Knowledge."],
-        assumptions: ["The USER's stated objective remains the controlling preference for this advice."],
+        assumptions: [changed ? "easiest to reverse later" : "maintenance burden low"],
         uncertainties: [...knowledge.uncertainties],
         preservedUncertainties: [...knowledge.uncertainties],
-        alternatives: ["Keep both approaches open if the unresolved evidence is material to the choice."],
+        alternatives: [changed ? "Approach Atlas" : "Approach Birch"],
       },
       invocationProvenance: PROVENANCE,
     };
@@ -388,7 +386,7 @@ test("M2 general advisory spine preserves Intent/V36 authority and durable Recom
     }>();
     assert.equal(whyBody.status, "RECOMMENDATION_REFERENCE_RESOLVED");
     assert.equal(whyBody.recommendationReference.recommendationId, firstBody.recommendationReference.recommendationId);
-    assert.match(whyBody.presentation.assistantMessage, /Why:/u);
+    assert.match(whyBody.presentation.assistantMessage, /Established support:/u);
     assert.equal(advisory.inputs.length, 1);
     assert.equal(acquisition.requests.length, 1);
 
@@ -494,14 +492,14 @@ class NeedsKnowledgeThenRecommendationAdvisory implements SolandraAdvisoryRuntim
     return {
       result: {
         status: "RECOMMENDATION",
-        recommendation: "Prefer the option that best fits the USER's stated maintenance and reversibility objective.",
+        recommendation: "Approach Atlas",
         basis,
         rationale: ["The governed findings together provide the factual comparison basis; the preference-sensitive conclusion is advisory."],
         tradeoffs: ["The recommendation is conditional on the USER's stated objective."],
-        assumptions: ["The stated objective remains the controlling preference."],
+        assumptions: ["maintenance burden low"],
         uncertainties: [...preserved],
         preservedUncertainties: [...preserved],
-        alternatives: ["Keep the alternatives open if the remaining uncertainty is material."],
+        alternatives: ["Approach Birch"],
       },
       invocationProvenance: PROVENANCE,
     };
@@ -752,7 +750,6 @@ test("ModelSolandraAdvisoryRuntime rejects fabricated Knowledge/claim references
     /referenced Knowledge that Lattice did not supply/iu,
   );
 });
-
 
 class SingleObjectArrayGroundingProvider implements ModelProvider {
   readonly kind = "m4-single-object-array-grounding-provider";
