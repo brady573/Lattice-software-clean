@@ -143,8 +143,11 @@ export function buildRecommendationRecord(
     sourceMessageId,
   );
   const exactBasisIdentity = normalizedBasis.map((entry) => `${entry.knowledgeId}:${entry.claimIds.join(",")}`);
+  const userIdentity = runId === null ? userMaterialBasis : [];
   return Object.freeze({
-    recommendationId: stableId("recommendation", runId ?? sourceMessageId, intentVersionId, ...exactBasisIdentity, ...userMaterialBasis),
+    // Run-based Recommendation identity remains compatible with the pre-#45 derivation.
+    // Exact USER premise lineage is additive authority metadata, not a new identity input.
+    recommendationId: stableId("recommendation", runId ?? sourceMessageId, intentVersionId, ...exactBasisIdentity, ...userIdentity),
     conversationId,
     runId,
     intentScopeId,
