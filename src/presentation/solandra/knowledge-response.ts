@@ -8,15 +8,15 @@ import {
 } from "./knowledge-simplification.js";
 
 const EMPTY_KNOWLEDGE_MESSAGE = "No validated external findings are sufficiently relevant to this objective.";
-const EMPTY_CAUSAL_KNOWLEDGE_MESSAGE = "I couldn't establish why this happens from the available evidence.";
-const CAUSE_SEEKING_OBJECTIVE_PATTERN = /\b(?:why|cause|causes|caused|causing|mechanism)\b/iu;
-const CAUSE_SEEKING_FOLLOW_UP_PATTERN = /^(?:why\??|explain(?:\s+that)?(?:\s+more)?|tell\s+me\s+more)\.?$/iu;
-const DIRECT_CAUSAL_SENTENCE_PATTERN = /\b(?:because|due\s+to|cause|causes|caused|causing|lead|leads|led|leading|result|results|resulted|resulting|require|requires|required|requiring|react|reacts|reacted|reacting|trigger|triggers|triggered|triggering|produce|produces|produced|producing|drive|drives|drove|driven|driving)\b/iu;
 const SOURCE_REQUEST_PATTERN = /\b(?:source|sources|citation|citations|evidence)\b/iu;
+/*
+ * Source suitability is a real trust boundary. This lexical applicability check
+ * remains isolated debt until cognition can supply the applicability decision
+ * without weakening authoritative-source enforcement. Do not expand this list.
+ */
 const HIGH_STAKES_SOURCE_PATTERN = /\b(?:tax|taxes|taxation|taxable|legal|law|laws|regulation|regulatory|regulated|compliance|license|licensing|permit|statute|statutory)\b/iu;
 const SOURCE_SUITABILITY_LIMITATION =
   "I found relevant background material, but I need an appropriate authoritative source before I can answer this kind of question reliably.";
-const MAX_DIRECT_SOURCE_REPORT_SENTENCES = 2;
 
 function renderSourceReportFinding(finding: KnowledgeFinding, text = finding.text): string {
   const statusLabel: Record<KnowledgeFinding["status"], string> = {
@@ -43,11 +43,6 @@ function runContext(run: LatticeRun): readonly string[] {
   return isConsultationRunRequest(run.request) ? run.request.context : [];
 }
 
-function causeSeeking(knowledge: KnowledgeOutcome, context: readonly string[]): boolean {
-  return CAUSE_SEEKING_OBJECTIVE_PATTERN.test(knowledge.objective)
-    || CAUSE_SEEKING_FOLLOW_UP_PATTERN.test(context.at(-1)?.trim() ?? "");
-}
-
 function sourceRequest(context: readonly string[]): boolean {
   return SOURCE_REQUEST_PATTERN.test(context.at(-1)?.trim() ?? "");
 }
@@ -69,29 +64,9 @@ function sourceLabel(knowledge: KnowledgeOutcome): string {
   return `Sources: ${labels.join("; ")}.`;
 }
 
-function faithfulSentences(value: string): string[] {
-  return value
-    .match(/[^.!?\n]+(?:[.!?]+|$)/gu)
-    ?.map((sentence) => sentence.trim())
-    .filter(Boolean)
-    ?? [];
-}
-
-function directFragments(finding: KnowledgeFinding, causal: boolean): string[] {
-  const sentences = faithfulSentences(finding.text);
-  if (sentences.length === 0) return [];
-  if (causal) {
-    const direct = sentences.find((sentence) => DIRECT_CAUSAL_SENTENCE_PATTERN.test(sentence));
-    return direct ? [direct] : [];
-  }
-  if (finding.basis === "SOURCE_REPORT") {
-    return sentences.slice(0, MAX_DIRECT_SOURCE_REPORT_SENTENCES);
-  }
-  return [sentences[0]!];
-}
-
-function directFragment(finding: KnowledgeFinding, causal: boolean): string | undefined {
-  return directFragments(finding, causal)[0];
+function uncertaintyLabel(knowledge: KnowledgeOutcome): string {
+  if (knowledge.uncertainties.length === 0) return "";
+  return `Known uncertainty:\n${knowledge.uncertainties.map((item) => `- ${item}`).join("\n")}`;
 }
 
 function renderSourceList(knowledge: KnowledgeOutcome): string {
@@ -107,63 +82,21 @@ function renderSourceList(knowledge: KnowledgeOutcome): string {
   return `Sources I used:\n${lines.join("\n")}${suitabilityNote}`;
 }
 
-function renderGovernedAnswer(knowledge: KnowledgeOutcome, context: readonly string[]): string {
+function renderGovernedAnswer(knowledge: KnowledgeOutcome): string {
   if (knowledge.findings.length === 0) {
-    return causeSeeking(knowledge, context)
-      ? EMPTY_CAUSAL_KNOWLEDGE_MESSAGE
-      : "I couldn't establish enough relevant evidence to answer that reliably.";
-  }
-
-  const conflicted = knowledge.findings.filter((finding) => finding.status === "CONFLICTED");
-  if (conflicted.length > 0) {
-    const disputed = directFragment(conflicted[0]!, false) ?? conflicted[0]!.text;
-    return [
-      `The available evidence conflicts on this point, so I can't give a single reliable answer: ${disputed}`,
-      sourceLabel(knowledge),
-    ].filter(Boolean).join("\n\n");
+    return knowledge.uncertainties.find((item) => item.includes("No validated external findings"))
+      ?? "I couldn't establish enough relevant evidence to answer that reliably.";
   }
 
   if (requiresAuthoritativeDomainSource(knowledge) && !hasAuthoritativeDomainSource(knowledge)) {
     return [SOURCE_SUITABILITY_LIMITATION, sourceLabel(knowledge)].filter(Boolean).join("\n\n");
   }
 
-  const refuted = knowledge.findings.find((finding) => finding.status === "REFUTED");
-  if (refuted) {
-    const text = directFragment(refuted, false) ?? refuted.text;
-    return [
-      `The available governed evidence refutes this claim: ${text}`,
-      sourceLabel(knowledge),
-    ].filter(Boolean).join("\n\n");
-  }
-
-  const causal = causeSeeking(knowledge, context);
-  const answerable = knowledge.findings.filter((finding) =>
-    finding.status === "SUPPORTED"
-    || (finding.basis === "SOURCE_REPORT" && finding.evidenceIds.length > 0)
-  );
-  const fragments = answerable
-    .flatMap((finding) => directFragments(finding, causal))
-    .filter((fragment, index, values) => values.indexOf(fragment) === index)
-    .slice(0, 2);
-
-  if (fragments.length === 0) {
-    return [
-      causal
-        ? "I found relevant evidence, but it doesn't contain a direct explanation I can present faithfully."
-        : "I found relevant evidence, but I can't turn it into a direct answer without adding unsupported meaning.",
-      sourceLabel(knowledge),
-    ].filter(Boolean).join("\n\n");
-  }
-
-  const sourceReportOnly = answerable.length > 0 && answerable.every((finding) => finding.basis === "SOURCE_REPORT");
-  const answer = sourceReportOnly
-    ? `The retrieved source material reports: ${fragments.join(" ")}`
-    : fragments.join(" ");
-  const qualification = sourceReportOnly
-    ? "That establishes what the cited source reports; it does not by itself independently verify the broader real-world claim."
-    : "";
-
-  return [answer, qualification, sourceLabel(knowledge)].filter(Boolean).join("\n\n");
+  return [
+    knowledge.findings.map((finding) => renderFinding(finding)).join("\n\n"),
+    uncertaintyLabel(knowledge),
+    sourceLabel(knowledge),
+  ].filter(Boolean).join("\n\n");
 }
 
 function simplificationLimitation(attempt: KnowledgeSimplificationAttempt): string {
@@ -200,7 +133,6 @@ async function attemptSimplification(
 /** Project governed KnowledgeOutcome content into concise Solandra conversation text. */
 export function renderKnowledgeResponse(knowledge: KnowledgeOutcome): string {
   if (knowledge.findings.length === 0) {
-    if (CAUSE_SEEKING_OBJECTIVE_PATTERN.test(knowledge.objective)) return EMPTY_CAUSAL_KNOWLEDGE_MESSAGE;
     return knowledge.uncertainties.find((item) => item.includes("No validated external findings"))
       ?? EMPTY_KNOWLEDGE_MESSAGE;
   }
@@ -209,8 +141,9 @@ export function renderKnowledgeResponse(knowledge: KnowledgeOutcome): string {
 
 /**
  * Produce Product-facing Knowledge without changing canonical Knowledge. Direct
- * answers remain extractive. Model assistance is optional, non-authoritative,
- * subject-authorized by canonical composition, and failure/revocation fail closed.
+ * answers render governed findings structurally rather than reconstructing their
+ * meaning from lexical markers. Explicit legacy model assistance remains bounded
+ * to its existing subject-authorized simplification capability.
  */
 export async function renderKnowledgeResponseForRun(
   knowledge: KnowledgeOutcome,
@@ -225,7 +158,7 @@ export async function renderKnowledgeResponseForRun(
   }
 
   const governed = renderKnowledgeResponse(knowledge);
-  if (!knowledgeSimplificationRequested(run)) return renderGovernedAnswer(knowledge, context);
+  if (!knowledgeSimplificationRequested(run)) return renderGovernedAnswer(knowledge);
 
   if (knowledge.findings.length !== 1 || simplifier === undefined) {
     return `${governed}\n\n${KNOWLEDGE_SIMPLIFICATION_FAILURE_MESSAGE}`;
