@@ -10,7 +10,7 @@ const migrations = [
 
 export type RecommendationRepresentationKind =
   | "LEGACY_FREEFORM"
-  | "STRUCTURAL_USER_MATERIAL_V1";
+  | "STRUCTURAL_ADVISORY_V1";
 
 export interface RecommendationBasis {
   knowledgeId: string;
@@ -36,12 +36,12 @@ export interface RecommendationRecord {
   sourceMessageId: string;
   basis: RecommendationBasis[];
   userMaterialBasis: string[];
-  /** Exact premise authority. Generated advisory prose cannot add to this set. */
+  /** Exact premise authority. Generated advisory proposal text cannot add to this set. */
   premiseAuthority: RecommendationPremiseAuthority;
   knowledgeIds: string[];
   claimIds: string[];
   /**
-   * New records use STRUCTURAL_USER_MATERIAL_V1. LEGACY_FREEFORM records are
+   * New records use STRUCTURAL_ADVISORY_V1. LEGACY_FREEFORM records are
    * read through a fail-closed compatibility projection that never reproduces
    * their historical free-form Recommendation prose.
    */
@@ -49,8 +49,8 @@ export interface RecommendationRecord {
   /** Stable option identities, including for fail-closed legacy projections. */
   optionIds: string[];
   /**
-   * For STRUCTURAL_USER_MATERIAL_V1:
-   * - recommendation/alternatives are exact USER-authored option excerpts;
+   * For STRUCTURAL_ADVISORY_V1:
+   * - recommendation/alternatives are non-authoritative Solandra advisory proposals;
    * - rationale is deterministic rendering of exact governed claim content;
    * - assumptions are exact USER-authored premise excerpts;
    * - uncertainties are exact governed uncertainty strings;
@@ -209,7 +209,7 @@ export function buildRecommendationRecord(
     premiseAuthority,
     knowledgeIds,
     claimIds,
-    representationKind: "STRUCTURAL_USER_MATERIAL_V1",
+    representationKind: "STRUCTURAL_ADVISORY_V1",
     optionIds: optionIds(recommendationId, recommendation, alternatives),
     recommendation,
     rationale: input.rationale.map((item) => bounded(item, "rationale item", 2_000)),
@@ -310,7 +310,7 @@ function stringArray(value: unknown, label: string): string[] {
 }
 
 function representationKind(value: string): RecommendationRepresentationKind {
-  if (value === "LEGACY_FREEFORM" || value === "STRUCTURAL_USER_MATERIAL_V1") return value;
+  if (value === "LEGACY_FREEFORM" || value === "STRUCTURAL_ADVISORY_V1") return value;
   throw new Error("Persisted Recommendation representation kind is invalid.");
 }
 
