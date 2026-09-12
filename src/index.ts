@@ -1,4 +1,9 @@
 import { resolveCanonicalOwnerSubjectResolver } from "./auth/owner-access.js";
+import {
+  createOwnerBrowserSessionSubjectResolver,
+  OwnerBrowserSessionBroker,
+  registerOwnerBrowserSessionRoutes,
+} from "./auth/owner-browser-session.js";
 import { registerCapabilityBrokerApi } from "./capabilities/api.js";
 import { createConfiguredCapabilityBroker } from "./capabilities/composition.js";
 import { createAlphaDecisionRuntimeComposition } from "./decision/alpha-decision-composition.js";
@@ -24,7 +29,13 @@ try {
   const capabilityComposition = await createConfiguredCapabilityBroker(config);
   const decisionCapability = createAlphaDecisionRuntimeComposition();
   const solandra = createConfiguredSolandraCognition(config);
-  const authenticatedSubjectResolver = resolveCanonicalOwnerSubjectResolver(config);
+  const ownerSubjectResolver = resolveCanonicalOwnerSubjectResolver(config);
+  const ownerBrowserSessions = ownerSubjectResolver === undefined
+    ? undefined
+    : new OwnerBrowserSessionBroker();
+  const authenticatedSubjectResolver = ownerSubjectResolver === undefined
+    ? undefined
+    : createOwnerBrowserSessionSubjectResolver(ownerSubjectResolver, ownerBrowserSessions!);
   let app;
   try {
     app = await createRuntimeApp(config, {
@@ -41,6 +52,9 @@ try {
   } catch (error) {
     await Promise.allSettled([modelAssistance.close(), capabilityComposition.broker.close()]);
     throw error;
+  }
+  if (ownerBrowserSessions !== undefined && ownerSubjectResolver !== undefined) {
+    registerOwnerBrowserSessionRoutes(app, ownerBrowserSessions, ownerSubjectResolver);
   }
   registerModelAssistanceApi(app, modelAssistance);
   registerCapabilityBrokerApi(app, capabilityComposition.broker);
