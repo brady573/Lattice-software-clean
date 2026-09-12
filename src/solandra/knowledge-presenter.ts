@@ -3,7 +3,6 @@ import { ModelProviderError } from "../model/errors.js";
 import { ModelRuntime } from "../model/runtime.js";
 import type { CanonicalModelRequest, ModelInvocationProvenance } from "../model/types.js";
 import type { KnowledgeFinding, KnowledgeOutcome } from "../outcome.js";
-import { validateKnowledgeSimplification } from "../presentation/solandra/knowledge-simplification.js";
 
 export type SolandraKnowledgePresentationMode = "EXPLAIN" | "SIMPLIFY";
 
@@ -39,7 +38,6 @@ const presentationOutputSchema = z.object({
   needsNewKnowledge: z.boolean(),
   segments: z.array(z.object({
     claimId: z.string().min(1).max(300),
-    text: z.string().min(1).max(2_000),
   }).strict()).max(16),
 }).strict();
 
@@ -70,9 +68,9 @@ function buildRequest(
           "You are Solandra presenting an already-governed Lattice Knowledge object. Presentation is not Knowledge authority.",
           "Use only the supplied findings. Do not add facts, examples, causes, consequences, quantities, dates, recommendations, source claims, or certainty absent from them.",
           "If the requested explanation would require any externally factual claim not present in the findings, set needsNewKnowledge=true and return no segments.",
-          "Otherwise return one or more claim-bound segments. Each claimId must exactly match a supplied finding. A segment may restate that finding in clearer ordinary language but may not change its material meaning.",
-          "Do not mention internal IDs, V36, runs, models, providers, or workflow stages in segment text.",
-          "Return exactly JSON: {\"needsNewKnowledge\":boolean,\"segments\":[{\"claimId\":\"...\",\"text\":\"...\"}]} and no prose.",
+          "Otherwise select and order the governed findings that should be presented. Each claimId must exactly match a supplied finding.",
+          "Do not rewrite, paraphrase, compress, or replace factual finding text. Lattice renders the authoritative proposition from governed Knowledge after your selection.",
+          "Return exactly JSON: {\"needsNewKnowledge\":boolean,\"segments\":[{\"claimId\":\"...\"}]} and no prose.",
         ].join("\n"),
       },
       {
@@ -88,30 +86,45 @@ function buildRequest(
       },
     ],
     temperature: 0,
-    maxOutputTokens: 1_200,
+    maxOutputTokens: 800,
     seed: 0,
   };
 }
 
-function normalized(value: string): string {
-  return value.trim().replace(/\s+/gu, " ");
+function statusLabel(finding: KnowledgeFinding): string {
+  switch (finding.status) {
+    case "SUPPORTED": return "Supported";
+    case "REFUTED": return "Refuted";
+    case "CONFLICTED": return "Materially conflicted";
+    case "UNRESOLVED": return "Unresolved";
+  }
 }
 
-function safeRestatement(original: string, candidate: string): string | null {
-  if (normalized(original) === normalized(candidate)) return candidate.trim();
-  return validateKnowledgeSimplification(original, candidate);
-}
-
-function renderFinding(finding: KnowledgeFinding, text: string): string {
+function renderFinding(finding: KnowledgeFinding): string {
   if (finding.basis === "SOURCE_REPORT") {
-    return `${text} This is a plain-language presentation of what the cited source reports; it does not independently verify a broader real-world claim.`;
+    return `${statusLabel(finding)} as a source report: ${finding.text} This status concerns what the retrieved source material reports; it does not independently verify the broader real-world claim.`;
   }
   switch (finding.status) {
-    case "SUPPORTED": return text;
-    case "REFUTED": return `The governed evidence refutes this: ${text}`;
-    case "CONFLICTED": return `The governed evidence remains materially conflicted: ${text}`;
-    case "UNRESOLVED": return `The available governed evidence does not establish this strongly enough: ${text}`;
+    case "SUPPORTED": return finding.text;
+    case "REFUTED": return `The governed evidence refutes this: ${finding.text}`;
+    case "CONFLICTED": return `The governed evidence remains materially conflicted: ${finding.text}`;
+    case "UNRESOLVED": return `The available governed evidence does not establish this strongly enough: ${finding.text}`;
   }
+}
+
+function renderUncertainties(knowledge: KnowledgeOutcome): string {
+  if (knowledge.uncertainties.length === 0) return "";
+  return `Known uncertainty:\n${knowledge.uncertainties.map((item) => `- ${item}`).join("\n")}`;
+}
+
+function renderSources(knowledge: KnowledgeOutcome): string {
+  if (knowledge.provenance.length === 0) return "";
+  const lines = knowledge.provenance.map((source) => {
+    const title = source.title.trim() || source.canonicalUri;
+    const publisher = source.publisher ? ` — ${source.publisher}` : "";
+    return `- ${title}${publisher}\n  ${source.canonicalUri}`;
+  });
+  return `Sources:\n${lines.join("\n")}`;
 }
 
 export class ModelSolandraKnowledgePresenter implements SolandraKnowledgePresenter {
@@ -150,7 +163,11 @@ export class ModelSolandraKnowledgePresenter implements SolandraKnowledgePresent
     if (result.response.output.length !== 1 || result.response.output[0]?.type !== "text") {
       return Object.freeze({ status: "FIDELITY_REJECTED", text: null, invocationProvenance });
     }
-    const parsed = presentationOutputSchema.parse(parseJsonObject(result.response.output[0].text));
+    const parsedResult = presentationOutputSchema.safeParse(parseJsonObject(result.response.output[0].text));
+    if (!parsedResult.success) {
+      return Object.freeze({ status: "FIDELITY_REJECTED", text: null, invocationProvenance });
+    }
+    const parsed = parsedResult.data;
     if (parsed.needsNewKnowledge) {
       if (parsed.segments.length !== 0) {
         return Object.freeze({ status: "FIDELITY_REJECTED", text: null, invocationProvenance });
@@ -169,20 +186,21 @@ export class ModelSolandraKnowledgePresenter implements SolandraKnowledgePresent
       if (!finding || seen.has(segment.claimId)) {
         return Object.freeze({ status: "FIDELITY_REJECTED", text: null, invocationProvenance });
       }
-      const text = safeRestatement(finding.text, segment.text);
-      if (text === null) {
-        return Object.freeze({ status: "FIDELITY_REJECTED", text: null, invocationProvenance });
-      }
       seen.add(segment.claimId);
-      rendered.push(renderFinding(finding, text));
+      rendered.push(renderFinding(finding));
     }
 
     const prefix = input.mode === "SIMPLIFY"
-      ? "In plain language, based on the same established Knowledge:"
+      ? "In plain language structure, using the same established factual wording:"
       : "Based on the same established Knowledge:";
     return Object.freeze({
       status: "PRESENTED",
-      text: `${prefix}\n\n${rendered.join("\n\n")}\n\nThe underlying Knowledge and its sources are unchanged.`,
+      text: [
+        `${prefix}\n\n${rendered.join("\n\n")}`,
+        renderUncertainties(input.knowledge),
+        renderSources(input.knowledge),
+        "The underlying Knowledge and its sources are unchanged.",
+      ].filter(Boolean).join("\n\n"),
       invocationProvenance,
     });
   }
