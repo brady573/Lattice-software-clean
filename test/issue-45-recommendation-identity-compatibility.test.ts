@@ -4,6 +4,10 @@ import { recommendationOptions } from "../src/recommendation/recommendation-opti
 import { buildRecommendationRecord } from "../src/recommendation/recommendation-store.js";
 
 const FIXED_TIME = "2026-09-12T14:30:00.000Z";
+const USER_PREMISE = [{
+  intentVersionId: "intent-issue-45-identity-v1",
+  sourceMessageId: "message-issue-45-identity",
+}];
 
 function build(userMaterialBasis?: string[]) {
   return buildRecommendationRecord({
@@ -24,17 +28,15 @@ function build(userMaterialBasis?: string[]) {
   });
 }
 
-test("Issue #45: adding exact USER premise lineage does not change run Recommendation or option identity", () => {
-  const previousShape = build();
+test("Issue #45: exact USER premise projection preserves historical run Recommendation and option identity", () => {
+  const historicalShape = build();
   const candidateShape = build([
     "intent-issue-45-identity-v1",
     "message-issue-45-identity",
   ]);
 
-  assert.equal(candidateShape.recommendationId, previousShape.recommendationId);
-  assert.deepEqual(recommendationOptions(candidateShape), recommendationOptions(previousShape));
-  assert.deepEqual(candidateShape.premiseAuthority.user, [{
-    intentVersionId: "intent-issue-45-identity-v1",
-    sourceMessageId: "message-issue-45-identity",
-  }]);
+  assert.equal(candidateShape.recommendationId, historicalShape.recommendationId);
+  assert.deepEqual(recommendationOptions(candidateShape), recommendationOptions(historicalShape));
+  assert.deepEqual(historicalShape.premiseAuthority.user, USER_PREMISE);
+  assert.deepEqual(candidateShape.premiseAuthority.user, USER_PREMISE);
 });
