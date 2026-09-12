@@ -258,7 +258,7 @@ test("M2 PostgreSQL restart preserves exact Recommendation identity, claim prove
     assert.equal(before.basis.length, 1);
     assert.deepEqual(before.basis[0]?.claimIds, before.claimIds);
     assert.deepEqual(before.factualBasis[0]?.claimIds, before.claimIds);
-    assert.deepEqual(before.rationale, [FINDING]);
+    assert.deepEqual(before.rationale, [`Source report (unresolved): ${FINDING}`]);
     const establishedKnowledge = await first.inject({
       method: "GET",
       url: `/api/v1/knowledge/${before.basis[0]!.knowledgeId}`,
