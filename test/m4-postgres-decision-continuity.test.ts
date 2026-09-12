@@ -19,11 +19,15 @@ test("PostgreSQL persists Solandra-originated run-free Recommendation and Accept
   let first = await createRuntimeApp(config, { solandraCognition: new C(), solandraAdvisory: advisory });
   let conversationId = "";
   let choiceId = "";
+  let recommendationId = "";
+  let optionIds: string[] = [];
   try {
     const created = await first.inject({ method: "POST", url: "/api/v1/conversations" }); conversationId = created.json().conversation.id;
     const rec = await first.inject({ method: "POST", url: `/api/v1/conversations/${conversationId}/turns`, payload: { turnId: "pg-1", message: USER_MESSAGE } });
     assert.equal(rec.statusCode, 200, rec.body);
     assert.equal(rec.json().recommendationReference.options[0].text, "Keep the lighter routine.");
+    recommendationId = rec.json().recommendationReference.recommendationId;
+    optionIds = rec.json().recommendationReference.options.map((item: { optionId: string }) => item.optionId);
     const chosen = await first.inject({ method: "POST", url: `/api/v1/conversations/${conversationId}/turns`, payload: { turnId: "pg-2", message: "I choose the other option." } });
     assert.equal(chosen.statusCode, 200, chosen.body); choiceId = chosen.json().acceptedChoice.acceptedChoiceId;
   } finally { await first.close(); }
@@ -35,9 +39,15 @@ test("PostgreSQL persists Solandra-originated run-free Recommendation and Accept
     assert.equal(continuity.statusCode, 200, continuity.body);
     assert.equal(continuity.json().recommendations.length, 1);
     assert.equal(continuity.json().recommendations[0].runId, null);
-    assert.equal(continuity.json().recommendations[0].recommendation, "Keep the lighter routine.");
+    assert.equal(continuity.json().recommendations[0].options[0].text, "Keep the lighter routine.");
+    assert.deepEqual(continuity.json().recommendations[0].options.map((item: { optionId: string }) => item.optionId), optionIds);
     assert.equal(continuity.json().acceptedChoices.length, 1);
     assert.equal(continuity.json().acceptedChoices[0].acceptedChoiceId, choiceId);
     assert.equal(continuity.json().acceptedChoices[0].authorizationGranted, false);
+    assert.equal(continuity.json().acceptedChoices[0].executionAuthorized, false);
+
+    const raw = await second.inject({ method: "GET", url: `/api/v1/recommendations/${recommendationId}` });
+    assert.equal(raw.statusCode, 200, raw.body);
+    assert.ok(raw.json().proposals.every((item: { origin: string; factualAuthority: boolean }) => item.origin === "SOLANDRA" && item.factualAuthority === false));
   } finally { await second.close(); }
 });

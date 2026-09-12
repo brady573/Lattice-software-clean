@@ -251,7 +251,9 @@ test("Issue #45 held-out: goal-only decision can use governed external Knowledge
     const recommendation = await app.inject({ method: "GET", url: `/api/v1/recommendations/${recommendationId}` });
     assert.equal(recommendation.statusCode, 200, recommendation.body);
     const record = recommendation.json();
-    assert.equal(record.recommendation, "Use a snapshot-based backup plan with regular restore checks.");
+    assert.equal(record.proposals[0].text, "Use a snapshot-based backup plan with regular restore checks.");
+    assert.equal(record.proposals[0].origin, "SOLANDRA");
+    assert.equal(record.proposals[0].factualAuthority, false);
     assert.equal(record.selectionAuthorized, false);
     assert.equal(record.knowledgeIds.length, 1);
     assert.equal(record.claimIds.length, 1);
