@@ -95,7 +95,7 @@ function recommendationPremiseAuthority(
 ): RecommendationPremiseAuthority {
   const hasIntentVersion = userMaterialBasis.includes(intentVersionId);
   const hasSourceMessage = userMaterialBasis.includes(sourceMessageId);
-  if (hasIntentVersion !== hasSourceMessage) {
+  if (userMaterialBasis.length > 0 && (!hasIntentVersion || !hasSourceMessage)) {
     throw new Error("Recommendation USER-material basis must retain IntentVersion and source-message identity together.");
   }
   return Object.freeze({
@@ -103,9 +103,9 @@ function recommendationPremiseAuthority(
       knowledgeId: entry.knowledgeId,
       claimIds: [...entry.claimIds],
     })),
-    user: hasIntentVersion
-      ? [{ intentVersionId, sourceMessageId }]
-      : [],
+    // intentVersionId/sourceMessageId predate userMaterialBasis on run Recommendations,
+    // so this exact pair also upgrades historical rows structurally without rewriting them.
+    user: [{ intentVersionId, sourceMessageId }],
   });
 }
 
