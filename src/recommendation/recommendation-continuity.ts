@@ -155,7 +155,8 @@ function assertPreservedGovernedUncertainty(
   advisory: SolandraRecommendationResult,
   governedUncertainties: readonly string[],
 ): void {
-  if (!equalSet(advisory.preservedUncertainties, governedUncertainties)) {
+  const preserved = [...new Set(advisory.preservedUncertainties)];
+  if (!equalSet(preserved, governedUncertainties)) {
     throw new Error("Solandra advisory reasoning dropped or invented material governed uncertainty from its Recommendation basis.");
   }
 }
