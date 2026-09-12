@@ -10,6 +10,16 @@ export interface RecommendationBasis {
   claimIds: string[];
 }
 
+export interface RecommendationUserPremise {
+  intentVersionId: string;
+  sourceMessageId: string;
+}
+
+export interface RecommendationPremiseAuthority {
+  knowledge: RecommendationBasis[];
+  user: RecommendationUserPremise[];
+}
+
 export interface RecommendationRecord {
   recommendationId: string;
   conversationId: string;
@@ -19,8 +29,14 @@ export interface RecommendationRecord {
   sourceMessageId: string;
   basis: RecommendationBasis[];
   userMaterialBasis: string[];
+  /**
+   * The only durable premise-authority set for this Recommendation.
+   * Generated advisory prose below is not factual Knowledge and does not add to this set.
+   */
+  premiseAuthority: RecommendationPremiseAuthority;
   knowledgeIds: string[];
   claimIds: string[];
+  /** Non-authoritative advisory judgment. These fields never establish factual premise authority. */
   recommendation: string;
   rationale: string[];
   tradeoffs: string[];
@@ -71,8 +87,30 @@ function clone<T>(value: T): T {
   return structuredClone(value);
 }
 
+function recommendationPremiseAuthority(
+  basis: readonly RecommendationBasis[],
+  userMaterialBasis: readonly string[],
+  intentVersionId: string,
+  sourceMessageId: string,
+): RecommendationPremiseAuthority {
+  const hasIntentVersion = userMaterialBasis.includes(intentVersionId);
+  const hasSourceMessage = userMaterialBasis.includes(sourceMessageId);
+  if (hasIntentVersion !== hasSourceMessage) {
+    throw new Error("Recommendation USER-material basis must retain IntentVersion and source-message identity together.");
+  }
+  return Object.freeze({
+    knowledge: basis.map((entry) => ({
+      knowledgeId: entry.knowledgeId,
+      claimIds: [...entry.claimIds],
+    })),
+    user: hasIntentVersion
+      ? [{ intentVersionId, sourceMessageId }]
+      : [],
+  });
+}
+
 export function buildRecommendationRecord(
-  input: Omit<RecommendationRecord, "recommendationId" | "selectionAuthorized" | "knowledgeIds" | "claimIds" | "userMaterialBasis"> & { userMaterialBasis?: string[] },
+  input: Omit<RecommendationRecord, "recommendationId" | "selectionAuthorized" | "knowledgeIds" | "claimIds" | "userMaterialBasis" | "premiseAuthority"> & { userMaterialBasis?: string[] },
 ): RecommendationRecord {
   const conversationId = bounded(input.conversationId, "conversationId", 128);
   const runId = input.runId === null ? null : bounded(input.runId, "runId", 200);
@@ -98,6 +136,12 @@ export function buildRecommendationRecord(
     .map(([knowledgeId, claimIds]) => ({ knowledgeId, claimIds: [...claimIds].sort() }));
   const knowledgeIds = normalizedBasis.map((entry) => entry.knowledgeId);
   const claimIds = unique(normalizedBasis.flatMap((entry) => entry.claimIds));
+  const premiseAuthority = recommendationPremiseAuthority(
+    normalizedBasis,
+    userMaterialBasis,
+    intentVersionId,
+    sourceMessageId,
+  );
   const exactBasisIdentity = normalizedBasis.map((entry) => `${entry.knowledgeId}:${entry.claimIds.join(",")}`);
   return Object.freeze({
     recommendationId: stableId("recommendation", runId ?? sourceMessageId, intentVersionId, ...exactBasisIdentity, ...userMaterialBasis),
@@ -108,6 +152,7 @@ export function buildRecommendationRecord(
     sourceMessageId,
     basis: normalizedBasis,
     userMaterialBasis,
+    premiseAuthority,
     knowledgeIds,
     claimIds,
     recommendation: bounded(input.recommendation, "recommendation"),
@@ -209,6 +254,8 @@ function stringArray(value: unknown, label: string): string[] {
 
 function mapRecommendation(row: RecommendationRow): RecommendationRecord {
   if (row.selection_authorized !== false) throw new Error("Persisted Recommendation cannot authorize selection.");
+  const basis = recommendationBasis(row.basis);
+  const userMaterialBasis = stringArray(row.user_material_basis, "user_material_basis");
   return {
     recommendationId: row.recommendation_id,
     conversationId: row.conversation_id,
@@ -216,8 +263,14 @@ function mapRecommendation(row: RecommendationRow): RecommendationRecord {
     intentScopeId: row.intent_scope_id,
     intentVersionId: row.intent_version_id,
     sourceMessageId: row.source_message_id,
-    basis: recommendationBasis(row.basis),
-    userMaterialBasis: stringArray(row.user_material_basis, "user_material_basis"),
+    basis,
+    userMaterialBasis,
+    premiseAuthority: recommendationPremiseAuthority(
+      basis,
+      userMaterialBasis,
+      row.intent_version_id,
+      row.source_message_id,
+    ),
     knowledgeIds: stringArray(row.knowledge_ids, "knowledge_ids"),
     claimIds: stringArray(row.claim_ids, "claim_ids"),
     recommendation: row.recommendation,
