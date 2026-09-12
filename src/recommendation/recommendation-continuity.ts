@@ -107,17 +107,18 @@ export async function establishRecommendation(input: {
     intentVersionId: input.intentVersion.intentVersionId,
     sourceMessageId: input.run.request.sourceMessageId,
     basis,
-    userMaterialBasis: [],
+    userMaterialBasis: [input.intentVersion.intentVersionId, input.run.request.sourceMessageId],
     recommendation: input.advisory.recommendation,
     rationale: input.advisory.rationale,
     tradeoffs: input.advisory.tradeoffs,
     assumptions: input.advisory.assumptions,
     uncertainties: [...new Set([...input.advisory.preservedUncertainties, ...input.advisory.uncertainties])],
     alternatives: input.advisory.alternatives,
-    // The latest immutable Knowledge establishment time is a deterministic
-    // recommendation-establishment timestamp. Concurrent first reads therefore
-    // construct byte-identical records instead of racing on wall-clock time.
-    createdAt: input.createdAt ?? latestKnowledgeCreationTime(input.knowledge),
+    // The latest immutable Knowledge establishment time remains deterministic when Knowledge is used.
+    // USER-only recommendations instead use the exact immutable IntentVersion time rather than inventing
+    // a wall-clock establishment time or requiring external Knowledge solely for identity.
+    createdAt: input.createdAt
+      ?? (input.knowledge.length > 0 ? latestKnowledgeCreationTime(input.knowledge) : input.intentVersion.createdAt),
   });
   try {
     return await input.store.putRecommendation(draft);
@@ -185,8 +186,19 @@ export async function loadRecommendation(
   const record = await store.getRecommendation(recommendationId);
   if (!record) return undefined;
 
-  const basisKnowledgeIds = [...new Set(record.basis.map((item) => item.knowledgeId))];
-  const basisClaimIds = [...new Set(record.basis.flatMap((item) => item.claimIds))];
+  const authoritativeKnowledgeBasis = record.premiseAuthority.knowledge;
+  if (JSON.stringify(authoritativeKnowledgeBasis) !== JSON.stringify(record.basis)) {
+    throw new Error("Recommendation factual premise authority no longer matches its exact Knowledge/claim basis.");
+  }
+  const expectedUserPremises = record.userMaterialBasis.length === 0
+    ? []
+    : [{ intentVersionId: record.intentVersionId, sourceMessageId: record.sourceMessageId }];
+  if (JSON.stringify(record.premiseAuthority.user) !== JSON.stringify(expectedUserPremises)) {
+    throw new Error("Recommendation USER premise authority no longer matches its exact USER-material lineage.");
+  }
+
+  const basisKnowledgeIds = [...new Set(authoritativeKnowledgeBasis.map((item) => item.knowledgeId))];
+  const basisClaimIds = [...new Set(authoritativeKnowledgeBasis.flatMap((item) => item.claimIds))];
   if (!equalSet(record.knowledgeIds, basisKnowledgeIds) || !equalSet(record.claimIds, basisClaimIds)) {
     throw new Error("Recommendation flattened basis no longer matches its exact Knowledge/claim relationship.");
   }
@@ -198,7 +210,7 @@ export async function loadRecommendation(
     throw new Error("Recommendation Knowledge conversation binding changed.");
   }
   const loadedById = new Map(loaded.map((item) => [item.record.knowledgeId, item]));
-  for (const basis of record.basis) {
+  for (const basis of authoritativeKnowledgeBasis) {
     const item = loadedById.get(basis.knowledgeId);
     if (!item || basis.claimIds.some((claimId) => !item.record.claimIds.includes(claimId))) {
       throw new Error("Recommendation exact claim basis no longer resolves through its governed Knowledge.");
@@ -218,8 +230,8 @@ export async function loadRecommendation(
     ) {
       throw new Error("Recommendation exact Run/Intent/USER-source binding changed.");
     }
-  } else if (record.userMaterialBasis.length === 0) {
-    throw new Error("Run-free Recommendation is missing exact USER-material basis identity.");
+  } else if (record.premiseAuthority.user.length === 0) {
+    throw new Error("Run-free Recommendation is missing exact USER-material premise authority.");
   }
   return { record, knowledge: loaded };
 }
@@ -236,7 +248,7 @@ export async function loadRecommendationByRunId(
 
 export function recommendationBasisTrace(loaded: LoadedRecommendation): RecommendationBasisTrace[] {
   const byId = new Map(loaded.knowledge.map((item) => [item.record.knowledgeId, item]));
-  return loaded.record.basis.map((basis) => {
+  return loaded.record.premiseAuthority.knowledge.map((basis) => {
     const knowledge = byId.get(basis.knowledgeId);
     if (!knowledge) throw new Error("Recommendation basis Knowledge is unavailable for provenance traversal.");
     const claims = new Set(basis.claimIds);
