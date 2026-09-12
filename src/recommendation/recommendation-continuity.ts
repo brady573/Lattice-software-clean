@@ -190,9 +190,10 @@ export async function loadRecommendation(
   if (JSON.stringify(authoritativeKnowledgeBasis) !== JSON.stringify(record.basis)) {
     throw new Error("Recommendation factual premise authority no longer matches its exact Knowledge/claim basis.");
   }
-  const expectedUserPremises = record.userMaterialBasis.length === 0
-    ? []
-    : [{ intentVersionId: record.intentVersionId, sourceMessageId: record.sourceMessageId }];
+  const expectedUserPremises = [{
+    intentVersionId: record.intentVersionId,
+    sourceMessageId: record.sourceMessageId,
+  }];
   if (JSON.stringify(record.premiseAuthority.user) !== JSON.stringify(expectedUserPremises)) {
     throw new Error("Recommendation USER premise authority no longer matches its exact USER-material lineage.");
   }
