@@ -62,7 +62,7 @@ async function createConversation() {
   return (await request({ method: "POST", url: "/api/v1/conversations" })).conversation.id;
 }
 async function state(conversationId) {
-  const body = await request({ method: "GET", url: `/api/v1/conversations/${conversationId}` });
+  const body = await request({ method: "GET", url: `/api/v1/conversations/${conversationId}/continuity` });
   return {
     runs: body.runs?.length ?? 0,
     knowledge: body.knowledge?.length ?? 0,
