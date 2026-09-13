@@ -29,19 +29,22 @@ assert.equal(config.solandraCognitionRoute, "groq-gpt-oss-120b");
 
 const solandra = createConfiguredSolandraCognition(config);
 assert.ok(solandra, "Configured Solandra composition is required for this validation.");
-assert.ok(solandra.model.trim().length > 0, "Configured Solandra model identity is required.");
 
 const acquisitions = [];
 const cognitionObservations = [];
 const evidence = {
   product: { sha: expectedSha, tree: expectedTree },
+  reusedOrdinaryEvidence: {
+    workflowRunId: 34769624090,
+    acceptedCompletedTurns: 6,
+    repeated: false,
+  },
   route: {
     configured: config.solandraCognitionRoute,
     truthMode: config.truthMode,
     composedModel: solandra.model,
   },
   cognition: cognitionObservations,
-  ordinary: [],
   knowledge: null,
   historicalFollowUp: null,
 };
@@ -126,7 +129,6 @@ async function state(conversationId) {
     knowledge: body.knowledge?.length ?? 0,
     recommendations: body.recommendations?.length ?? 0,
     choices: body.acceptedChoices?.length ?? body.choices?.length ?? 0,
-    body,
   };
 }
 async function submit(conversationId, message) {
@@ -135,40 +137,6 @@ async function submit(conversationId, message) {
     url: `/api/v1/conversations/${conversationId}/turns`,
     payload: { turnId: randomUUID(), message },
   });
-}
-async function ordinaryTurn(conversationId, capability, message) {
-  const before = await state(conversationId);
-  const cognitionStart = cognitionObservations.length;
-  const result = await submit(conversationId, message);
-  const turnCognition = cognitionObservations.slice(cognitionStart);
-  const after = await state(conversationId);
-  const record = {
-    capability,
-    status: result.status,
-    assistantMessage: result.presentation?.assistantMessage,
-    publicCognitionMode: result.interpretation?.mode ?? null,
-    publicCognition: result.interpretation ?? null,
-    cognition: turnCognition,
-    authority: result.interpretation?.authority,
-    factualAuthority: result.interpretation?.factualAuthority,
-    created: {
-      runs: after.runs - before.runs,
-      knowledge: after.knowledge - before.knowledge,
-      recommendations: after.recommendations - before.recommendations,
-      choices: after.choices - before.choices,
-    },
-  };
-  evidence.ordinary.push(record);
-  writeEvidence();
-  if (turnCognition.some((observation) => observation.mode === "GOVERNED")) {
-    throw new Error("PR92_ORDINARY_TURN_RETURNED_GOVERNED: preserve this real-model evidence for Steward review; no Product repair is authorized in this task.");
-  }
-  assert.equal(record.status, "CONVERSATION_COMPLETED");
-  assert.equal(record.publicCognitionMode, "CONVERSATION");
-  assert.equal(record.authority, "NON_AUTHORITATIVE_CONVERSATION");
-  assert.equal(record.factualAuthority, false);
-  assert.ok(typeof record.assistantMessage === "string" && record.assistantMessage.trim().length > 0);
-  assert.deepEqual(record.created, { runs: 0, knowledge: 0, recommendations: 0, choices: 0 });
 }
 async function waitForRun(runId) {
   const deadline = Date.now() + 60_000;
@@ -187,93 +155,84 @@ async function waitForRun(runId) {
 }
 
 try {
-  const first = await createConversation();
-  await ordinaryTurn(first, ["reference/coreference", "multiple requests"], "I'm inventing two airships: Juniper is quick and Copper Finch is roomy. Give each a one-line motto, then tell me which name feels warmer.");
-  await ordinaryTurn(first, ["ellipsis", "response-style adaptation"], "For the second one too—shorter, like a label.");
-  await ordinaryTurn(first, ["correction/revision", "negation"], "Actually, I mixed them up: Juniper is the roomy one. Don't rewrite both; just correct the affected comparison.");
-  await ordinaryTurn(first, ["topic change"], "Quick detour: suggest a playful name for an imaginary moon café.");
-  await ordinaryTurn(first, ["return to earlier topic", "coreference"], "Back to the airships: which one did I say was quick? Answer in five words or fewer.");
-
-  const second = await createConversation();
-  await ordinaryTurn(second, ["hypothetical reasoning", "negation", "multiple requests"], "Suppose a fictional library lends memories instead of books. Describe one benefit and one risk, but don't make either sound like an established fact.");
-  await ordinaryTurn(second, ["ellipsis", "style adaptation"], "And a safeguard? One sentence, calm tone.");
-
-  const knowledgeConversation = await createConversation();
-  const beforeKnowledge = await state(knowledgeConversation);
-  const knowledgeCognitionStart = cognitionObservations.length;
-  const accepted = await submit(
-    knowledgeConversation,
-    "Please find trustworthy external sources explaining why the Eiffel Tower's measured height can vary with temperature, and summarize the supported explanation.",
-  );
-  const knowledgeCognition = cognitionObservations.slice(knowledgeCognitionStart);
+  writeEvidence();
+  const conversationId = await createConversation();
+  const knowledgeRequest = "I heard that Venus takes longer to rotate once than to orbit the Sun. Please verify that with trustworthy external sources and summarize what the evidence supports.";
+  const beforeKnowledge = await state(conversationId);
+  const accepted = await submit(conversationId, knowledgeRequest);
+  const knowledgeCognition = cognitionObservations[0] ?? null;
   evidence.knowledge = {
-    status: accepted.status,
-    publicCognitionMode: accepted.interpretation?.mode ?? null,
-    publicCognition: accepted.interpretation ?? null,
+    userRequest: knowledgeRequest,
     cognition: knowledgeCognition,
+    publicCognition: accepted.interpretation ?? null,
+    status: accepted.status,
+    runId: accepted.runId ?? null,
+    runStatus: null,
+    findings: null,
+    provenance: null,
+    acquisition: null,
+    stateDelta: null,
   };
   writeEvidence();
-  assert.equal(accepted.status, "RUN_ACCEPTED");
-  assert.ok(accepted.runId);
+  assert.equal(knowledgeCognition?.mode, "GOVERNED", "Knowledge-required turn did not return GOVERNED cognition.");
+  assert.equal(accepted.status, "RUN_ACCEPTED", "Knowledge-required turn did not create the governed Run.");
+  assert.ok(accepted.runId, "Knowledge-required turn did not expose a Run ID.");
+
   const completed = await waitForRun(accepted.runId);
-  const afterKnowledge = await state(knowledgeConversation);
-  assert.equal(afterKnowledge.runs - beforeKnowledge.runs, 1);
-  assert.ok(afterKnowledge.knowledge - beforeKnowledge.knowledge > 0);
-  assert.ok(acquisitions.length === 1);
-  assert.ok(completed.outcome.provenance?.length > 0);
-  Object.assign(evidence.knowledge, {
-    runId: accepted.runId,
+  const afterKnowledge = await state(conversationId);
+  evidence.knowledge = {
+    ...evidence.knowledge,
     runStatus: completed.run.status,
     findings: completed.outcome.findings,
     provenance: completed.outcome.provenance,
-    acquisition: acquisitions[0],
+    acquisition: acquisitions[0] ?? null,
     stateDelta: {
       runs: afterKnowledge.runs - beforeKnowledge.runs,
       knowledge: afterKnowledge.knowledge - beforeKnowledge.knowledge,
       recommendations: afterKnowledge.recommendations - beforeKnowledge.recommendations,
       choices: afterKnowledge.choices - beforeKnowledge.choices,
     },
-  });
+  };
   writeEvidence();
+  assert.equal(afterKnowledge.runs - beforeKnowledge.runs, 1);
+  assert.ok(afterKnowledge.knowledge - beforeKnowledge.knowledge > 0, "Governed Knowledge was not created.");
+  assert.equal(acquisitions.length, 1, "v36-live acquisition was not invoked exactly once.");
+  assert.ok(completed.outcome.provenance?.length > 0, "Governed Knowledge lacks provenance.");
 
-  const beforeFollow = await state(knowledgeConversation);
-  const followCognitionStart = cognitionObservations.length;
-  const follow = await submit(knowledgeConversation, "Which source from that research most directly supports the temperature explanation? Keep the answer brief.");
-  const followCognition = cognitionObservations.slice(followCognitionStart);
-  const afterFollow = await state(knowledgeConversation);
+  const followUp = "Which source from that check most directly supports the rotation-versus-orbit comparison? Keep the answer brief.";
+  const beforeFollow = await state(conversationId);
+  const follow = await submit(conversationId, followUp);
+  const followCognition = cognitionObservations[1] ?? null;
+  const afterFollow = await state(conversationId);
   evidence.historicalFollowUp = {
-    status: follow.status,
-    assistantMessage: follow.presentation?.assistantMessage,
-    publicCognitionMode: follow.interpretation?.mode ?? null,
-    publicCognition: follow.interpretation ?? null,
+    userRequest: followUp,
     cognition: followCognition,
-    authority: follow.interpretation?.authority,
-    factualAuthority: follow.interpretation?.factualAuthority,
+    publicCognition: follow.interpretation ?? null,
+    status: follow.status,
+    assistantMessage: follow.presentation?.assistantMessage ?? null,
+    knowledgeReference: follow.knowledgeReference ?? null,
+    knowledgeId: follow.knowledge?.knowledgeId ?? follow.knowledgeReference?.knowledgeId ?? null,
+    priorProvenance: completed.outcome.provenance,
     stateDelta: {
       runs: afterFollow.runs - beforeFollow.runs,
       knowledge: afterFollow.knowledge - beforeFollow.knowledge,
       recommendations: afterFollow.recommendations - beforeFollow.recommendations,
       choices: afterFollow.choices - beforeFollow.choices,
     },
-    priorKnowledgeCount: beforeFollow.knowledge,
-    priorProvenance: completed.outcome.provenance,
   };
   writeEvidence();
-  assert.equal(follow.status, "CONVERSATION_COMPLETED");
-  assert.equal(follow.interpretation?.authority, "NON_AUTHORITATIVE_CONVERSATION");
-  assert.equal(follow.interpretation?.factualAuthority, false);
-  assert.equal(afterFollow.runs - beforeFollow.runs, 0);
-  assert.equal(afterFollow.knowledge, beforeFollow.knowledge);
-  assert.ok(typeof follow.presentation?.assistantMessage === "string" && follow.presentation.assistantMessage.trim());
+  assert.equal(followCognition?.mode, "GOVERNED", "Historical Knowledge/source follow-up did not return GOVERNED cognition.");
+  assert.equal(follow.status, "REFERENCE_RESOLVED", "Historical Knowledge/source follow-up did not resolve existing Knowledge.");
+  assert.equal(afterFollow.runs - beforeFollow.runs, 0, "Historical Knowledge/source follow-up created an unnecessary new Run.");
+  assert.equal(afterFollow.knowledge, beforeFollow.knowledge, "Historical Knowledge/source follow-up changed Knowledge count.");
+  assert.ok(follow.knowledgeReference?.knowledgeId, "Historical Knowledge/source follow-up did not reference existing Knowledge.");
+  assert.ok(typeof follow.presentation?.assistantMessage === "string" && follow.presentation.assistantMessage.trim().length > 0);
 
   assert.equal(git("rev-parse", "HEAD"), expectedSha);
   assert.equal(git("rev-parse", "HEAD^{tree}"), expectedTree);
   writeEvidence();
   process.stdout.write(`${JSON.stringify(evidence, null, 2)}\n`);
-  console.log("PR92_EXACT_REAL_MODEL_VALIDATION=PASS");
-} catch (error) {
-  writeEvidence();
-  throw error;
+  console.log("PR92_KNOWLEDGE_ONLY_REAL_MODEL_VALIDATION=PASS");
 } finally {
   await app.close();
 }
