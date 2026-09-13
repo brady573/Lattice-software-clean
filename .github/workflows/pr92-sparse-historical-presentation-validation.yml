@@ -1,0 +1,61 @@
+name: Validation — PR 92 Sparse Historical Presentation
+
+on:
+  push:
+    branches:
+      - validation/pr92-sparse-presentation-20260913
+    paths:
+      - .github/workflows/pr92-sparse-historical-presentation-validation.yml
+      - tools/pr92-sparse-historical-presentation-proof.mjs
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  EXPECTED_PRODUCT_SHA: 179f83497f0fb8b2d91d93076d024c185729e0b9
+  EXPECTED_PRODUCT_TREE: bdc10be9f8a8cabd892c3d825b2aa5ec5d19ff8b
+
+jobs:
+  deterministic-presentation:
+    name: Targeted presentation validation
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - name: Checkout validation infrastructure
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: validation/pr92-sparse-presentation-20260913
+          path: validation-infrastructure
+          persist-credentials: false
+      - name: Checkout exact Product candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ env.EXPECTED_PRODUCT_SHA }}
+          path: product
+          persist-credentials: false
+      - name: Verify exact Product candidate
+        working-directory: product
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_PRODUCT_SHA"
+          test "$(git rev-parse HEAD^{tree})" = "$EXPECTED_PRODUCT_TREE"
+          test -z "$(git status --porcelain)"
+          echo "EXACT_CANDIDATE=VERIFIED"
+      - name: Provision Node 24
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '24'
+      - name: Install locked dependencies
+        working-directory: product
+        run: npm ci --no-audit --no-fund
+      - name: Build exact Product
+        working-directory: product
+        run: npm run build
+      - name: Run sparse historical presentation contract
+        working-directory: product
+        run: node --import tsx --test test/issue-91-sparse-historical-knowledge-presentation.test.ts
+      - name: Run existing presentation-boundary regression
+        working-directory: product
+        run: node --import tsx --test test/issues-43-47-knowledge-presentation-boundary.test.ts
