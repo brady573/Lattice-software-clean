@@ -43,8 +43,9 @@ export function deriveGeneralizedDecisionIntentFromState(
   for (const [key, field] of Object.entries(state.requirements)) {
     const match = REQUIREMENT_KEY_PATTERN.exec(key);
     if (!match || field.value.state !== "VALUE") continue;
-    const criterionId = match[1] as string;
-    const suffix = match[2] as string;
+    const criterionId = match[1];
+    const suffix = match[2];
+    if (criterionId === undefined || suffix === undefined) continue;
     decisionSemantics.hardRequirements[criterionId] = {
       value: { operator: operatorForSuffix(suffix), expected: field.value.value },
       provenance: field.provenance,

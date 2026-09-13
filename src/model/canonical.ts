@@ -33,6 +33,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function isInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value);
+}
+
+function isSafeInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value);
+}
+
 function ownKeys(value: Record<string, unknown>): string[] {
   return Object.keys(value);
 }
@@ -358,24 +366,24 @@ export function validateCanonicalModelRequest(value: unknown): CanonicalModelReq
   let maxOutputTokens: number | undefined;
   if (value.maxOutputTokens !== undefined) {
     if (
-      !Number.isInteger(value.maxOutputTokens)
-      || (value.maxOutputTokens as number) < 1
-      || (value.maxOutputTokens as number) > 32_768
+      !isInteger(value.maxOutputTokens)
+      || value.maxOutputTokens < 1
+      || value.maxOutputTokens > 32_768
     ) {
       throw new ModelProviderError(
         "invalid_output",
         "maxOutputTokens must be an integer between 1 and 32768.",
       );
     }
-    maxOutputTokens = value.maxOutputTokens as number;
+    maxOutputTokens = value.maxOutputTokens;
   }
 
   let seed: number | undefined;
   if (value.seed !== undefined) {
-    if (!Number.isSafeInteger(value.seed)) {
+    if (!isSafeInteger(value.seed)) {
       throw new ModelProviderError("invalid_output", "seed must be a safe integer.");
     }
-    seed = value.seed as number;
+    seed = value.seed;
   }
 
   return Object.freeze({
@@ -535,16 +543,16 @@ export function validateCanonicalModelResponse(
     const inputTokens = value.usage.inputTokens;
     const outputTokens = value.usage.outputTokens;
     if (
-      !Number.isSafeInteger(inputTokens)
-      || !Number.isSafeInteger(outputTokens)
-      || (inputTokens as number) < 0
-      || (outputTokens as number) < 0
+      !isSafeInteger(inputTokens)
+      || !isSafeInteger(outputTokens)
+      || inputTokens < 0
+      || outputTokens < 0
     ) {
       throw new ModelProviderError("invalid_output", "response.usage is invalid.");
     }
     usage = Object.freeze({
-      inputTokens: inputTokens as number,
-      outputTokens: outputTokens as number,
+      inputTokens,
+      outputTokens,
     });
   } else if (value.usage !== undefined) {
     throw new ModelProviderError("invalid_output", "response.usage must be an object.");

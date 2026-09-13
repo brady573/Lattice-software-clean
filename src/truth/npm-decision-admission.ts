@@ -25,10 +25,10 @@ function qualifier(input: KnowledgeEvidenceQualificationInput, key: string): str
 }
 
 function sourcePackage(canonical: URL): string | null {
-  const parts = canonical.pathname.split("/").filter(Boolean);
-  if (parts.length !== 2 || parts[1] !== "latest") return null;
+  const [encodedPackageName, tag, ...extra] = canonical.pathname.split("/").filter(Boolean);
+  if (encodedPackageName === undefined || tag !== "latest" || extra.length > 0) return null;
   try {
-    const packageName = decodeURIComponent(parts[0]!).toLocaleLowerCase("en-US");
+    const packageName = decodeURIComponent(encodedPackageName).toLocaleLowerCase("en-US");
     return /^(?:@[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._-]*|[a-z0-9][a-z0-9._-]*)$/u.test(packageName)
       ? packageName
       : null;

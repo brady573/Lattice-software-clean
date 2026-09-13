@@ -123,12 +123,13 @@ export function parseSpecialistGuidanceProfile(raw: unknown): SpecialistGuidance
   rejectUnknownKeys(value, PROFILE_KEYS, "Specialist Guidance Profile");
   const profileId = requireString(value.profileId, "profileId", 128);
   if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(profileId)) throw new Error("profileId must use lowercase kebab-case.");
-  if (!Number.isSafeInteger(value.version) || (value.version as number) < 1) {
+  const version = value.version;
+  if (typeof version !== "number" || !Number.isSafeInteger(version) || version < 1) {
     throw new Error("version must be a positive safe integer.");
   }
   return Object.freeze({
     profileId,
-    version: value.version as number,
+    version,
     userFacingLabel: requireString(value.userFacingLabel, "userFacingLabel", 160),
     domain: requireString(value.domain, "domain", 128),
     purpose: requireString(value.purpose, "purpose"),
