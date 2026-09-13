@@ -105,14 +105,18 @@ type ConversationResponseRow = {
 };
 
 function fromRow(row: ConversationResponseRow): ConversationResponse {
+  if (row.origin !== "SOLANDRA") throw new Error("Persisted conversation response origin is invalid.");
+  if (row.authority !== "NON_AUTHORITATIVE_CONVERSATION" || row.factual_authority !== false) {
+    throw new Error("Persisted conversation response authority is invalid.");
+  }
   return normalizedResponse({
     responseId: row.response_id,
     conversationId: row.conversation_id,
     sourceMessageId: row.source_message_id,
     content: row.content,
-    origin: row.origin as "SOLANDRA",
-    authority: row.authority as "NON_AUTHORITATIVE_CONVERSATION",
-    factualAuthority: row.factual_authority as false,
+    origin: row.origin,
+    authority: row.authority,
+    factualAuthority: row.factual_authority,
     createdAt: new Date(row.created_at).toISOString(),
   });
 }
