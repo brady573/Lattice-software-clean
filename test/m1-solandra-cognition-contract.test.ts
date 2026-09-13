@@ -7,7 +7,7 @@ import type {
   ModelCallContext,
   ModelProviderResult,
 } from "../src/model/types.js";
-import { ModelSolandraCognitiveRuntime } from "../src/solandra/cognition.js";
+import { isConversationalCognition, ModelSolandraCognitiveRuntime } from "../src/solandra/cognition.js";
 
 class RedundantMetadataProvider implements ModelProvider {
   readonly kind = "m1-redundant-cognition-metadata";
@@ -20,18 +20,21 @@ class RedundantMetadataProvider implements ModelProvider {
         output: [{
           type: "text",
           text: JSON.stringify({
-            objectiveRelation: "NEW_OBJECTIVE",
-            proposedObjective: "A non-authoritative normalized objective.",
-            requestedHelp: "FRESH_RESEARCH",
-            relevantContext: [],
-            entities: [],
-            referents: [],
-            constraints: [],
-            preferences: [],
-            knowledgeNeeds: ["current external information needed to answer the request"],
-            materialAmbiguity: null,
-            referencedKnowledgeId: null,
-            proposedNextStep: "FRESH_RESEARCH",
+            mode: "GOVERNED",
+            projection: {
+              objectiveRelation: "NEW_OBJECTIVE",
+              proposedObjective: "A non-authoritative normalized objective.",
+              requestedHelp: "FRESH_RESEARCH",
+              relevantContext: [],
+              entities: [],
+              referents: [],
+              constraints: [],
+              preferences: [],
+              knowledgeNeeds: ["current external information needed to answer the request"],
+              materialAmbiguity: null,
+              referencedKnowledgeId: null,
+              proposedNextStep: "FRESH_RESEARCH",
+            },
           }),
         }],
       },
@@ -57,6 +60,7 @@ test("redundant non-authoritative next-step metadata cannot block Solandra cogni
     governedKnowledge: [],
   });
 
+  if (isConversationalCognition(result)) assert.fail("expected governed cognition");
   assert.equal(result.proposal.requestedHelp, "FRESH_RESEARCH");
   assert.deepEqual(result.proposal.knowledgeNeeds, ["current external information needed to answer the request"]);
   assert.equal(result.proposal.proposedNextStep, "FRESH_RESEARCH");

@@ -18,9 +18,9 @@ test("Issue #91 persisted Solandra conversation prose cannot acquire factual aut
     assert.equal(persisted.origin, "SOLANDRA");
     assert.equal(persisted.authority, "NON_AUTHORITATIVE_CONVERSATION");
     assert.equal(persisted.factualAuthority, false);
-    assert.equal((persisted as Record<string, unknown>).knowledgeId, undefined);
-    assert.equal((persisted as Record<string, unknown>).intentVersionId, undefined);
-    assert.equal((persisted as Record<string, unknown>).authorizationId, undefined);
+    assert.equal("knowledgeId" in persisted, false);
+    assert.equal("intentVersionId" in persisted, false);
+    assert.equal("authorizationId" in persisted, false);
   } finally {
     await store.close();
   }

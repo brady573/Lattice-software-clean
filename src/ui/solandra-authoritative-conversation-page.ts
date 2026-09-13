@@ -314,7 +314,15 @@ const capabilityScript = `
     })();
   </script>`;
 
-const directCognitiveAssistanceHandling = `        if (body.status === "COGNITIVE_ASSISTANCE_COMPLETED") {
+const directConversationHandling = `        if (body.status === "CONVERSATION_COMPLETED") {
+          const assistantMessage = typeof body.presentation?.assistantMessage === "string"
+            ? body.presentation.assistantMessage.trim()
+            : "";
+          if (!assistantMessage) throw new Error("Solandra returned no usable response.");
+          appendSolandraTurn(assistantMessage);
+          return;
+        }
+        if (body.status === "COGNITIVE_ASSISTANCE_COMPLETED") {
           const assistantMessage = typeof body.presentation?.assistantMessage === "string"
             ? body.presentation.assistantMessage.trim()
             : "";
@@ -387,7 +395,7 @@ export function renderSolandraAuthoritativeConversationPage(): string {
     )
     .replace(
       '        if (!body.runId) throw new Error("I couldn\'t establish the requested work safely.");',
-      directCognitiveAssistanceHandling,
+      directConversationHandling,
     )
     .replace("  <script>\n    (() => {", `${ownerAccessMarkup}${ownerAccessScript}  <script>\n    (() => {`)
     .replace("</body>", `${capabilityMarkup}${capabilityScript}</body>`);

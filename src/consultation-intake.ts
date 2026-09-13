@@ -80,6 +80,7 @@ import {
   type SolandraCognitionResult,
   type SolandraCognitiveRuntime,
   type SolandraConversationContextTurn,
+  type SolandraGovernedCognitionResult,
   type SolandraRequestedHelp,
 } from "./solandra/cognition.js";
 import type { SolandraKnowledgePresenter } from "./solandra/knowledge-presenter.js";
@@ -268,7 +269,7 @@ function isOptionReferenceHelp(help: SolandraRequestedHelp): boolean {
 function cognitiveInterpretation(
   sourceMessage: IntentUserMessage,
   currentVersion: IntentVersion | undefined,
-  result: Exclude<SolandraCognitionResult, { mode: "CONVERSATION" }>,
+  result: SolandraGovernedCognitionResult,
   explicitResourceNeed: ConsultationResourceNeed | undefined,
 ): ConsultationInterpretationProposal {
   const proposal = result.proposal;
@@ -537,7 +538,7 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
         return reply.status(500).send({ error: "AUTHORITATIVE_INTENT_VERSION_MISSING" });
       }
 
-      let cognition: SolandraCognitionResult | undefined;
+      let cognition: SolandraGovernedCognitionResult | undefined;
       let interpretation: ConsultationInterpretationProposal;
       try {
         if (options.solandraCognition) {
@@ -549,7 +550,7 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
             : [];
           const recentMessages = [...history.map((message) => message.content)];
           if (!recentMessages.includes(sourceMessage.content)) recentMessages.push(sourceMessage.content);
-          cognition = await options.solandraCognition.interpret({
+          const cognitionResult = await options.solandraCognition.interpret({
             conversationId,
             messageId: sourceMessage.messageId,
             message: sourceMessage.content,
@@ -559,24 +560,25 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
             governedKnowledge: governed.map(governedKnowledgeContext),
             governedRecommendations: recommendations.slice(-4).map(recommendationContext),
           });
-          if (isConversationalCognition(cognition)) {
+          if (isConversationalCognition(cognitionResult)) {
             const persisted = await options.conversationResponseStore.putResponse({
               responseId: stableUuid("conversation-response", conversationId, sourceMessage.messageId),
               conversationId,
               sourceMessageId: sourceMessage.messageId,
-              content: cognition.response,
+              content: cognitionResult.response,
               origin: "SOLANDRA",
               authority: "NON_AUTHORITATIVE_CONVERSATION",
               factualAuthority: false,
-              createdAt: new Date().toISOString(),
+              createdAt: sourceMessage.createdAt,
             });
             return reply.status(200).send({
               status: "CONVERSATION_COMPLETED",
               presentation: { assistantMessage: persisted.content },
-              interpretation: publicCognition(cognition),
+              interpretation: publicCognition(cognitionResult),
               conversationResponse: conversationResponsePayload(persisted),
             });
           }
+          cognition = cognitionResult;
           const inferredResourceNeed = cognition.proposal.requestedHelp === "RESOURCE"
             ? inferConsultationResourceNeed(sourceMessage.content)
             : "NONE";

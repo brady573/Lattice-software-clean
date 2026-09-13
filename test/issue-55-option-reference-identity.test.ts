@@ -4,6 +4,7 @@ import type { ModelProvider } from "../src/model/provider.js";
 import { ModelRuntime } from "../src/model/runtime.js";
 import type { CanonicalModelRequest, ModelCallContext, ModelProviderResult } from "../src/model/types.js";
 import {
+  isConversationalCognition,
   ModelSolandraCognitiveRuntime,
   type SolandraGovernedRecommendationContext,
   type SolandraSemanticProposal,
@@ -63,7 +64,7 @@ class ProposalProvider implements ModelProvider {
       response: {
         id: `issue-55-response-${this.calls}`,
         model: request.model,
-        output: [{ type: "text", text: JSON.stringify(this.responseProposal) }],
+        output: [{ type: "text", text: JSON.stringify({ mode: "GOVERNED", projection: this.responseProposal }) }],
       },
       route: {
         actualProvider: this.kind,
@@ -90,6 +91,7 @@ async function interpret(
     governedKnowledge: [],
     governedRecommendations,
   });
+  if (isConversationalCognition(result)) assert.fail("expected governed cognition");
   return { result, calls: provider.calls };
 }
 

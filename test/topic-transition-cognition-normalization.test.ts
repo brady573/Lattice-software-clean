@@ -3,7 +3,7 @@ import test from "node:test";
 import type { ModelProvider } from "../src/model/provider.js";
 import { ModelRuntime } from "../src/model/runtime.js";
 import type { CanonicalModelRequest, ModelCallContext, ModelProviderResult } from "../src/model/types.js";
-import { ModelSolandraCognitiveRuntime } from "../src/solandra/cognition.js";
+import { isConversationalCognition, ModelSolandraCognitiveRuntime } from "../src/solandra/cognition.js";
 
 class SemanticProposalProvider implements ModelProvider {
   readonly kind = "topic-transition-semantic-proposal";
@@ -21,19 +21,22 @@ class SemanticProposalProvider implements ModelProvider {
         output: [{
           type: "text",
           text: JSON.stringify({
-            objectiveRelation: this.objectiveRelation,
-            proposedObjective: this.proposedObjective,
-            requestedHelp: "KNOWLEDGE",
-            relevantContext: [],
-            entities: [],
-            referents: [],
-            constraints: [],
-            preferences: [],
-            knowledgeNeeds: [],
-            materialAmbiguity: null,
-            referencedKnowledgeId: null,
-            referencedRecommendationId: null,
-            referencedOptionId: null,
+            mode: "GOVERNED",
+            projection: {
+              objectiveRelation: this.objectiveRelation,
+              proposedObjective: this.proposedObjective,
+              requestedHelp: "KNOWLEDGE",
+              relevantContext: [],
+              entities: [],
+              referents: [],
+              constraints: [],
+              preferences: [],
+              knowledgeNeeds: [],
+              materialAmbiguity: null,
+              referencedKnowledgeId: null,
+              referencedRecommendationId: null,
+              referencedOptionId: null,
+            },
           }),
         }],
       },
@@ -61,6 +64,7 @@ test("Solandra correction semantics are not overwritten by deterministic USER-ph
     governedKnowledge: [],
   });
 
+  if (isConversationalCognition(result)) assert.fail("expected governed cognition");
   assert.equal(result.proposal.objectiveRelation, "CORRECTION");
   assert.equal(result.proposal.proposedObjective, null);
   assert.equal(result.proposal.materialAmbiguity, null);
@@ -81,6 +85,7 @@ test("model-proposed exact USER correction remains non-authoritative semantic ou
     governedKnowledge: [],
   });
 
+  if (isConversationalCognition(result)) assert.fail("expected governed cognition");
   assert.equal(result.proposal.objectiveRelation, "CORRECTION");
   assert.equal(result.proposal.proposedObjective, message);
   assert.equal(result.proposal.materialAmbiguity, null);
