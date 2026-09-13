@@ -47,23 +47,28 @@ interface ResearchDispatchPayload {
   runEpoch: number;
 }
 
+function isSafeInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value);
+}
+
 function parseResearchDispatchPayload(payload: unknown): ResearchDispatchPayload | null {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
   const record = payload as Record<string, unknown>;
+  const runEpoch = record.runEpoch;
   if (
     typeof record.taskId !== "string"
     || record.taskId.trim().length === 0
     || typeof record.taskFingerprint !== "string"
     || record.taskFingerprint.trim().length === 0
-    || !Number.isSafeInteger(record.runEpoch)
-    || (record.runEpoch as number) < 0
+    || !isSafeInteger(runEpoch)
+    || runEpoch < 0
   ) {
     return null;
   }
   return {
     taskId: record.taskId,
     taskFingerprint: record.taskFingerprint,
-    runEpoch: record.runEpoch as number,
+    runEpoch,
   };
 }
 
