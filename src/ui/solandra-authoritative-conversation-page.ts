@@ -331,6 +331,28 @@ const capabilityFailureHandling = `      const productFailureMessage = (status, 
         if (body?.error === "COGNITIVE_ASSISTANCE_FAILED") return "Cognitive assistance couldn't complete that request. Nothing was changed; you can revise it or try again.";
         if (body?.error === "RESOURCE_SCOPE_UNSUPPORTED" && typeof body.message === "string") return body.message;`;
 
+const legacyPreparedResourceRendering = `      const renderPreparedResource = (title, body) => {
+        composerHasProductContent = true;
+        composer.innerHTML = '<div class="resource"><h1>' + escapeHtml(title) + '</h1><p>Review and edit this before using it.</p><textarea aria-label="Prepared resource">' + escapeHtml(body) + '</textarea></div>';
+      };`;
+
+const preparedResourceTrustRendering = `      const renderPreparedResource = (resource, knowledge, body) => {
+        composerHasProductContent = true;
+        const selectedClaimIds = new Set((resource.basis || []).flatMap((entry) => entry.claimIds || []));
+        const support = (knowledge?.findings || []).filter((finding) => selectedClaimIds.has(finding.claimId));
+        const supportHtml = support.length > 0
+          ? '<h2>Established support</h2><ul>' + support.map((finding) => '<li>' + escapeHtml(finding.text) + '</li>').join("") + '</ul>'
+          : '<h2>Established support</h2><p class="muted">No external factual support was used for this draft.</p>';
+        const uncertaintyHtml = (resource.preservedUncertainties || []).length > 0
+          ? '<h2>What remains uncertain</h2><ul>' + resource.preservedUncertainties.map((item) => '<li>' + escapeHtml(item) + '</li>').join("") + '</ul>'
+          : '';
+        const draftLabel = resource.draftAuthority?.origin === "SOLANDRA" ? "Solandra draft" : "Prepared draft";
+        const trustNote = resource.draftAuthority?.factualAuthority === false
+          ? 'This wording is a draft, not established fact. Only the items under Established support are backed by established evidence.'
+          : 'Review and edit this before using it.';
+        composer.innerHTML = '<div class="resource"><div class="finding-status">' + escapeHtml(draftLabel) + '</div><h1>' + escapeHtml(resource.title) + '</h1><p>' + escapeHtml(trustNote) + '</p><textarea aria-label="Prepared resource">' + escapeHtml(body) + '</textarea>' + supportHtml + uncertaintyHtml + '</div>';
+      };`;
+
 /** Canonical Product surface: Conversation + free-form input + adaptive Composer. */
 export function renderSolandraAuthoritativeConversationPage(): string {
   return renderSolandraConversationPage()
@@ -343,6 +365,11 @@ export function renderSolandraAuthoritativeConversationPage(): string {
     .replace(
       '      const productFailureMessage = (status, body) => {\n        if (body?.error === "RESOURCE_SCOPE_UNSUPPORTED" && typeof body.message === "string") return body.message;',
       capabilityFailureHandling,
+    )
+    .replace(legacyPreparedResourceRendering, preparedResourceTrustRendering)
+    .replace(
+      '          renderPreparedResource(outcome.resource.title, options.preparedBody ?? outcome.resource.body);',
+      '          renderPreparedResource(outcome.resource, outcome.knowledge, options.preparedBody ?? outcome.resource.body);',
     )
     .replace(
       '        if (!body.runId) throw new Error("I couldn\'t establish the requested work safely.");',
