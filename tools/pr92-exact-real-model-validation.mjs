@@ -6,6 +6,7 @@ import { resolve } from "node:path";
 import { WikimediaKnowledgeAcquisitionProvider } from "../dist/src/knowledge/wikimedia-acquisition.js";
 import { createRuntimeApp } from "../dist/src/runtime-app.js";
 import { resolveRuntimeConfig } from "../dist/src/runtime-config.js";
+import { createConfiguredSolandraCognition } from "../dist/src/solandra/cognition-composition.js";
 
 const expectedSha = process.env.EXPECTED_PRODUCT_SHA?.trim();
 const expectedTree = process.env.EXPECTED_PRODUCT_TREE?.trim();
@@ -26,7 +27,66 @@ const config = resolveRuntimeConfig({
 assert.equal(config.truthMode, "v36-live");
 assert.equal(config.solandraCognitionRoute, "groq-gpt-oss-120b");
 
+const solandra = createConfiguredSolandraCognition(config);
+assert.ok(solandra, "Configured Solandra composition is required for this validation.");
+assert.ok(solandra.model.trim().length > 0, "Configured Solandra model identity is required.");
+
 const acquisitions = [];
+const cognitionObservations = [];
+const evidence = {
+  product: { sha: expectedSha, tree: expectedTree },
+  route: {
+    configured: config.solandraCognitionRoute,
+    truthMode: config.truthMode,
+    composedModel: solandra.model,
+  },
+  cognition: cognitionObservations,
+  ordinary: [],
+  knowledge: null,
+  historicalFollowUp: null,
+};
+const artifactDir = resolve(process.env.VALIDATION_ARTIFACT_DIR ?? "../artifacts/pr92-real-model");
+mkdirSync(artifactDir, { recursive: true });
+function writeEvidence() {
+  writeFileSync(resolve(artifactDir, "evidence.json"), JSON.stringify(evidence, null, 2));
+}
+function governedProjection(proposal) {
+  return {
+    objectiveRelation: proposal.objectiveRelation,
+    proposedObjective: proposal.proposedObjective,
+    requestedHelp: proposal.requestedHelp,
+    relevantContext: proposal.relevantContext,
+    entities: proposal.entities,
+    referents: proposal.referents,
+    constraints: proposal.constraints,
+    preferences: proposal.preferences,
+    knowledgeNeeds: proposal.knowledgeNeeds,
+    materialAmbiguity: proposal.materialAmbiguity,
+    referencedKnowledgeId: proposal.referencedKnowledgeId,
+    referencedRecommendationId: proposal.referencedRecommendationId ?? null,
+    referencedOptionId: proposal.referencedOptionId ?? null,
+  };
+}
+const observedCognition = {
+  async interpret(input) {
+    const result = await solandra.cognition.interpret(input);
+    const mode = result.mode === "CONVERSATION" ? "CONVERSATION" : "GOVERNED";
+    const observation = {
+      sequence: cognitionObservations.length + 1,
+      messageId: input.messageId,
+      mode,
+      actualProvider: result.invocationProvenance.actualProvider ?? null,
+      actualModel: result.invocationProvenance.actualModel ?? null,
+      routeProvenance: result.invocationProvenance.routeProvenance ?? null,
+      ...(mode === "GOVERNED" ? { projection: governedProjection(result.proposal) } : {}),
+    };
+    cognitionObservations.push(observation);
+    writeEvidence();
+    console.log(`PR92_COGNITION_OBSERVATION=${JSON.stringify(observation)}`);
+    return result;
+  },
+};
+
 const liveProvider = new WikimediaKnowledgeAcquisitionProvider();
 const recordingProvider = {
   kind: `pr92-validation:${liveProvider.kind}`,
@@ -37,6 +97,7 @@ const recordingProvider = {
       queries: [...(input.investigationQueries ?? [])],
       sources: result.sources.map(({ sourceId, title, canonicalUri }) => ({ sourceId, title, canonicalUri })),
     });
+    writeEvidence();
     return result;
   },
 };
@@ -44,14 +105,11 @@ const recordingProvider = {
 const app = await createRuntimeApp(config, {
   memoryDispatchDelayMs: 1,
   knowledgeAcquisitionProvider: recordingProvider,
+  solandraCognition: observedCognition,
+  solandraAdvisory: solandra.advisory,
+  solandraActionPreparer: solandra.actionPreparer,
+  solandraKnowledgePresenter: solandra.knowledgePresenter,
 });
-const evidence = {
-  product: { sha: expectedSha, tree: expectedTree },
-  route: { configured: config.solandraCognitionRoute, truthMode: config.truthMode },
-  ordinary: [],
-  knowledge: null,
-  historicalFollowUp: null,
-};
 
 async function request(options) {
   const response = await app.inject(options);
@@ -80,12 +138,17 @@ async function submit(conversationId, message) {
 }
 async function ordinaryTurn(conversationId, capability, message) {
   const before = await state(conversationId);
+  const cognitionStart = cognitionObservations.length;
   const result = await submit(conversationId, message);
+  const turnCognition = cognitionObservations.slice(cognitionStart);
   const after = await state(conversationId);
   const record = {
     capability,
     status: result.status,
     assistantMessage: result.presentation?.assistantMessage,
+    publicCognitionMode: result.interpretation?.mode ?? null,
+    publicCognition: result.interpretation ?? null,
+    cognition: turnCognition,
     authority: result.interpretation?.authority,
     factualAuthority: result.interpretation?.factualAuthority,
     created: {
@@ -96,7 +159,12 @@ async function ordinaryTurn(conversationId, capability, message) {
     },
   };
   evidence.ordinary.push(record);
+  writeEvidence();
+  if (turnCognition.some((observation) => observation.mode === "GOVERNED")) {
+    throw new Error("PR92_ORDINARY_TURN_RETURNED_GOVERNED: preserve this real-model evidence for Steward review; no Product repair is authorized in this task.");
+  }
   assert.equal(record.status, "CONVERSATION_COMPLETED");
+  assert.equal(record.publicCognitionMode, "CONVERSATION");
   assert.equal(record.authority, "NON_AUTHORITATIVE_CONVERSATION");
   assert.equal(record.factualAuthority, false);
   assert.ok(typeof record.assistantMessage === "string" && record.assistantMessage.trim().length > 0);
@@ -132,10 +200,19 @@ try {
 
   const knowledgeConversation = await createConversation();
   const beforeKnowledge = await state(knowledgeConversation);
+  const knowledgeCognitionStart = cognitionObservations.length;
   const accepted = await submit(
     knowledgeConversation,
     "Please find trustworthy external sources explaining why the Eiffel Tower's measured height can vary with temperature, and summarize the supported explanation.",
   );
+  const knowledgeCognition = cognitionObservations.slice(knowledgeCognitionStart);
+  evidence.knowledge = {
+    status: accepted.status,
+    publicCognitionMode: accepted.interpretation?.mode ?? null,
+    publicCognition: accepted.interpretation ?? null,
+    cognition: knowledgeCognition,
+  };
+  writeEvidence();
   assert.equal(accepted.status, "RUN_ACCEPTED");
   assert.ok(accepted.runId);
   const completed = await waitForRun(accepted.runId);
@@ -144,8 +221,7 @@ try {
   assert.ok(afterKnowledge.knowledge - beforeKnowledge.knowledge > 0);
   assert.ok(acquisitions.length === 1);
   assert.ok(completed.outcome.provenance?.length > 0);
-  evidence.knowledge = {
-    status: accepted.status,
+  Object.assign(evidence.knowledge, {
     runId: accepted.runId,
     runStatus: completed.run.status,
     findings: completed.outcome.findings,
@@ -157,14 +233,20 @@ try {
       recommendations: afterKnowledge.recommendations - beforeKnowledge.recommendations,
       choices: afterKnowledge.choices - beforeKnowledge.choices,
     },
-  };
+  });
+  writeEvidence();
 
   const beforeFollow = await state(knowledgeConversation);
+  const followCognitionStart = cognitionObservations.length;
   const follow = await submit(knowledgeConversation, "Which source from that research most directly supports the temperature explanation? Keep the answer brief.");
+  const followCognition = cognitionObservations.slice(followCognitionStart);
   const afterFollow = await state(knowledgeConversation);
   evidence.historicalFollowUp = {
     status: follow.status,
     assistantMessage: follow.presentation?.assistantMessage,
+    publicCognitionMode: follow.interpretation?.mode ?? null,
+    publicCognition: follow.interpretation ?? null,
+    cognition: followCognition,
     authority: follow.interpretation?.authority,
     factualAuthority: follow.interpretation?.factualAuthority,
     stateDelta: {
@@ -176,6 +258,7 @@ try {
     priorKnowledgeCount: beforeFollow.knowledge,
     priorProvenance: completed.outcome.provenance,
   };
+  writeEvidence();
   assert.equal(follow.status, "CONVERSATION_COMPLETED");
   assert.equal(follow.interpretation?.authority, "NON_AUTHORITATIVE_CONVERSATION");
   assert.equal(follow.interpretation?.factualAuthority, false);
@@ -185,11 +268,12 @@ try {
 
   assert.equal(git("rev-parse", "HEAD"), expectedSha);
   assert.equal(git("rev-parse", "HEAD^{tree}"), expectedTree);
-  const artifactDir = resolve(process.env.VALIDATION_ARTIFACT_DIR ?? "../artifacts/pr92-real-model");
-  mkdirSync(artifactDir, { recursive: true });
-  writeFileSync(resolve(artifactDir, "evidence.json"), JSON.stringify(evidence, null, 2));
+  writeEvidence();
   process.stdout.write(`${JSON.stringify(evidence, null, 2)}\n`);
   console.log("PR92_EXACT_REAL_MODEL_VALIDATION=PASS");
+} catch (error) {
+  writeEvidence();
+  throw error;
 } finally {
   await app.close();
 }
