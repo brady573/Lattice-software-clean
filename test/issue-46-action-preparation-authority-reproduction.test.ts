@@ -69,7 +69,7 @@ const input: SolandraActionPreparationInput = {
   }],
 };
 
-test("Issue #46 reproduction: false-positive correlated grounding persists arbitrary body without durable body authority classification", async () => {
+test("Issue #46: false-positive correlated grounding cannot give generated draft prose factual authority", async () => {
   const runtime = new ScriptedRuntime([
     JSON.stringify({
       status: "PREPARED",
@@ -91,7 +91,7 @@ test("Issue #46 reproduction: false-positive correlated grounding persists arbit
   const generated = await preparer.prepare(input);
   assert.equal(generated.result.status, "PREPARED");
   if (generated.result.status !== "PREPARED") return;
-  assert.equal(runtime.calls.length, 2);
+  assert.equal(runtime.calls.length, 2, "grounding remains a drafting-quality guard, not factual authority");
 
   const record = buildPreparedResourceRecord({
     conversationId: input.conversationId,
@@ -109,9 +109,16 @@ test("Issue #46 reproduction: false-positive correlated grounding persists arbit
   const resource = preparedResourceFromRecord(record);
 
   assert.match(resource.body, /guarantees a free 30-day extension/u);
+  assert.deepEqual(resource.draftAuthority, {
+    origin: "SOLANDRA",
+    factualAuthority: false,
+    userAuthored: false,
+  });
   assert.deepEqual(resource.basis, [{ knowledgeId: "knowledge-issue-46", claimIds: ["claim-trial-end"] }]);
   assert.deepEqual(resource.preservedUncertainties, ["No governed material establishes whether an extension is guaranteed."]);
   assert.equal(resource.editable, true);
   assert.equal(resource.executionAuthorized, false);
-  assert.equal("draftAuthority" in resource, false);
+  assert.equal("evidenceIds" in resource, false);
+  assert.equal("sourceIds" in resource, false);
+  assert.equal("truthStatus" in resource, false);
 });
