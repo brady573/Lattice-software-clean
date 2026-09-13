@@ -343,18 +343,28 @@ const preparedResourceTrustRendering = `      const renderPreparedResource = (re
           return;
         }
         const selectedClaimIds = new Set((resource.basis || []).flatMap((entry) => entry.claimIds || []));
-        const support = (knowledge?.findings || []).filter((finding) => selectedClaimIds.has(finding.claimId));
-        const supportHtml = support.length > 0
-          ? '<h2>Established support</h2><ul>' + support.map((finding) => '<li>' + escapeHtml(finding.text) + '</li>').join("") + '</ul>'
-          : '<h2>Established support</h2><p class="muted">No external factual support was used for this draft.</p>';
+        const selectedFindings = (knowledge?.findings || []).filter((finding) => selectedClaimIds.has(finding.claimId));
+        const statusSections = [
+          ["SUPPORTED", "Established support"],
+          ["REFUTED", "Evidence refutes"],
+          ["CONFLICTED", "Evidence remains conflicted"],
+          ["UNRESOLVED", "Not established"],
+        ];
+        const evidenceHtml = selectedFindings.length > 0
+          ? statusSections.map(([status, heading]) => {
+              const findings = selectedFindings.filter((finding) => finding.status === status);
+              if (findings.length === 0) return "";
+              return '<section data-governed-status="' + status + '"><h2>' + escapeHtml(heading) + '</h2><ul>' + findings.map((finding) => '<li>' + escapeHtml(finding.text) + '</li>').join("") + '</ul></section>';
+            }).join("")
+          : '<h2>Evidence</h2><p class="muted">No external evidence was used for this draft.</p>';
         const uncertaintyHtml = (resource.preservedUncertainties || []).length > 0
           ? '<h2>What remains uncertain</h2><ul>' + resource.preservedUncertainties.map((item) => '<li>' + escapeHtml(item) + '</li>').join("") + '</ul>'
           : '';
         const draftLabel = resource.draftAuthority?.origin === "SOLANDRA" ? "Solandra draft" : "Prepared draft";
         const trustNote = resource.draftAuthority?.factualAuthority === false
-          ? 'This wording is a draft, not established fact. Only the items under Established support are backed by established evidence.'
+          ? 'This wording is a draft, not established fact. The evidence summary below preserves what is supported, refuted, conflicted, or unresolved.'
           : 'Review and edit this before using it.';
-        composer.innerHTML = '<div class="resource"><div class="finding-status">' + escapeHtml(draftLabel) + '</div><h1>' + escapeHtml(resource.title) + '</h1><p>' + escapeHtml(trustNote) + '</p><textarea aria-label="Prepared resource">' + escapeHtml(body) + '</textarea>' + supportHtml + uncertaintyHtml + '</div>';
+        composer.innerHTML = '<div class="resource"><div class="finding-status">' + escapeHtml(draftLabel) + '</div><h1>' + escapeHtml(resource.title) + '</h1><p>' + escapeHtml(trustNote) + '</p><textarea aria-label="Prepared resource">' + escapeHtml(body) + '</textarea>' + evidenceHtml + uncertaintyHtml + '</div>';
       };`;
 
 /** Canonical Product surface: Conversation + free-form input + adaptive Composer. */
