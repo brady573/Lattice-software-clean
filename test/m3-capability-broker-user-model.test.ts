@@ -55,23 +55,18 @@ class CognitionProvider implements ModelProvider {
 
   async generate(request: CanonicalModelRequest, context: ModelCallContext): Promise<ModelProviderResult> {
     this.calls.push({ request: structuredClone(request), context });
-    const currentMessage = request.messages.at(-1)?.content.match(/Current USER message: ([\s\S]*)$/u)?.[1]?.trim() ?? "";
-    const proposal = {
-      objectiveRelation: "NEW_OBJECTIVE",
-      proposedObjective: currentMessage || null,
-      requestedHelp: "COGNITIVE_ASSISTANCE",
-      relevantContext: [],
-      entities: [],
-      referents: [],
-      constraints: [],
-      preferences: [],
-      knowledgeNeeds: [],
-      materialAmbiguity: null,
-      referencedKnowledgeId: null,
-      referencedRecommendationId: null,
-    };
     return {
-      response: { id: "m3-cognition-response", model: COGNITION_MODEL, output: [{ type: "text", text: JSON.stringify(proposal) }] },
+      response: {
+        id: "m3-cognition-response",
+        model: COGNITION_MODEL,
+        output: [{
+          type: "text",
+          text: JSON.stringify({
+            mode: "CONVERSATION",
+            response: "Sorter, TidyNotes, and NoteShelf.",
+          }),
+        }],
+      },
       metadata: {},
       route: { actualProvider: "fixture-cognition-provider", actualModel: COGNITION_MODEL, upstreamRequestId: "fixture-cognition-upstream" },
     };
@@ -332,10 +327,9 @@ test("unavailable capability fails honestly without fallback", async () => {
   await broker.close();
 });
 
-test("ordinary Conversation uses real Solandra cognition, broker authorization, user model, and Solandra response", async () => {
+test("ordinary Conversation uses canonical Solandra cognition without routing through user-model capability", async () => {
   const cognitionProvider = new CognitionProvider();
   const userProvider = new RecordingProvider();
-  userProvider.output = "Sorter, TidyNotes, and NoteShelf.";
   const broker = new CapabilityBroker(new MemoryCapabilityAuthorizationStore());
   broker.register(userCapability(userProvider));
   const config = resolveRuntimeConfig({ LATTICE_DEPLOYMENT_MODE: "development", LATTICE_TRUTH_MODE: "v36-offline" } as NodeJS.ProcessEnv);
@@ -362,20 +356,19 @@ test("ordinary Conversation uses real Solandra cognition, broker authorization, 
     const body = response.json<{
       status: string;
       presentation: { assistantMessage: string };
-      interpretation: { requestedHelp: string; authority: string };
-      capability: { capabilityId: string; authority: string; effect: string; trustHandling: string };
+      interpretation: { mode: string; authority: string; factualAuthority: boolean };
+      conversationResponse: { authority: string; factualAuthority: boolean };
     }>();
-    assert.equal(body.status, "COGNITIVE_ASSISTANCE_COMPLETED");
-    assert.equal(body.presentation.assistantMessage, userProvider.output);
-    assert.equal(body.interpretation.requestedHelp, "COGNITIVE_ASSISTANCE");
-    assert.equal(body.interpretation.authority, "NON_AUTHORITATIVE_PROPOSAL");
-    assert.equal(body.capability.capabilityId, USER_AUTHORIZED_MODEL_CAPABILITY_ID);
-    assert.equal(body.capability.authority, "NON_AUTHORITATIVE_PROPOSAL");
+    assert.equal(body.status, "CONVERSATION_COMPLETED");
+    assert.equal(body.presentation.assistantMessage, "Sorter, TidyNotes, and NoteShelf.");
+    assert.equal(body.interpretation.mode, "CONVERSATION");
+    assert.equal(body.interpretation.authority, "NON_AUTHORITATIVE_CONVERSATION");
+    assert.equal(body.interpretation.factualAuthority, false);
+    assert.equal(body.conversationResponse.authority, "NON_AUTHORITATIVE_CONVERSATION");
+    assert.equal(body.conversationResponse.factualAuthority, false);
     assert.equal(cognitionProvider.calls.length, 1);
-    assert.equal(userProvider.calls.length, 1);
+    assert.equal(userProvider.calls.length, 0, "ordinary conversation must not require a second user-model capability call");
     assert.match(JSON.stringify(cognitionProvider.calls[0]?.request), /Current USER message: Brainstorm three alternate labels/u);
-    assert.match(JSON.stringify(userProvider.calls[0]?.request), /Brainstorm three alternate labels/u);
-    assert.doesNotMatch(JSON.stringify(userProvider.calls[0]?.request), /Governed Knowledge context/iu);
   } finally {
     await app.close();
     await broker.close();
