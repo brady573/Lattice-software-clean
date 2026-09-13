@@ -50,5 +50,6 @@ test("Issue #91 canonical cognition may answer ordinary conversation without sem
   assert.match(prompt, /SOLANDRA: Think of the desk as fast temporary access/u);
   assert.match(prompt, /Use CONVERSATION for ordinary discussion/u);
   assert.match(prompt, /not canonical USER intent, governed Knowledge/u);
-  assert.doesNotMatch(JSON.stringify(result), /requestedHelp|objectiveRelation|knowledgeNeeds/u);
+  assert.equal(result.proposal.requestedHelp, "COGNITIVE_ASSISTANCE", "legacy proposal metadata is Lattice-generated compatibility only");
+  assert.deepEqual(result.proposal.knowledgeNeeds, []);
 });
