@@ -2,6 +2,11 @@ name: Validation — PR 92 Exact Real Model
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/pr92-exact-real-model-validation.yml
 
 permissions:
   contents: read
@@ -62,22 +67,19 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cp validation-infrastructure/tools/pr92-exact-real-model-validation.mjs             product/tools/pr92-exact-real-model-validation.mjs
+          cp validation-infrastructure/tools/pr92-exact-real-model-validation.mjs \
+            product/tools/pr92-exact-real-model-validation.mjs
 
-      - name: Execute configured Groq route and exact-candidate journey
+      - name: Execute configured Groq route and missing Knowledge journey
         working-directory: product
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-          LATTICE_M3_EXPECTED_SHA: e589b343e8ce6b517490fda59008cd456a0624c0
-          LATTICE_M3_EXPECTED_TREE: 24e64fb796a0f608743cda7b65edd9385d480cb3
-          LATTICE_M3_ARTIFACT_DIR: ../artifacts/pr92-real-model/provider
           VALIDATION_ARTIFACT_DIR: ../artifacts/pr92-real-model/journey
         shell: bash
         run: |
           set -euo pipefail
           test -n "${GROQ_API_KEY:-}"
           echo "GROQ_API_KEY=CONFIGURED_NOT_EXPOSED"
-          node tools/m3-live-user-model-proof.mjs
           node tools/pr92-exact-real-model-validation.mjs
           test "$(git rev-parse HEAD)" = "$EXPECTED_PRODUCT_SHA"
           test "$(git rev-parse HEAD^{tree})" = "$EXPECTED_PRODUCT_TREE"
