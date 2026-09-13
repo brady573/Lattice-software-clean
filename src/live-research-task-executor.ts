@@ -54,6 +54,14 @@ function nonEmptyString(value: unknown, label: string, max: number): string {
   return value;
 }
 
+function isNullableString(value: unknown): value is string | null {
+  return value === null || typeof value === "string";
+}
+
+function isSafeInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value);
+}
+
 export function parseLiveV36ResearchTask(task: DurableResearchTask): ParsedLiveV36ResearchTask {
   if (task.taskType !== "RESEARCH") throw new Error("Live research executor accepts RESEARCH tasks only.");
   const root = record(task.input);
@@ -70,11 +78,11 @@ export function parseLiveV36ResearchTask(task: DurableResearchTask): ParsedLiveV
   const runId = nonEmptyString(rawRequest.runId, "V36 research request runId", 256);
   if (runId !== task.runId) throw new Error("V36 research request crossed durable Run scope.");
   const parentRequestId = rawRequest.parentRequestId;
-  if (parentRequestId !== null && typeof parentRequestId !== "string") {
+  if (!isNullableString(parentRequestId)) {
     throw new Error("V36 research request parentRequestId is invalid.");
   }
   const serialRound = rawRequest.serialRound;
-  if (!Number.isSafeInteger(serialRound) || (serialRound as number) < 1) {
+  if (!isSafeInteger(serialRound) || serialRound < 1) {
     throw new Error("V36 research request serialRound is invalid.");
   }
 
@@ -84,10 +92,10 @@ export function parseLiveV36ResearchTask(task: DurableResearchTask): ParsedLiveV
       id: nonEmptyString(rawRequest.id, "V36 research request id", 256),
       runId,
       claimId: nonEmptyString(rawRequest.claimId, "V36 research request claimId", 256),
-      parentRequestId: parentRequestId as string | null,
+      parentRequestId,
       purpose: nonEmptyString(rawRequest.purpose, "V36 research request purpose", 256),
       query: nonEmptyString(rawRequest.query, "V36 research request query", 64 * 1024),
-      serialRound: serialRound as number,
+      serialRound,
     }),
   });
 }
