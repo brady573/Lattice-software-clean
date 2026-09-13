@@ -231,7 +231,7 @@ test("post-freeze: prepared-message presentation separates generated wording, ex
     factualAuthority: false,
     userAuthored: false,
   });
-  assert.deepEqual(descriptor.factualSupport, [{
+  assert.deepEqual(descriptor.governedBasis, [{
     knowledgeId: "knowledge-building",
     claimIds: ["claim-selected"],
   }]);
@@ -247,16 +247,19 @@ test("post-freeze: prepared-message presentation separates generated wording, ex
   if (!hydrated || hydrated.payload.kind !== "generated_artifact") return;
   assert.match(hydrated.payload.text, /guaranteed to fail again tonight/u);
   assert.deepEqual(hydrated.payload.draftAuthority, descriptor.draftAuthority);
-  assert.deepEqual(hydrated.payload.factualSupport, descriptor.factualSupport);
+  assert.deepEqual(hydrated.payload.governedBasis, descriptor.governedBasis);
   assert.deepEqual(hydrated.payload.preservedUncertainties, descriptor.preservedUncertainties);
 });
 
-test("post-freeze: canonical browser template communicates draft/support distinction while preserving checklist treatment", () => {
+test("post-freeze: canonical browser template communicates status-preserving evidence treatment while preserving checklist treatment", () => {
   const html = renderSolandraAuthoritativeConversationPage();
   assert.match(html, /Solandra draft/u);
   assert.match(html, /This wording is a draft, not established fact\./u);
   assert.match(html, /Established support/u);
-  assert.match(html, /No external factual support was used for this draft\./u);
+  assert.match(html, /Evidence refutes/u);
+  assert.match(html, /Evidence remains conflicted/u);
+  assert.match(html, /Not established/u);
+  assert.match(html, /No external evidence was used for this draft\./u);
   assert.match(html, /What remains uncertain/u);
   assert.match(html, /resource\.kind !== "PREPARED_MESSAGE"/u);
   assert.match(html, /Review and edit this before using it\./u);
