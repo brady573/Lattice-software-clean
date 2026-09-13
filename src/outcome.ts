@@ -65,8 +65,13 @@ export interface PreparedResourceBasis {
   claimIds: string[];
 }
 
-export interface PreparedResource {
-  kind: "CHECKLIST" | "PREPARED_MESSAGE";
+export interface PreparedDraftAuthority {
+  origin: "SOLANDRA" | "LATTICE";
+  factualAuthority: false;
+  userAuthored: false;
+}
+
+interface PreparedResourceBase {
   title: string;
   body: string;
   editable: true;
@@ -74,6 +79,17 @@ export interface PreparedResource {
   basis?: PreparedResourceBasis[];
   preservedUncertainties?: string[];
 }
+
+export interface PreparedMessageResource extends PreparedResourceBase {
+  kind: "PREPARED_MESSAGE";
+  draftAuthority: PreparedDraftAuthority;
+}
+
+export interface PreparedChecklistResource extends PreparedResourceBase {
+  kind: "CHECKLIST";
+}
+
+export type PreparedResource = PreparedMessageResource | PreparedChecklistResource;
 
 export interface ActionPreparationOutcome {
   kind: "ACTION_PREPARATION";
@@ -246,6 +262,11 @@ function prepareResource(request: ConsultationRunRequest, knowledge: KnowledgeOu
         "",
         "Please review and edit this message before sending it.",
       ].join("\n"),
+      draftAuthority: {
+        origin: "LATTICE",
+        factualAuthority: false,
+        userAuthored: false,
+      },
       editable: true,
       executionAuthorized: false,
     };
