@@ -6,6 +6,7 @@ on:
       - "src/**"
       - "migrations/**"
       - "tools/m7-browser-lifecycle.mjs"
+      - "tools/issue-46-browser-prepared-message.mjs"
       - "package.json"
       - "package-lock.json"
       - ".github/workflows/browser-lifecycle-validation.yml"
@@ -16,6 +17,7 @@ on:
       - "src/**"
       - "migrations/**"
       - "tools/m7-browser-lifecycle.mjs"
+      - "tools/issue-46-browser-prepared-message.mjs"
       - "package.json"
       - "package-lock.json"
       - ".github/workflows/browser-lifecycle-validation.yml"
@@ -85,7 +87,9 @@ jobs:
         run: npm ci --no-audit --no-fund
 
       - name: Syntax-check browser lifecycle harness
-        run: node --check tools/m7-browser-lifecycle.mjs
+        run: |
+          node --check tools/m7-browser-lifecycle.mjs
+          node --check tools/issue-46-browser-prepared-message.mjs
 
       - name: Build browser validation subject
         run: npm run build
@@ -128,6 +132,7 @@ jobs:
         run: |
           set -euo pipefail
           node tools/m7-browser-lifecycle.mjs
+          node tools/issue-46-browser-prepared-message.mjs
           test "$(git rev-parse HEAD)" = "$SUBJECT_SOURCE_SHA"
           echo "BROWSER_LIFECYCLE=PASS sha=$SUBJECT_SOURCE_SHA"
           echo 'PRODUCTION_DEPLOYMENT=NOT_PERFORMED'

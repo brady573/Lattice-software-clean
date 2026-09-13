@@ -2,9 +2,23 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { Pool } from "pg";
-import type { PreparedResource, PreparedResourceBasis } from "../outcome.js";
+import type {
+  PreparedDraftAuthority,
+  PreparedResource,
+  PreparedResourceBasis,
+} from "../outcome.js";
 
 const migration = "035_prepared_resources.sql" as const;
+
+export interface SolandraPreparedDraftAuthority extends PreparedDraftAuthority {
+  origin: "SOLANDRA";
+}
+
+const SOLANDRA_DRAFT_AUTHORITY: SolandraPreparedDraftAuthority = Object.freeze({
+  origin: "SOLANDRA",
+  factualAuthority: false,
+  userAuthored: false,
+});
 
 export interface PreparedResourceRecord {
   resourceId: string;
@@ -16,6 +30,7 @@ export interface PreparedResourceRecord {
   kind: "PREPARED_MESSAGE";
   title: string;
   body: string;
+  draftAuthority: SolandraPreparedDraftAuthority;
   basis: PreparedResourceBasis[];
   knowledgeIds: string[];
   claimIds: string[];
@@ -88,7 +103,7 @@ function sameRecord(left: unknown, right: unknown): boolean {
 }
 
 export function buildPreparedResourceRecord(
-  input: Omit<PreparedResourceRecord, "resourceId" | "knowledgeIds" | "claimIds" | "editable" | "executionAuthorized">,
+  input: Omit<PreparedResourceRecord, "resourceId" | "draftAuthority" | "knowledgeIds" | "claimIds" | "editable" | "executionAuthorized">,
 ): PreparedResourceRecord {
   const runId = bounded(input.runId, "runId", 200);
   const intentVersionId = bounded(input.intentVersionId, "intentVersionId", 200);
@@ -104,6 +119,7 @@ export function buildPreparedResourceRecord(
     kind: "PREPARED_MESSAGE",
     title: bounded(input.title, "title", 300),
     body: bounded(input.body, "body", 8_000),
+    draftAuthority: SOLANDRA_DRAFT_AUTHORITY,
     basis,
     knowledgeIds: basis.map((entry) => entry.knowledgeId),
     claimIds: unique(basis.flatMap((entry) => entry.claimIds)),
@@ -119,6 +135,7 @@ export function preparedResourceFromRecord(record: PreparedResourceRecord): Prep
     kind: record.kind,
     title: record.title,
     body: record.body,
+    draftAuthority: clone(record.draftAuthority),
     editable: true,
     executionAuthorized: false,
     basis: clone(record.basis),
@@ -207,6 +224,10 @@ function mapRow(row: PreparedResourceRow): PreparedResourceRecord {
     kind: "PREPARED_MESSAGE",
     title: row.title,
     body: row.body,
+    // Migration 035 rows can only be established through the production Action Preparation write path,
+    // which persists Solandra-generated PREPARED_MESSAGE bodies. Reconstructing this non-authoritative
+    // origin across restart is therefore an invariant classification, not semantic inference from prose.
+    draftAuthority: SOLANDRA_DRAFT_AUTHORITY,
     basis: persistedBasis(row.basis),
     knowledgeIds: stringArray(row.knowledge_ids, "PreparedResource knowledge IDs"),
     claimIds: stringArray(row.claim_ids, "PreparedResource claim IDs"),
