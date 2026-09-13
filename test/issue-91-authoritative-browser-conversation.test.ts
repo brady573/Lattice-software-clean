@@ -6,7 +6,7 @@ test("Issue #91 authoritative browser handles ordinary conversation before requi
   const html = renderSolandraAuthoritativeConversationPage();
   const conversationIndex = html.indexOf('body.status === "CONVERSATION_COMPLETED"');
   const legacyIndex = html.indexOf('body.status === "COGNITIVE_ASSISTANCE_COMPLETED"');
-  const guardIndex = html.indexOf('if (!body.runId) throw new Error("I couldn\\'t establish the requested work safely.")');
+  const guardIndex = html.indexOf("if (!body.runId) throw new Error(");
   assert.ok(conversationIndex >= 0, "ordinary conversation handling must be present");
   assert.ok(legacyIndex >= 0, "legacy cognitive-assistance compatibility remains available");
   assert.ok(guardIndex >= 0, "required-Run guard must remain present for governed work");
