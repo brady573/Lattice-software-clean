@@ -30,6 +30,11 @@ import { registerConversationApi } from "./conversation/conversation-api.js";
 import { registerConversationMembershipGuard } from "./conversation/conversation-membership-guard.js";
 import { registerConversationContinuityApi } from "./conversation/continuity-api.js";
 import {
+  MemoryConversationResponseStore,
+  PostgresConversationResponseStore,
+  type ConversationResponseStore,
+} from "./conversation/conversation-response-store.js";
+import {
   MemoryConversationStore,
   PostgresConversationStore,
   type ConversationStore,
@@ -120,6 +125,7 @@ export interface RuntimeAppOptions {
   recommendationStore?: RecommendationStore;
   acceptedChoiceStore?: AcceptedChoiceStore;
   preparedResourceStore?: PreparedResourceStore;
+  conversationResponseStore?: ConversationResponseStore;
   solandraCognition?: SolandraCognitiveRuntime;
   solandraAdvisory?: SolandraAdvisoryRuntime;
   solandraActionPreparer?: SolandraActionPreparer;
@@ -256,6 +262,7 @@ export async function migrateRuntimeDatabase(databaseUrl: string): Promise<void>
   await PostgresV36ResearchBridge.migrate(databaseUrl);
   await migrateV36ResearchContinuationRounds(databaseUrl);
   await PostgresConversationStore.migrate(databaseUrl);
+  await PostgresConversationResponseStore.migrate(databaseUrl);
   await PostgresIntentUserMessageStore.migrate(databaseUrl);
   await PostgresIntentAuthorityStore.migrate(databaseUrl);
   await migrateRunIntentBindings(databaseUrl);
@@ -288,6 +295,7 @@ export async function connectPostgresRuntimeStores(
   userMessageStore: IntentUserMessageStore;
   userPreferenceStore: UserPreferenceStore;
   conversationStore: ConversationStore;
+  conversationResponseStore: ConversationResponseStore;
   decisionPlanStore: DecisionPlanStore;
   runIndexStore: ConversationRunIndexStore;
   knowledgeStore: KnowledgeRecordStore;
@@ -299,84 +307,91 @@ export async function connectPostgresRuntimeStores(
 
   const conversationStore = await PostgresConversationStore.connect(databaseUrl, { migrate: false });
   try {
-    const intentStore = await PostgresIntentAuthorityStore.connect(databaseUrl, { migrate: false });
+    const conversationResponseStore = await PostgresConversationResponseStore.connect(databaseUrl, { migrate: false });
     try {
-      const userMessageStore = await PostgresIntentUserMessageStore.connect(databaseUrl, { migrate: false });
+      const intentStore = await PostgresIntentAuthorityStore.connect(databaseUrl, { migrate: false });
       try {
-        const userPreferenceStore = await PostgresUserPreferenceStore.connect(databaseUrl);
+        const userMessageStore = await PostgresIntentUserMessageStore.connect(databaseUrl, { migrate: false });
         try {
-          const runStore = await PostgresRunStore.connect(databaseUrl, { migrate: false });
+          const userPreferenceStore = await PostgresUserPreferenceStore.connect(databaseUrl);
           try {
-            const baseApiControlStore = await PostgresApiRunControlStore.connect(databaseUrl, { migrate: false });
+            const runStore = await PostgresRunStore.connect(databaseUrl, { migrate: false });
             try {
-              const decisionPlanStore = await PostgresDecisionPlanStore.connect(databaseUrl, {
-                migrate: false,
-                ...(decisionPlanFidelityPolicy ? { fidelityPolicy: decisionPlanFidelityPolicy } : {}),
-              });
+              const baseApiControlStore = await PostgresApiRunControlStore.connect(databaseUrl, { migrate: false });
               try {
-                const runIndexStore = await PostgresConversationRunIndexStore.connect(databaseUrl);
+                const decisionPlanStore = await PostgresDecisionPlanStore.connect(databaseUrl, {
+                  migrate: false,
+                  ...(decisionPlanFidelityPolicy ? { fidelityPolicy: decisionPlanFidelityPolicy } : {}),
+                });
                 try {
-                  const knowledgeStore = await PostgresKnowledgeRecordStore.connect(databaseUrl);
+                  const runIndexStore = await PostgresConversationRunIndexStore.connect(databaseUrl);
                   try {
-                    const recommendationStore = await PostgresRecommendationStore.connect(databaseUrl);
+                    const knowledgeStore = await PostgresKnowledgeRecordStore.connect(databaseUrl);
                     try {
-                      const acceptedChoiceStore = await PostgresAcceptedChoiceStore.connect(databaseUrl);
+                      const recommendationStore = await PostgresRecommendationStore.connect(databaseUrl);
                       try {
-                        const preparedResourceStore = await PostgresPreparedResourceStore.connect(databaseUrl);
-                        const decisionPlanControl = new DecisionPlanRecordingApiRunControlStore(baseApiControlStore, decisionPlanStore);
-                        const apiControlStore = new ConversationRunIndexRecordingApiRunControlStore(decisionPlanControl, runIndexStore);
-                        return {
-                          runStore,
-                          apiControlStore,
-                          intentStore,
-                          userMessageStore,
-                          userPreferenceStore,
-                          conversationStore,
-                          decisionPlanStore,
-                          runIndexStore,
-                          knowledgeStore,
-                          recommendationStore,
-                          acceptedChoiceStore,
-                          preparedResourceStore,
-                        };
+                        const acceptedChoiceStore = await PostgresAcceptedChoiceStore.connect(databaseUrl);
+                        try {
+                          const preparedResourceStore = await PostgresPreparedResourceStore.connect(databaseUrl);
+                          const decisionPlanControl = new DecisionPlanRecordingApiRunControlStore(baseApiControlStore, decisionPlanStore);
+                          const apiControlStore = new ConversationRunIndexRecordingApiRunControlStore(decisionPlanControl, runIndexStore);
+                          return {
+                            runStore,
+                            apiControlStore,
+                            intentStore,
+                            userMessageStore,
+                            userPreferenceStore,
+                            conversationStore,
+                            conversationResponseStore,
+                            decisionPlanStore,
+                            runIndexStore,
+                            knowledgeStore,
+                            recommendationStore,
+                            acceptedChoiceStore,
+                            preparedResourceStore,
+                          };
+                        } catch (error) {
+                          await acceptedChoiceStore.close();
+                          throw error;
+                        }
                       } catch (error) {
-                        await acceptedChoiceStore.close();
+                        await recommendationStore.close();
                         throw error;
                       }
                     } catch (error) {
-                      await recommendationStore.close();
+                      await knowledgeStore.close();
                       throw error;
                     }
                   } catch (error) {
-                    await knowledgeStore.close();
+                    await runIndexStore.close();
                     throw error;
                   }
                 } catch (error) {
-                  await runIndexStore.close();
+                  await decisionPlanStore.close();
                   throw error;
                 }
               } catch (error) {
-                await decisionPlanStore.close();
+                await baseApiControlStore.close();
                 throw error;
               }
             } catch (error) {
-              await baseApiControlStore.close();
+              await runStore.close();
               throw error;
             }
           } catch (error) {
-            await runStore.close();
+            await userPreferenceStore.close();
             throw error;
           }
         } catch (error) {
-          await userPreferenceStore.close();
+          await userMessageStore.close();
           throw error;
         }
       } catch (error) {
-        await userMessageStore.close();
+        await intentStore.close();
         throw error;
       }
     } catch (error) {
-      await intentStore.close();
+      await conversationResponseStore.close();
       throw error;
     }
   } catch (error) {
@@ -404,6 +419,7 @@ export async function createRuntimeApp(
   let userMessageStore: IntentUserMessageStore;
   let userPreferenceStore: UserPreferenceStore;
   let conversationStore: ConversationStore;
+  let conversationResponseStore: ConversationResponseStore;
   let decisionPlanStore: DecisionPlanStore;
   let runIndexStore: ConversationRunIndexStore;
   let knowledgeStore: KnowledgeRecordStore;
@@ -419,6 +435,7 @@ export async function createRuntimeApp(
       userMessageStore,
       userPreferenceStore,
       conversationStore,
+      conversationResponseStore,
       decisionPlanStore,
       runIndexStore,
       knowledgeStore,
@@ -432,6 +449,7 @@ export async function createRuntimeApp(
     const memoryUserMessageStore = new MemoryIntentUserMessageStore();
     const memoryUserPreferenceStore = new MemoryUserPreferenceStore();
     const memoryConversationStore = new MemoryConversationStore();
+    const memoryConversationResponseStore = options.conversationResponseStore ?? new MemoryConversationResponseStore();
     const memoryDecisionPlanStore = new MemoryDecisionPlanStore(memoryIntentStore);
     const memoryRunIndexStore = new MemoryConversationRunIndexStore();
     const memoryKnowledgeStore = options.knowledgeStore ?? new MemoryKnowledgeRecordStore();
@@ -444,6 +462,7 @@ export async function createRuntimeApp(
     userMessageStore = memoryUserMessageStore;
     userPreferenceStore = memoryUserPreferenceStore;
     conversationStore = memoryConversationStore;
+    conversationResponseStore = memoryConversationResponseStore;
     decisionPlanStore = memoryDecisionPlanStore;
     runIndexStore = memoryRunIndexStore;
     knowledgeStore = memoryKnowledgeStore;
@@ -494,6 +513,7 @@ export async function createRuntimeApp(
   registerConsultationIntake(app, {
     intentStore,
     conversationStore,
+    conversationResponseStore,
     userMessageStore,
     apiControlStore,
     runStore,
@@ -513,6 +533,7 @@ export async function createRuntimeApp(
   registerDecisionPlanApi(app, { decisionPlanStore });
   registerConversationContinuityApi(app, {
     conversationStore,
+    conversationResponseStore,
     userMessageStore,
     runStore,
     runIndexStore,
@@ -533,6 +554,7 @@ export async function createRuntimeApp(
     await acceptedChoiceStore.close();
     await recommendationStore.close();
     await knowledgeStore.close();
+    await conversationResponseStore.close();
     await conversationStore.close();
     await userMessageStore.close();
     await userPreferenceStore.close();
