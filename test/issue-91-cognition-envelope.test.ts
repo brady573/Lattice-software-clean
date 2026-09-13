@@ -1,25 +1,26 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { ModelRuntime } from "../src/model/runtime.js";
-import type { CanonicalModelRequest, ModelCallContext, ModelProvider, ModelProviderResult } from "../src/model/types.js";
+import type { ModelProvider } from "../src/model/provider.js";
+import type { CanonicalModelRequest, ModelCallContext, ModelProviderResult } from "../src/model/types.js";
 import { ModelSolandraCognitiveRuntime } from "../src/solandra/cognition.js";
 
 class CapturingProvider implements ModelProvider {
+  readonly kind = "issue-91-fixture";
   readonly requests: CanonicalModelRequest[] = [];
-  readonly providerName = "issue-91-fixture";
-  readonly capability = Object.freeze({ transport: "test" });
 
-  async invoke(request: CanonicalModelRequest, _context: ModelCallContext): Promise<ModelProviderResult> {
+  async generate(request: CanonicalModelRequest, _context: ModelCallContext): Promise<ModelProviderResult> {
     this.requests.push(structuredClone(request));
     return {
       response: {
+        id: "response-91",
+        model: request.model,
         output: [{ type: "text", text: JSON.stringify({ mode: "CONVERSATION", response: "That follows from the earlier analogy." }) }],
         usage: { inputTokens: 1, outputTokens: 1 },
       },
-      invocation: {
-        provider: this.providerName,
-        model: request.model,
-        route: "fixture",
+      route: {
+        actualProvider: this.kind,
+        actualModel: request.model,
       },
     };
   }
@@ -42,6 +43,7 @@ test("Issue #91 canonical cognition may answer ordinary conversation without sem
   });
 
   assert.equal(result.mode, "CONVERSATION");
+  if (result.mode !== "CONVERSATION") assert.fail("expected conversational cognition");
   assert.equal(result.response, "That follows from the earlier analogy.");
   assert.equal(provider.requests.length, 1);
   const prompt = provider.requests[0]?.messages.map((message) => message.content).join("\n") ?? "";
