@@ -103,9 +103,9 @@ class BoundedStore<T> {
     this.entries.delete(key);
     this.entries.set(key, value);
     while (this.entries.size > this.maxEntries) {
-      const oldest = this.entries.keys().next().value as string | undefined;
-      if (oldest === undefined) break;
-      this.entries.delete(oldest);
+      const oldest = this.entries.keys().next();
+      if (oldest.done) break;
+      this.entries.delete(oldest.value);
     }
   }
 
@@ -124,9 +124,9 @@ class BoundedAttemptLedger {
     this.entries.delete(key);
     this.entries.set(key, attempt + 1);
     while (this.entries.size > this.maxEntries) {
-      const oldest = this.entries.keys().next().value as string | undefined;
-      if (oldest === undefined) break;
-      this.entries.delete(oldest);
+      const oldest = this.entries.keys().next();
+      if (oldest.done) break;
+      this.entries.delete(oldest.value);
     }
     return attempt;
   }
