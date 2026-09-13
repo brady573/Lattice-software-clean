@@ -10,7 +10,12 @@ import type {
 } from "../intent/decision-plan-store.js";
 import type { DecisionInputSnapshot } from "../decision/decision-input-snapshot.js";
 import type { IntentProvenance, IntentValue, IntentVersion } from "../intent/types.js";
-import type { KnowledgeOutcome, RunOutcome } from "../outcome.js";
+import type {
+  KnowledgeOutcome,
+  PreparedDraftAuthority,
+  PreparedResourceBasis,
+  RunOutcome,
+} from "../outcome.js";
 
 export type SolandraSemanticPhase = "listening" | "understanding" | "knowledge_gap" | "actionable";
 export type SolandraPresentationTransition = "initial" | "updated" | "reconnected";
@@ -77,6 +82,9 @@ export interface ResourceDescriptor {
   capabilities: ResourceCapability[];
   editable?: true;
   executionAuthorized?: false;
+  draftAuthority?: PreparedDraftAuthority;
+  factualSupport?: PreparedResourceBasis[];
+  preservedUncertainties?: string[];
 }
 
 export interface SolandraPresentationSnapshot {
@@ -97,7 +105,15 @@ export interface HydratedResource {
   presentationRevision: string;
   payload:
     | { kind: "text"; text: string }
-    | { kind: "generated_artifact"; filename: string; mediaType: "text/plain"; text: string };
+    | {
+        kind: "generated_artifact";
+        filename: string;
+        mediaType: "text/plain";
+        text: string;
+        draftAuthority?: PreparedDraftAuthority;
+        factualSupport?: PreparedResourceBasis[];
+        preservedUncertainties?: string[];
+      };
 }
 
 function formatConstraintValue(operator: "lte" | "gte" | "eq", value: string | number | boolean): string {
@@ -152,12 +168,21 @@ function faithfulKnowledgeFromOutcome(
   return knowledge;
 }
 
+function actionPreparationClaimIds(outcome: RunOutcome | undefined): Set<string> | undefined {
+  if (outcome?.kind !== "ACTION_PREPARATION" || outcome.resource.kind !== "PREPARED_MESSAGE") return undefined;
+  return new Set((outcome.resource.basis ?? []).flatMap((entry) => entry.claimIds));
+}
+
 function supportingFromOutcome(run: LatticeRun | undefined, outcome: RunOutcome | undefined): SupportingKnowledge[] {
   const knowledge = faithfulKnowledgeFromOutcome(run, outcome);
   if (!knowledge) return [];
+  const selectedClaimIds = actionPreparationClaimIds(outcome);
+  const findings = selectedClaimIds === undefined
+    ? knowledge.findings
+    : knowledge.findings.filter((finding) => selectedClaimIds.has(finding.claimId));
   const provenance = knowledge.truthAssessmentIds.map((ref) => ({ authority: "v36" as const, ref }));
-  if (knowledge.findings.length > 0 && provenance.length === 0) return [];
-  return knowledge.findings.map((finding) => ({
+  if (findings.length > 0 && provenance.length === 0) return [];
+  return findings.map((finding) => ({
     id: `knowledge:${finding.claimId}`,
     label: finding.status,
     value: finding.text,
@@ -176,6 +201,18 @@ function phaseFromRun(
   return plan || intentVersion ? "understanding" : "listening";
 }
 
+function actionPreparationUncertainty(
+  run: LatticeRun | undefined,
+  outcome: RunOutcome | undefined,
+): MaterialUncertainty[] {
+  if (!run || outcome?.kind !== "ACTION_PREPARATION") return [];
+  return (outcome.resource.preservedUncertainties ?? []).map((description, index) => ({
+    id: `action-preparation-uncertainty:${run.id}:${index}`,
+    description,
+    provenance: [{ authority: "product_capability" as const, ref: `action-preparation:${run.id}` }],
+  }));
+}
+
 function actionPreparationResource(
   run: LatticeRun | undefined,
   outcome: RunOutcome | undefined,
@@ -184,19 +221,25 @@ function actionPreparationResource(
     return undefined;
   }
   if (!faithfulKnowledgeFromOutcome(run, outcome)) return undefined;
+  const draftAuthority = outcome.resource.kind === "PREPARED_MESSAGE"
+    ? structuredClone(outcome.resource.draftAuthority)
+    : undefined;
   return {
     id: `action-preparation:${run.id}`,
     kind: "generated_artifact",
     title: outcome.resource.title,
     purpose: "enable_next_action",
-    provenance: [
-      { authority: "execution_runtime", ref: `${run.id}@${run.version}` },
-      ...outcome.knowledge.truthAssessmentIds.map((ref) => ({ authority: "v36" as const, ref })),
-    ],
+    // This provenance describes the prepared artifact lifecycle only. Governed factual
+    // support travels separately in factualSupport/supportingKnowledge and never blesses
+    // arbitrary generated draft wording with V36 authority.
+    provenance: [{ authority: "execution_runtime", ref: `${run.id}@${run.version}` }],
     status: "available",
     capabilities: ["copy", "download"],
     editable: outcome.resource.editable,
     executionAuthorized: outcome.resource.executionAuthorized,
+    ...(draftAuthority ? { draftAuthority } : {}),
+    factualSupport: structuredClone(outcome.resource.basis ?? []),
+    preservedUncertainties: [...(outcome.resource.preservedUncertainties ?? [])],
   };
 }
 
@@ -225,17 +268,17 @@ function resourcesFor(
     });
   }
   resources.push({
-      id: `decision-rationale:${run.id}`,
-      kind: "generated_artifact",
-      title: "Decision rationale",
-      purpose: "enable_next_action",
-      provenance: [
-        { authority: "structured_decision", ref: run.id },
-        ...run.truthAssessmentIds.map((id) => ({ authority: "v36" as const, ref: id })),
-      ],
-      status: "available",
-      capabilities: ["copy", "download"],
-    });
+    id: `decision-rationale:${run.id}`,
+    kind: "generated_artifact",
+    title: "Decision rationale",
+    purpose: "enable_next_action",
+    provenance: [
+      { authority: "structured_decision", ref: run.id },
+      ...run.truthAssessmentIds.map((id) => ({ authority: "v36" as const, ref: id })),
+    ],
+    status: "available",
+    capabilities: ["copy", "download"],
+  });
   return resources;
 }
 
@@ -267,7 +310,7 @@ export function composeSolandraPresentation(input: {
         description: "More accepted information is required before the current decision can progress responsibly.",
         provenance: [{ authority: "execution_runtime", ref: `${run.id}@${run.version}` }],
       }]
-    : [];
+    : actionPreparationUncertainty(run, outcome);
   const nextAction = run?.status === "COMPLETED" && run.decision !== null
     ? {
         outcome: run.decision.outcome
@@ -347,6 +390,9 @@ export function hydrateSolandraResource(input: {
         filename: `solandra-${filenameKind}-${input.run.id}.txt`,
         mediaType: "text/plain",
         text: input.outcome.resource.body,
+        ...(descriptor.draftAuthority ? { draftAuthority: structuredClone(descriptor.draftAuthority) } : {}),
+        factualSupport: structuredClone(descriptor.factualSupport ?? []),
+        preservedUncertainties: [...(descriptor.preservedUncertainties ?? [])],
       },
     };
   }
