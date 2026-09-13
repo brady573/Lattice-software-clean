@@ -83,7 +83,7 @@ export interface ResourceDescriptor {
   editable?: true;
   executionAuthorized?: false;
   draftAuthority?: PreparedDraftAuthority;
-  factualSupport?: PreparedResourceBasis[];
+  governedBasis?: PreparedResourceBasis[];
   preservedUncertainties?: string[];
 }
 
@@ -111,7 +111,7 @@ export interface HydratedResource {
         mediaType: "text/plain";
         text: string;
         draftAuthority?: PreparedDraftAuthority;
-        factualSupport?: PreparedResourceBasis[];
+        governedBasis?: PreparedResourceBasis[];
         preservedUncertainties?: string[];
       };
 }
@@ -246,15 +246,15 @@ function actionPreparationResource(
     kind: "generated_artifact",
     title: outcome.resource.title,
     purpose: "enable_next_action",
-    // This provenance describes the prepared draft lifecycle only. Governed factual
-    // support travels separately and never blesses arbitrary generated draft wording.
+    // This provenance describes the prepared draft lifecycle only. Governed Knowledge
+    // basis travels separately and never blesses arbitrary generated draft wording.
     provenance: [{ authority: "execution_runtime", ref: `${run.id}@${run.version}` }],
     status: "available",
     capabilities: ["copy", "download"],
     editable: outcome.resource.editable,
     executionAuthorized: outcome.resource.executionAuthorized,
     draftAuthority: structuredClone(outcome.resource.draftAuthority),
-    factualSupport: structuredClone(outcome.resource.basis ?? []),
+    governedBasis: structuredClone(outcome.resource.basis ?? []),
     preservedUncertainties: [...(outcome.resource.preservedUncertainties ?? [])],
   };
 }
@@ -407,7 +407,7 @@ export function hydrateSolandraResource(input: {
         mediaType: "text/plain",
         text: input.outcome.resource.body,
         ...(descriptor.draftAuthority ? { draftAuthority: structuredClone(descriptor.draftAuthority) } : {}),
-        ...(descriptor.factualSupport ? { factualSupport: structuredClone(descriptor.factualSupport) } : {}),
+        ...(descriptor.governedBasis ? { governedBasis: structuredClone(descriptor.governedBasis) } : {}),
         ...(descriptor.preservedUncertainties
           ? { preservedUncertainties: [...descriptor.preservedUncertainties] }
           : {}),
