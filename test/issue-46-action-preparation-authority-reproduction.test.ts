@@ -108,6 +108,8 @@ test("Issue #46: false-positive correlated grounding cannot give generated draft
   });
   const resource = preparedResourceFromRecord(record);
 
+  assert.equal(resource.kind, "PREPARED_MESSAGE");
+  if (resource.kind !== "PREPARED_MESSAGE") return;
   assert.match(resource.body, /guarantees a free 30-day extension/u);
   assert.deepEqual(resource.draftAuthority, {
     origin: "SOLANDRA",
