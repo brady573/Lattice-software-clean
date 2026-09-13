@@ -74,7 +74,11 @@ jobs:
         working-directory: product
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-          VALIDATION_ARTIFACT_DIR: ../artifacts/pr92-real-model/journey
+          LATTICE_DEPLOYMENT_MODE: development
+          LATTICE_TRUTH_MODE: v36-live
+          LATTICE_AUTHENTICATION_MODE: development-fixture
+          LATTICE_DEVELOPMENT_FIXTURE_SUBJECT_ID: pr92-exact-real-model-validator
+          LATTICE_SOLANDRA_COGNITION_ROUTE: groq-gpt-oss-120b
         shell: bash
         run: |
           set -euo pipefail
