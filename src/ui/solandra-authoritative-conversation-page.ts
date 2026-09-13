@@ -338,6 +338,10 @@ const legacyPreparedResourceRendering = `      const renderPreparedResource = (t
 
 const preparedResourceTrustRendering = `      const renderPreparedResource = (resource, knowledge, body) => {
         composerHasProductContent = true;
+        if (resource.kind !== "PREPARED_MESSAGE") {
+          composer.innerHTML = '<div class="resource"><h1>' + escapeHtml(resource.title) + '</h1><p>Review and edit this before using it.</p><textarea aria-label="Prepared resource">' + escapeHtml(body) + '</textarea></div>';
+          return;
+        }
         const selectedClaimIds = new Set((resource.basis || []).flatMap((entry) => entry.claimIds || []));
         const support = (knowledge?.findings || []).filter((finding) => selectedClaimIds.has(finding.claimId));
         const supportHtml = support.length > 0
