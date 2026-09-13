@@ -205,7 +205,11 @@ function actionPreparationUncertainty(
   run: LatticeRun | undefined,
   outcome: RunOutcome | undefined,
 ): MaterialUncertainty[] {
-  if (!run || outcome?.kind !== "ACTION_PREPARATION") return [];
+  if (
+    !run
+    || outcome?.kind !== "ACTION_PREPARATION"
+    || outcome.resource.kind !== "PREPARED_MESSAGE"
+  ) return [];
   return (outcome.resource.preservedUncertainties ?? []).map((description, index) => ({
     id: `action-preparation-uncertainty:${run.id}:${index}`,
     description,
@@ -221,23 +225,35 @@ function actionPreparationResource(
     return undefined;
   }
   if (!faithfulKnowledgeFromOutcome(run, outcome)) return undefined;
-  const draftAuthority = outcome.resource.kind === "PREPARED_MESSAGE"
-    ? structuredClone(outcome.resource.draftAuthority)
-    : undefined;
+  if (outcome.resource.kind !== "PREPARED_MESSAGE") {
+    return {
+      id: `action-preparation:${run.id}`,
+      kind: "generated_artifact",
+      title: outcome.resource.title,
+      purpose: "enable_next_action",
+      provenance: [
+        { authority: "execution_runtime", ref: `${run.id}@${run.version}` },
+        ...outcome.knowledge.truthAssessmentIds.map((ref) => ({ authority: "v36" as const, ref })),
+      ],
+      status: "available",
+      capabilities: ["copy", "download"],
+      editable: outcome.resource.editable,
+      executionAuthorized: outcome.resource.executionAuthorized,
+    };
+  }
   return {
     id: `action-preparation:${run.id}`,
     kind: "generated_artifact",
     title: outcome.resource.title,
     purpose: "enable_next_action",
-    // This provenance describes the prepared artifact lifecycle only. Governed factual
-    // support travels separately in factualSupport/supportingKnowledge and never blesses
-    // arbitrary generated draft wording with V36 authority.
+    // This provenance describes the prepared draft lifecycle only. Governed factual
+    // support travels separately and never blesses arbitrary generated draft wording.
     provenance: [{ authority: "execution_runtime", ref: `${run.id}@${run.version}` }],
     status: "available",
     capabilities: ["copy", "download"],
     editable: outcome.resource.editable,
     executionAuthorized: outcome.resource.executionAuthorized,
-    ...(draftAuthority ? { draftAuthority } : {}),
+    draftAuthority: structuredClone(outcome.resource.draftAuthority),
     factualSupport: structuredClone(outcome.resource.basis ?? []),
     preservedUncertainties: [...(outcome.resource.preservedUncertainties ?? [])],
   };
@@ -391,8 +407,10 @@ export function hydrateSolandraResource(input: {
         mediaType: "text/plain",
         text: input.outcome.resource.body,
         ...(descriptor.draftAuthority ? { draftAuthority: structuredClone(descriptor.draftAuthority) } : {}),
-        factualSupport: structuredClone(descriptor.factualSupport ?? []),
-        preservedUncertainties: [...(descriptor.preservedUncertainties ?? [])],
+        ...(descriptor.factualSupport ? { factualSupport: structuredClone(descriptor.factualSupport) } : {}),
+        ...(descriptor.preservedUncertainties
+          ? { preservedUncertainties: [...descriptor.preservedUncertainties] }
+          : {}),
       },
     };
   }
