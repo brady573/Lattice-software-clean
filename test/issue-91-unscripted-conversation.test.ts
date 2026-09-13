@@ -6,7 +6,24 @@ import type {
   SolandraCognitionInput,
   SolandraCognitionResult,
   SolandraCognitiveRuntime,
+  SolandraSemanticProposal,
 } from "../src/solandra/cognition.js";
+
+const compatibilityProposal: SolandraSemanticProposal = {
+  objectiveRelation: "CONTINUE",
+  proposedObjective: null,
+  requestedHelp: "COGNITIVE_ASSISTANCE",
+  relevantContext: [],
+  entities: [],
+  referents: [],
+  constraints: [],
+  preferences: [],
+  knowledgeNeeds: [],
+  materialAmbiguity: null,
+  referencedKnowledgeId: null,
+  referencedRecommendationId: null,
+  referencedOptionId: null,
+};
 
 class ContextAwareConversationCognition implements SolandraCognitiveRuntime {
   readonly inputs: SolandraCognitionInput[] = [];
@@ -20,9 +37,17 @@ class ContextAwareConversationCognition implements SolandraCognitiveRuntime {
     return {
       mode: "CONVERSATION",
       response,
+      proposal: compatibilityProposal,
       invocationProvenance: {
+        executionClass: null,
+        routeMode: null,
+        requestedProvider: null,
+        requestedModel: "context-aware-conversation",
         actualProvider: "test",
         actualModel: "context-aware-conversation",
+        brokerIdentity: null,
+        brokerVersion: null,
+        upstreamRequestId: null,
         routeProvenance: "COMPLETE",
       },
     };
