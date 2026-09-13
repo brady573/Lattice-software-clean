@@ -18,6 +18,7 @@ import {
   type UserModelInput,
   type UserModelOutput,
 } from "./capabilities/user-model-capability.js";
+import type { ConversationResponse, ConversationResponseStore } from "./conversation/conversation-response-store.js";
 import type { ConversationStore } from "./conversation/conversation-store.js";
 import { buildAcceptedChoiceRecord, type AcceptedChoiceStore } from "./intent/accepted-choice-store.js";
 import type { QualifiedCriterionCatalog } from "./decision/criterion-catalog.js";
@@ -74,16 +75,18 @@ import { createPendingRun } from "./run-execution.js";
 import type { RunStore } from "./run-store.js";
 import type { SolandraAdvisoryRuntime } from "./solandra/advisory.js";
 import type { SolandraActionPreparer } from "./solandra/action-preparer.js";
-import type {
-  SolandraCognitionResult,
-  SolandraCognitiveRuntime,
-  SolandraRequestedHelp,
+import {
+  isConversationalCognition,
+  type SolandraCognitionResult,
+  type SolandraCognitiveRuntime,
+  type SolandraConversationContextTurn,
+  type SolandraRequestedHelp,
 } from "./solandra/cognition.js";
 import type { SolandraKnowledgePresenter } from "./solandra/knowledge-presenter.js";
 
 const IDEMPOTENCY_RETENTION_MS = 24 * 60 * 60 * 1_000;
 const MAX_RUN_CONTEXT_ITEMS = 32;
-const MAX_COGNITIVE_HISTORY_ITEMS = 8;
+const MAX_COGNITIVE_HISTORY_ITEMS = 12;
 const MAX_ADVISORY_KNOWLEDGE_ROUNDS = 2;
 
 const consultationTurnSchema = z.object({
@@ -106,6 +109,7 @@ const clarificationTurnSchema = z.object({
 export interface ConsultationIntakeOptions {
   intentStore: IntentAuthorityStore;
   conversationStore: ConversationStore;
+  conversationResponseStore: ConversationResponseStore;
   userMessageStore: IntentUserMessageStore;
   apiControlStore: ApiRunControlStore;
   runStore: RunStore;
@@ -222,6 +226,13 @@ function authoritativeObjective(version: IntentVersion): string {
 
 function publicCognition(result: SolandraCognitionResult | undefined): unknown {
   if (!result) return undefined;
+  if (isConversationalCognition(result)) {
+    return {
+      authority: "NON_AUTHORITATIVE_CONVERSATION",
+      factualAuthority: false,
+      mode: "CONVERSATION",
+    };
+  }
   return {
     authority: "NON_AUTHORITATIVE_PROPOSAL",
     objectiveRelation: result.proposal.objectiveRelation,
@@ -257,7 +268,7 @@ function isOptionReferenceHelp(help: SolandraRequestedHelp): boolean {
 function cognitiveInterpretation(
   sourceMessage: IntentUserMessage,
   currentVersion: IntentVersion | undefined,
-  result: SolandraCognitionResult,
+  result: Exclude<SolandraCognitionResult, { mode: "CONVERSATION" }>,
   explicitResourceNeed: ConsultationResourceNeed | undefined,
 ): ConsultationInterpretationProposal {
   const proposal = result.proposal;
@@ -296,6 +307,35 @@ function cognitiveInterpretation(
     ...(proposal.materialAmbiguity && !materialObjectiveProposal
       ? { clarificationQuestion: proposal.materialAmbiguity.question }
       : {}),
+  };
+}
+
+function boundedConversationContext(
+  userMessages: readonly IntentUserMessage[],
+  responses: readonly ConversationResponse[],
+  sourceMessage: IntentUserMessage,
+): SolandraConversationContextTurn[] {
+  const bySourceMessage = new Map(responses.map((response) => [response.sourceMessageId, response] as const));
+  const messages = [...userMessages];
+  if (!messages.some((message) => message.messageId === sourceMessage.messageId)) messages.push(sourceMessage);
+  messages.sort((left, right) => left.messageHorizon - right.messageHorizon || left.createdAt.localeCompare(right.createdAt));
+  const turns: SolandraConversationContextTurn[] = [];
+  for (const message of messages) {
+    turns.push({ role: "USER", content: message.content });
+    const response = bySourceMessage.get(message.messageId);
+    if (response) turns.push({ role: "SOLANDRA", content: response.content });
+  }
+  return turns.slice(-MAX_COGNITIVE_HISTORY_ITEMS);
+}
+
+function conversationResponsePayload(response: ConversationResponse): Record<string, unknown> {
+  return {
+    responseId: response.responseId,
+    sourceMessageId: response.sourceMessageId,
+    origin: response.origin,
+    authority: response.authority,
+    factualAuthority: response.factualAuthority,
+    createdAt: response.createdAt,
   };
 }
 
@@ -474,6 +514,21 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
         return reply.status(409).send({ error: "USER_MESSAGE_PROVENANCE_CONFLICT", message });
       }
 
+      const conversationResponses = await options.conversationResponseStore.listByConversation(conversationId);
+      const replayedConversationResponse = conversationResponses.find((response) => response.sourceMessageId === sourceMessage.messageId);
+      if (replayedConversationResponse) {
+        return reply.status(200).send({
+          status: "CONVERSATION_COMPLETED",
+          presentation: { assistantMessage: replayedConversationResponse.content },
+          interpretation: {
+            authority: replayedConversationResponse.authority,
+            factualAuthority: replayedConversationResponse.factualAuthority,
+            mode: "CONVERSATION",
+          },
+          conversationResponse: conversationResponsePayload(replayedConversationResponse),
+        });
+      }
+
       const existingScope = await options.intentStore.getScope(intentScopeId);
       const currentVersion = existingScope
         ? await options.intentStore.getVersion(existingScope.currentIntentVersionId)
@@ -500,9 +555,28 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
             message: sourceMessage.content,
             ...(currentVersion ? { currentObjective: authoritativeObjective(currentVersion) } : {}),
             recentUserMessages: recentMessages.slice(-MAX_COGNITIVE_HISTORY_ITEMS),
+            recentConversation: boundedConversationContext(history, conversationResponses, sourceMessage),
             governedKnowledge: governed.map(governedKnowledgeContext),
             governedRecommendations: recommendations.slice(-4).map(recommendationContext),
           });
+          if (isConversationalCognition(cognition)) {
+            const persisted = await options.conversationResponseStore.putResponse({
+              responseId: stableUuid("conversation-response", conversationId, sourceMessage.messageId),
+              conversationId,
+              sourceMessageId: sourceMessage.messageId,
+              content: cognition.response,
+              origin: "SOLANDRA",
+              authority: "NON_AUTHORITATIVE_CONVERSATION",
+              factualAuthority: false,
+              createdAt: new Date().toISOString(),
+            });
+            return reply.status(200).send({
+              status: "CONVERSATION_COMPLETED",
+              presentation: { assistantMessage: persisted.content },
+              interpretation: publicCognition(cognition),
+              conversationResponse: conversationResponsePayload(persisted),
+            });
+          }
           const inferredResourceNeed = cognition.proposal.requestedHelp === "RESOURCE"
             ? inferConsultationResourceNeed(sourceMessage.content)
             : "NONE";

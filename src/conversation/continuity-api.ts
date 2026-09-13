@@ -23,6 +23,7 @@ import {
   hydrateSolandraResource,
 } from "../presentation/solandra-presentation.js";
 import type { RunStore } from "../run-store.js";
+import type { ConversationResponseStore } from "./conversation-response-store.js";
 import type { ConversationStore } from "./conversation-store.js";
 import type { ConversationRunIndexStore } from "./run-index-store.js";
 
@@ -32,6 +33,7 @@ const RESOURCE_ID_MAX_CHARS = 256;
 
 export interface ConversationContinuityApiOptions {
   conversationStore: ConversationStore;
+  conversationResponseStore: ConversationResponseStore;
   userMessageStore: IntentUserMessageStore;
   runStore: RunStore;
   runIndexStore: ConversationRunIndexStore;
@@ -104,14 +106,41 @@ export function registerConversationContinuityApi(
       const conversation = await options.conversationStore.getOwned(conversationId, subjectId);
       if (!conversation) return reply.status(404).send({ error: "CONVERSATION_NOT_FOUND" });
 
-      const [messages, runIds, knowledge, references, recommendations, acceptedChoices] = await Promise.all([
+      const [messages, conversationResponses, runIds, knowledge, references, recommendations, acceptedChoices] = await Promise.all([
         options.userMessageStore.listByConversation(conversationId),
+        options.conversationResponseStore.listByConversation(conversationId),
         options.runIndexStore.listRunIds(conversationId),
         options.knowledgeStore?.listKnowledgeByConversation(conversationId) ?? Promise.resolve([]),
         options.knowledgeStore?.listReferences(conversationId) ?? Promise.resolve([]),
         options.recommendationStore?.listRecommendationsByConversation(conversationId) ?? Promise.resolve([]),
         options.acceptedChoiceStore?.listAcceptedChoicesByConversation(conversationId) ?? Promise.resolve([]),
       ]);
+
+      const responsesBySourceMessage = new Map(
+        conversationResponses.map((response) => [response.sourceMessageId, response] as const),
+      );
+      const conversationMessages = messages.flatMap((message) => {
+        const user = {
+          id: message.messageId,
+          role: "USER" as const,
+          content: message.content,
+          createdAt: message.createdAt,
+        };
+        const response = responsesBySourceMessage.get(message.messageId);
+        if (!response) return [user];
+        return [
+          user,
+          {
+            id: response.responseId,
+            role: "SOLANDRA" as const,
+            content: response.content,
+            createdAt: response.createdAt,
+            sourceMessageId: response.sourceMessageId,
+            authority: response.authority,
+            factualAuthority: response.factualAuthority,
+          },
+        ];
+      });
 
       const runs = await Promise.all(runIds.map(async (runId) => {
         const run = await options.runStore.get(runId);
@@ -154,12 +183,7 @@ export function registerConversationContinuityApi(
 
       return reply.status(200).send({
         conversation,
-        messages: messages.map((message) => ({
-          id: message.messageId,
-          role: "USER" as const,
-          content: message.content,
-          createdAt: message.createdAt,
-        })),
+        messages: conversationMessages,
         runs: runs.filter((run) => run !== undefined),
         knowledge: knowledge.map((record) => ({
           knowledgeId: record.knowledgeId,
