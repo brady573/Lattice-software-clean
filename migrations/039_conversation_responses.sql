@@ -1,6 +1,6 @@
 CREATE TABLE IF NOT EXISTS conversation_responses (
   response_id text PRIMARY KEY,
-  conversation_id text NOT NULL,
+  conversation_id text NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
   source_message_id text NOT NULL,
   content text NOT NULL CHECK (length(btrim(content)) > 0),
   origin text NOT NULL CHECK (origin = 'SOLANDRA'),
