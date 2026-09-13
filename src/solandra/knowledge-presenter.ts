@@ -118,13 +118,39 @@ function renderUncertainties(knowledge: KnowledgeOutcome): string {
 }
 
 function renderSources(knowledge: KnowledgeOutcome): string {
-  if (knowledge.provenance.length === 0) return "";
+  if (knowledge.provenance.length === 0) {
+    return "Sources:\n- No admitted source is linked to this established Knowledge.";
+  }
   const lines = knowledge.provenance.map((source) => {
     const title = source.title.trim() || source.canonicalUri;
     const publisher = source.publisher ? ` — ${source.publisher}` : "";
     return `- ${title}${publisher}\n  ${source.canonicalUri}`;
   });
   return `Sources:\n${lines.join("\n")}`;
+}
+
+function noModelInvocationProvenance(model: string): ModelInvocationProvenance {
+  return {
+    executionClass: null,
+    routeMode: null,
+    requestedProvider: null,
+    requestedModel: model,
+    actualProvider: null,
+    actualModel: null,
+    brokerIdentity: null,
+    brokerVersion: null,
+    upstreamRequestId: null,
+    routeProvenance: "MISSING",
+  };
+}
+
+function renderSparseKnowledge(knowledge: KnowledgeOutcome): string {
+  return [
+    "This established Knowledge contains no governed findings.",
+    renderUncertainties(knowledge),
+    renderSources(knowledge),
+    "The underlying Knowledge and its sources are unchanged.",
+  ].filter(Boolean).join("\n\n");
 }
 
 export class ModelSolandraKnowledgePresenter implements SolandraKnowledgePresenter {
@@ -138,20 +164,9 @@ export class ModelSolandraKnowledgePresenter implements SolandraKnowledgePresent
   async present(input: SolandraKnowledgePresentationInput): Promise<SolandraKnowledgePresentationResult> {
     if (input.knowledge.findings.length === 0) {
       return Object.freeze({
-        status: "NEEDS_NEW_KNOWLEDGE",
-        text: null,
-        invocationProvenance: {
-          executionClass: null,
-          routeMode: null,
-          requestedProvider: null,
-          requestedModel: this.model,
-          actualProvider: null,
-          actualModel: null,
-          brokerIdentity: null,
-          brokerVersion: null,
-          upstreamRequestId: null,
-          routeProvenance: "MISSING" as const,
-        },
+        status: "PRESENTED",
+        text: renderSparseKnowledge(input.knowledge),
+        invocationProvenance: noModelInvocationProvenance(this.model),
       });
     }
     const result = await this.runtime.call(buildRequest(this.model, input), {
