@@ -1,0 +1,98 @@
+name: Validation — PR 92 Historical Knowledge Continuation
+
+on:
+  push:
+    branches:
+      - validation/pr92-exact-real-model-20260913
+    paths:
+      - .github/workflows/pr92-historical-knowledge-continuation-validation.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr92-historical-knowledge-continuation-validation
+  cancel-in-progress: false
+
+jobs:
+  continuation:
+    name: Remaining historical Knowledge evidence
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      EXPECTED_PRODUCT_SHA: 3fd8b8cae97dc60bf02225aa730a175f9c6fd60e
+      EXPECTED_PRODUCT_TREE: 0dfea8a9b5a27e7d9fc4600d2ddffd76e39e6f9c
+
+    steps:
+      - name: Checkout validation infrastructure
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: validation/pr92-exact-real-model-20260913
+          path: validation-infrastructure
+          persist-credentials: false
+
+      - name: Checkout exact Product candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: 3fd8b8cae97dc60bf02225aa730a175f9c6fd60e
+          path: product
+          persist-credentials: false
+
+      - name: Verify exact Product candidate
+        working-directory: product
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_PRODUCT_SHA"
+          test "$(git rev-parse HEAD^{tree})" = "$EXPECTED_PRODUCT_TREE"
+          test -z "$(git status --porcelain)"
+          echo "PRODUCT_SHA=$EXPECTED_PRODUCT_SHA"
+          echo "PRODUCT_TREE=$EXPECTED_PRODUCT_TREE"
+          echo "EXACT_CANDIDATE=VERIFIED"
+
+      - name: Provision Node 24
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+
+      - name: Install and build exact Product
+        working-directory: product
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund
+          npm run build
+
+      - name: Stage continuation helper outside Product history
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp validation-infrastructure/tools/pr92-historical-knowledge-generalization-continuation.mjs \
+            product/tools/pr92-historical-knowledge-generalization-continuation.mjs
+
+      - name: Run only remaining unseen real-model probes
+        working-directory: product
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          VALIDATION_ARTIFACT_DIR: ../artifacts/pr92-historical-continuation
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${GROQ_API_KEY:-}"
+          echo "GROQ_API_KEY=CONFIGURED_NOT_EXPOSED"
+          node tools/pr92-historical-knowledge-generalization-continuation.mjs
+          test "$(git rev-parse HEAD)" = "$EXPECTED_PRODUCT_SHA"
+          test "$(git rev-parse HEAD^{tree})" = "$EXPECTED_PRODUCT_TREE"
+          test -z "$(git status --porcelain --untracked-files=no)"
+          echo "PRODUCT_CANDIDATE_REMAINS_UNCHANGED=YES"
+          echo "SECRET_OUTPUT=PROHIBITED"
+          echo "DEPLOYMENT=NOT_PERFORMED"
+
+      - name: Upload bounded Steward evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: pr92-historical-knowledge-continuation-evidence
+          path: artifacts/pr92-historical-continuation/
+          if-no-files-found: warn
+          retention-days: 14
