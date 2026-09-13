@@ -12,7 +12,10 @@ if (!browserExecutable) throw new Error("M7_BROWSER_EXECUTABLE is required.");
 
 const objective = "Ask the facilities coordinator about a room reservation.";
 const draft = "The room is guaranteed to be open all evening, so could you reserve it for our workshop?";
-const selectedSupport = "The published schedule lists the room as occupied until 6 PM.";
+const supportedFinding = "The published schedule lists the room as occupied until 6 PM.";
+const refutedFinding = "The room is available all evening.";
+const conflictedFinding = "Evening building access is available without an escort.";
+const unresolvedFinding = "The room can seat twenty people.";
 const siblingKnowledge = "The lobby closes at 9 PM.";
 const uncertainty = "The published schedule does not establish availability after 6 PM.";
 
@@ -57,19 +60,25 @@ const server = createServer((request, response) => {
           objective,
           acceptedUnderstanding: objective,
           findings: [
-            { claimId: "claim-selected", text: selectedSupport, status: "SUPPORTED" },
+            { claimId: "claim-supported", text: supportedFinding, status: "SUPPORTED" },
+            { claimId: "claim-refuted", text: refutedFinding, status: "REFUTED" },
+            { claimId: "claim-conflicted", text: conflictedFinding, status: "CONFLICTED" },
+            { claimId: "claim-unresolved", text: unresolvedFinding, status: "UNRESOLVED" },
             { claimId: "claim-sibling", text: siblingKnowledge, status: "SUPPORTED" },
           ],
           uncertainties: [],
           provenance: [],
-          truthAssessmentIds: ["truth-selected", "truth-sibling"],
+          truthAssessmentIds: ["truth-room"],
         },
         resource: {
           kind: "PREPARED_MESSAGE",
           title: "Prepared message",
           body: draft,
           draftAuthority: { origin: "SOLANDRA", factualAuthority: false, userAuthored: false },
-          basis: [{ knowledgeId: "knowledge-room", claimIds: ["claim-selected"] }],
+          basis: [{
+            knowledgeId: "knowledge-room",
+            claimIds: ["claim-supported", "claim-refuted", "claim-conflicted", "claim-unresolved"],
+          }],
           preservedUncertainties: [uncertainty],
           editable: true,
           executionAuthorized: false,
@@ -190,15 +199,35 @@ try {
     const composer=document.getElementById('composer');
     const prepared=document.querySelector('textarea[aria-label="Prepared resource"]');
     if(!(prepared instanceof HTMLTextAreaElement))return null;
-    const text=composer.innerText;
-    if(!text.includes('Solandra draft')||!text.includes('Established support'))return null;
-    return { text, body:prepared.value, editable:!prepared.disabled&&!prepared.readOnly, conversation:document.getElementById('conversation').innerText };
+    const sections={};
+    for(const status of ['SUPPORTED','REFUTED','CONFLICTED','UNRESOLVED']){
+      const section=document.querySelector('[data-governed-status="'+status+'"]');
+      sections[status]=section?.innerText ?? '';
+    }
+    if(!composer.innerText.includes('Solandra draft')||!sections.SUPPORTED||!sections.REFUTED||!sections.CONFLICTED||!sections.UNRESOLVED)return null;
+    return {
+      text:composer.innerText,
+      body:prepared.value,
+      editable:!prepared.disabled&&!prepared.readOnly,
+      conversation:document.getElementById('conversation').innerText,
+      sections,
+    };
   })()`));
 
   assert.equal(visible.body, draft);
   assert.equal(visible.editable, true);
   assert.match(visible.text, /This wording is a draft, not established fact\./u);
-  assert.match(visible.text, new RegExp(selectedSupport.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "u"));
+  assert.match(visible.sections.SUPPORTED, /Established support/u);
+  assert.match(visible.sections.SUPPORTED, new RegExp(supportedFinding.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "u"));
+  assert.doesNotMatch(visible.sections.SUPPORTED, new RegExp(refutedFinding.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "u"));
+  assert.doesNotMatch(visible.sections.SUPPORTED, new RegExp(conflictedFinding.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "u"));
+  assert.doesNotMatch(visible.sections.SUPPORTED, new RegExp(unresolvedFinding.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "u"));
+  assert.match(visible.sections.REFUTED, /Evidence refutes/u);
+  assert.match(visible.sections.REFUTED, new RegExp(refutedFinding.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "u"));
+  assert.match(visible.sections.CONFLICTED, /Evidence remains conflicted/u);
+  assert.match(visible.sections.CONFLICTED, new RegExp(conflictedFinding.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "u"));
+  assert.match(visible.sections.UNRESOLVED, /Not established/u);
+  assert.match(visible.sections.UNRESOLVED, new RegExp(unresolvedFinding.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "u"));
   assert.doesNotMatch(visible.text, new RegExp(siblingKnowledge.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "u"));
   assert.match(visible.text, new RegExp(uncertainty.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "u"));
   assert.match(visible.conversation, /Nothing has been sent or executed\./u);
