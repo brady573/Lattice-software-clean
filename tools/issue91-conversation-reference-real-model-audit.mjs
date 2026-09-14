@@ -171,6 +171,7 @@ try {
     knowledgeReferenceCount: continuity.references.length,
     recommendationCount: continuity.recommendations.length,
     acceptedChoices: continuity.acceptedChoices,
+    solandraConversationResponseCount: continuity.messages.filter((message) => message.role === "SOLANDRA").length,
     messages: continuity.messages,
   };
 
@@ -195,8 +196,7 @@ try {
       Object.hasOwn(reference, "recommendationId")
       || Object.hasOwn(reference, "optionId")
       || Object.hasOwn(reference, "acceptedChoiceId")),
-    governedReferenceResponsesInConversationHistory: continuity.messages.some((message) =>
-      message.role === "SOLANDRA" && referenceMessages.some((referenceMessage) => message.content?.includes(referenceMessage))),
+    governedResponsesPersistedInConversationHistory: continuity.messages.some((message) => message.role === "SOLANDRA"),
   };
   artifact.modelObservations = modelObservations;
 
