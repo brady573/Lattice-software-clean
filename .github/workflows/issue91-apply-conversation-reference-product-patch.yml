@@ -3,7 +3,7 @@ name: Implementation — Issue 91 ConversationReference Patch
 on:
   push:
     branches:
-      - validation/issue-91-conversation-reference-audit-20260914
+      - validation/issue-91-conversation-reference-implementation-20260914
     paths:
       - tools/apply-issue91-conversation-reference-product-patch.py
       - .github/workflows/issue91-apply-conversation-reference-product-patch.yml
@@ -21,7 +21,7 @@ jobs:
       - name: Checkout helper
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          ref: validation/issue-91-conversation-reference-audit-20260914
+          ref: validation/issue-91-conversation-reference-implementation-20260914
           path: helper
           persist-credentials: false
 
@@ -43,7 +43,7 @@ jobs:
 
       - name: Apply bounded structural patch
         working-directory: product
-        run: python ../helper/tools/apply-issue91-conversation-reference-product-patch.py
+        run: python "$GITHUB_WORKSPACE/helper/tools/apply-issue91-conversation-reference-product-patch.py"
 
       - name: Provision Node 24
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
