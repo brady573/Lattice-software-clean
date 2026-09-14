@@ -386,7 +386,7 @@ test("M2 general advisory spine preserves Intent/V36 authority and durable Recom
     }>();
     assert.equal(whyBody.status, "RECOMMENDATION_REFERENCE_RESOLVED");
     assert.equal(whyBody.recommendationReference.recommendationId, firstBody.recommendationReference.recommendationId);
-    assert.match(whyBody.presentation.assistantMessage, /Established support:/u);
+    assert.match(whyBody.presentation.assistantMessage, /What supports this:/u);
     assert.equal(advisory.inputs.length, 1);
     assert.equal(acquisition.requests.length, 1);
 
