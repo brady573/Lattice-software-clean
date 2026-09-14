@@ -59,6 +59,11 @@ jobs:
           set -euo pipefail
           cp validation-infrastructure/tools/issue91-post96-e2e-knowledge-trace.mjs \
             product/tools/issue91-post96-e2e-knowledge-trace.mjs
+          # Gemini 3.8 rejects deprecated sampling controls; translate only in
+          # this validation-only provider shim. Product requests/prompts remain unchanged.
+          sed -i '/request\.temperature === undefined/d; /request\.seed === undefined/d' \
+            product/tools/issue91-post96-e2e-knowledge-trace.mjs
+          echo "VALIDATION_GEMINI_TRANSLATION=OMIT_DEPRECATED_SAMPLING_CONTROLS"
 
       - name: Run held-out E2E Knowledge trace
         working-directory: product
