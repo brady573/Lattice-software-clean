@@ -1,0 +1,88 @@
+name: Diagnostic — Issue 91 Post-96 Groq E2E Knowledge Trace
+
+on:
+  push:
+    branches:
+      - validation/issue-91-post96-groq-e2e-20260914
+
+permissions:
+  contents: read
+
+jobs:
+  trace:
+    name: Trace one held-out Groq Knowledge journey
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      EXPECTED_PRODUCT_SHA: 1431392e8d9871d8b7156b06495d461e6f7dfea4
+      EXPECTED_PRODUCT_TREE: b119c71179e2c46d0028faa0de5f03a0d2f889b4
+    steps:
+      - name: Checkout validation infrastructure
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: validation/issue-91-post96-groq-e2e-20260914
+          path: validation-infrastructure
+          persist-credentials: false
+
+      - name: Checkout exact canonical Product base
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: 1431392e8d9871d8b7156b06495d461e6f7dfea4
+          path: product
+          persist-credentials: false
+
+      - name: Verify exact Product base
+        working-directory: product
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_PRODUCT_SHA"
+          test "$(git rev-parse HEAD^{tree})" = "$EXPECTED_PRODUCT_TREE"
+          test -z "$(git status --porcelain)"
+          echo "EXACT_CANONICAL_BASE=VERIFIED"
+
+      - name: Provision Node 24
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 24
+
+      - name: Install locked dependencies and build exact Product
+        working-directory: product
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund
+          npm run build
+
+      - name: Stage validation-only trace helper
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp validation-infrastructure/tools/issue91-post96-groq-e2e-trace.mjs \
+            product/tools/issue91-post96-groq-e2e-trace.mjs
+
+      - name: Run one held-out Groq E2E Knowledge trace
+        working-directory: product
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          VALIDATION_ARTIFACT_DIR: ../artifacts/issue91-post96-groq-e2e
+        shell: bash
+        run: |
+          set -euo pipefail
+          node tools/issue91-post96-groq-e2e-trace.mjs
+          test "$(git rev-parse HEAD)" = "$EXPECTED_PRODUCT_SHA"
+          test "$(git rev-parse HEAD^{tree})" = "$EXPECTED_PRODUCT_TREE"
+          test -z "$(git status --porcelain --untracked-files=no)"
+          echo "PRODUCT_SEMANTICS_CHANGED=NO"
+          echo "BRAVE_USED=NO"
+          echo "RETRIES_ADDED=NO"
+          echo "PROVIDER_MANAGEMENT_ADDED=NO"
+          echo "DEPLOYMENT=NOT_PERFORMED"
+
+      - name: Upload bounded trace evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: issue91-post96-groq-e2e-trace
+          path: artifacts/issue91-post96-groq-e2e/
+          if-no-files-found: warn
+          retention-days: 14
