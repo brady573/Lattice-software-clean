@@ -147,12 +147,13 @@ test("Issue #91: recommendation and AcceptedChoice presentation never outrun est
     assert.equal(created.statusCode, 201, created.body);
     const conversationId = created.json().conversation.id as string;
 
+    const firstUserMessage = "I'm deciding whether to water the herbs or fold clean laundry first. I'd like to finish the quicker chore first. What would you pick?";
     const recommendationTurn = await app.inject({
       method: "POST",
       url: `/api/v1/conversations/${conversationId}/turns`,
       payload: {
         turnId: "state-presentation-1",
-        message: "I'm deciding whether to water the herbs or fold clean laundry first. I'd like to finish the quicker chore first. What would you pick?",
+        message: firstUserMessage,
       },
     });
     assert.equal(recommendationTurn.statusCode, 200, recommendationTurn.body);
@@ -179,13 +180,18 @@ test("Issue #91: recommendation and AcceptedChoice presentation never outrun est
     assert.equal(recommendation.authorization, undefined);
     assert.equal(recommendation.executionReceipt, undefined);
     assert.equal(recommendation.verification, undefined);
+    console.log(`ISSUE91_BLACKBOX_RECOMMENDATION=${JSON.stringify({
+      user: firstUserMessage,
+      assistant: recommendation.presentation.assistantMessage,
+    })}`);
 
+    const secondUserMessage = "That works for me. Make your recommendation my choice.";
     const choiceTurn = await app.inject({
       method: "POST",
       url: `/api/v1/conversations/${conversationId}/turns`,
       payload: {
         turnId: "state-presentation-2",
-        message: "That works for me. Make your recommendation my choice.",
+        message: secondUserMessage,
       },
     });
     assert.equal(choiceTurn.statusCode, 200, choiceTurn.body);
@@ -214,6 +220,10 @@ test("Issue #91: recommendation and AcceptedChoice presentation never outrun est
     assert.equal(choice.authorization, undefined);
     assert.equal(choice.executionReceipt, undefined);
     assert.equal(choice.verification, undefined);
+    console.log(`ISSUE91_BLACKBOX_CHOICE=${JSON.stringify({
+      user: secondUserMessage,
+      assistant: choice.presentation.assistantMessage,
+    })}`);
 
     assert.equal(cognition.inputs.length, 2);
     assert.equal(cognition.inputs[1]?.governedRecommendations?.[0]?.selectionAuthorized, false);
@@ -278,8 +288,8 @@ test("Issue #91: canonical cognition receives exact Recommendation state and the
       }],
     }],
   });
+  if (result.mode === "CONVERSATION") assert.fail("expected exact Recommendation choice to use governed state");
   assert.equal(result.mode, "GOVERNED");
-  if (result.mode === "CONVERSATION") return;
   assert.equal(result.proposal.requestedHelp, "ACCEPT_CHOICE");
 
   const system = provider.request?.messages[0]?.content ?? "";
