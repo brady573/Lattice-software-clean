@@ -138,12 +138,14 @@ export async function appendConversationReference(
   store: ConversationReferenceStore,
   input: Omit<Parameters<typeof buildConversationReference>[0], "parentReferenceId">,
 ): Promise<ConversationReferenceRecord> {
+  const identity = buildConversationReference({ ...input, parentReferenceId: null });
+  const existing = await store.getReference(identity.referenceId);
+  if (existing) return existing;
   const latest = await store.latestReference(input.conversationId);
-  const candidate = buildConversationReference({
+  return store.putReference(buildConversationReference({
     ...input,
     parentReferenceId: latest?.referenceId ?? null,
-  });
-  return store.putReference(candidate);
+  }));
 }
 
 export class MemoryConversationReferenceStore implements ConversationReferenceStore {
@@ -215,7 +217,7 @@ function persistedTargets(value: unknown): ConversationReferenceTarget[] {
 }
 
 function mapRow(row: ReferenceRow): ConversationReferenceRecord {
-  return buildConversationReference({
+  const mapped = buildConversationReference({
     conversationId: row.conversation_id,
     userMessageId: row.user_message_id,
     responseId: row.response_id,
@@ -224,6 +226,10 @@ function mapRow(row: ReferenceRow): ConversationReferenceRecord {
     parentReferenceId: row.parent_reference_id,
     createdAt: row.created_at instanceof Date ? row.created_at.toISOString() : row.created_at,
   });
+  if (mapped.referenceId !== row.reference_id) {
+    throw new Error("Persisted ConversationReference identity does not match its exact governed binding.");
+  }
+  return mapped;
 }
 
 async function applyMigration(pool: Pool): Promise<void> {
