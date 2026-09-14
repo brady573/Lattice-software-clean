@@ -1,0 +1,103 @@
+name: Validation — Issue 91 Live Partial Acquisition
+
+on:
+  push:
+    branches:
+      - validation/issue-91-wikimedia-partial-repair-20260913
+    paths:
+      - tools/issue91-live-partial-acquisition-proof.mjs
+      - .github/workflows/issue91-live-partial-acquisition-proof.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: issue91-live-partial-acquisition-proof
+  cancel-in-progress: false
+
+jobs:
+  proof:
+    name: Exact-candidate live general-Knowledge proof
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      EXPECTED_PRODUCT_SHA: 7d140b41def09eb228b5da6f69c7e2874bad5639
+      EXPECTED_PRODUCT_TREE: a689fa0ea4430e0b0f5148ed6c93c6b8f48d33a1
+
+    steps:
+      - name: Checkout validation infrastructure
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: validation/issue-91-wikimedia-partial-repair-20260913
+          path: validation-infrastructure
+          persist-credentials: false
+
+      - name: Checkout exact Product candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: 7d140b41def09eb228b5da6f69c7e2874bad5639
+          path: product
+          persist-credentials: false
+
+      - name: Verify exact Product candidate
+        working-directory: product
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_PRODUCT_SHA"
+          test "$(git rev-parse HEAD^{tree})" = "$EXPECTED_PRODUCT_TREE"
+          test -z "$(git status --porcelain)"
+          echo "EXACT_CANDIDATE=VERIFIED"
+
+      - name: Provision Node 24
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+
+      - name: Install and build exact candidate
+        working-directory: product
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund
+          npm run build
+
+      - name: Stage validation helper outside Product history
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp validation-infrastructure/tools/issue91-live-partial-acquisition-proof.mjs \
+            product/tools/issue91-live-partial-acquisition-proof.mjs
+
+      - name: Execute one unseen live encyclopedic Product path
+        working-directory: product
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          LATTICE_DEPLOYMENT_MODE: development
+          LATTICE_TRUTH_MODE: v36-live
+          LATTICE_AUTHENTICATION_MODE: development-fixture
+          LATTICE_DEVELOPMENT_FIXTURE_SUBJECT_ID: issue91-live-partial-validator
+          LATTICE_SOLANDRA_COGNITION_ROUTE: groq-gpt-oss-120b
+          VALIDATION_ARTIFACT_DIR: ../artifacts/issue91-live-partial
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${GROQ_API_KEY:-}"
+          echo "GROQ_API_KEY=CONFIGURED_NOT_EXPOSED"
+          node tools/issue91-live-partial-acquisition-proof.mjs
+          test "$(git rev-parse HEAD)" = "$EXPECTED_PRODUCT_SHA"
+          test "$(git rev-parse HEAD^{tree})" = "$EXPECTED_PRODUCT_TREE"
+          test -z "$(git status --porcelain --untracked-files=no)"
+          echo "PRODUCT_CANDIDATE_REMAINS_UNCHANGED=YES"
+          echo "RETRIES_ADDED=NO"
+          echo "PACING_ADDED=NO"
+          echo "DEPLOYMENT=NOT_PERFORMED"
+
+      - name: Upload bounded Steward evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: issue91-live-partial-acquisition-evidence
+          path: artifacts/issue91-live-partial/
+          if-no-files-found: warn
+          retention-days: 14
