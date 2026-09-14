@@ -143,6 +143,29 @@ function isAcquisitionLimitationClaim(claim: TruthBundle["claims"][number]): boo
   return claim.qualifiers.some((item) => item.key === "acquisition-state");
 }
 
+function claimQualifier(claim: TruthBundle["claims"][number], key: string): string | undefined {
+  return claim.qualifiers.find((item) => item.key === key)?.value;
+}
+
+function acquisitionUncertainties(truth: TruthBundle): string[] {
+  const partial = truth.claims.find((claim) => claimQualifier(claim, "acquisition-state") === "PARTIAL");
+  if (!partial) return [];
+  switch (claimQualifier(partial, "acquisition-reason")) {
+    case "RATE_LIMITED":
+      return [
+        "External source retrieval was incomplete because the source provider limited further requests. The result reflects only material retrieved before that interruption.",
+      ];
+    case "TIMED_OUT":
+      return [
+        "External source retrieval was incomplete because the source request timed out. The result reflects only material retrieved before that interruption.",
+      ];
+    default:
+      return [
+        "External source retrieval was incomplete because the source provider became unavailable. The result reflects only material retrieved before that interruption.",
+      ];
+  }
+}
+
 function unresolvedSummary(finding: KnowledgeFinding): string {
   if (finding.status === "CONFLICTED") {
     return "CONFLICTED: admitted evidence remains materially conflicting for this finding.";
@@ -200,10 +223,14 @@ export function buildKnowledgeOutcome(run: LatticeRun, truth: TruthBundle): Know
     }];
   });
 
-  const uncertainties = findings
-    .filter((finding) => finding.status === "UNRESOLVED" || finding.status === "CONFLICTED")
-    .map(unresolvedSummary);
-  if (findings.length === 0) {
+  const acquisitionLimitations = acquisitionUncertainties(truth);
+  const uncertainties = [
+    ...acquisitionLimitations,
+    ...findings
+      .filter((finding) => finding.status === "UNRESOLVED" || finding.status === "CONFLICTED")
+      .map(unresolvedSummary),
+  ];
+  if (findings.length === 0 && acquisitionLimitations.length === 0) {
     uncertainties.push("No validated external findings are sufficiently relevant to this objective.");
   }
   if (findings.some((finding) => finding.basis === "SOURCE_REPORT")) {
