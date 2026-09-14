@@ -1,0 +1,82 @@
+name: Issue 91 Semantic Responsiveness Capacity Validation
+
+on:
+  push:
+    branches:
+      - validation/issue-91-semantic-responsiveness-capacity-20260913
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    env:
+      EXPECTED_SHA: f095a76acd1f1a037ef9a58797abc0b8569d974b
+      EXPECTED_TREE: b119c71179e2c46d0028faa0de5f03a0d2f889b4
+    steps:
+      - name: Checkout validation infrastructure
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: validation/issue-91-semantic-responsiveness-capacity-20260913
+          path: validation-infrastructure
+          persist-credentials: false
+
+      - name: Checkout exact Product candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ env.EXPECTED_SHA }}
+          path: product
+          persist-credentials: false
+
+      - name: Verify exact candidate
+        working-directory: product
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test "$(git rev-parse HEAD^{tree})" = "$EXPECTED_TREE"
+          test -z "$(git status --porcelain)"
+          echo "EXACT_CANDIDATE=VERIFIED"
+
+      - name: Provision Node 24
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 24
+
+      - name: Install locked dependencies
+        working-directory: product
+        run: npm ci --no-audit --no-fund
+
+      - name: Build
+        working-directory: product
+        run: npm run build
+
+      - name: Focused responsiveness capacity tests
+        working-directory: product
+        run: node --import tsx --test test/issue-91-semantic-responsiveness-capacity.test.ts
+
+      - name: Focused semantic boundary tests
+        working-directory: product
+        run: node --import tsx --test test/knowledge-semantic-investigation-boundary.test.ts
+
+      - name: Focused Knowledge boundary tests
+        working-directory: product
+        run: node --import tsx --test test/knowledge-consultation-v01.test.ts
+
+      - name: Full check
+        working-directory: product
+        run: npm run check
+
+      - name: Confirm candidate tree remained clean
+        working-directory: product
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test "$(git rev-parse HEAD^{tree})" = "$EXPECTED_TREE"
+          test -z "$(git status --porcelain --untracked-files=no)"
+          echo "PRODUCT_MUTATION=NO"
+          echo "POSTGRESQL_GATE=NOT_RUN_NO_PERSISTENCE_CHANGE"
+          echo "BROWSER_GATE=NOT_RUN_NO_UI_CHANGE"
+          echo "DEPLOYMENT=NOT_PERFORMED"
