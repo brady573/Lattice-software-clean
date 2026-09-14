@@ -1,0 +1,79 @@
+name: Issue 91 Semantic Responsiveness Live Proof
+
+on:
+  push:
+    branches:
+      - validation/issue-91-semantic-responsiveness-live-20260913
+
+permissions:
+  contents: read
+
+jobs:
+  live-proof:
+    runs-on: ubuntu-latest
+    env:
+      EXPECTED_PRODUCT_SHA: f095a76acd1f1a037ef9a58797abc0b8569d974b
+      EXPECTED_PRODUCT_TREE: b119c71179e2c46d0028faa0de5f03a0d2f889b4
+    steps:
+      - name: Checkout validation infrastructure
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: validation/issue-91-semantic-responsiveness-live-20260913
+          path: validation-infrastructure
+          persist-credentials: false
+
+      - name: Checkout exact Product candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ env.EXPECTED_PRODUCT_SHA }}
+          path: product
+          persist-credentials: false
+
+      - name: Verify exact Product candidate
+        working-directory: product
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_PRODUCT_SHA"
+          test "$(git rev-parse HEAD^{tree})" = "$EXPECTED_PRODUCT_TREE"
+          test -z "$(git status --porcelain)"
+          echo "EXACT_CANDIDATE=VERIFIED"
+
+      - name: Provision Node 24
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 24
+
+      - name: Install and build exact Product
+        working-directory: product
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+
+      - name: Stage validation helper outside Product history
+        shell: bash
+        run: cp validation-infrastructure/tools/issue91-semantic-responsiveness-live-proof.mjs product/tools/issue91-semantic-responsiveness-live-proof.mjs
+
+      - name: Run one real Product canary
+        working-directory: product
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          VALIDATION_ARTIFACT_DIR: ../artifacts/issue91-semantic-capacity-live
+        run: |
+          set -euo pipefail
+          node tools/issue91-semantic-responsiveness-live-proof.mjs
+          test "$(git rev-parse HEAD)" = "$EXPECTED_PRODUCT_SHA"
+          test "$(git rev-parse HEAD^{tree})" = "$EXPECTED_PRODUCT_TREE"
+          test -z "$(git status --porcelain --untracked-files=no)"
+          echo "PRODUCT_MUTATION=NO"
+          echo "PROVIDER_RETRIES_ADDED=NO"
+          echo "DEPLOYMENT=NOT_PERFORMED"
+
+      - name: Upload bounded live evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: issue91-semantic-responsiveness-live-evidence
+          path: artifacts/issue91-semantic-capacity-live/
+          if-no-files-found: warn
+          retention-days: 14
