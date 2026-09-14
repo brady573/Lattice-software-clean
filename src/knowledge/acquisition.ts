@@ -62,9 +62,27 @@ export interface RetrievedKnowledgeClaim {
   readonly evidence: readonly RetrievedKnowledgeEvidence[];
 }
 
+export type KnowledgeAcquisitionPartialReason =
+  | "RATE_LIMITED"
+  | "TIMED_OUT"
+  | "PROVIDER_FAILURE";
+
+export type KnowledgeAcquisitionCompletion =
+  | { readonly status: "COMPLETE" }
+  | {
+      readonly status: "PARTIAL";
+      readonly reason: KnowledgeAcquisitionPartialReason;
+    };
+
 export interface KnowledgeAcquisitionResult {
   readonly sources: readonly RetrievedKnowledgeSource[];
   readonly claims: readonly RetrievedKnowledgeClaim[];
+  /**
+   * Operational completeness only. Omission preserves compatibility with
+   * existing injected providers and is interpreted as COMPLETE downstream.
+   * It never admits evidence or establishes truth.
+   */
+  readonly completion?: KnowledgeAcquisitionCompletion;
 }
 
 /**

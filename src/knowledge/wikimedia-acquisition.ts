@@ -2,6 +2,7 @@ import type {
   KnowledgeAcquisitionProvider,
   KnowledgeAcquisitionRequest,
   KnowledgeAcquisitionResult,
+  KnowledgeAcquisitionPartialReason,
   RetrievedKnowledgeClaim,
   RetrievedKnowledgeSource,
 } from "./acquisition.js";
@@ -16,6 +17,7 @@ const MAX_CLAIM_CHARS = 1_200;
 const MAX_CLAIMS_PER_SOURCE = 8;
 const MAX_TOTAL_RESULTS = 12;
 const MAX_INVESTIGATION_QUERIES = 8;
+const DETAIL_BATCH_SIZE = 4;
 
 export interface WikimediaKnowledgeAcquisitionOptions {
   readonly endpoint?: string;
@@ -32,6 +34,30 @@ type WikimediaPage = {
   extract?: unknown;
   fullurl?: unknown;
 };
+
+type WikimediaCandidatePage = {
+  pageId: string;
+  title: string;
+  canonicalUri: string;
+  introExtract: string;
+  investigationQuery: string;
+  investigationQueryIndex: number;
+};
+
+class WikimediaRequestError extends Error {
+  constructor(
+    readonly reason: KnowledgeAcquisitionPartialReason,
+    message: string,
+    options?: ErrorOptions,
+  ) {
+    super(message, options);
+    this.name = "WikimediaRequestError";
+  }
+}
+
+function interruptionReason(error: unknown): KnowledgeAcquisitionPartialReason {
+  return error instanceof WikimediaRequestError ? error.reason : "PROVIDER_FAILURE";
+}
 
 function record(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === "object" && !Array.isArray(value)
@@ -101,9 +127,14 @@ function sourceClaimTexts(content: string): string[] {
 async function readBoundedJson(response: Response): Promise<unknown> {
   if (!response.ok) {
     await response.body?.cancel().catch(() => undefined);
-    throw new Error(`Knowledge source returned HTTP ${response.status}.`);
+    throw new WikimediaRequestError(
+      response.status === 429 ? "RATE_LIMITED" : "PROVIDER_FAILURE",
+      `Knowledge source returned HTTP ${response.status}.`,
+    );
   }
-  if (!response.body) throw new Error("Knowledge source returned an empty response.");
+  if (!response.body) {
+    throw new WikimediaRequestError("PROVIDER_FAILURE", "Knowledge source returned an empty response.");
+  }
   const reader = response.body.getReader();
   const chunks: Uint8Array[] = [];
   let total = 0;
@@ -114,7 +145,10 @@ async function readBoundedJson(response: Response): Promise<unknown> {
       total += value.byteLength;
       if (total > MAX_RESPONSE_BYTES) {
         await reader.cancel().catch(() => undefined);
-        throw new Error("Knowledge source response exceeded its byte limit.");
+        throw new WikimediaRequestError(
+          "PROVIDER_FAILURE",
+          "Knowledge source response exceeded its byte limit.",
+        );
       }
       chunks.push(value);
     }
@@ -127,7 +161,15 @@ async function readBoundedJson(response: Response): Promise<unknown> {
     combined.set(chunk, offset);
     offset += chunk.byteLength;
   }
-  return JSON.parse(new TextDecoder().decode(combined));
+  try {
+    return JSON.parse(new TextDecoder().decode(combined));
+  } catch (error) {
+    throw new WikimediaRequestError(
+      "PROVIDER_FAILURE",
+      "Knowledge source returned malformed JSON.",
+      { cause: error },
+    );
+  }
 }
 
 /**
@@ -169,37 +211,65 @@ export class WikimediaKnowledgeAcquisitionProvider implements KnowledgeAcquisiti
       return await readBoundedJson(response);
     } catch (error) {
       if (signal.aborted) {
-        throw new Error(`Knowledge source request exceeded ${this.timeoutMs} ms`, { cause: error });
+        throw new WikimediaRequestError(
+          "TIMED_OUT",
+          `Knowledge source request exceeded ${this.timeoutMs} ms`,
+          { cause: error },
+        );
       }
-      throw error;
+      if (error instanceof WikimediaRequestError) throw error;
+      throw new WikimediaRequestError(
+        "PROVIDER_FAILURE",
+        "Knowledge source request failed.",
+        { cause: error },
+      );
     }
   }
 
-  private async fullPageExtract(pageId: string, fallback: string, signal: AbortSignal): Promise<string> {
-    const url = new URL(this.endpoint.href);
-    for (const [key, value] of Object.entries({
-      action: "query",
-      pageids: pageId,
-      prop: "extracts",
-      explaintext: "1",
-      format: "json",
-      formatversion: "2",
-      origin: "*",
-    })) {
-      url.searchParams.set(key, value);
+  private async fullPageExtracts(
+    pages: readonly WikimediaCandidatePage[],
+    signal: AbortSignal,
+  ): Promise<{
+    extracts: Map<string, string>;
+    interruption: KnowledgeAcquisitionPartialReason | null;
+  }> {
+    const extracts = new Map(
+      pages.map((page) => [page.pageId, page.introExtract.slice(0, MAX_SOURCE_CONTENT_CHARS)] as const),
+    );
+
+    for (let offset = 0; offset < pages.length; offset += DETAIL_BATCH_SIZE) {
+      const batch = pages.slice(offset, offset + DETAIL_BATCH_SIZE);
+      const url = new URL(this.endpoint.href);
+      for (const [key, value] of Object.entries({
+        action: "query",
+        pageids: batch.map((page) => page.pageId).join("|"),
+        prop: "extracts",
+        explaintext: "1",
+        format: "json",
+        formatversion: "2",
+        origin: "*",
+      })) {
+        url.searchParams.set(key, value);
+      }
+
+      try {
+        const root = record(await this.requestJson(url, signal));
+        const query = record(root?.query);
+        const returnedPages = Array.isArray(query?.pages) ? query.pages : [];
+        for (const rawPage of returnedPages) {
+          const page = record(rawPage) as WikimediaPage | null;
+          const pageId = typeof page?.pageid === "number" ? String(page.pageid) : null;
+          const extract = typeof page?.extract === "string" ? page.extract.trim() : "";
+          if (pageId && extract && extracts.has(pageId)) {
+            extracts.set(pageId, extract.slice(0, MAX_SOURCE_CONTENT_CHARS));
+          }
+        }
+      } catch (error) {
+        return { extracts, interruption: interruptionReason(error) };
+      }
     }
 
-    try {
-      const root = record(await this.requestJson(url, signal));
-      const query = record(root?.query);
-      const rawPage = Array.isArray(query?.pages) ? query.pages[0] : undefined;
-      const page = record(rawPage) as WikimediaPage | null;
-      const extract = typeof page?.extract === "string" ? page.extract.trim() : "";
-      return (extract || fallback).slice(0, MAX_SOURCE_CONTENT_CHARS);
-    } catch (error) {
-      if (signal.aborted) throw error;
-      return fallback.slice(0, MAX_SOURCE_CONTENT_CHARS);
-    }
+    return { extracts, interruption: null };
   }
 
   async acquire(request: KnowledgeAcquisitionRequest): Promise<KnowledgeAcquisitionResult> {
@@ -209,11 +279,12 @@ export class WikimediaKnowledgeAcquisitionProvider implements KnowledgeAcquisiti
     const queries = retrievalQueries(request);
     const retrievedAt = this.clock().toISOString();
     const signal = AbortSignal.timeout(this.timeoutMs);
-    const sources: RetrievedKnowledgeSource[] = [];
-    const claims: RetrievedKnowledgeClaim[] = [];
+    const candidatePages: WikimediaCandidatePage[] = [];
     const seenPageIds = new Set<string>();
+    let interruption: KnowledgeAcquisitionPartialReason | null = null;
 
     for (const [queryIndex, searchQuery] of queries.entries()) {
+      if (candidatePages.length >= MAX_TOTAL_RESULTS) break;
       const url = new URL(this.endpoint.href);
       for (const [key, value] of Object.entries({
         action: "query",
@@ -236,19 +307,19 @@ export class WikimediaKnowledgeAcquisitionProvider implements KnowledgeAcquisiti
       try {
         root = record(await this.requestJson(url, signal));
       } catch (error) {
-        throw new Error(`Knowledge source was unavailable: ${error instanceof Error ? error.message : "request failed"}.`);
+        interruption = interruptionReason(error);
+        break;
       }
 
       const query = record(root?.query);
       const pages = Array.isArray(query?.pages) ? query.pages : [];
-
       for (const rawPage of [...pages].sort((left, right) => {
         const a = record(left)?.index;
         const b = record(right)?.index;
         return (typeof a === "number" ? a : Number.MAX_SAFE_INTEGER)
           - (typeof b === "number" ? b : Number.MAX_SAFE_INTEGER);
       })) {
-        if (sources.length >= MAX_TOTAL_RESULTS) break;
+        if (candidatePages.length >= MAX_TOTAL_RESULTS) break;
         const page = record(rawPage) as WikimediaPage | null;
         if (!page) continue;
         const pageId = typeof page.pageid === "number" ? String(page.pageid) : null;
@@ -264,43 +335,70 @@ export class WikimediaKnowledgeAcquisitionProvider implements KnowledgeAcquisiti
         } catch {
           continue;
         }
-
-        const extract = await this.fullPageExtract(pageId, introExtract, signal);
-        if (!extract) continue;
-        const sourceId = `page:${pageId}`;
-        const source: RetrievedKnowledgeSource = {
-          sourceId,
-          canonicalUri,
-          title,
-          publisher: "Wikipedia contributors",
-          retrievedAt,
-          publishedAt: null,
-          contentType: "text/plain; charset=utf-8",
-          content: extract,
-          metadata: {
-            pageId: Number(pageId),
-            sourceAdapter: this.kind,
-            investigationQuery: searchQuery,
-            investigationQueryIndex: queryIndex,
-            evidentiarySuitability: "GENERAL_REFERENCE",
-          },
-        };
-        const paragraphs = sourceClaimTexts(extract);
-        if (paragraphs.length === 0) continue;
         seenPageIds.add(pageId);
-        sources.push(source);
-        for (const [paragraphIndex, text] of paragraphs.entries()) {
-          claims.push({
-            claimId: `source-report:${pageId}:${paragraphIndex + 1}`,
-            text,
-            claimType: "INTERPRETIVE",
-            evidence: [{ sourceId, relation: "SUPPORTS", excerpt: text }],
-          });
-        }
+        candidatePages.push({
+          pageId,
+          title,
+          canonicalUri,
+          introExtract,
+          investigationQuery: searchQuery,
+          investigationQueryIndex: queryIndex,
+        });
       }
-      if (sources.length >= MAX_TOTAL_RESULTS) break;
     }
 
-    return { sources, claims };
+    let extracts = new Map(
+      candidatePages.map((page) => [page.pageId, page.introExtract.slice(0, MAX_SOURCE_CONTENT_CHARS)] as const),
+    );
+    if (interruption === null && candidatePages.length > 0) {
+      const detail = await this.fullPageExtracts(candidatePages, signal);
+      extracts = detail.extracts;
+      interruption = detail.interruption;
+    }
+
+    const sources: RetrievedKnowledgeSource[] = [];
+    const claims: RetrievedKnowledgeClaim[] = [];
+    for (const page of candidatePages) {
+      const content = extracts.get(page.pageId) ?? page.introExtract.slice(0, MAX_SOURCE_CONTENT_CHARS);
+      if (!content) continue;
+      const sourceId = `page:${page.pageId}`;
+      const source: RetrievedKnowledgeSource = {
+        sourceId,
+        canonicalUri: page.canonicalUri,
+        title: page.title,
+        publisher: "Wikipedia contributors",
+        retrievedAt,
+        publishedAt: null,
+        contentType: "text/plain; charset=utf-8",
+        content,
+        metadata: {
+          pageId: Number(page.pageId),
+          sourceAdapter: this.kind,
+          investigationQuery: page.investigationQuery,
+          investigationQueryIndex: page.investigationQueryIndex,
+          evidentiarySuitability: "GENERAL_REFERENCE",
+        },
+      };
+      const paragraphs = sourceClaimTexts(content);
+      if (paragraphs.length === 0) continue;
+      sources.push(source);
+      for (const [paragraphIndex, claimText] of paragraphs.entries()) {
+        claims.push({
+          claimId: `source-report:${page.pageId}:${paragraphIndex + 1}`,
+          text: claimText,
+          claimType: "INTERPRETIVE",
+          evidence: [{ sourceId, relation: "SUPPORTS", excerpt: claimText }],
+        });
+      }
+    }
+
+    return {
+      sources,
+      claims,
+      completion: interruption === null
+        ? { status: "COMPLETE" }
+        : { status: "PARTIAL", reason: interruption },
+    };
   }
+
 }

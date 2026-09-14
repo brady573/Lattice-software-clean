@@ -155,6 +155,7 @@ export class RelevantKnowledgeAcquisitionProvider implements KnowledgeAcquisitio
     return {
       sources: acquired.sources.filter((source) => selectedSourceIds.has(source.sourceId)),
       claims,
+      ...(acquired.completion === undefined ? {} : { completion: acquired.completion }),
     };
   }
 }
