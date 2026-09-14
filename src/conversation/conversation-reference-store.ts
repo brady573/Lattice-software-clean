@@ -32,6 +32,61 @@ export interface ConversationReferenceRecord {
   createdAt: string;
 }
 
+export interface ConversationReferenceAuthority {
+  conversationStore: {
+    get(id: string): Promise<{ id: string; ownerSubjectId: string } | undefined>;
+  };
+  userMessageStore: {
+    get(messageId: string): Promise<{
+      messageId: string;
+      conversationId: string;
+      intentScopeId: string;
+    } | undefined>;
+  };
+  intentStore: {
+    getVersion(intentVersionId: string): Promise<{
+      intentVersionId: string;
+      intentScopeId: string;
+    } | undefined>;
+  };
+  knowledgeStore: {
+    getKnowledge(knowledgeId: string): Promise<{
+      knowledgeId: string;
+      conversationId: string;
+    } | undefined>;
+  };
+  recommendationStore: {
+    getRecommendation(recommendationId: string): Promise<{
+      recommendationId: string;
+      conversationId: string;
+      proposals: readonly { proposalId: string }[];
+    } | undefined>;
+    listRecommendationsByConversation(conversationId: string): Promise<readonly {
+      recommendationId: string;
+      conversationId: string;
+      proposals: readonly { proposalId: string }[];
+    }[]>;
+  };
+  acceptedChoiceStore: {
+    getAcceptedChoice(acceptedChoiceId: string): Promise<{
+      acceptedChoiceId: string;
+      conversationId: string;
+      recommendationId: string;
+      optionId: string;
+      authorizationGranted: false;
+      executionAuthorized: false;
+    } | undefined>;
+  };
+  preparedResourceStore: {
+    getPreparedResource(resourceId: string): Promise<{
+      resourceId: string;
+      conversationId: string;
+      knowledgeIds: readonly string[];
+      executionAuthorized: false;
+    } | undefined>;
+  };
+}
+
 export interface ConversationReferenceStore {
   readonly kind: "memory" | "postgres";
   putReference(reference: ConversationReferenceRecord): Promise<ConversationReferenceRecord>;
@@ -134,13 +189,176 @@ export function buildConversationReference(input: {
   });
 }
 
+type RecommendationAuthorityRecord = Awaited<ReturnType<ConversationReferenceAuthority["recommendationStore"]["getRecommendation"]>>;
+type AcceptedChoiceAuthorityRecord = Awaited<ReturnType<ConversationReferenceAuthority["acceptedChoiceStore"]["getAcceptedChoice"]>>;
+type PreparedResourceAuthorityRecord = Awaited<ReturnType<ConversationReferenceAuthority["preparedResourceStore"]["getPreparedResource"]>>;
+
+function targetIds(
+  reference: ConversationReferenceRecord,
+  kind: ConversationReferenceTargetKind,
+  relation?: ConversationReferenceRelation,
+): string[] {
+  return reference.targets
+    .filter((target) => target.kind === kind && (relation === undefined || target.relation === relation))
+    .map((target) => target.targetId);
+}
+
+function includesTarget(
+  reference: ConversationReferenceRecord,
+  kind: ConversationReferenceTargetKind,
+  targetId: string,
+  relation: ConversationReferenceRelation,
+): boolean {
+  return reference.targets.some((target) =>
+    target.kind === kind && target.targetId === targetId && target.relation === relation);
+}
+
+async function assertConversationReferenceIntegrity(
+  reference: ConversationReferenceRecord,
+  authority: ConversationReferenceAuthority,
+  getParent: (referenceId: string) => Promise<ConversationReferenceRecord | undefined>,
+): Promise<void> {
+  const conversation = await authority.conversationStore.get(reference.conversationId);
+  if (!conversation) {
+    throw new Error("ConversationReference requires an existing active Conversation.");
+  }
+
+  const userMessage = await authority.userMessageStore.get(reference.userMessageId);
+  if (!userMessage || userMessage.conversationId !== reference.conversationId) {
+    throw new Error("ConversationReference USER message must belong to the same Conversation.");
+  }
+
+  const intentVersion = await authority.intentStore.getVersion(reference.intentVersionId);
+  if (!intentVersion || intentVersion.intentScopeId !== userMessage.intentScopeId) {
+    throw new Error("ConversationReference IntentVersion must belong to the USER message intent scope.");
+  }
+
+  if (reference.parentReferenceId !== null) {
+    const parent = await getParent(reference.parentReferenceId);
+    if (!parent || parent.conversationId !== reference.conversationId) {
+      throw new Error("ConversationReference parent must already exist in the same Conversation.");
+    }
+  }
+
+  const recommendationCache = new Map<string, NonNullable<RecommendationAuthorityRecord>>();
+  const acceptedChoiceCache = new Map<string, NonNullable<AcceptedChoiceAuthorityRecord>>();
+  const preparedResourceCache = new Map<string, NonNullable<PreparedResourceAuthorityRecord>>();
+  let conversationRecommendations: Awaited<ReturnType<ConversationReferenceAuthority["recommendationStore"]["listRecommendationsByConversation"]>> | undefined;
+
+  const loadRecommendation = async (recommendationId: string): Promise<NonNullable<RecommendationAuthorityRecord>> => {
+    const cached = recommendationCache.get(recommendationId);
+    if (cached) return cached;
+    const recommendation = await authority.recommendationStore.getRecommendation(recommendationId);
+    if (!recommendation || recommendation.conversationId !== reference.conversationId) {
+      throw new Error("ConversationReference Recommendation must exist in the same Conversation.");
+    }
+    recommendationCache.set(recommendationId, recommendation);
+    return recommendation;
+  };
+
+  const optionOwner = async (optionId: string): Promise<NonNullable<RecommendationAuthorityRecord>> => {
+    conversationRecommendations ??= await authority.recommendationStore.listRecommendationsByConversation(reference.conversationId);
+    const owners = conversationRecommendations.filter((recommendation) =>
+      recommendation.proposals.some((proposal) => proposal.proposalId === optionId));
+    if (owners.length !== 1) {
+      throw new Error("ConversationReference Option must resolve to exactly one Recommendation in the same Conversation.");
+    }
+    const owner = owners[0]!;
+    recommendationCache.set(owner.recommendationId, owner);
+    return owner;
+  };
+
+  for (const target of reference.targets) {
+    if (target.kind === "KNOWLEDGE") {
+      const knowledge = await authority.knowledgeStore.getKnowledge(target.targetId);
+      if (!knowledge || knowledge.conversationId !== reference.conversationId) {
+        throw new Error("ConversationReference Knowledge must exist in the same Conversation.");
+      }
+      continue;
+    }
+
+    if (target.kind === "RECOMMENDATION") {
+      await loadRecommendation(target.targetId);
+      continue;
+    }
+
+    if (target.kind === "OPTION") {
+      const owner = await optionOwner(target.targetId);
+      if (!includesTarget(reference, "RECOMMENDATION", owner.recommendationId, target.relation)) {
+        throw new Error("ConversationReference Option must retain its owning Recommendation with the same relation.");
+      }
+      continue;
+    }
+
+    if (target.kind === "ACCEPTED_CHOICE") {
+      const choice = await authority.acceptedChoiceStore.getAcceptedChoice(target.targetId);
+      if (
+        !choice
+        || choice.conversationId !== reference.conversationId
+        || choice.authorizationGranted !== false
+        || choice.executionAuthorized !== false
+      ) {
+        throw new Error("ConversationReference AcceptedChoice must exist in the same Conversation without action authority.");
+      }
+      const recommendation = await loadRecommendation(choice.recommendationId);
+      if (!recommendation.proposals.some((proposal) => proposal.proposalId === choice.optionId)) {
+        throw new Error("ConversationReference AcceptedChoice must retain its exact Recommendation option lineage.");
+      }
+      acceptedChoiceCache.set(choice.acceptedChoiceId, choice);
+      continue;
+    }
+
+    const resource = await authority.preparedResourceStore.getPreparedResource(target.targetId);
+    if (
+      !resource
+      || resource.conversationId !== reference.conversationId
+      || resource.executionAuthorized !== false
+    ) {
+      throw new Error("ConversationReference PreparedResource must exist in the same Conversation without execution authority.");
+    }
+    preparedResourceCache.set(resource.resourceId, resource);
+  }
+
+  for (const recommendationId of targetIds(reference, "RECOMMENDATION", "PRODUCED")) {
+    const recommendation = await loadRecommendation(recommendationId);
+    for (const proposal of recommendation.proposals) {
+      if (!includesTarget(reference, "OPTION", proposal.proposalId, "PRODUCED")) {
+        throw new Error("Produced Recommendation references must retain every durable Recommendation option identity.");
+      }
+    }
+  }
+
+  for (const acceptedChoiceId of targetIds(reference, "ACCEPTED_CHOICE", "PRODUCED")) {
+    const choice = acceptedChoiceCache.get(acceptedChoiceId)
+      ?? await authority.acceptedChoiceStore.getAcceptedChoice(acceptedChoiceId);
+    if (!choice) throw new Error("ConversationReference AcceptedChoice must exist before it can be referenced.");
+    if (
+      !includesTarget(reference, "RECOMMENDATION", choice.recommendationId, "CONSUMED")
+      || !includesTarget(reference, "OPTION", choice.optionId, "CONSUMED")
+    ) {
+      throw new Error("Produced AcceptedChoice references must retain the consumed Recommendation and option lineage.");
+    }
+  }
+
+  for (const resourceId of targetIds(reference, "PREPARED_RESOURCE", "PRODUCED")) {
+    const resource = preparedResourceCache.get(resourceId)
+      ?? await authority.preparedResourceStore.getPreparedResource(resourceId);
+    if (!resource) throw new Error("ConversationReference PreparedResource must exist before it can be referenced.");
+    for (const knowledgeId of resource.knowledgeIds) {
+      if (!includesTarget(reference, "KNOWLEDGE", knowledgeId, "CONSUMED")) {
+        throw new Error("Produced PreparedResource references must retain their consumed Knowledge basis.");
+      }
+    }
+  }
+}
+
 export async function appendConversationReference(
   store: ConversationReferenceStore,
   input: Omit<Parameters<typeof buildConversationReference>[0], "parentReferenceId">,
 ): Promise<ConversationReferenceRecord> {
   const identity = buildConversationReference({ ...input, parentReferenceId: null });
   const existing = await store.getReference(identity.referenceId);
-  if (existing) return existing;
+  if (existing) return store.putReference(existing);
   const latest = await store.latestReference(input.conversationId);
   return store.putReference(buildConversationReference({
     ...input,
@@ -152,15 +370,19 @@ export class MemoryConversationReferenceStore implements ConversationReferenceSt
   readonly kind = "memory" as const;
   private readonly references = new Map<string, ConversationReferenceRecord>();
 
+  constructor(private readonly authority: ConversationReferenceAuthority) {}
+
   async putReference(reference: ConversationReferenceRecord): Promise<ConversationReferenceRecord> {
     const normalized = buildConversationReference(reference);
+    await assertConversationReferenceIntegrity(
+      normalized,
+      this.authority,
+      async (referenceId) => this.references.get(referenceId),
+    );
     const existing = this.references.get(normalized.referenceId);
     if (existing) {
       if (!same(existing, normalized)) throw new Error("ConversationReference identity cannot be rebound.");
       return clone(existing);
-    }
-    if (normalized.parentReferenceId !== null && !this.references.has(normalized.parentReferenceId)) {
-      throw new Error("ConversationReference parent must already exist.");
     }
     this.references.set(normalized.referenceId, clone(normalized));
     return clone(normalized);
@@ -265,7 +487,10 @@ const columns = "reference_id,conversation_id,user_message_id,response_id,intent
 
 export class PostgresConversationReferenceStore implements ConversationReferenceStore {
   readonly kind = "postgres" as const;
-  private constructor(private readonly pool: Pool) {}
+  private constructor(
+    private readonly pool: Pool,
+    private readonly authority: ConversationReferenceAuthority,
+  ) {}
 
   static async migrate(databaseUrl: string): Promise<void> {
     const pool = new Pool({ connectionString: databaseUrl });
@@ -278,12 +503,15 @@ export class PostgresConversationReferenceStore implements ConversationReference
     }
   }
 
-  static async connect(databaseUrl: string): Promise<PostgresConversationReferenceStore> {
+  static async connect(
+    databaseUrl: string,
+    authority: ConversationReferenceAuthority,
+  ): Promise<PostgresConversationReferenceStore> {
     const pool = new Pool({ connectionString: databaseUrl });
     try {
       await pool.query("SELECT 1");
       await assertReady(pool);
-      return new PostgresConversationReferenceStore(pool);
+      return new PostgresConversationReferenceStore(pool, authority);
     } catch (error) {
       await pool.end();
       throw error;
@@ -292,12 +520,11 @@ export class PostgresConversationReferenceStore implements ConversationReference
 
   async putReference(reference: ConversationReferenceRecord): Promise<ConversationReferenceRecord> {
     const normalized = buildConversationReference(reference);
-    if (normalized.parentReferenceId !== null) {
-      const parent = await this.getReference(normalized.parentReferenceId);
-      if (!parent || parent.conversationId !== normalized.conversationId) {
-        throw new Error("ConversationReference parent must exist in the same conversation.");
-      }
-    }
+    await assertConversationReferenceIntegrity(
+      normalized,
+      this.authority,
+      async (referenceId) => this.getReference(referenceId),
+    );
     const result = await this.pool.query<ReferenceRow>(
       `INSERT INTO conversation_references(${columns}) VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7,$8)
        ON CONFLICT(reference_id) DO NOTHING RETURNING ${columns}`,
