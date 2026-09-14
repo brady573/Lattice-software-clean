@@ -18,6 +18,11 @@ import {
   type UserModelInput,
   type UserModelOutput,
 } from "./capabilities/user-model-capability.js";
+import {
+  appendConversationReference,
+  type ConversationReferenceStore,
+  type ConversationReferenceTarget,
+} from "./conversation/conversation-reference-store.js";
 import type { ConversationResponse, ConversationResponseStore } from "./conversation/conversation-response-store.js";
 import type { ConversationStore } from "./conversation/conversation-store.js";
 import { buildAcceptedChoiceRecord, type AcceptedChoiceStore } from "./intent/accepted-choice-store.js";
@@ -111,6 +116,7 @@ export interface ConsultationIntakeOptions {
   intentStore: IntentAuthorityStore;
   conversationStore: ConversationStore;
   conversationResponseStore: ConversationResponseStore;
+  conversationReferenceStore?: ConversationReferenceStore;
   userMessageStore: IntentUserMessageStore;
   apiControlStore: ApiRunControlStore;
   runStore: RunStore;
@@ -134,6 +140,45 @@ function digestHex(...parts: string[]): string {
 function stableUuid(...parts: string[]): `${string}-${string}-${string}-${string}-${string}` {
   const digest = digestHex(...parts).slice(0, 32);
   return `${digest.slice(0, 8)}-${digest.slice(8, 12)}-${digest.slice(12, 16)}-${digest.slice(16, 20)}-${digest.slice(20, 32)}`;
+}
+
+async function recordConversationReference(
+  options: ConsultationIntakeOptions,
+  input: Parameters<typeof appendConversationReference>[1],
+): Promise<void> {
+  if (!options.conversationReferenceStore) return;
+  await appendConversationReference(options.conversationReferenceStore, input);
+}
+
+function governedResponseId(kind: string, ...parts: string[]): string {
+  return `governed_response_${digestHex(kind, ...parts).slice(0, 40)}`;
+}
+
+function producedRecommendationTargets(
+  recommendation: Parameters<typeof recommendationOptions>[0],
+): ConversationReferenceTarget[] {
+  return [
+    { kind: "RECOMMENDATION", targetId: recommendation.recommendationId, relation: "PRODUCED" },
+    ...recommendationOptions(recommendation).map((option) => ({
+      kind: "OPTION" as const,
+      targetId: option.optionId,
+      relation: "PRODUCED" as const,
+    })),
+  ];
+}
+
+async function recordEstablishedKnowledgeReference(
+  options: ConsultationIntakeOptions,
+  established: Awaited<ReturnType<typeof establishKnowledge>>,
+): Promise<void> {
+  await recordConversationReference(options, {
+    conversationId: established.record.conversationId,
+    userMessageId: established.record.sourceMessageId,
+    responseId: established.reference.responseId,
+    intentVersionId: established.record.intentVersionId,
+    targets: [{ kind: "KNOWLEDGE", targetId: established.record.knowledgeId, relation: "PRODUCED" }],
+    createdAt: established.reference.createdAt,
+  });
 }
 
 function isConfirmation(message: string): boolean {
@@ -694,6 +739,17 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
         const option = recommendationOption(loaded.record, cognition.proposal.referencedOptionId!);
         if (!option) return reply.status(404).send({ error: "RECOMMENDATION_OPTION_NOT_FOUND" });
         if (cognition.proposal.requestedHelp === "EXPLAIN_OPTION") {
+          await recordConversationReference(options, {
+            conversationId,
+            userMessageId: sourceMessage.messageId,
+            responseId: governedResponseId("option-reference", sourceMessage.messageId, loaded.record.recommendationId, option.optionId),
+            intentVersionId: currentVersion.intentVersionId,
+            targets: [
+              { kind: "RECOMMENDATION", targetId: loaded.record.recommendationId, relation: "CONSUMED" },
+              { kind: "OPTION", targetId: option.optionId, relation: "CONSUMED" },
+            ],
+            createdAt: sourceMessage.createdAt,
+          });
           return reply.status(200).send({
             status: "OPTION_REFERENCE_RESOLVED",
             acceptedUnderstanding: authoritativeObjective(currentVersion),
@@ -734,6 +790,18 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
           const message = error instanceof Error ? error.message : "Accepted USER choice could not be preserved.";
           return reply.status(409).send({ error: "ACCEPTED_CHOICE_CONFLICT", message });
         }
+        await recordConversationReference(options, {
+          conversationId,
+          userMessageId: sourceMessage.messageId,
+          responseId: governedResponseId("accepted-choice", sourceMessage.messageId, acceptedChoice.acceptedChoiceId),
+          intentVersionId: currentVersion.intentVersionId,
+          targets: [
+            { kind: "RECOMMENDATION", targetId: loaded.record.recommendationId, relation: "CONSUMED" },
+            { kind: "OPTION", targetId: option.optionId, relation: "CONSUMED" },
+            { kind: "ACCEPTED_CHOICE", targetId: acceptedChoice.acceptedChoiceId, relation: "PRODUCED" },
+          ],
+          createdAt: sourceMessage.createdAt,
+        });
         return reply.status(200).send({
           status: "ACCEPTED_CHOICE_ESTABLISHED",
           acceptedUnderstanding: authoritativeObjective(currentVersion),
@@ -772,6 +840,14 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
         const assistantMessage = cognition.proposal.requestedHelp === "SOURCES_RECOMMENDATION"
           ? renderHistoricalRecommendationSources(loaded)
           : renderHistoricalRecommendationExplanation(loaded);
+        await recordConversationReference(options, {
+          conversationId,
+          userMessageId: sourceMessage.messageId,
+          responseId: governedResponseId("recommendation-reference", sourceMessage.messageId, loaded.record.recommendationId),
+          intentVersionId: currentVersion.intentVersionId,
+          targets: [{ kind: "RECOMMENDATION", targetId: loaded.record.recommendationId, relation: "CONSUMED" }],
+          createdAt: sourceMessage.createdAt,
+        });
         return reply.status(200).send({
           status: "RECOMMENDATION_REFERENCE_RESOLVED",
           acceptedUnderstanding: authoritativeObjective(currentVersion),
@@ -840,6 +916,14 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
           knowledge: loaded.record,
           userMessageId: sourceMessage.messageId,
           intentVersionId: currentVersion.intentVersionId,
+          createdAt: sourceMessage.createdAt,
+        });
+        await recordConversationReference(options, {
+          conversationId,
+          userMessageId: sourceMessage.messageId,
+          responseId: reference.responseId,
+          intentVersionId: currentVersion.intentVersionId,
+          targets: [{ kind: "KNOWLEDGE", targetId: loaded.record.knowledgeId, relation: "CONSUMED" }],
           createdAt: sourceMessage.createdAt,
         });
         return reply.status(200).send({
@@ -999,6 +1083,14 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
             sourceMessage,
             knowledge: governed,
             advisory: advisory.result,
+          });
+          await recordConversationReference(options, {
+            conversationId,
+            userMessageId: sourceMessage.messageId,
+            responseId: governedResponseId("recommendation-established", sourceMessage.messageId, recommendation.recommendationId),
+            intentVersionId: version.intentVersionId,
+            targets: producedRecommendationTargets(recommendation),
+            createdAt: recommendation.createdAt,
           });
           return reply.status(200).send({
             status: "RECOMMENDATION_ESTABLISHED",
@@ -1280,6 +1372,7 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
         return reply.status(409).send({ error: "ACTION_PREPARATION_INTENT_BINDING_UNAVAILABLE" });
       }
       const established = await establishKnowledge(options.knowledgeStore, run, truth, outcome.knowledge);
+      await recordEstablishedKnowledgeReference(options, established);
       const knowledgeReference = {
         knowledgeId: established.record.knowledgeId,
         referenceId: established.reference.referenceId,
@@ -1356,6 +1449,21 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
         ...outcome,
         resource: preparedResourceFromRecord(prepared),
       };
+      await recordConversationReference(options, {
+        conversationId: run.conversationId,
+        userMessageId: run.request.sourceMessageId,
+        responseId: governedResponseId("prepared-resource", run.id, prepared.resourceId),
+        intentVersionId: prepared.intentVersionId,
+        targets: [
+          ...prepared.knowledgeIds.map((knowledgeId) => ({
+            kind: "KNOWLEDGE" as const,
+            targetId: knowledgeId,
+            relation: "CONSUMED" as const,
+          })),
+          { kind: "PREPARED_RESOURCE", targetId: prepared.resourceId, relation: "PRODUCED" },
+        ],
+        createdAt: prepared.createdAt,
+      });
       return reply.send({
         runId: run.id,
         status: run.status,
@@ -1375,6 +1483,7 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
       return reply.send({ runId: run.id, status: run.status, outcome });
     }
     const established = await establishKnowledge(options.knowledgeStore, run, truth, outcome);
+    await recordEstablishedKnowledgeReference(options, established);
     const knowledgeReference = {
       knowledgeId: established.record.knowledgeId,
       referenceId: established.reference.referenceId,
@@ -1453,6 +1562,7 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
           continuationTruth,
           continuationOutcome,
         );
+        await recordEstablishedKnowledgeReference(options, continuationEstablished);
         const continuationKnowledge = await loadKnowledge(
           options.knowledgeStore,
           options.runStore,
@@ -1532,6 +1642,14 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
         intentVersion,
         knowledge: governedKnowledge,
         advisory: advisory.result,
+      });
+      await recordConversationReference(options, {
+        conversationId: run.conversationId,
+        userMessageId: run.request.sourceMessageId,
+        responseId: governedResponseId("recommendation-established", run.id, recommendation.recommendationId),
+        intentVersionId: recommendation.intentVersionId,
+        targets: producedRecommendationTargets(recommendation),
+        createdAt: recommendation.createdAt,
       });
       return reply.send({
         runId: run.id,

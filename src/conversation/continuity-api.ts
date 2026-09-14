@@ -23,6 +23,7 @@ import {
   hydrateSolandraResource,
 } from "../presentation/solandra-presentation.js";
 import type { RunStore } from "../run-store.js";
+import type { ConversationReferenceStore } from "./conversation-reference-store.js";
 import type { ConversationResponseStore } from "./conversation-response-store.js";
 import type { ConversationStore } from "./conversation-store.js";
 import type { ConversationRunIndexStore } from "./run-index-store.js";
@@ -34,6 +35,7 @@ const RESOURCE_ID_MAX_CHARS = 256;
 export interface ConversationContinuityApiOptions {
   conversationStore: ConversationStore;
   conversationResponseStore: ConversationResponseStore;
+  conversationReferenceStore?: ConversationReferenceStore;
   userMessageStore: IntentUserMessageStore;
   runStore: RunStore;
   runIndexStore: ConversationRunIndexStore;
@@ -106,9 +108,10 @@ export function registerConversationContinuityApi(
       const conversation = await options.conversationStore.getOwned(conversationId, subjectId);
       if (!conversation) return reply.status(404).send({ error: "CONVERSATION_NOT_FOUND" });
 
-      const [messages, conversationResponses, runIds, knowledge, references, recommendations, acceptedChoices] = await Promise.all([
+      const [messages, conversationResponses, conversationReferences, runIds, knowledge, references, recommendations, acceptedChoices] = await Promise.all([
         options.userMessageStore.listByConversation(conversationId),
         options.conversationResponseStore.listByConversation(conversationId),
+        options.conversationReferenceStore?.listByConversation(conversationId) ?? Promise.resolve([]),
         options.runIndexStore.listRunIds(conversationId),
         options.knowledgeStore?.listKnowledgeByConversation(conversationId) ?? Promise.resolve([]),
         options.knowledgeStore?.listReferences(conversationId) ?? Promise.resolve([]),
@@ -205,6 +208,15 @@ export function registerConversationContinuityApi(
           intentVersionId: reference.intentVersionId,
           knowledgeId: reference.knowledgeId,
           referenceKind: reference.referenceKind,
+          parentReferenceId: reference.parentReferenceId,
+          createdAt: reference.createdAt,
+        })),
+        conversationReferences: conversationReferences.map((reference) => ({
+          referenceId: reference.referenceId,
+          userMessageId: reference.userMessageId,
+          responseId: reference.responseId,
+          intentVersionId: reference.intentVersionId,
+          targets: reference.targets,
           parentReferenceId: reference.parentReferenceId,
           createdAt: reference.createdAt,
         })),
