@@ -26,12 +26,12 @@ jobs:
           persist-credentials: false
 
       - name: Verify exact candidate
+        shell: pwsh
         run: |
-          @echo off
-          for /f %%I in ('git rev-parse HEAD') do set "ACTUAL_SHA=%%I"
-          if /I not "%ACTUAL_SHA%"=="4def96130ddcf3f66810227e52e911f936cb760e" exit /b 1
-          for /f %%I in ('git rev-parse HEAD^{tree}') do set "ACTUAL_TREE=%%I"
-          if /I not "%ACTUAL_TREE%"=="3759afbd7fbffd3df2a9e714c6ec1fb3fec7ff1b" exit /b 1
+          $actualSha = git rev-parse HEAD
+          if ($actualSha -ne '4def96130ddcf3f66810227e52e911f936cb760e') { throw "Unexpected candidate SHA: $actualSha" }
+          $actualTree = git rev-parse 'HEAD^{tree}'
+          if ($actualTree -ne '3759afbd7fbffd3df2a9e714c6ec1fb3fec7ff1b') { throw "Unexpected candidate tree: $actualTree" }
 
       - name: Provision Node 24
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
@@ -45,9 +45,8 @@ jobs:
         run: npm run check
 
       - name: Confirm Product candidate unchanged
+        shell: pwsh
         run: |
-          @echo off
-          if not ""=="%errorlevel%" exit /b %errorlevel%
-          for /f %%I in ('git rev-parse HEAD') do set "FINAL_SHA=%%I"
-          if /I not "%FINAL_SHA%"=="4def96130ddcf3f66810227e52e911f936cb760e" exit /b 1
-          echo ISSUE91_ACQUISITION_CHECK=PASS sha=%FINAL_SHA%
+          $finalSha = git rev-parse HEAD
+          if ($finalSha -ne '4def96130ddcf3f66810227e52e911f936cb760e') { throw "Candidate changed during validation: $finalSha" }
+          Write-Output "ISSUE91_ACQUISITION_CHECK=PASS sha=$finalSha"
