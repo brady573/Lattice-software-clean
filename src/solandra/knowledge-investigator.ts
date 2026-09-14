@@ -5,12 +5,14 @@ import type {
   KnowledgeInvestigationPlanningInput,
   KnowledgeResponsivenessInput,
   KnowledgeResponsivenessResult,
+  KnowledgeResponsivenessSelection,
 } from "../knowledge/investigation.js";
 import {
   GROQ_KNOWLEDGE_SIMPLIFIER_MODEL,
   GroqKnowledgeSimplifierModelProvider,
   GroqKnowledgeSimplifierModelRuntime,
 } from "../model/groq-knowledge-simplifier.js";
+import { validateCanonicalModelRequest } from "../model/canonical.js";
 import { LocalOfflineModelRuntime } from "../model/local-offline-runtime.js";
 import { ModelProviderError } from "../model/errors.js";
 import { OpenAiCompatibleModelProvider } from "../model/openai-compatible.js";
@@ -19,7 +21,7 @@ import type { CanonicalModelRequest } from "../model/types.js";
 import type { RuntimeConfig } from "../runtime-config.js";
 
 const MAX_RETRIEVAL_QUERIES = 8;
-const MAX_SOURCE_PREVIEW_CHARS = 6_000;
+const MAX_RESPONSIVENESS_SELECTIONS_PER_REQUEST = 64;
 
 const investigationPlanSchema = z.object({
   retrievalQueries: z.array(z.string().min(1).max(1_000)).min(1).max(MAX_RETRIEVAL_QUERIES),
@@ -29,7 +31,7 @@ const responsivenessSchema = z.object({
   selections: z.array(z.object({
     claimId: z.string().min(1).max(300),
     sourceIds: z.array(z.string().min(1).max(300)).min(1).max(16),
-  }).strict()).max(64),
+  }).strict()).max(MAX_RESPONSIVENESS_SELECTIONS_PER_REQUEST),
 }).strict();
 
 function parseJsonObject(text: string, purpose: string): unknown {
@@ -82,14 +84,21 @@ function planningRequest(model: string, input: KnowledgeInvestigationPlanningInp
   };
 }
 
-function responsivenessRequest(model: string, input: KnowledgeResponsivenessInput): CanonicalModelRequest {
-  const sources = input.sources.map((source) => [
-    `Source ID: ${source.sourceId}`,
-    `Title: ${source.title}`,
-    `Publisher: ${source.publisher ?? "unknown"}`,
-    `Content preview: ${source.content.slice(0, MAX_SOURCE_PREVIEW_CHARS)}`,
-  ].join("\n")).join("\n\n");
-  const claims = input.claims.map((claim) => [
+function responsivenessRequest(
+  model: string,
+  input: KnowledgeResponsivenessInput,
+  claims: KnowledgeResponsivenessInput["claims"],
+): CanonicalModelRequest {
+  const sourceIds = new Set(claims.flatMap((claim) => claim.evidence.map((item) => item.sourceId)));
+  const sources = input.sources
+    .filter((source) => sourceIds.has(source.sourceId))
+    .map((source) => [
+      `Source ID: ${source.sourceId}`,
+      `Title: ${source.title}`,
+      `Publisher: ${source.publisher ?? "unknown"}`,
+    ].join("\n"))
+    .join("\n\n");
+  const claimText = claims.map((claim) => [
     `Claim ID: ${claim.claimId}`,
     `Claim: ${claim.text}`,
     `Evidence source IDs: ${claim.evidence.map((item) => item.sourceId).join(" | ") || "none"}`,
@@ -124,7 +133,7 @@ function responsivenessRequest(model: string, input: KnowledgeResponsivenessInpu
           sources || "none",
           "",
           "Acquired claims:",
-          claims || "none",
+          claimText || "none",
         ].join("\n"),
       },
     ],
@@ -132,6 +141,69 @@ function responsivenessRequest(model: string, input: KnowledgeResponsivenessInpu
     maxOutputTokens: 1_600,
     seed: 0,
   };
+}
+
+interface ResponsivenessBatch {
+  readonly claims: KnowledgeResponsivenessInput["claims"];
+  readonly request: CanonicalModelRequest;
+}
+
+function responsivenessBatches(
+  model: string,
+  input: KnowledgeResponsivenessInput,
+): ResponsivenessBatch[] {
+  const batches: ResponsivenessBatch[] = [];
+  let claims: KnowledgeResponsivenessInput["claims"] = [];
+
+  const finalize = (): void => {
+    if (claims.length === 0) return;
+    batches.push({
+      claims,
+      request: validateCanonicalModelRequest(responsivenessRequest(model, input, claims)),
+    });
+    claims = [];
+  };
+
+  for (const claim of input.claims) {
+    if (claims.length >= MAX_RESPONSIVENESS_SELECTIONS_PER_REQUEST) finalize();
+    const candidate = [...claims, claim];
+    try {
+      validateCanonicalModelRequest(responsivenessRequest(model, input, candidate));
+      claims = candidate;
+    } catch (error) {
+      if (claims.length === 0) throw error;
+      finalize();
+      claims = [claim];
+      validateCanonicalModelRequest(responsivenessRequest(model, input, claims));
+    }
+  }
+  finalize();
+  return batches;
+}
+
+function assertBatchSelections(
+  batchClaims: KnowledgeResponsivenessInput["claims"],
+  selections: readonly KnowledgeResponsivenessSelection[],
+): void {
+  const claimById = new Map(batchClaims.map((claim) => [claim.claimId, claim] as const));
+  for (const selection of selections) {
+    const claim = claimById.get(selection.claimId);
+    if (!claim) {
+      throw new ModelProviderError(
+        "invalid_output",
+        `Solandra Knowledge responsiveness referenced claim ${selection.claimId} outside its supplied structural batch.`,
+      );
+    }
+    const boundSourceIds = new Set(claim.evidence.map((item) => item.sourceId));
+    for (const sourceId of selection.sourceIds) {
+      if (!boundSourceIds.has(sourceId)) {
+        throw new ModelProviderError(
+          "invalid_output",
+          `Solandra Knowledge responsiveness referenced source ${sourceId} outside claim ${selection.claimId}'s supplied bindings.`,
+        );
+      }
+    }
+  }
 }
 
 export class ModelSolandraKnowledgeInvestigator implements KnowledgeInvestigator {
@@ -158,15 +230,23 @@ export class ModelSolandraKnowledgeInvestigator implements KnowledgeInvestigator
 
   async selectResponsive(input: KnowledgeResponsivenessInput): Promise<KnowledgeResponsivenessResult> {
     if (input.sources.length === 0 || input.claims.length === 0) return { selections: [] };
-    const result = await this.runtime.call(responsivenessRequest(this.model, input), {
-      correlationId: `solandra-responsiveness:${input.runId}`,
-      idempotencyKey: `${input.runId}:responsiveness`,
-      maxAttempts: 1,
-    });
-    return responsivenessSchema.parse(parseJsonObject(
-      singleTextOutput(result, "Knowledge responsiveness"),
-      "Knowledge responsiveness",
-    ));
+    const batches = responsivenessBatches(this.model, input);
+    const selections: KnowledgeResponsivenessSelection[] = [];
+    for (const [batchIndex, batch] of batches.entries()) {
+      const batchNumber = batchIndex + 1;
+      const result = await this.runtime.call(batch.request, {
+        correlationId: `solandra-responsiveness:${input.runId}:batch:${batchNumber}`,
+        idempotencyKey: `${input.runId}:responsiveness:batch:${batchNumber}`,
+        maxAttempts: 1,
+      });
+      const parsed = responsivenessSchema.parse(parseJsonObject(
+        singleTextOutput(result, "Knowledge responsiveness"),
+        "Knowledge responsiveness",
+      ));
+      assertBatchSelections(batch.claims, parsed.selections);
+      selections.push(...parsed.selections);
+    }
+    return { selections };
   }
 }
 
