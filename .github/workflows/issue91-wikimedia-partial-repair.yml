@@ -6,6 +6,7 @@ on:
       - validation/issue-91-wikimedia-partial-repair-20260913
     paths:
       - tools/apply-issue91-wikimedia-partial-repair.py
+      - tools/fix-issue91-partial-repair-imports.py
       - .github/workflows/issue91-wikimedia-partial-repair.yml
   workflow_dispatch:
 
@@ -60,6 +61,7 @@ jobs:
         run: |
           set -euo pipefail
           python ../validation-infrastructure/tools/apply-issue91-wikimedia-partial-repair.py
+          python ../validation-infrastructure/tools/fix-issue91-partial-repair-imports.py
           git diff --check
           git status --short
 
