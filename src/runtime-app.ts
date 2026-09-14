@@ -452,7 +452,15 @@ export async function createRuntimeApp(
       preparedResourceStore,
     } = await connectPostgresRuntimeStores(config.databaseUrl, config.autoMigrate));
     conversationReferenceStore = options.conversationReferenceStore
-      ?? await PostgresConversationReferenceStore.connect(config.databaseUrl);
+      ?? await PostgresConversationReferenceStore.connect(config.databaseUrl, {
+        conversationStore,
+        userMessageStore,
+        intentStore,
+        knowledgeStore,
+        recommendationStore,
+        acceptedChoiceStore,
+        preparedResourceStore,
+      });
   } else {
     const memoryRunStore = new MemoryRunStore();
     const memoryIntentStore = new MemoryIntentAuthorityStore();
@@ -460,13 +468,21 @@ export async function createRuntimeApp(
     const memoryUserPreferenceStore = new MemoryUserPreferenceStore();
     const memoryConversationStore = new MemoryConversationStore();
     const memoryConversationResponseStore = options.conversationResponseStore ?? new MemoryConversationResponseStore();
-    const memoryConversationReferenceStore = options.conversationReferenceStore ?? new MemoryConversationReferenceStore();
     const memoryDecisionPlanStore = new MemoryDecisionPlanStore(memoryIntentStore);
     const memoryRunIndexStore = new MemoryConversationRunIndexStore();
     const memoryKnowledgeStore = options.knowledgeStore ?? new MemoryKnowledgeRecordStore();
     const memoryRecommendationStore = options.recommendationStore ?? new MemoryRecommendationStore();
     const memoryAcceptedChoiceStore = options.acceptedChoiceStore ?? new MemoryAcceptedChoiceStore();
     const memoryPreparedResourceStore = options.preparedResourceStore ?? new MemoryPreparedResourceStore();
+    const memoryConversationReferenceStore = options.conversationReferenceStore ?? new MemoryConversationReferenceStore({
+      conversationStore: memoryConversationStore,
+      userMessageStore: memoryUserMessageStore,
+      intentStore: memoryIntentStore,
+      knowledgeStore: memoryKnowledgeStore,
+      recommendationStore: memoryRecommendationStore,
+      acceptedChoiceStore: memoryAcceptedChoiceStore,
+      preparedResourceStore: memoryPreparedResourceStore,
+    });
     const intentBoundRuns = new MemoryIntentBoundRunStore(memoryRunStore, memoryIntentStore);
     runStore = memoryRunStore;
     intentStore = memoryIntentStore;
