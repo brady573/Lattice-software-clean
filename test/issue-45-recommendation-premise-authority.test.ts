@@ -331,9 +331,10 @@ test("Issue #45: false-positive GROUNDED cannot give a proposal-embedded externa
     const rendered = renderRecommendation(record);
     assert.match(rendered, /Solandra recommends:/u);
     assert.match(rendered, new RegExp(UNSUPPORTED_FACT, "u"));
-    assert.match(rendered, /Established support:/u);
+    assert.match(rendered, /What supports this:/u);
     assert.match(rendered, new RegExp(DECLARED_FACT.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "u"));
-    assert.match(rendered, /Only the facts listed under Established support are governed factual support/u);
+    assert.match(rendered, /This is a recommendation, not an action/u);
+    assert.doesNotMatch(rendered, /proposal wording|advisory judgment|governed factual support|factual Knowledge/iu);
 
     const choice = buildAcceptedChoiceRecord({
       conversationId: CONVERSATION_ID,
@@ -431,7 +432,8 @@ test("Issue #45: Solandra-originated advisory proposal does not require a verbat
     const rendered = renderRecommendation(record);
     assert.match(rendered, /Solandra recommends:\nUse a staged canary rollout\./u);
     assert.match(rendered, /Other options Solandra considered:/u);
-    assert.match(rendered, /does not make proposal wording factual Knowledge or authorize action/u);
+    assert.match(rendered, /Choosing an option records your choice; it does not carry anything out\./u);
+    assert.doesNotMatch(rendered, /proposal wording|advisory judgment|governed factual support|factual Knowledge/iu);
   } finally {
     await store.close();
   }
