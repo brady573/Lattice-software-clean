@@ -1,0 +1,364 @@
+name: Validation — Issue 91 Staged Knowledge
+
+on:
+  push:
+    branches:
+      - validation/issue-91-staged-knowledge-20260914
+
+permissions:
+  contents: read
+
+env:
+  EXPECTED_PRODUCT_SHA: 1431392e8d9871d8b7156b06495d461e6f7dfea4
+  EXPECTED_PRODUCT_TREE: b119c71179e2c46d0028faa0de5f03a0d2f889b4
+
+jobs:
+  stage-a:
+    name: Stage A — cognition and investigation
+    runs-on: ubuntu-latest
+    outputs:
+      continue_stage_b: ${{ steps.run.outputs.continue_stage_b }}
+    steps:
+      - name: Checkout validation infrastructure
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: validation/issue-91-staged-knowledge-20260914
+          path: validation-infrastructure
+          persist-credentials: false
+
+      - name: Checkout exact canonical Product base
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ env.EXPECTED_PRODUCT_SHA }}
+          path: product
+          persist-credentials: false
+
+      - name: Verify exact Product base
+        working-directory: product
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_PRODUCT_SHA"
+          test "$(git rev-parse HEAD^{tree})" = "$EXPECTED_PRODUCT_TREE"
+          test -z "$(git status --porcelain)"
+          echo "EXACT_CANONICAL_BASE=VERIFIED"
+
+      - name: Provision Node 24
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 24
+
+      - name: Install locked dependencies and build exact Product
+        working-directory: product
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund
+          npm run build
+
+      - name: Stage validation helper outside Product history
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp validation-infrastructure/tools/issue91-staged-knowledge-validation.mjs \
+            product/tools/issue91-staged-knowledge-validation.mjs
+
+      - name: Run Stage A
+        id: run
+        working-directory: product
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          LATTICE_SOLANDRA_COGNITION_ROUTE: groq-gpt-oss-120b
+          LATTICE_TRUTH_MODE: v36-live
+          STAGE_ARTIFACT_PATH: ../artifacts/stage-a/stage-a.json
+        run: |
+          set -euo pipefail
+          node tools/issue91-staged-knowledge-validation.mjs A
+          test "$(git rev-parse HEAD)" = "$EXPECTED_PRODUCT_SHA"
+          test "$(git rev-parse HEAD^{tree})" = "$EXPECTED_PRODUCT_TREE"
+          test -z "$(git status --porcelain --untracked-files=no)"
+          echo "PRODUCT_SEMANTICS_CHANGED=NO"
+
+      - name: Upload Stage A artifact
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: issue91-stage-a
+          path: artifacts/stage-a/
+          if-no-files-found: warn
+          retention-days: 14
+
+  stage-b:
+    name: Stage B — Wikimedia acquisition
+    needs: stage-a
+    if: needs.stage-a.outputs.continue_stage_b == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      continue_stage_c: ${{ steps.run.outputs.continue_stage_c }}
+    steps:
+      - name: Checkout validation infrastructure
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: validation/issue-91-staged-knowledge-20260914
+          path: validation-infrastructure
+          persist-credentials: false
+
+      - name: Checkout exact canonical Product base
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ env.EXPECTED_PRODUCT_SHA }}
+          path: product
+          persist-credentials: false
+
+      - name: Download exact Stage A artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: issue91-stage-a
+          path: inputs/stage-a
+
+      - name: Provision Node 24
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 24
+
+      - name: Install locked dependencies and build exact Product
+        working-directory: product
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund
+          npm run build
+
+      - name: Stage validation helper outside Product history
+        run: cp validation-infrastructure/tools/issue91-staged-knowledge-validation.mjs product/tools/issue91-staged-knowledge-validation.mjs
+
+      - name: Run Stage B
+        id: run
+        working-directory: product
+        env:
+          STAGE_A_ARTIFACT: ../inputs/stage-a/stage-a.json
+          STAGE_ARTIFACT_PATH: ../artifacts/stage-b/stage-b.json
+        run: |
+          set -euo pipefail
+          node tools/issue91-staged-knowledge-validation.mjs B
+          test "$(git rev-parse HEAD)" = "$EXPECTED_PRODUCT_SHA"
+          test "$(git rev-parse HEAD^{tree})" = "$EXPECTED_PRODUCT_TREE"
+          test -z "$(git status --porcelain --untracked-files=no)"
+          echo "MODEL_CALLS_INTRODUCED=NO"
+          echo "PRODUCT_SEMANTICS_CHANGED=NO"
+
+      - name: Upload Stage B artifact
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: issue91-stage-b
+          path: artifacts/stage-b/
+          if-no-files-found: warn
+          retention-days: 14
+
+  stage-c:
+    name: Stage C — semantic responsiveness
+    needs: stage-b
+    if: needs.stage-b.outputs.continue_stage_c == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      continue_stage_d: ${{ steps.run.outputs.continue_stage_d }}
+    steps:
+      - name: Checkout validation infrastructure
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: validation/issue-91-staged-knowledge-20260914
+          path: validation-infrastructure
+          persist-credentials: false
+
+      - name: Checkout exact canonical Product base
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ env.EXPECTED_PRODUCT_SHA }}
+          path: product
+          persist-credentials: false
+
+      - name: Download exact Stage A artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: issue91-stage-a
+          path: inputs/stage-a
+
+      - name: Download exact Stage B artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: issue91-stage-b
+          path: inputs/stage-b
+
+      - name: Provision Node 24
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 24
+
+      - name: Install locked dependencies and build exact Product
+        working-directory: product
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund
+          npm run build
+
+      - name: Stage validation helper outside Product history
+        run: cp validation-infrastructure/tools/issue91-staged-knowledge-validation.mjs product/tools/issue91-staged-knowledge-validation.mjs
+
+      - name: Run Stage C in fresh provider window
+        id: run
+        working-directory: product
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          LATTICE_SOLANDRA_COGNITION_ROUTE: groq-gpt-oss-120b
+          LATTICE_TRUTH_MODE: v36-live
+          STAGE_A_ARTIFACT: ../inputs/stage-a/stage-a.json
+          STAGE_B_ARTIFACT: ../inputs/stage-b/stage-b.json
+          STAGE_ARTIFACT_PATH: ../artifacts/stage-c/stage-c.json
+        run: |
+          set -euo pipefail
+          node tools/issue91-staged-knowledge-validation.mjs C
+          test "$(git rev-parse HEAD)" = "$EXPECTED_PRODUCT_SHA"
+          test "$(git rev-parse HEAD^{tree})" = "$EXPECTED_PRODUCT_TREE"
+          test -z "$(git status --porcelain --untracked-files=no)"
+          echo "AUTOMATIC_RETRY=NO"
+          echo "PROVIDER_ROTATION=NO"
+          echo "PRODUCT_SEMANTICS_CHANGED=NO"
+
+      - name: Upload Stage C artifact
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: issue91-stage-c
+          path: artifacts/stage-c/
+          if-no-files-found: warn
+          retention-days: 14
+
+  stage-d:
+    name: Stage D — sanitizer V36 Knowledge
+    needs: stage-c
+    if: needs.stage-c.outputs.continue_stage_d == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      continue_stage_e: ${{ steps.run.outputs.continue_stage_e }}
+    steps:
+      - name: Checkout validation infrastructure
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: validation/issue-91-staged-knowledge-20260914
+          path: validation-infrastructure
+          persist-credentials: false
+
+      - name: Checkout exact canonical Product base
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ env.EXPECTED_PRODUCT_SHA }}
+          path: product
+          persist-credentials: false
+
+      - name: Download exact Stage C artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: issue91-stage-c
+          path: inputs/stage-c
+
+      - name: Provision Node 24
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 24
+
+      - name: Install locked dependencies and build exact Product
+        working-directory: product
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund
+          npm run build
+
+      - name: Stage validation helper outside Product history
+        run: cp validation-infrastructure/tools/issue91-staged-knowledge-validation.mjs product/tools/issue91-staged-knowledge-validation.mjs
+
+      - name: Run Stage D
+        id: run
+        working-directory: product
+        env:
+          STAGE_C_ARTIFACT: ../inputs/stage-c/stage-c.json
+          STAGE_ARTIFACT_PATH: ../artifacts/stage-d/stage-d.json
+        run: |
+          set -euo pipefail
+          node tools/issue91-staged-knowledge-validation.mjs D
+          test "$(git rev-parse HEAD)" = "$EXPECTED_PRODUCT_SHA"
+          test "$(git rev-parse HEAD^{tree})" = "$EXPECTED_PRODUCT_TREE"
+          test -z "$(git status --porcelain --untracked-files=no)"
+          echo "PRODUCT_SEMANTICS_CHANGED=NO"
+
+      - name: Upload Stage D artifact
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: issue91-stage-d
+          path: artifacts/stage-d/
+          if-no-files-found: warn
+          retention-days: 14
+
+  stage-e:
+    name: Stage E — presentation
+    needs: stage-d
+    if: needs.stage-d.outputs.continue_stage_e == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout validation infrastructure
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: validation/issue-91-staged-knowledge-20260914
+          path: validation-infrastructure
+          persist-credentials: false
+
+      - name: Checkout exact canonical Product base
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ env.EXPECTED_PRODUCT_SHA }}
+          path: product
+          persist-credentials: false
+
+      - name: Download exact Stage D artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: issue91-stage-d
+          path: inputs/stage-d
+
+      - name: Provision Node 24
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 24
+
+      - name: Install locked dependencies and build exact Product
+        working-directory: product
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund
+          npm run build
+
+      - name: Stage validation helper outside Product history
+        run: cp validation-infrastructure/tools/issue91-staged-knowledge-validation.mjs product/tools/issue91-staged-knowledge-validation.mjs
+
+      - name: Run Stage E
+        working-directory: product
+        env:
+          STAGE_D_ARTIFACT: ../inputs/stage-d/stage-d.json
+          STAGE_ARTIFACT_PATH: ../artifacts/stage-e/stage-e.json
+        run: |
+          set -euo pipefail
+          node tools/issue91-staged-knowledge-validation.mjs E
+          test "$(git rev-parse HEAD)" = "$EXPECTED_PRODUCT_SHA"
+          test "$(git rev-parse HEAD^{tree})" = "$EXPECTED_PRODUCT_TREE"
+          test -z "$(git status --porcelain --untracked-files=no)"
+          echo "GENERATED_PROSE_FACTUAL_AUTHORITY=NO"
+          echo "PRODUCT_SEMANTICS_CHANGED=NO"
+          echo "DEPLOYMENT=NOT_PERFORMED"
+
+      - name: Upload Stage E artifact
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: issue91-stage-e
+          path: artifacts/stage-e/
+          if-no-files-found: warn
+          retention-days: 14
