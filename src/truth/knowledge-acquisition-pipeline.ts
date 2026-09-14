@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 import { isConsultationRunRequest, type LatticeRunRequest } from "../domain.js";
 import type {
   KnowledgeAcquisitionProvider,
+  KnowledgeAcquisitionCompletion,
+  KnowledgeAcquisitionPartialReason,
   KnowledgeAcquisitionResult,
   RetrievedKnowledgeClaim,
   RetrievedKnowledgeEvidence,
@@ -120,6 +122,7 @@ export class ExactSourceReportAdmissionPolicy implements KnowledgeEvidenceAdmiss
 type SanitizedAcquisition = {
   sources: RetrievedKnowledgeSource[];
   claims: RetrievedKnowledgeClaim[];
+  completion: KnowledgeAcquisitionCompletion;
 };
 
 function nonBlank(value: unknown, label: string, max: number): string {
@@ -223,6 +226,19 @@ function sanitizeClaim(value: RetrievedKnowledgeClaim): RetrievedKnowledgeClaim 
   };
 }
 
+function sanitizeCompletion(
+  value: KnowledgeAcquisitionResult["completion"],
+): KnowledgeAcquisitionCompletion {
+  if (value === undefined || value.status === "COMPLETE") return { status: "COMPLETE" };
+  if (
+    value.status === "PARTIAL"
+    && (value.reason === "RATE_LIMITED" || value.reason === "TIMED_OUT" || value.reason === "PROVIDER_FAILURE")
+  ) {
+    return { status: "PARTIAL", reason: value.reason };
+  }
+  throw new Error("Knowledge acquisition completion state is invalid.");
+}
+
 function sanitizeAcquisition(value: KnowledgeAcquisitionResult): SanitizedAcquisition {
   if (!value || typeof value !== "object" || !Array.isArray(value.sources) || !Array.isArray(value.claims)) {
     throw new Error("Knowledge acquisition result must contain source and claim arrays.");
@@ -243,7 +259,7 @@ function sanitizeAcquisition(value: KnowledgeAcquisitionResult): SanitizedAcquis
       }
     }
   }
-  return { sources, claims };
+  return { sources, claims, completion: sanitizeCompletion(value.completion) };
 }
 
 function researchQuery(request: Extract<LatticeRunRequest, { kind: "consultation" }>): string {
@@ -265,35 +281,48 @@ function emptyAssessment(
   });
 }
 
-function unavailableBundle(runId: string, query: string): TruthBundle {
+function unavailableBundle(
+  runId: string,
+  query: string,
+  partialReason?: KnowledgeAcquisitionPartialReason,
+): TruthBundle {
+  const partial = partialReason !== undefined;
+  const sourceClaimId = partial ? "acquisition-partial" : "acquisition-unavailable";
   const compilation = compileClaim({
     runId,
-    sourceClaimId: "acquisition-unavailable",
-    text: "External information could not be established for this consultation.",
+    sourceClaimId,
+    text: partial
+      ? "External information retrieval was incomplete for this consultation."
+      : "External information could not be established for this consultation.",
     claimType: "INTERPRETIVE",
-    qualifiers: [{ key: "acquisition-state", value: "UNAVAILABLE_OR_INSUFFICIENT" }],
+    qualifiers: [
+      { key: "acquisition-state", value: partial ? "PARTIAL" : "UNAVAILABLE_OR_INSUFFICIENT" },
+      ...(partialReason === undefined ? [] : [{ key: "acquisition-reason", value: partialReason }]),
+    ],
   });
   const obligations = compilation.requiredProofKinds.map<ProofObligation>((kind) => ({
-    id: stableTruthUuid(`${runId}:obligation:acquisition-unavailable:${kind}`),
+    id: stableTruthUuid(`${runId}:obligation:${sourceClaimId}:${kind}`),
     runId,
     claimId: compilation.claim.id,
     kind,
     required: true,
   }));
   const checks = obligations.map<ProofCheck>((obligation) => ({
-    id: stableTruthUuid(`${runId}:check:acquisition-unavailable:${obligation.kind}`),
+    id: stableTruthUuid(`${runId}:check:${sourceClaimId}:${obligation.kind}`),
     runId,
     obligationId: obligation.id,
     kind: obligation.kind,
     status: "UNRESOLVED",
     evidenceIds: [],
-    explanation: "No source-bound evidence was available for this proof obligation.",
+    explanation: partial
+      ? "Acquisition was incomplete before this proof obligation could be fully investigated."
+      : "No source-bound evidence was available for this proof obligation.",
   }));
   return {
     runId,
     provenanceComponents: [],
     researchQuestions: [{
-      id: stableTruthUuid(`${runId}:research:acquisition-unavailable`),
+      id: stableTruthUuid(`${runId}:research:${sourceClaimId}`),
       runId,
       claimId: compilation.claim.id,
       parentQuestionId: null,
@@ -311,13 +340,34 @@ function unavailableBundle(runId: string, query: string): TruthBundle {
   };
 }
 
+function appendPartialAcquisitionLimitation(
+  bundle: TruthBundle,
+  runId: string,
+  query: string,
+  reason: KnowledgeAcquisitionPartialReason,
+): TruthBundle {
+  const limitation = unavailableBundle(runId, query, reason);
+  return {
+    ...bundle,
+    researchQuestions: [...bundle.researchQuestions, ...limitation.researchQuestions],
+    claims: [...bundle.claims, ...limitation.claims],
+    obligations: [...bundle.obligations, ...limitation.obligations],
+    checks: [...bundle.checks, ...limitation.checks],
+    assessments: [...bundle.assessments, ...limitation.assessments],
+  };
+}
+
 function investigatedBundle(
   runId: string,
   request: Extract<LatticeRunRequest, { kind: "consultation" }>,
   acquired: SanitizedAcquisition,
 ): TruthBundle {
   if (acquired.sources.length === 0 || acquired.claims.length === 0) {
-    return unavailableBundle(runId, researchQuery(request));
+    return unavailableBundle(
+      runId,
+      researchQuery(request),
+      acquired.completion.status === "PARTIAL" ? acquired.completion.reason : undefined,
+    );
   }
   const sourceByExternalId = new Map<string, SourceArtifact>();
   for (const source of acquired.sources) {
@@ -432,7 +482,7 @@ function investigatedBundle(
     assessments.push(emptyAssessment(compilation.claim, claimObligations, claimChecks, claimEvidence));
   }
 
-  return {
+  const bundle: TruthBundle = {
     runId,
     provenanceComponents: [],
     researchQuestions,
@@ -444,6 +494,14 @@ function investigatedBundle(
     checks,
     assessments,
   };
+  return acquired.completion.status === "PARTIAL"
+    ? appendPartialAcquisitionLimitation(
+        bundle,
+        runId,
+        researchQuery(request),
+        acquired.completion.reason,
+      )
+    : bundle;
 }
 
 function sourceContent(source: SourceArtifact): string {

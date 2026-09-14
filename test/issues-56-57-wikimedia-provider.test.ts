@@ -142,13 +142,14 @@ test("Issue #57: stalled Wikimedia search is bounded and a later request still s
     },
   });
 
-  await assert.rejects(
-    provider.acquire(request("issue-57-timeout")),
-    /Knowledge source was unavailable: Knowledge source request exceeded 20 ms\./u,
-  );
+  const timedOut = await provider.acquire(request("issue-57-timeout"));
+  assert.deepEqual(timedOut.completion, { status: "PARTIAL", reason: "TIMED_OUT" });
+  assert.deepEqual(timedOut.sources, []);
+  assert.deepEqual(timedOut.claims, []);
   assert.equal(calls, 1, "Wikimedia acquisition must not invent a retry after timeout");
 
   const recovered = await provider.acquire(request("issue-57-recovery"));
+  assert.deepEqual(recovered.completion, { status: "COMPLETE" });
   assert.equal(recovered.sources[0]?.sourceId, "page:42");
   assert.equal(recovered.sources[0]?.publishedAt, null);
   assert.equal(calls, 3, "later acquisition should use one search and one detail fetch");
@@ -168,10 +169,9 @@ test("Issue #57: stalled full-page fetch times out instead of becoming successfu
     },
   });
 
-  await assert.rejects(
-    provider.acquire(request("issue-57-detail-timeout")),
-    /Knowledge source request exceeded 20 ms/u,
-  );
+  const result = await provider.acquire(request("issue-57-detail-timeout"));
+  assert.equal(result.sources[0]?.content, "Introductory source report.");
+  assert.deepEqual(result.completion, { status: "PARTIAL", reason: "TIMED_OUT" });
   assert.equal(calls, 2);
 });
 
@@ -188,6 +188,7 @@ test("Issue #57: non-timeout detail failure still preserves the already retrieve
   const result = await provider.acquire(request("issue-57-detail-fallback"));
   assert.equal(result.sources[0]?.content, "Introductory source report.");
   assert.equal(result.sources[0]?.publishedAt, null);
+  assert.deepEqual(result.completion, { status: "PARTIAL", reason: "PROVIDER_FAILURE" });
 });
 
 test("Issue #57: Wikimedia timeout configuration is bounded", () => {
@@ -199,4 +200,112 @@ test("Issue #57: Wikimedia timeout configuration is bounded", () => {
     () => new WikimediaKnowledgeAcquisitionProvider({ timeoutMs: 120_001 }),
     /timeoutMs must be an integer between 1 and 120000/u,
   );
+});
+
+
+test("Issue #91: later Wikimedia rate limit preserves already retrieved source material as partial acquisition", async () => {
+  let searches = 0;
+  let calls = 0;
+  const provider = new WikimediaKnowledgeAcquisitionProvider({
+    timeoutMs: 2_000,
+    fetchImpl: async (input) => {
+      calls += 1;
+      const url = new URL(String(input));
+      assert.equal(url.searchParams.get("generator"), "search");
+      searches += 1;
+      if (searches === 2) return new Response("rate limited", { status: 429 });
+      return new Response(JSON.stringify({
+        query: {
+          pages: [{
+            pageid: 91,
+            index: 1,
+            title: "Retrieved before interruption",
+            fullurl: "https://en.wikipedia.org/wiki/Retrieved_before_interruption",
+            extract: "Materially useful introductory source report.",
+          }],
+        },
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    },
+  });
+
+  const result = await provider.acquire({
+    runId: "issue-91-later-rate-limit",
+    objective: "Understand an encyclopedic topic.",
+    context: [],
+    investigationQueries: ["first useful query", "later interrupted query"],
+  });
+
+  assert.deepEqual(result.completion, { status: "PARTIAL", reason: "RATE_LIMITED" });
+  assert.equal(result.sources[0]?.sourceId, "page:91");
+  assert.equal(result.sources[0]?.content, "Materially useful introductory source report.");
+  assert.equal(result.claims.length, 1);
+  assert.equal(calls, 2, "rate limit must not trigger detail enrichment, retry, or further provider calls");
+});
+
+test("Issue #91: first Wikimedia rate limit remains explicit even when no material was retrieved", async () => {
+  let calls = 0;
+  const provider = new WikimediaKnowledgeAcquisitionProvider({
+    timeoutMs: 2_000,
+    fetchImpl: async () => {
+      calls += 1;
+      return new Response("rate limited", { status: 429 });
+    },
+  });
+
+  const result = await provider.acquire(request("issue-91-first-rate-limit"));
+  assert.deepEqual(result.sources, []);
+  assert.deepEqual(result.claims, []);
+  assert.deepEqual(result.completion, { status: "PARTIAL", reason: "RATE_LIMITED" });
+  assert.equal(calls, 1);
+});
+
+test("Issue #91: full-page enrichment is batched instead of multiplying one request per page", async () => {
+  let searchNumber = 0;
+  let calls = 0;
+  const provider = new WikimediaKnowledgeAcquisitionProvider({
+    timeoutMs: 2_000,
+    resultLimit: 4,
+    fetchImpl: async (input) => {
+      calls += 1;
+      const url = new URL(String(input));
+      const pageIds = url.searchParams.get("pageids");
+      if (pageIds) {
+        return new Response(JSON.stringify({
+          query: {
+            pages: pageIds.split("|").map((raw) => ({
+              pageid: Number(raw),
+              title: `Topic ${raw}`,
+              extract: `Full source report ${raw}.`,
+            })),
+          },
+        }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+
+      searchNumber += 1;
+      const base = searchNumber * 100;
+      return new Response(JSON.stringify({
+        query: {
+          pages: [1, 2, 3, 4].map((offset) => ({
+            pageid: base + offset,
+            index: offset,
+            title: `Topic ${base + offset}`,
+            fullurl: `https://en.wikipedia.org/wiki/Topic_${base + offset}`,
+            extract: `Intro source report ${base + offset}.`,
+          })),
+        },
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    },
+  });
+
+  const result = await provider.acquire({
+    runId: "issue-91-batched-enrichment",
+    objective: "Investigate several source candidates.",
+    context: [],
+    investigationQueries: ["query one", "query two", "query three", "query four"],
+  });
+
+  assert.equal(result.sources.length, 12);
+  assert.deepEqual(result.completion, { status: "COMPLETE" });
+  assert.equal(searchNumber, 3, "source cap should stop further search work once twelve candidates exist");
+  assert.equal(calls, 6, "twelve candidates should require three searches plus three batched detail requests");
 });
