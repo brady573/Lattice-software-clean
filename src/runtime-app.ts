@@ -30,6 +30,11 @@ import { registerConversationApi } from "./conversation/conversation-api.js";
 import { registerConversationMembershipGuard } from "./conversation/conversation-membership-guard.js";
 import { registerConversationContinuityApi } from "./conversation/continuity-api.js";
 import {
+  MemoryConversationReferenceStore,
+  PostgresConversationReferenceStore,
+  type ConversationReferenceStore,
+} from "./conversation/conversation-reference-store.js";
+import {
   MemoryConversationResponseStore,
   PostgresConversationResponseStore,
   type ConversationResponseStore,
@@ -126,6 +131,7 @@ export interface RuntimeAppOptions {
   acceptedChoiceStore?: AcceptedChoiceStore;
   preparedResourceStore?: PreparedResourceStore;
   conversationResponseStore?: ConversationResponseStore;
+  conversationReferenceStore?: ConversationReferenceStore;
   solandraCognition?: SolandraCognitiveRuntime;
   solandraAdvisory?: SolandraAdvisoryRuntime;
   solandraActionPreparer?: SolandraActionPreparer;
@@ -263,6 +269,7 @@ export async function migrateRuntimeDatabase(databaseUrl: string): Promise<void>
   await migrateV36ResearchContinuationRounds(databaseUrl);
   await PostgresConversationStore.migrate(databaseUrl);
   await PostgresConversationResponseStore.migrate(databaseUrl);
+  await PostgresConversationReferenceStore.migrate(databaseUrl);
   await PostgresIntentUserMessageStore.migrate(databaseUrl);
   await PostgresIntentAuthorityStore.migrate(databaseUrl);
   await migrateRunIntentBindings(databaseUrl);
@@ -420,6 +427,7 @@ export async function createRuntimeApp(
   let userPreferenceStore: UserPreferenceStore;
   let conversationStore: ConversationStore;
   let conversationResponseStore: ConversationResponseStore;
+  let conversationReferenceStore: ConversationReferenceStore;
   let decisionPlanStore: DecisionPlanStore;
   let runIndexStore: ConversationRunIndexStore;
   let knowledgeStore: KnowledgeRecordStore;
@@ -443,6 +451,8 @@ export async function createRuntimeApp(
       acceptedChoiceStore,
       preparedResourceStore,
     } = await connectPostgresRuntimeStores(config.databaseUrl, config.autoMigrate));
+    conversationReferenceStore = options.conversationReferenceStore
+      ?? await PostgresConversationReferenceStore.connect(config.databaseUrl);
   } else {
     const memoryRunStore = new MemoryRunStore();
     const memoryIntentStore = new MemoryIntentAuthorityStore();
@@ -450,6 +460,7 @@ export async function createRuntimeApp(
     const memoryUserPreferenceStore = new MemoryUserPreferenceStore();
     const memoryConversationStore = new MemoryConversationStore();
     const memoryConversationResponseStore = options.conversationResponseStore ?? new MemoryConversationResponseStore();
+    const memoryConversationReferenceStore = options.conversationReferenceStore ?? new MemoryConversationReferenceStore();
     const memoryDecisionPlanStore = new MemoryDecisionPlanStore(memoryIntentStore);
     const memoryRunIndexStore = new MemoryConversationRunIndexStore();
     const memoryKnowledgeStore = options.knowledgeStore ?? new MemoryKnowledgeRecordStore();
@@ -463,6 +474,7 @@ export async function createRuntimeApp(
     userPreferenceStore = memoryUserPreferenceStore;
     conversationStore = memoryConversationStore;
     conversationResponseStore = memoryConversationResponseStore;
+    conversationReferenceStore = memoryConversationReferenceStore;
     decisionPlanStore = memoryDecisionPlanStore;
     runIndexStore = memoryRunIndexStore;
     knowledgeStore = memoryKnowledgeStore;
@@ -514,6 +526,7 @@ export async function createRuntimeApp(
     intentStore,
     conversationStore,
     conversationResponseStore,
+    conversationReferenceStore,
     userMessageStore,
     apiControlStore,
     runStore,
@@ -534,6 +547,7 @@ export async function createRuntimeApp(
   registerConversationContinuityApi(app, {
     conversationStore,
     conversationResponseStore,
+    conversationReferenceStore,
     userMessageStore,
     runStore,
     runIndexStore,
@@ -554,6 +568,7 @@ export async function createRuntimeApp(
     await acceptedChoiceStore.close();
     await recommendationStore.close();
     await knowledgeStore.close();
+    await conversationReferenceStore.close();
     await conversationResponseStore.close();
     await conversationStore.close();
     await userMessageStore.close();
