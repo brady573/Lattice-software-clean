@@ -1,0 +1,104 @@
+name: Diagnostic — Issue 91 General Knowledge Trace
+
+on:
+  push:
+    branches:
+      - diagnostic/issue-91-general-knowledge-trace-20260913
+    paths:
+      - .github/workflows/issue91-general-knowledge-trace.yml
+      - tools/issue91-general-knowledge-trace.mjs
+
+permissions:
+  contents: read
+
+concurrency:
+  group: issue91-general-knowledge-trace-20260913
+  cancel-in-progress: false
+
+jobs:
+  trace:
+    name: Canonical general-Knowledge diagnostic trace
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      EXPECTED_PRODUCT_SHA: eb495880342e3990f368cee99a28a824d235934b
+      EXPECTED_PRODUCT_TREE: da839ff38527db3558fb48f0d7be7704b9771706
+
+    steps:
+      - name: Checkout temporary diagnostic infrastructure
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: diagnostic/issue-91-general-knowledge-trace-20260913
+          path: validation-infrastructure
+          persist-credentials: false
+
+      - name: Checkout exact canonical Product base
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: eb495880342e3990f368cee99a28a824d235934b
+          path: product
+          persist-credentials: false
+
+      - name: Verify exact Product base
+        working-directory: product
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_PRODUCT_SHA"
+          test "$(git rev-parse HEAD^{tree})" = "$EXPECTED_PRODUCT_TREE"
+          test -z "$(git status --porcelain)"
+          echo "PRODUCT_SHA=$EXPECTED_PRODUCT_SHA"
+          echo "PRODUCT_TREE=$EXPECTED_PRODUCT_TREE"
+          echo "EXACT_CANONICAL_BASE=VERIFIED"
+
+      - name: Provision Node 24
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+
+      - name: Install locked dependencies and build exact Product
+        working-directory: product
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund
+          npm run build
+
+      - name: Stage diagnostic-only harness outside Product history
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp validation-infrastructure/tools/issue91-general-knowledge-trace.mjs \
+            product/tools/issue91-general-knowledge-trace.mjs
+
+      - name: Trace canonical configured path
+        working-directory: product
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          LATTICE_DEPLOYMENT_MODE: development
+          LATTICE_TRUTH_MODE: v36-live
+          LATTICE_AUTHENTICATION_MODE: development-fixture
+          LATTICE_DEVELOPMENT_FIXTURE_SUBJECT_ID: issue91-general-knowledge-trace
+          LATTICE_SOLANDRA_COGNITION_ROUTE: groq-gpt-oss-120b
+          DIAGNOSTIC_ARTIFACT_DIR: ../artifacts/issue91-general-knowledge-trace
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${GROQ_API_KEY:-}"
+          echo "GROQ_API_KEY=CONFIGURED_NOT_EXPOSED"
+          node tools/issue91-general-knowledge-trace.mjs
+          test "$(git rev-parse HEAD)" = "$EXPECTED_PRODUCT_SHA"
+          test "$(git rev-parse HEAD^{tree})" = "$EXPECTED_PRODUCT_TREE"
+          test -z "$(git status --porcelain --untracked-files=no)"
+          echo "PRODUCT_SEMANTICS_CHANGED=NO"
+          echo "PRODUCT_BASE_REMAINS_UNCHANGED=YES"
+          echo "DEPLOYMENT=NOT_PERFORMED"
+
+      - name: Upload bounded diagnostic evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: issue91-general-knowledge-trace
+          path: artifacts/issue91-general-knowledge-trace/
+          if-no-files-found: warn
+          retention-days: 14
