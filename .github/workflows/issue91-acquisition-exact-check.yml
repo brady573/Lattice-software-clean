@@ -1,0 +1,35 @@
+name: Validation — Issue 91 Acquisition Exact Check
+
+on:
+  push:
+    branches:
+      - validation/issue91-acquisition-check-7d140b41
+
+permissions:
+  contents: read
+
+jobs:
+  exact-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout exact accepted candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: 7d140b41def09eb228b5da6f69c7e2874bad5639
+          persist-credentials: false
+      - name: Verify exact candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "7d140b41def09eb228b5da6f69c7e2874bad5639"
+          test "$(git rev-parse HEAD^{tree})" = "a689fa0ea4430e0b0f5148ed6c93c6b8f48d33a1"
+          test -z "$(git status --porcelain)"
+          echo "EXACT_CANDIDATE=VERIFIED"
+      - name: Setup Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 24
+      - name: Install locked dependencies
+        run: npm ci --no-audit --no-fund
+      - name: Repository sanity gate
+        run: npm run check
