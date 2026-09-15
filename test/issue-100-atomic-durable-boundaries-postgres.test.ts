@@ -181,14 +181,14 @@ async function durableCounts(pool: Pool, runId: string, idem?: ApiIdempotencyInp
     dispatches: string;
   }>(
     `SELECT
-       (SELECT count(*)::text FROM runs WHERE id=$1) AS runs,
-       (SELECT count(*)::text FROM run_intent_bindings WHERE run_id=$1) AS bindings,
-       (SELECT count(*)::text FROM decision_plans WHERE run_id=$1) AS plans,
+       (SELECT count(*)::text FROM runs WHERE id=$1::uuid) AS runs,
+       (SELECT count(*)::text FROM run_intent_bindings WHERE run_id=$1::uuid) AS bindings,
+       (SELECT count(*)::text FROM decision_plans WHERE run_id=$1::text) AS plans,
        (SELECT count(*)::text FROM api_idempotency_keys
-          WHERE run_id=$1
+          WHERE run_id=$1::uuid
             AND ($2::text IS NULL OR scope_key=$2)
             AND ($3::text IS NULL OR idempotency_key=$3)) AS idempotency,
-       (SELECT count(*)::text FROM dispatch_outbox WHERE run_id=$1) AS dispatches`,
+       (SELECT count(*)::text FROM dispatch_outbox WHERE run_id=$1::uuid) AS dispatches`,
     [runId, idem?.scopeKey ?? null, idem?.idempotencyKey ?? null],
   );
   const row = result.rows[0]!;
@@ -267,7 +267,6 @@ class FailOnceConversationReferenceStore implements ConversationReferenceStore {
 test("Issue #100: qualified PostgreSQL Run acceptance rolls back at every invariant/dispatch insertion boundary", { skip: !databaseUrl }, async () => {
   assert.ok(databaseUrl);
   await migrateRuntimeDatabase(databaseUrl);
-
   const pool = new Pool({ connectionString: databaseUrl });
   const intentStore = await PostgresIntentAuthorityStore.connect(databaseUrl, { migrate: false });
   const control = await PostgresApiRunControlStore.connect(databaseUrl, {
@@ -280,7 +279,6 @@ test("Issue #100: qualified PostgreSQL Run acceptance rolls back at every invari
   try {
     const intentVersionId = await createExactIntent(intentStore, intentScopeId, "Choose the most reliable bounded option");
     await installFailureFunction(pool);
-
     const boundaries = [
       ["runs", "issue100_fail_runs"],
       ["run_intent_bindings", "issue100_fail_binding"],
@@ -314,9 +312,7 @@ test("Issue #100: qualified PostgreSQL Run acceptance rolls back at every invari
       }, `failure at ${table} must not expose a partially qualified operation`);
     }
   } finally {
-    for (const [table, trigger] of installedTriggers) {
-      await removeFailureTrigger(pool, table, trigger);
-    }
+    for (const [table, trigger] of installedTriggers) await removeFailureTrigger(pool, table, trigger);
     await removeFailureFunction(pool);
     for (const conversationId of conversationIds) await cleanupConversation(pool, conversationId);
     await pool.query("DELETE FROM intent_scopes WHERE intent_scope_id=$1", [intentScopeId]);
@@ -329,16 +325,15 @@ test("Issue #100: qualified PostgreSQL Run acceptance rolls back at every invari
 test("Issue #100: PostgreSQL qualified Run exact replay/conflict/concurrency/expiry/restart preserves one Plan and dispatch", { skip: !databaseUrl }, async () => {
   assert.ok(databaseUrl);
   await migrateRuntimeDatabase(databaseUrl);
-
   const pool = new Pool({ connectionString: databaseUrl });
   const intentStore = await PostgresIntentAuthorityStore.connect(databaseUrl, { migrate: false });
   const intentScopeId = `scope-${randomUUID()}`;
   const conversationId = `conversation-${randomUUID()}`;
-  let first = await PostgresApiRunControlStore.connect(databaseUrl, {
+  let first: PostgresApiRunControlStore | undefined = await PostgresApiRunControlStore.connect(databaseUrl, {
     migrate: false,
     decisionPlanFidelityPolicy: allowExactTestPlanning,
   });
-  let second = await PostgresApiRunControlStore.connect(databaseUrl, {
+  let second: PostgresApiRunControlStore | undefined = await PostgresApiRunControlStore.connect(databaseUrl, {
     migrate: false,
     decisionPlanFidelityPolicy: allowExactTestPlanning,
   });
@@ -371,7 +366,9 @@ test("Issue #100: PostgreSQL qualified Run exact replay/conflict/concurrency/exp
     await pool.query("UPDATE api_idempotency_keys SET expires_at=now()-interval '1 second' WHERE run_id=$1", [run.id]);
     await pool.query("DELETE FROM decision_plans WHERE run_id=$1", [run.id]);
     await first.close();
+    first = undefined;
     await second.close();
+    second = undefined;
 
     first = await PostgresApiRunControlStore.connect(databaseUrl, {
       migrate: false,
@@ -389,8 +386,11 @@ test("Issue #100: PostgreSQL qualified Run exact replay/conflict/concurrency/exp
     });
 
     await pool.query("UPDATE api_idempotency_keys SET expires_at=now()-interval '1 second' WHERE run_id=$1", [run.id]);
-    const conflictingRun = structuredClone(run);
-    conflictingRun.request.objective = "A conflicting objective must not rebind the committed Run";
+    const conflictingRun = createPendingRun(
+      conversationId,
+      qualifiedRequest(intentScopeId, intentVersionId, "A conflicting objective must not rebind the committed Run"),
+      run.id,
+    );
     const conflictIdem: ApiIdempotencyInput = {
       ...idem,
       requestHash: createApiRequestHash(conflictingRun.request),
@@ -405,7 +405,10 @@ test("Issue #100: PostgreSQL qualified Run exact replay/conflict/concurrency/exp
       idempotency: 1,
       dispatches: 1,
     });
-    const immutable = await pool.query<{ request_json: ConsultationRunRequest }>("SELECT request_json FROM runs WHERE id=$1", [run.id]);
+    const immutable = await pool.query<{ request_json: ConsultationRunRequest }>(
+      "SELECT request_json FROM runs WHERE id=$1",
+      [run.id],
+    );
     assert.deepEqual(immutable.rows[0]?.request_json, request);
 
     await pool.query("UPDATE api_idempotency_keys SET expires_at=now()-interval '1 second' WHERE run_id=$1", [run.id]);
@@ -423,8 +426,8 @@ test("Issue #100: PostgreSQL qualified Run exact replay/conflict/concurrency/exp
       dispatches: 1,
     });
   } finally {
-    await first.close();
-    await second.close();
+    if (first) await first.close();
+    if (second) await second.close();
     await cleanupConversation(pool, conversationId, intentScopeId);
     await intentStore.close();
     await pool.end();
@@ -434,7 +437,6 @@ test("Issue #100: PostgreSQL qualified Run exact replay/conflict/concurrency/exp
 test("Issue #100: DecisionPlan failure cannot escape through material-correction supersession and exact replay is singular", { skip: !databaseUrl }, async () => {
   assert.ok(databaseUrl);
   await migrateRuntimeDatabase(databaseUrl);
-
   const pool = new Pool({ connectionString: databaseUrl });
   const intentStore = await PostgresIntentAuthorityStore.connect(databaseUrl, { migrate: false });
   const control = await PostgresApiRunControlStore.connect(databaseUrl, {
@@ -447,8 +449,7 @@ test("Issue #100: DecisionPlan failure cannot escape through material-correction
   let triggerInstalled = false;
   try {
     const firstVersionId = await createExactIntent(intentStore, intentScopeId, "Choose the most reliable bounded option");
-    const predecessorRequest = qualifiedRequest(intentScopeId, firstVersionId);
-    const predecessor = createPendingRun(conversationId, predecessorRequest, randomUUID());
+    const predecessor = createPendingRun(conversationId, qualifiedRequest(intentScopeId, firstVersionId), randomUUID());
     const accepted = await control.submitRun(submission(predecessor, intentScopeId, firstVersionId));
     assert.equal(accepted.outcome, "created");
 
@@ -482,10 +483,7 @@ test("Issue #100: DecisionPlan failure cannot escape through material-correction
         expectedPredecessorStatus: predecessor.status,
         expectedPredecessorVersion: predecessor.version,
         successorRun: successor,
-        successorBinding: {
-          intentScopeId,
-          intentVersionId: successorIntentVersionId,
-        },
+        successorBinding: { intentScopeId, intentVersionId: successorIntentVersionId },
       },
       dispatch: {
         logicalKey: `run:${successor.id}:execute`,
@@ -577,7 +575,6 @@ test("Issue #100: Run-index projection failure does not fail Run authority and o
     assert.equal((await runStore.get(run.id))?.id, run.id);
     assert.equal(warnings.length, 1);
     assert.match(String(warnings[0]?.[0]), /reconnect reconciliation is required/);
-
     assert.deepEqual(await flakyIndex.listRunIds(conversationId), [run.id]);
     assert.deepEqual(await flakyIndex.listRunIds(conversationId), [run.id]);
   } finally {
@@ -597,16 +594,17 @@ test("Issue #100: PostgreSQL Run-index reconnect derives exact identity from aut
     priorities: [{ criterion: "reliability", weight: 1 }],
     hardConstraints: [{ criterion: "budget", operator: "lte", value: 1000 }],
   });
-  let index = await PostgresConversationRunIndexStore.connect(databaseUrl);
+  let index: PostgresConversationRunIndexStore | undefined = await PostgresConversationRunIndexStore.connect(databaseUrl);
   try {
     await runStore.create(run);
     assert.deepEqual(await index.listRunIds(conversationId), [run.id]);
     await index.close();
+    index = undefined;
     index = await PostgresConversationRunIndexStore.connect(databaseUrl);
     assert.deepEqual(await index.listRunIds(conversationId), [run.id]);
     assert.deepEqual(await index.listRunIds(conversationId), [run.id]);
   } finally {
-    await index.close();
+    if (index) await index.close();
     await runStore.close();
     await cleanupConversation(pool, conversationId);
     await pool.end();
