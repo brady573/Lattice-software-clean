@@ -1,0 +1,8 @@
+-- Code-driven, idempotent migration marker for Issue #91.
+--
+-- The actual backfill is implemented in
+-- src/conversation/conversation-reference-backfill.ts so every translated
+-- legacy Knowledge reference is rebuilt with canonical ConversationReference
+-- identity and admitted through the canonical ConversationReference store.
+--
+-- This file intentionally contains no direct data mutation SQL.
