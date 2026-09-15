@@ -7,6 +7,8 @@ on:
       - "migrations/**"
       - "tools/m7-browser-lifecycle.mjs"
       - "tools/issue-46-browser-prepared-message.mjs"
+      - "tools/issue-91-browser-cognition-fixture.mjs"
+      - "tools/issue-91-live-solandra-cognition.mjs"
       - "package.json"
       - "package-lock.json"
       - ".github/workflows/browser-lifecycle-validation.yml"
@@ -18,6 +20,8 @@ on:
       - "migrations/**"
       - "tools/m7-browser-lifecycle.mjs"
       - "tools/issue-46-browser-prepared-message.mjs"
+      - "tools/issue-91-browser-cognition-fixture.mjs"
+      - "tools/issue-91-live-solandra-cognition.mjs"
       - "package.json"
       - "package-lock.json"
       - ".github/workflows/browser-lifecycle-validation.yml"
@@ -90,6 +94,8 @@ jobs:
         run: |
           node --check tools/m7-browser-lifecycle.mjs
           node --check tools/issue-46-browser-prepared-message.mjs
+          node --check tools/issue-91-browser-cognition-fixture.mjs
+          node --check tools/issue-91-live-solandra-cognition.mjs
 
       - name: Build browser validation subject
         run: npm run build
@@ -111,38 +117,20 @@ jobs:
           NODE
           node dist/src/migrate.js
 
-      - name: Prepare LLM-owned browser validation harness
+      - name: Start deterministic Solandra cognition fixture
         run: |
           set -euo pipefail
-          node --input-type=module <<'NODE'
-          import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-          const source = readFileSync('tools/m7-browser-lifecycle.mjs', 'utf8');
-          const ambiguous = 'const knowledgeMessage = "Explain the tradeoffs of keeping a local-first hobby app simple while preserving recoverability.";';
-          const governed = 'const knowledgeMessage = "Please find trustworthy external sources about the tradeoffs of keeping a local-first hobby app simple while preserving recoverability, and summarize the supported evidence.";';
-          const localWait = 'async function waitFor(description, probe, timeoutMs = 15_000, intervalMs = 50) {';
-          const remoteWait = 'async function waitFor(description, probe, timeoutMs = 60_000, intervalMs = 50) {';
-          const resourceStartMarker = '    await submitBrowserTurn(cdp, resourceMessage);\n';
-          const mobileStartMarker = '    await cdp.send("Emulation.setDeviceMetricsOverride", {\n';
-          const continuityTail = '    assert.equal(continuity.messages.length, 2);\n    assert.equal(continuity.messages[0].content, knowledgeMessage);\n    assert.equal(continuity.messages[1].content, resourceMessage);';
-          const knowledgeOnlyTail = '    assert.equal(continuity.messages.length, 1);\n    assert.equal(continuity.messages[0].content, knowledgeMessage);';
-          if (!source.includes(ambiguous) || !source.includes(localWait) || !source.includes(continuityTail)) {
-            throw new Error('Legacy browser harness shape changed; update this bounded validation adaptation instead of guessing.');
-          }
-          const resourceStart = source.indexOf(resourceStartMarker);
-          const mobileStart = source.indexOf(mobileStartMarker, resourceStart);
-          if (resourceStart < 0 || mobileStart <= resourceStart) {
-            throw new Error('Legacy resource-routing block could not be isolated safely.');
-          }
-          const withoutResourceRouting = source.slice(0, resourceStart) + source.slice(mobileStart);
-          const adapted = withoutResourceRouting
-            .replace(ambiguous, governed)
-            .replace(localWait, remoteWait)
-            .replace(continuityTail, knowledgeOnlyTail);
-          mkdirSync('artifacts', { recursive: true });
-          writeFileSync('artifacts/issue91-m7-browser-lifecycle.mjs', adapted, 'utf8');
-          NODE
-          node --check artifacts/issue91-m7-browser-lifecycle.mjs
-          git diff --exit-code
+          mkdir -p artifacts/browser-lifecycle
+          node tools/issue-91-browser-cognition-fixture.mjs > artifacts/browser-lifecycle/cognition-fixture.log 2>&1 &
+          echo "ISSUE91_BROWSER_COGNITION_FIXTURE_PID=$!" >> "$GITHUB_ENV"
+          for attempt in $(seq 1 50); do
+            if curl --fail --silent http://127.0.0.1:3110/health >/dev/null; then
+              exit 0
+            fi
+            sleep 0.1
+          done
+          cat artifacts/browser-lifecycle/cognition-fixture.log >&2
+          exit 1
 
       - name: Execute real-browser lifecycle validation
         env:
@@ -151,8 +139,8 @@ jobs:
           LATTICE_TRUTH_MODE: v36-offline
           LATTICE_AUTHENTICATION_MODE: development-fixture
           LATTICE_DEVELOPMENT_FIXTURE_SUBJECT_ID: browser-validation-subject
-          LATTICE_SOLANDRA_COGNITION_ROUTE: groq-gpt-oss-120b
-          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          LATTICE_LOCAL_MODEL_PROVIDER_BASE_URL: http://127.0.0.1:3110/v1
+          LATTICE_LOCAL_MODEL_PROVIDER_MODEL: issue91-browser-cognition-fixture
           LATTICE_AUTO_MIGRATE: 'false'
           LATTICE_RUN_WORKER_LEASE_MS: '5000'
           LATTICE_RUN_WORKER_RETRY_DELAY_MS: '5'
@@ -166,14 +154,24 @@ jobs:
           M7_BROWSER_ARTIFACT_DIR: artifacts/browser-lifecycle
         run: |
           set -euo pipefail
-          test -n "${GROQ_API_KEY:-}"
-          node artifacts/issue91-m7-browser-lifecycle.mjs
+          node tools/m7-browser-lifecycle.mjs
           node tools/issue-46-browser-prepared-message.mjs
+          node --input-type=module <<'NODE'
+          const status = await fetch('http://127.0.0.1:3110/health').then((response) => response.json());
+          if (status.calls !== 2) throw new Error(`Expected exactly two canonical browser cognition calls, received ${status.calls}.`);
+          NODE
           test "$(git rev-parse HEAD)" = "$SUBJECT_SOURCE_SHA"
           git diff --exit-code
           echo "BROWSER_LIFECYCLE=PASS sha=$SUBJECT_SOURCE_SHA"
           echo 'PRODUCTION_DEPLOYMENT=NOT_PERFORMED'
           echo 'PRODUCTION_DATABASE=NOT_TOUCHED'
+
+      - name: Stop deterministic Solandra cognition fixture
+        if: always()
+        run: |
+          if [ -n "${ISSUE91_BROWSER_COGNITION_FIXTURE_PID:-}" ]; then
+            kill "$ISSUE91_BROWSER_COGNITION_FIXTURE_PID" 2>/dev/null || true
+          fi
 
       - name: Upload browser evidence
         if: always()
@@ -183,3 +181,36 @@ jobs:
           path: artifacts/browser-lifecycle/
           if-no-files-found: warn
           retention-days: 7
+
+  live-solandra-cognition:
+    name: Live model-owned Solandra cognition validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact subject source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Provision Node 24
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+
+      - name: Install locked dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Execute bounded real-Groq cognition proof
+        env:
+          SUBJECT_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "${GROQ_API_KEY:-}"
+          test "$(git rev-parse HEAD)" = "$SUBJECT_SOURCE_SHA"
+          node --import tsx tools/issue-91-live-solandra-cognition.mjs
+          git diff --exit-code
+          echo "LIVE_SOLANDRA_COGNITION=PASS sha=$SUBJECT_SOURCE_SHA"
+          echo 'PRODUCTION_DEPLOYMENT=NOT_PERFORMED'
+          echo 'PRODUCTION_DATABASE=NOT_TOUCHED'
