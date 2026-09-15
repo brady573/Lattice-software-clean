@@ -7,7 +7,7 @@ import {
   AlphaDecisionKnowledgeAcquisitionProvider,
 } from "../knowledge/npm-decision-acquisition.js";
 import { WikimediaKnowledgeAcquisitionProvider } from "../knowledge/wikimedia-acquisition.js";
-import { resolveRuntimeConfig, type TruthMode } from "../runtime-config.js";
+import { resolveRuntimeConfig, type RuntimeConfig, type TruthMode } from "../runtime-config.js";
 import { createConfiguredSolandraKnowledgeInvestigator } from "../solandra/knowledge-investigator.js";
 import {
   createDefaultOfflineTruthPipeline,
@@ -30,12 +30,13 @@ export function createConfiguredTruthPipeline(
   mode: TruthMode,
   provider?: KnowledgeAcquisitionProvider,
   investigator?: KnowledgeInvestigator,
+  runtimeConfig: RuntimeConfig = resolveRuntimeConfig(),
 ): TruthExecutionPipeline {
   if (mode === "v36-offline") return createDefaultOfflineTruthPipeline();
 
   const semanticInvestigator = investigator
     ?? (provider === undefined
-      ? createConfiguredSolandraKnowledgeInvestigator(resolveRuntimeConfig())
+      ? createConfiguredSolandraKnowledgeInvestigator(runtimeConfig)
       : undefined);
 
   if (provider === undefined && semanticInvestigator === undefined) {
