@@ -20,6 +20,7 @@ import {
 } from "./capabilities/user-model-capability.js";
 import {
   appendConversationReference,
+  type ConversationReferenceRecord,
   type ConversationReferenceStore,
   type ConversationReferenceTarget,
 } from "./conversation/conversation-reference-store.js";
@@ -57,10 +58,9 @@ import {
   governedKnowledgeContext,
   loadKnowledge,
   recentGovernedKnowledge,
-  referenceKnowledge,
   renderHistoricalSources,
 } from "./knowledge/knowledge-continuity.js";
-import type { KnowledgeRecordStore } from "./knowledge/knowledge-record-store.js";
+import type { KnowledgeRecord, KnowledgeRecordStore } from "./knowledge/knowledge-record-store.js";
 import { buildRunOutcome } from "./outcome.js";
 import {
   advisoryKnowledge,
@@ -145,9 +145,9 @@ function stableUuid(...parts: string[]): `${string}-${string}-${string}-${string
 async function recordConversationReference(
   options: ConsultationIntakeOptions,
   input: Parameters<typeof appendConversationReference>[1],
-): Promise<void> {
-  if (!options.conversationReferenceStore) return;
-  await appendConversationReference(options.conversationReferenceStore, input);
+): Promise<ConversationReferenceRecord | undefined> {
+  if (!options.conversationReferenceStore) return undefined;
+  return appendConversationReference(options.conversationReferenceStore, input);
 }
 
 function governedResponseId(kind: string, ...parts: string[]): string {
@@ -169,15 +169,15 @@ function producedRecommendationTargets(
 
 async function recordEstablishedKnowledgeReference(
   options: ConsultationIntakeOptions,
-  established: Awaited<ReturnType<typeof establishKnowledge>>,
-): Promise<void> {
-  await recordConversationReference(options, {
-    conversationId: established.record.conversationId,
-    userMessageId: established.record.sourceMessageId,
-    responseId: established.reference.responseId,
-    intentVersionId: established.record.intentVersionId,
-    targets: [{ kind: "KNOWLEDGE", targetId: established.record.knowledgeId, relation: "PRODUCED" }],
-    createdAt: established.reference.createdAt,
+  established: KnowledgeRecord,
+): Promise<ConversationReferenceRecord | undefined> {
+  return recordConversationReference(options, {
+    conversationId: established.conversationId,
+    userMessageId: established.sourceMessageId,
+    responseId: `run:${established.runId}:outcome`,
+    intentVersionId: established.intentVersionId,
+    targets: [{ kind: "KNOWLEDGE", targetId: established.knowledgeId, relation: "PRODUCED" }],
+    createdAt: established.createdAt,
   });
 }
 
@@ -585,11 +585,18 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
 
       let cognition: SolandraGovernedCognitionResult | undefined;
       let interpretation: ConsultationInterpretationProposal;
+      let cognitiveGovernedKnowledge: Awaited<ReturnType<typeof recentGovernedKnowledge>> = [];
       try {
         if (options.solandraCognition) {
-          const governed = options.knowledgeStore
-            ? await recentGovernedKnowledge(options.knowledgeStore, options.runStore, conversationId)
+          const governed = options.knowledgeStore && options.conversationReferenceStore
+            ? await recentGovernedKnowledge(
+              options.knowledgeStore,
+              options.conversationReferenceStore,
+              options.runStore,
+              conversationId,
+            )
             : [];
+          cognitiveGovernedKnowledge = governed;
           const recommendations = options.recommendationStore
             ? await options.recommendationStore.listRecommendationsByConversation(conversationId)
             : [];
@@ -868,17 +875,14 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
         && cognition.proposal.materialAmbiguity === null
         && cognition.proposal.referencedKnowledgeId !== null
       ) {
-        if (!options.knowledgeStore || !currentVersion) {
+        if (!options.knowledgeStore || !options.conversationReferenceStore || !currentVersion) {
           return reply.status(409).send({
             error: "GOVERNED_KNOWLEDGE_REFERENCE_UNAVAILABLE",
             message: "The referenced governed Knowledge is not available in this conversation state.",
           });
         }
-        const loaded = await loadKnowledge(
-          options.knowledgeStore,
-          options.runStore,
-          cognition.proposal.referencedKnowledgeId,
-        );
+        const loaded = cognitiveGovernedKnowledge.find((item) =>
+          item.record.knowledgeId === cognition.proposal.referencedKnowledgeId);
         if (!loaded || loaded.record.conversationId !== conversationId) {
           return reply.status(404).send({ error: "KNOWLEDGE_NOT_FOUND" });
         }
@@ -912,20 +916,18 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
             : "I couldn't transform that faithfully, so I kept the established Knowledge unchanged.";
         }
 
-        const reference = await referenceKnowledge(options.knowledgeStore, {
-          knowledge: loaded.record,
-          userMessageId: sourceMessage.messageId,
-          intentVersionId: currentVersion.intentVersionId,
-          createdAt: sourceMessage.createdAt,
-        });
-        await recordConversationReference(options, {
+        const responseId = `knowledge:${loaded.record.knowledgeId}:reference:${sourceMessage.messageId}`;
+        const reference = await recordConversationReference(options, {
           conversationId,
           userMessageId: sourceMessage.messageId,
-          responseId: reference.responseId,
+          responseId,
           intentVersionId: currentVersion.intentVersionId,
           targets: [{ kind: "KNOWLEDGE", targetId: loaded.record.knowledgeId, relation: "CONSUMED" }],
           createdAt: sourceMessage.createdAt,
         });
+        if (!reference) {
+          return reply.status(409).send({ error: "GOVERNED_KNOWLEDGE_REFERENCE_UNAVAILABLE" });
+        }
         return reply.status(200).send({
           status: "REFERENCE_RESOLVED",
           acceptedUnderstanding: authoritativeObjective(currentVersion),
@@ -1058,8 +1060,14 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
         && options.recommendationStore
         && options.solandraAdvisory
       ) {
-        const governed = options.knowledgeStore
-          ? await recentGovernedKnowledge(options.knowledgeStore, options.runStore, conversationId, 4)
+        const governed = options.knowledgeStore && options.conversationReferenceStore
+          ? await recentGovernedKnowledge(
+            options.knowledgeStore,
+            options.conversationReferenceStore,
+            options.runStore,
+            conversationId,
+            4,
+          )
           : [];
         let advisory;
         try {
@@ -1372,11 +1380,11 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
         return reply.status(409).send({ error: "ACTION_PREPARATION_INTENT_BINDING_UNAVAILABLE" });
       }
       const established = await establishKnowledge(options.knowledgeStore, run, truth, outcome.knowledge);
-      await recordEstablishedKnowledgeReference(options, established);
+      const establishedReference = await recordEstablishedKnowledgeReference(options, established);
       const knowledgeReference = {
-        knowledgeId: established.record.knowledgeId,
-        referenceId: established.reference.referenceId,
-        responseId: established.reference.responseId,
+        knowledgeId: established.knowledgeId,
+        referenceId: establishedReference?.referenceId ?? null,
+        responseId: establishedReference?.responseId ?? `run:${run.id}:outcome`,
       };
       let prepared = await options.preparedResourceStore.getPreparedResourceByRunId(run.id);
       if (!prepared) {
@@ -1384,15 +1392,18 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
         if (!sourceMessage || sourceMessage.conversationId !== run.conversationId) {
           return reply.status(409).send({ error: "ACTION_PREPARATION_USER_SOURCE_UNAVAILABLE" });
         }
-        const recent = await recentGovernedKnowledge(
-          options.knowledgeStore,
-          options.runStore,
-          run.conversationId,
-          4,
-        );
+        const recent = options.conversationReferenceStore
+          ? await recentGovernedKnowledge(
+            options.knowledgeStore,
+            options.conversationReferenceStore,
+            options.runStore,
+            run.conversationId,
+            4,
+          )
+          : [];
         const priorGoverned = recent.filter((item) => item.record.runId !== run.id);
         const currentGoverned = priorGoverned.length === 0
-          ? await loadKnowledge(options.knowledgeStore, options.runStore, established.record.knowledgeId)
+          ? await loadKnowledge(options.knowledgeStore, options.runStore, established.knowledgeId)
           : undefined;
         const governed = priorGoverned.length > 0
           ? priorGoverned
@@ -1483,11 +1494,11 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
       return reply.send({ runId: run.id, status: run.status, outcome });
     }
     const established = await establishKnowledge(options.knowledgeStore, run, truth, outcome);
-    await recordEstablishedKnowledgeReference(options, established);
+    const establishedReference = await recordEstablishedKnowledgeReference(options, established);
     const knowledgeReference = {
-      knowledgeId: established.record.knowledgeId,
-      referenceId: established.reference.referenceId,
-      responseId: established.reference.responseId,
+      knowledgeId: established.knowledgeId,
+      referenceId: establishedReference?.referenceId ?? null,
+      responseId: establishedReference?.responseId ?? `run:${run.id}:outcome`,
     };
 
     if (isConsultationRunRequest(run.request) && run.request.advisoryRequested) {
@@ -1521,7 +1532,7 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
       const intentVersionId = run.request.intentVersionId;
       const intentVersion = intentVersionId ? await options.intentStore.getVersion(intentVersionId) : undefined;
       if (!intentVersion) return reply.status(409).send({ error: "ADVISORY_INTENT_VERSION_UNAVAILABLE" });
-      const rootKnowledge = await loadKnowledge(options.knowledgeStore, options.runStore, established.record.knowledgeId);
+      const rootKnowledge = await loadKnowledge(options.knowledgeStore, options.runStore, established.knowledgeId);
       if (!rootKnowledge) return reply.status(409).send({ error: "ADVISORY_KNOWLEDGE_UNAVAILABLE" });
       const sourceMessage = await options.userMessageStore.get(run.request.sourceMessageId);
       if (!sourceMessage || sourceMessage.conversationId !== run.conversationId) {
@@ -1566,7 +1577,7 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
         const continuationKnowledge = await loadKnowledge(
           options.knowledgeStore,
           options.runStore,
-          continuationEstablished.record.knowledgeId,
+          continuationEstablished.knowledgeId,
         );
         if (!continuationKnowledge) {
           return reply.status(409).send({ error: "ADVISORY_CONTINUATION_KNOWLEDGE_UNAVAILABLE" });
@@ -1696,7 +1707,6 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
       outcome: loaded.knowledge,
     });
   });
-
 
   app.get<{ Params: { recommendationId: string } }>("/api/v1/recommendations/:recommendationId", async (request, reply) => {
     if (!options.recommendationStore || !options.knowledgeStore) {

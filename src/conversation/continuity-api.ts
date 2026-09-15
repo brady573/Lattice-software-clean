@@ -108,13 +108,12 @@ export function registerConversationContinuityApi(
       const conversation = await options.conversationStore.getOwned(conversationId, subjectId);
       if (!conversation) return reply.status(404).send({ error: "CONVERSATION_NOT_FOUND" });
 
-      const [messages, conversationResponses, conversationReferences, runIds, knowledge, references, recommendations, acceptedChoices] = await Promise.all([
+      const [messages, conversationResponses, conversationReferences, runIds, knowledge, recommendations, acceptedChoices] = await Promise.all([
         options.userMessageStore.listByConversation(conversationId),
         options.conversationResponseStore.listByConversation(conversationId),
         options.conversationReferenceStore?.listByConversation(conversationId) ?? Promise.resolve([]),
         options.runIndexStore.listRunIds(conversationId),
         options.knowledgeStore?.listKnowledgeByConversation(conversationId) ?? Promise.resolve([]),
-        options.knowledgeStore?.listReferences(conversationId) ?? Promise.resolve([]),
         options.recommendationStore?.listRecommendationsByConversation(conversationId) ?? Promise.resolve([]),
         options.acceptedChoiceStore?.listAcceptedChoicesByConversation(conversationId) ?? Promise.resolve([]),
       ]);
@@ -200,16 +199,6 @@ export function registerConversationContinuityApi(
           asOf: record.asOf,
           createdAt: record.createdAt,
           link: `/api/v1/knowledge/${encodeURIComponent(record.knowledgeId)}`,
-        })),
-        references: references.map((reference) => ({
-          referenceId: reference.referenceId,
-          userMessageId: reference.userMessageId,
-          responseId: reference.responseId,
-          intentVersionId: reference.intentVersionId,
-          knowledgeId: reference.knowledgeId,
-          referenceKind: reference.referenceKind,
-          parentReferenceId: reference.parentReferenceId,
-          createdAt: reference.createdAt,
         })),
         conversationReferences: conversationReferences.map((reference) => ({
           referenceId: reference.referenceId,
