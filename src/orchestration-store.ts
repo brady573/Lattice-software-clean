@@ -128,7 +128,7 @@ export interface DurableOrchestrationStore {
     limit: number;
   }): Promise<DispatchEnvelope[]>;
   acknowledgeDispatch(input: { id: number; workerId: string; now: Date }): Promise<DispatchMutationResult>;
-  releaseDispatch(input: { id: number; workerId: string; availableAt: Date }): Promise<DispatchMutationResult>;
+  releaseDispatch(input: { id: number; workerId: string; now: Date; availableAt: Date }): Promise<DispatchMutationResult>;
   close(): Promise<void>;
 }
 
@@ -445,10 +445,11 @@ export class MemoryOrchestrationStore implements DurableOrchestrationStore {
     if (!task) return { outcome: "stale" };
     const run = await this.runStore.get(task.runId);
     const attempt = this.attempts.get(task.id)?.find((item) => item.attemptNumber === input.attemptNumber);
+    const leaseValid = task.leaseExpiresAt !== null && new Date(task.leaseExpiresAt) > input.now;
     if (
       !run || isTerminal(run.status) || run.version !== task.runEpoch
       || task.status !== "RUNNING" || task.currentAttempt !== input.attemptNumber
-      || task.leaseOwner !== input.workerId || !attempt || attempt.status !== "RUNNING"
+      || task.leaseOwner !== input.workerId || !leaseValid || !attempt || attempt.status !== "RUNNING"
     ) {
       return { outcome: "stale" };
     }
@@ -505,16 +506,26 @@ export class MemoryOrchestrationStore implements DurableOrchestrationStore {
 
   async acknowledgeDispatch(input: { id: number; workerId: string; now: Date }): Promise<DispatchMutationResult> {
     const item = this.outbox.get(input.id);
-    if (!item || item.dispatchedAt !== null || item.leaseOwner !== input.workerId) return { outcome: "stale" };
+    const leaseValid = item?.leaseExpiresAt !== null
+      && item?.leaseExpiresAt !== undefined
+      && new Date(item.leaseExpiresAt) > input.now;
+    if (!item || item.dispatchedAt !== null || item.leaseOwner !== input.workerId || !leaseValid) {
+      return { outcome: "stale" };
+    }
     item.dispatchedAt = input.now.toISOString();
     item.leaseOwner = null;
     item.leaseExpiresAt = null;
     return { outcome: "updated" };
   }
 
-  async releaseDispatch(input: { id: number; workerId: string; availableAt: Date }): Promise<DispatchMutationResult> {
+  async releaseDispatch(input: { id: number; workerId: string; now: Date; availableAt: Date }): Promise<DispatchMutationResult> {
     const item = this.outbox.get(input.id);
-    if (!item || item.dispatchedAt !== null || item.leaseOwner !== input.workerId) return { outcome: "stale" };
+    const leaseValid = item?.leaseExpiresAt !== null
+      && item?.leaseExpiresAt !== undefined
+      && new Date(item.leaseExpiresAt) > input.now;
+    if (!item || item.dispatchedAt !== null || item.leaseOwner !== input.workerId || !leaseValid) {
+      return { outcome: "stale" };
+    }
     item.leaseOwner = null;
     item.leaseExpiresAt = null;
     item.availableAt = input.availableAt.toISOString();
