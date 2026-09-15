@@ -900,20 +900,21 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
             mode: cognition.proposal.requestedHelp === "SIMPLIFY_REFERENCE" ? "SIMPLIFY" : "EXPLAIN",
             knowledge: loaded.knowledge,
           });
-          if (presented.status === "NEEDS_NEW_KNOWLEDGE") {
-            return reply.status(202).send({
-              status: "NEEDS_NEW_KNOWLEDGE",
-              acceptedUnderstanding: authoritativeObjective(currentVersion),
-              intentScopeId,
-              intentVersionId: currentVersion.intentVersionId,
-              knowledgeId: loaded.record.knowledgeId,
-              question: "That would require factual Knowledge beyond what I previously established. Ask me to investigate it as new Knowledge.",
-              interpretation: publicCognition(cognition),
-            });
+          if (presented.status === "PRESENTED") {
+            assistantMessage = presented.text;
+          } else if (presented.status === "NEEDS_NEW_KNOWLEDGE") {
+            assistantMessage = [
+              "That transformation would require additional factual Knowledge beyond what is already established. I did not start new research.",
+              "The existing governed Knowledge remains available and unchanged.",
+              renderHistoricalSources(loaded),
+            ].join("\n\n");
+          } else {
+            assistantMessage = [
+              "I couldn't transform the established Knowledge faithfully, so I left it unchanged. I did not start new research.",
+              "The existing governed Knowledge remains available and unchanged.",
+              renderHistoricalSources(loaded),
+            ].join("\n\n");
           }
-          assistantMessage = presented.status === "PRESENTED"
-            ? presented.text
-            : "I couldn't transform that faithfully, so I kept the established Knowledge unchanged.";
         }
 
         const responseId = `knowledge:${loaded.record.knowledgeId}:reference:${sourceMessage.messageId}`;
