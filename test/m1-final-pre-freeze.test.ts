@@ -9,7 +9,6 @@ import type {
   KnowledgeAcquisitionRequest,
   KnowledgeAcquisitionResult,
 } from "../src/knowledge/acquisition.js";
-import { PostgresKnowledgeRecordStore } from "../src/knowledge/knowledge-record-store.js";
 import type { ModelProvider } from "../src/model/provider.js";
 import { ModelRuntime } from "../src/model/runtime.js";
 import type {
@@ -174,7 +173,6 @@ test("M1 PostgreSQL reconstruction preserves exact Knowledge identity, provenanc
   let second: FastifyInstance | undefined;
   let executionStore: PostgresRunStore | undefined;
   let runStore: PostgresRunStore | undefined;
-  let knowledgeStore: PostgresKnowledgeRecordStore | undefined;
   let conversationId = "";
   let runId = "";
   let intentScopeId = "";
@@ -245,12 +243,26 @@ test("M1 PostgreSQL reconstruction preserves exact Knowledge identity, provenanc
       solandraKnowledgePresenter: presenter,
     });
     runStore = await PostgresRunStore.connect(databaseUrl, { migrate: false });
-    knowledgeStore = await PostgresKnowledgeRecordStore.connect(databaseUrl);
 
-    const establishedReferences = await knowledgeStore.listReferences(conversationId);
+    const establishedContinuity = await second.inject({
+      method: "GET",
+      url: `/api/v1/conversations/${conversationId}/continuity`,
+    });
+    assert.equal(establishedContinuity.statusCode, 200, establishedContinuity.body);
+    const establishedContinuityBody = establishedContinuity.json<{
+      references?: unknown;
+      conversationReferences: Array<{
+        referenceId: string;
+        targets: Array<{ kind: string; targetId: string; relation: string }>;
+      }>;
+    }>();
+    assert.equal(establishedContinuityBody.references, undefined);
+    const establishedReferences = establishedContinuityBody.conversationReferences.filter((reference) =>
+      reference.targets.some((target) =>
+        target.kind === "KNOWLEDGE"
+        && target.targetId === knowledgeId
+        && target.relation === "PRODUCED"));
     assert.equal(establishedReferences.length, 1);
-    assert.equal(establishedReferences[0]?.knowledgeId, knowledgeId);
-    assert.equal(establishedReferences[0]?.referenceKind, "ESTABLISHED");
 
     const afterResponse = await second.inject({ method: "GET", url: `/api/v1/knowledge/${knowledgeId}` });
     assert.equal(afterResponse.statusCode, 200, afterResponse.body);
@@ -297,16 +309,31 @@ test("M1 PostgreSQL reconstruction preserves exact Knowledge identity, provenanc
     assert.equal(acquisition.requests.length, 1);
     assert.equal(presenter.inputs.length, 1);
 
-    const references = await knowledgeStore.listReferences(conversationId);
-    assert.equal(references.filter((item) => item.knowledgeId === knowledgeId).length, 3);
-    assert.equal(references.at(-1)?.referenceKind, "REFERENCED");
+    const continuity = await second.inject({
+      method: "GET",
+      url: `/api/v1/conversations/${conversationId}/continuity`,
+    });
+    assert.equal(continuity.statusCode, 200, continuity.body);
+    const references = continuity.json<{
+      conversationReferences: Array<{
+        referenceId: string;
+        targets: Array<{ kind: string; targetId: string; relation: string }>;
+      }>;
+    }>().conversationReferences.filter((reference) =>
+      reference.targets.some((target) => target.kind === "KNOWLEDGE" && target.targetId === knowledgeId));
+    assert.equal(references.length, 3);
+    assert.equal(
+      references.at(-1)?.targets.some((target) =>
+        target.kind === "KNOWLEDGE" && target.targetId === knowledgeId && target.relation === "CONSUMED"),
+      true,
+    );
   } finally {
     await executionStore?.close();
     await runStore?.close();
-    await knowledgeStore?.close();
     await first?.close();
     await second?.close();
     if (conversationId) {
+      await pool.query("DELETE FROM conversation_references WHERE conversation_id=$1", [conversationId]);
       await pool.query("DELETE FROM conversation_knowledge_references WHERE conversation_id=$1", [conversationId]);
       await pool.query("DELETE FROM knowledge_records WHERE conversation_id=$1", [conversationId]);
     }
