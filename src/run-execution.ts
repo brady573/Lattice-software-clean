@@ -314,18 +314,19 @@ export async function executePersistedRunTick(
     if (error instanceof LostRunOwnershipError) {
       throw new RunExecutionError(error.message, runId, true);
     }
-    const current = await runStore.get(runId);
-    if (current && !isSettledStatus(current.status)) {
-      try {
-        await runStore.transition({
+    if (!isSettledStatus(status)) {
+      const failed = await runStore.transition({
+        runId,
+        expectedStatus: status,
+        expectedVersion: version,
+        nextStatus: "FAILED",
+      });
+      if (failed.outcome !== "advanced") {
+        throw new RunExecutionError(
+          `Run failure handling lost epoch ownership at ${status}@v${version}.`,
           runId,
-          expectedStatus: current.status,
-          expectedVersion: current.version,
-          nextStatus: "FAILED",
-        });
-      } catch {
-        // Preserve the original Product failure. A concurrent terminal state or
-        // ownership loss remains controlling state and must not be overwritten.
+          true,
+        );
       }
     }
     throw new RunExecutionError(error instanceof Error ? error.message : "Unknown Run error", runId);
