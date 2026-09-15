@@ -7,7 +7,7 @@ import { createConfiguredModelAssistanceCapability } from "./model-assistance-co
 import { createRuntimeApp } from "./runtime-app.js";
 import { resolveRuntimeConfig } from "./runtime-config.js";
 import { assertDurableProcessSchemaReady } from "./runtime-schema-readiness.js";
-import { createConfiguredSolandraCognition } from "./solandra/cognition-composition.js";
+import { requireConfiguredSolandraCognition } from "./solandra/cognition-composition.js";
 
 try {
   const config = resolveRuntimeConfig();
@@ -23,7 +23,7 @@ try {
   const modelAssistance = await createConfiguredModelAssistanceCapability(config);
   const capabilityComposition = await createConfiguredCapabilityBroker(config);
   const decisionCapability = createAlphaDecisionRuntimeComposition();
-  const solandra = createConfiguredSolandraCognition(config);
+  const solandra = requireConfiguredSolandraCognition(config);
   const authenticatedSubjectResolver = resolveCanonicalOwnerSubjectResolver(config);
   let app;
   try {
@@ -31,12 +31,10 @@ try {
       ...decisionCapability,
       modelAssistanceService: modelAssistance,
       ...(authenticatedSubjectResolver === undefined ? {} : { authenticatedSubjectResolver }),
-      ...(solandra === undefined ? {} : {
-        solandraCognition: solandra.cognition,
-        solandraAdvisory: solandra.advisory,
-        solandraActionPreparer: solandra.actionPreparer,
-        solandraKnowledgePresenter: solandra.knowledgePresenter,
-      }),
+      solandraCognition: solandra.cognition,
+      solandraAdvisory: solandra.advisory,
+      solandraActionPreparer: solandra.actionPreparer,
+      solandraKnowledgePresenter: solandra.knowledgePresenter,
     });
   } catch (error) {
     await Promise.allSettled([modelAssistance.close(), capabilityComposition.broker.close()]);
