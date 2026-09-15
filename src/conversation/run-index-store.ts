@@ -8,9 +8,15 @@ export interface ConversationRunIndexStore {
   close(): Promise<void>;
 }
 
+export interface ConversationRunIndexSource {
+  listByConversation(conversationId: string): Promise<LatticeRun[]>;
+}
+
 export class MemoryConversationRunIndexStore implements ConversationRunIndexStore {
   readonly kind = "memory" as const;
   private readonly runIdsByConversation = new Map<string, string[]>();
+
+  constructor(private readonly source?: ConversationRunIndexSource) {}
 
   async record(run: LatticeRun): Promise<void> {
     const current = this.runIdsByConversation.get(run.conversationId) ?? [];
@@ -21,6 +27,11 @@ export class MemoryConversationRunIndexStore implements ConversationRunIndexStor
   }
 
   async listRunIds(conversationId: string): Promise<string[]> {
+    if (this.source) {
+      for (const run of await this.source.listByConversation(conversationId)) {
+        await this.record(run);
+      }
+    }
     return [...(this.runIdsByConversation.get(conversationId) ?? [])];
   }
 
@@ -49,6 +60,8 @@ export class PostgresConversationRunIndexStore implements ConversationRunIndexSt
   }
 
   async listRunIds(conversationId: string): Promise<string[]> {
+    // This read is also the deterministic reconciliation path: the durable
+    // projection is reconstructed directly from authoritative Run identity.
     const result = await this.pool.query<{ id: string }>(
       "SELECT id FROM runs WHERE conversation_id=$1 ORDER BY created_at,id",
       [conversationId],
