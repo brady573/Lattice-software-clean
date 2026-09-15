@@ -8,8 +8,6 @@ import type { TruthBundle } from "../truth/types.js";
 
 const migration = "033_knowledge_records.sql" as const;
 
-export type ConversationKnowledgeReferenceKind = "ESTABLISHED" | "REFERENCED";
-
 export interface KnowledgeRecord {
   knowledgeId: string;
   conversationId: string;
@@ -27,28 +25,12 @@ export interface KnowledgeRecord {
   createdAt: string;
 }
 
-export interface ConversationKnowledgeReference {
-  referenceId: string;
-  conversationId: string;
-  userMessageId: string;
-  responseId: string;
-  intentVersionId: string;
-  knowledgeId: string;
-  referenceKind: ConversationKnowledgeReferenceKind;
-  parentReferenceId: string | null;
-  createdAt: string;
-}
-
 export interface KnowledgeRecordStore {
   readonly kind: "memory" | "postgres";
   putKnowledge(record: KnowledgeRecord): Promise<KnowledgeRecord>;
   getKnowledge(knowledgeId: string): Promise<KnowledgeRecord | undefined>;
   getKnowledgeByRunId(runId: string): Promise<KnowledgeRecord | undefined>;
   listKnowledgeByConversation(conversationId: string): Promise<KnowledgeRecord[]>;
-  putReference(reference: ConversationKnowledgeReference): Promise<ConversationKnowledgeReference>;
-  getReference(referenceId: string): Promise<ConversationKnowledgeReference | undefined>;
-  listReferences(conversationId: string): Promise<ConversationKnowledgeReference[]>;
-  latestReference(conversationId: string): Promise<ConversationKnowledgeReference | undefined>;
   close(): Promise<void>;
 }
 
@@ -146,50 +128,10 @@ export function buildKnowledgeRecord(
   });
 }
 
-export function buildConversationKnowledgeReference(input: {
-  conversationId: string;
-  userMessageId: string;
-  responseId: string;
-  intentVersionId: string;
-  knowledgeId: string;
-  referenceKind: ConversationKnowledgeReferenceKind;
-  parentReferenceId?: string | null;
-  createdAt?: string;
-}): ConversationKnowledgeReference {
-  const conversationId = bounded(input.conversationId, "conversationId", 128);
-  const userMessageId = bounded(input.userMessageId, "userMessageId", 200);
-  const responseId = bounded(input.responseId, "responseId", 256);
-  const intentVersionId = bounded(input.intentVersionId, "intentVersionId", 200);
-  const knowledgeId = bounded(input.knowledgeId, "knowledgeId", 128);
-  const parentReferenceId = input.parentReferenceId === undefined || input.parentReferenceId === null
-    ? null
-    : bounded(input.parentReferenceId, "parentReferenceId", 128);
-  const createdAt = dateOrThrow(input.createdAt ?? new Date().toISOString(), "createdAt");
-  return Object.freeze({
-    referenceId: stableId(
-      "reference",
-      conversationId,
-      userMessageId,
-      responseId,
-      knowledgeId,
-      input.referenceKind,
-    ),
-    conversationId,
-    userMessageId,
-    responseId,
-    intentVersionId,
-    knowledgeId,
-    referenceKind: input.referenceKind,
-    parentReferenceId,
-    createdAt,
-  });
-}
-
 export class MemoryKnowledgeRecordStore implements KnowledgeRecordStore {
   readonly kind = "memory" as const;
   private readonly knowledge = new Map<string, KnowledgeRecord>();
   private readonly knowledgeByRun = new Map<string, string>();
-  private readonly references = new Map<string, ConversationKnowledgeReference>();
 
   async putKnowledge(record: KnowledgeRecord): Promise<KnowledgeRecord> {
     const existing = this.knowledge.get(record.knowledgeId);
@@ -223,39 +165,9 @@ export class MemoryKnowledgeRecordStore implements KnowledgeRecordStore {
       .map(clone);
   }
 
-  async putReference(reference: ConversationKnowledgeReference): Promise<ConversationKnowledgeReference> {
-    if (!this.knowledge.has(reference.knowledgeId)) {
-      throw new Error("Conversation reference requires an existing Knowledge record.");
-    }
-    const existing = this.references.get(reference.referenceId);
-    if (existing) {
-      if (!sameRecord(existing, reference)) throw new Error("Conversation reference identity cannot be rebound.");
-      return clone(existing);
-    }
-    this.references.set(reference.referenceId, clone(reference));
-    return clone(reference);
-  }
-
-  async getReference(referenceId: string): Promise<ConversationKnowledgeReference | undefined> {
-    const reference = this.references.get(referenceId);
-    return reference ? clone(reference) : undefined;
-  }
-
-  async listReferences(conversationId: string): Promise<ConversationKnowledgeReference[]> {
-    return [...this.references.values()]
-      .filter((reference) => reference.conversationId === conversationId)
-      .sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.referenceId.localeCompare(right.referenceId))
-      .map(clone);
-  }
-
-  async latestReference(conversationId: string): Promise<ConversationKnowledgeReference | undefined> {
-    return (await this.listReferences(conversationId)).at(-1);
-  }
-
   async close(): Promise<void> {
     this.knowledge.clear();
     this.knowledgeByRun.clear();
-    this.references.clear();
   }
 }
 
@@ -273,18 +185,6 @@ type KnowledgeRow = {
   truth_assessment_ids: unknown;
   uncertainties: unknown;
   as_of: Date | string;
-  created_at: Date | string;
-};
-
-type ReferenceRow = {
-  reference_id: string;
-  conversation_id: string;
-  user_message_id: string;
-  response_id: string;
-  intent_version_id: string;
-  knowledge_id: string;
-  reference_kind: ConversationKnowledgeReferenceKind;
-  parent_reference_id: string | null;
   created_at: Date | string;
 };
 
@@ -310,20 +210,6 @@ function mapKnowledge(row: KnowledgeRow): KnowledgeRecord {
     truthAssessmentIds: stringArray(row.truth_assessment_ids, "truth_assessment_ids"),
     uncertainties: stringArray(row.uncertainties, "uncertainties"),
     asOf: dateOrThrow(row.as_of instanceof Date ? row.as_of.toISOString() : row.as_of, "as_of"),
-    createdAt: dateOrThrow(row.created_at instanceof Date ? row.created_at.toISOString() : row.created_at, "created_at"),
-  };
-}
-
-function mapReference(row: ReferenceRow): ConversationKnowledgeReference {
-  return {
-    referenceId: row.reference_id,
-    conversationId: row.conversation_id,
-    userMessageId: row.user_message_id,
-    responseId: row.response_id,
-    intentVersionId: row.intent_version_id,
-    knowledgeId: row.knowledge_id,
-    referenceKind: row.reference_kind,
-    parentReferenceId: row.parent_reference_id,
     createdAt: dateOrThrow(row.created_at instanceof Date ? row.created_at.toISOString() : row.created_at, "created_at"),
   };
 }
@@ -360,7 +246,6 @@ async function assertReady(pool: Pool): Promise<void> {
 }
 
 const knowledgeColumns = "knowledge_id,conversation_id,run_id,intent_scope_id,intent_version_id,source_message_id,objective,claim_ids,source_ids,evidence_ids,truth_assessment_ids,uncertainties,as_of,created_at";
-const referenceColumns = "reference_id,conversation_id,user_message_id,response_id,intent_version_id,knowledge_id,reference_kind,parent_reference_id,created_at";
 
 export class PostgresKnowledgeRecordStore implements KnowledgeRecordStore {
   readonly kind = "postgres" as const;
@@ -443,57 +328,6 @@ export class PostgresKnowledgeRecordStore implements KnowledgeRecordStore {
       [conversationId],
     );
     return result.rows.map(mapKnowledge);
-  }
-
-  async putReference(reference: ConversationKnowledgeReference): Promise<ConversationKnowledgeReference> {
-    const result = await this.pool.query<ReferenceRow>(
-      `INSERT INTO conversation_knowledge_references(${referenceColumns})
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
-       ON CONFLICT(reference_id) DO NOTHING
-       RETURNING ${referenceColumns}`,
-      [
-        reference.referenceId,
-        reference.conversationId,
-        reference.userMessageId,
-        reference.responseId,
-        reference.intentVersionId,
-        reference.knowledgeId,
-        reference.referenceKind,
-        reference.parentReferenceId,
-        reference.createdAt,
-      ],
-    );
-    const inserted = result.rows[0];
-    if (inserted) return mapReference(inserted);
-    const existing = await this.getReference(reference.referenceId);
-    if (!existing || !sameRecord(existing, reference)) {
-      throw new Error("Conversation reference identity cannot be rebound.");
-    }
-    return existing;
-  }
-
-  async getReference(referenceId: string): Promise<ConversationKnowledgeReference | undefined> {
-    const result = await this.pool.query<ReferenceRow>(
-      `SELECT ${referenceColumns} FROM conversation_knowledge_references WHERE reference_id=$1`,
-      [referenceId],
-    );
-    return result.rows[0] ? mapReference(result.rows[0]) : undefined;
-  }
-
-  async listReferences(conversationId: string): Promise<ConversationKnowledgeReference[]> {
-    const result = await this.pool.query<ReferenceRow>(
-      `SELECT ${referenceColumns} FROM conversation_knowledge_references WHERE conversation_id=$1 ORDER BY created_at,reference_id`,
-      [conversationId],
-    );
-    return result.rows.map(mapReference);
-  }
-
-  async latestReference(conversationId: string): Promise<ConversationKnowledgeReference | undefined> {
-    const result = await this.pool.query<ReferenceRow>(
-      `SELECT ${referenceColumns} FROM conversation_knowledge_references WHERE conversation_id=$1 ORDER BY created_at DESC,reference_id DESC LIMIT 1`,
-      [conversationId],
-    );
-    return result.rows[0] ? mapReference(result.rows[0]) : undefined;
   }
 
   async close(): Promise<void> {
