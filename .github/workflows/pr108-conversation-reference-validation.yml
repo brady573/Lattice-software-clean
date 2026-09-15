@@ -1,0 +1,85 @@
+name: Validation — PR #108 ConversationReference
+
+on:
+  push:
+    branches:
+      - validation/pr108-conversation-reference
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      EXPECTED_PRODUCT_SHA: d12853bfd1f3e506cfadace3f2a650d867095c46
+      EXPECTED_PRODUCT_TREE: 715ba86960d202afed090277f0885a74d1e86836
+      DATABASE_URL: postgresql://lattice:lattice@127.0.0.1:55433/lattice_test
+
+    services:
+      postgres:
+        image: postgres:18.6
+        env:
+          POSTGRES_USER: lattice
+          POSTGRES_PASSWORD: lattice
+          POSTGRES_DB: lattice_test
+        ports:
+          - 55433:5432
+        options: >-
+          --health-cmd "pg_isready -U lattice -d lattice_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - name: Checkout validation infrastructure
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Checkout exact Product candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: d12853bfd1f3e506cfadace3f2a650d867095c46
+          path: product
+          persist-credentials: false
+
+      - name: Provision Node 24
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+
+      - name: Verify frozen Product identity
+        run: |
+          set -euo pipefail
+          test "$(git -C product rev-parse HEAD)" = "$EXPECTED_PRODUCT_SHA"
+          test "$(git -C product rev-parse HEAD^{tree})" = "$EXPECTED_PRODUCT_TREE"
+          test "$(node -p "process.versions.node.split('.')[0]")" = "24"
+          echo "PRODUCT_IDENTITY=PASS sha=$EXPECTED_PRODUCT_SHA tree=$EXPECTED_PRODUCT_TREE"
+
+      - name: Install locked Product dependencies
+        working-directory: product
+        run: npm ci --no-audit --no-fund
+
+      - name: Run exact focused consolidation gate
+        working-directory: product
+        run: |
+          set -euo pipefail
+          node --import tsx --test test/issue-91-conversation-reference-integrity.test.ts test/issue-91-conversation-reference-consolidation.test.ts
+          echo 'PR108_FOCUSED_CONSOLIDATION=PASS'
+
+      - name: Run live Solandra historical-Knowledge journey
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "${GROQ_API_KEY:-}"
+          node --import tsx validation/pr108-conversation-reference-e2e.mjs
+          test "$(git -C product rev-parse HEAD)" = "$EXPECTED_PRODUCT_SHA"
+          test "$(git -C product rev-parse HEAD^{tree})" = "$EXPECTED_PRODUCT_TREE"
+          git -C product diff --exit-code
+          echo 'PRODUCTION_DEPLOYMENT=NOT_PERFORMED'
+          echo 'CONNECTED_SOLANDRA_DATABASE=NOT_TOUCHED'
