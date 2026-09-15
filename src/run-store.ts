@@ -77,6 +77,12 @@ export class MemoryRunStore implements RunStore {
     this.runs.set(run.id, structuredClone(run));
   }
 
+  async listByConversation(conversationId: string): Promise<LatticeRun[]> {
+    return [...this.runs.values()]
+      .filter((run) => run.conversationId === conversationId)
+      .map((run) => structuredClone(run));
+  }
+
   async transition(input: RunTransition): Promise<RunTransitionResult> {
     assertAllowedTransition(input.expectedStatus, input.nextStatus);
     if (input.truthSnapshot) {
