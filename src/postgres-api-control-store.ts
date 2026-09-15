@@ -12,7 +12,14 @@ import type {
   ApiRunSupersessionResult,
   ApiSupersededRunResponse,
 } from "./api-control-store.js";
-import type { LatticeRun, RunStatus } from "./domain.js";
+import { isConsultationRunRequest, type LatticeRun, type RunStatus } from "./domain.js";
+import {
+  decisionPlanBindingForRun,
+} from "./intent/decision-plan-run-control.js";
+import {
+  PostgresDecisionPlanStore,
+  type DecisionPlanFidelityPolicy,
+} from "./intent/decision-plan-store.js";
 import {
   assertCanonicalPendingRun,
   assertSupersedableRunStatus,
@@ -25,6 +32,8 @@ const migration = "019_api_idempotency.sql" as const;
 type IdempotencyRow = {
   request_hash: string;
   response_json: ApiAcceptedRunResponse;
+  run_id: string;
+  active: boolean;
 };
 
 async function applyMigration(pool: Pool): Promise<void> {
@@ -82,15 +91,34 @@ function supersededResponse(record: RunSupersessionRecord): ApiSupersededRunResp
   };
 }
 
-async function readIdempotency(pool: Pool, input: ApiIdempotencyInput): Promise<IdempotencyRow | undefined> {
-  const result = await pool.query<IdempotencyRow>(
-    `SELECT request_hash,response_json
+function idempotencyLockKey(input: ApiIdempotencyInput): string {
+  return [input.scopeKey, input.httpMethod, input.canonicalRoute, input.idempotencyKey].join("\u001f");
+}
+
+async function lockIdempotency(client: PoolClient, input: ApiIdempotencyInput): Promise<void> {
+  await client.query(
+    "SELECT pg_advisory_xact_lock(hashtextextended($1,0))",
+    [idempotencyLockKey(input)],
+  );
+}
+
+async function readIdempotency(client: PoolClient, input: ApiIdempotencyInput): Promise<IdempotencyRow | undefined> {
+  const result = await client.query<IdempotencyRow>(
+    `SELECT request_hash,response_json,run_id,(expires_at > now()) AS active
      FROM api_idempotency_keys
-     WHERE scope_key=$1 AND http_method=$2 AND canonical_route=$3 AND idempotency_key=$4
-       AND expires_at > now()`,
+     WHERE scope_key=$1 AND http_method=$2 AND canonical_route=$3 AND idempotency_key=$4`,
     [input.scopeKey, input.httpMethod, input.canonicalRoute, input.idempotencyKey],
   );
   return result.rows[0];
+}
+
+async function deleteExpiredIdempotency(client: PoolClient, input: ApiIdempotencyInput): Promise<void> {
+  await client.query(
+    `DELETE FROM api_idempotency_keys
+     WHERE scope_key=$1 AND http_method=$2 AND canonical_route=$3 AND idempotency_key=$4
+       AND expires_at <= now()`,
+    [input.scopeKey, input.httpMethod, input.canonicalRoute, input.idempotencyKey],
+  );
 }
 
 async function insertRun(client: PoolClient, run: LatticeRun): Promise<void> {
@@ -229,57 +257,87 @@ function supersessionMatches(record: RunSupersessionRecord, input: ApiRunSuperse
 
 /**
  * PostgreSQL API mutation boundary. It is intentionally separate from V36 and
- * from worker execution: its job is to atomically accept durable Runs, record
- * idempotent HTTP responses, emit Run dispatch intents, persist exact
- * authoritative IntentVersion bindings, and atomically supersede an exact-bound
- * historical attempt when an upstream Product authority has already established
- * a material correction and exact successor IntentVersion.
+ * worker execution. For qualified decisions it owns one commit containing the
+ * Run, exact IntentVersion binding, exact DecisionPlan, idempotency record, and
+ * executable dispatch. It also atomically supersedes exact-bound historical
+ * attempts after Product authority has established a material correction.
  */
 export class PostgresApiRunControlStore implements ApiRunControlStore {
-  private constructor(private readonly pool: Pool) {}
+  private constructor(
+    private readonly pool: Pool,
+    private readonly decisionPlanFidelityPolicy?: DecisionPlanFidelityPolicy,
+  ) {}
 
   static async connect(
     connectionString: string,
-    options: { migrate?: boolean } = {},
+    options: { migrate?: boolean; decisionPlanFidelityPolicy?: DecisionPlanFidelityPolicy } = {},
   ): Promise<PostgresApiRunControlStore> {
     const pool = new Pool({ connectionString });
     try {
       await pool.query("SELECT 1");
       if (options.migrate ?? true) await applyMigration(pool);
       await assertReady(pool);
-      return new PostgresApiRunControlStore(pool);
+      return new PostgresApiRunControlStore(pool, options.decisionPlanFidelityPolicy);
     } catch (error) {
       await pool.end();
       throw error;
     }
   }
 
+  private async bindDecisionPlan(
+    client: PoolClient,
+    run: Pick<LatticeRun, "id" | "request">,
+    binding: RunIntentBindingInput | undefined,
+  ): Promise<void> {
+    if (!isConsultationRunRequest(run.request) && !this.decisionPlanFidelityPolicy) return;
+    const plan = decisionPlanBindingForRun(run, binding);
+    if (!plan) return;
+    if (this.decisionPlanFidelityPolicy) {
+      await PostgresDecisionPlanStore.bindWithClient(client, plan, this.decisionPlanFidelityPolicy);
+      return;
+    }
+    await PostgresDecisionPlanStore.bindWithClient(client, plan);
+  }
+
+  private async repairPersistedDecisionPlan(client: PoolClient, runId: string): Promise<void> {
+    const runResult = await client.query<{ id: string; request_json: LatticeRun["request"] }>(
+      "SELECT id,request_json FROM runs WHERE id=$1 FOR SHARE",
+      [runId],
+    );
+    const run = runResult.rows[0];
+    if (!run) throw new Error("Idempotent API response references a missing durable Run.");
+    const bindingResult = await client.query<{ intent_scope_id: string; intent_version_id: string }>(
+      "SELECT intent_scope_id,intent_version_id FROM run_intent_bindings WHERE run_id=$1",
+      [runId],
+    );
+    const binding = bindingResult.rows[0];
+    await this.bindDecisionPlan(
+      client,
+      { id: run.id, request: run.request_json },
+      binding
+        ? { intentScopeId: binding.intent_scope_id, intentVersionId: binding.intent_version_id }
+        : undefined,
+    );
+  }
+
   async submitRun(input: ApiRunSubmissionInput): Promise<ApiRunSubmissionResult> {
     const response = acceptedResponse(input.run);
-    if (input.idempotency) {
-      const existing = await readIdempotency(this.pool, input.idempotency);
-      if (existing) {
-        return existing.request_hash === input.idempotency.requestHash
-          ? { outcome: "existing", response: existing.response_json }
-          : { outcome: "conflict" };
-      }
-    }
-
     const client = await this.pool.connect();
     try {
       await client.query("BEGIN");
       if (input.idempotency) {
-        await client.query(
-          `DELETE FROM api_idempotency_keys
-           WHERE scope_key=$1 AND http_method=$2 AND canonical_route=$3 AND idempotency_key=$4
-             AND expires_at <= now()`,
-          [
-            input.idempotency.scopeKey,
-            input.idempotency.httpMethod,
-            input.idempotency.canonicalRoute,
-            input.idempotency.idempotencyKey,
-          ],
-        );
+        await lockIdempotency(client, input.idempotency);
+        const existing = await readIdempotency(client, input.idempotency);
+        if (existing?.active) {
+          if (existing.request_hash !== input.idempotency.requestHash) {
+            await client.query("ROLLBACK");
+            return { outcome: "conflict" };
+          }
+          await this.repairPersistedDecisionPlan(client, existing.run_id);
+          await client.query("COMMIT");
+          return { outcome: "existing", response: existing.response_json };
+        }
+        if (existing) await deleteExpiredIdempotency(client, input.idempotency);
 
         const existingRun = await existingRunMatchesSubmission(client, input);
         if (existingRun !== undefined) {
@@ -287,14 +345,10 @@ export class PostgresApiRunControlStore implements ApiRunControlStore {
             await client.query("ROLLBACK");
             return { outcome: "conflict" };
           }
+          await this.bindDecisionPlan(client, input.run, input.intentBinding);
           const inserted = await writeIdempotency(client, input.idempotency, input.run.id, response);
           if (!inserted) {
-            await client.query("ROLLBACK");
-            const raced = await readIdempotency(this.pool, input.idempotency);
-            if (!raced) throw new Error("Concurrent API idempotency recovery produced no durable response record.");
-            return raced.request_hash === input.idempotency.requestHash
-              ? { outcome: "existing", response: raced.response_json }
-              : { outcome: "conflict" };
+            throw new Error("Serialized API idempotency recovery could not renew the durable response record.");
           }
           await client.query("COMMIT");
           return { outcome: "existing", response };
@@ -305,16 +359,12 @@ export class PostgresApiRunControlStore implements ApiRunControlStore {
       if (input.intentBinding) {
         await insertIntentBinding(client, input.run.id, input.intentBinding);
       }
+      await this.bindDecisionPlan(client, input.run, input.intentBinding);
 
       if (input.idempotency) {
         const inserted = await writeIdempotency(client, input.idempotency, input.run.id, response);
         if (!inserted) {
-          await client.query("ROLLBACK");
-          const raced = await readIdempotency(this.pool, input.idempotency);
-          if (!raced) throw new Error("Concurrent API idempotency conflict produced no durable response record.");
-          return raced.request_hash === input.idempotency.requestHash
-            ? { outcome: "existing", response: raced.response_json }
-            : { outcome: "conflict" };
+          throw new Error("Serialized API idempotency creation could not persist the durable response record.");
         }
       }
 
@@ -353,6 +403,15 @@ export class PostgresApiRunControlStore implements ApiRunControlStore {
         if (!supersessionMatches(replay, input)) {
           throw new Error("Supersession identity was reused with different Run lineage.");
         }
+        const successorMatches = await existingRunMatchesSubmission(client, {
+          run: supersession.successorRun,
+          intentBinding: supersession.successorBinding,
+          dispatch: input.dispatch,
+        });
+        if (successorMatches !== true) {
+          throw new Error("Supersession identity was reused with different successor Run state.");
+        }
+        await this.bindDecisionPlan(client, supersession.successorRun, supersession.successorBinding);
         await client.query("COMMIT");
         return { outcome: "replayed", response: supersededResponse(replay), record: replay };
       }
@@ -426,15 +485,9 @@ export class PostgresApiRunControlStore implements ApiRunControlStore {
       );
 
       await insertRun(client, supersession.successorRun);
-      await client.query(
-        `INSERT INTO run_intent_bindings(run_id,intent_scope_id,intent_version_id)
-         VALUES ($1,$2,$3)`,
-        [
-          supersession.successorRun.id,
-          supersession.successorBinding.intentScopeId,
-          supersession.successorBinding.intentVersionId,
-        ],
-      );
+      await insertIntentBinding(client, supersession.successorRun.id, supersession.successorBinding);
+      await this.bindDecisionPlan(client, supersession.successorRun, supersession.successorBinding);
+
       const inserted = await client.query<{
         supersession_id: string;
         predecessor_run_id: string;
