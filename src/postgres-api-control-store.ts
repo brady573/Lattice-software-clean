@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import { Pool, type PoolClient } from "pg";
 import type {
   ApiAcceptedRunResponse,
@@ -135,6 +136,55 @@ async function insertIntentBinding(
   );
 }
 
+async function existingRunMatchesSubmission(
+  client: PoolClient,
+  input: ApiRunSubmissionInput,
+): Promise<boolean | undefined> {
+  const existing = await client.query<{ conversation_id: string; request_json: LatticeRun["request"] }>(
+    "SELECT conversation_id,request_json FROM runs WHERE id=$1 FOR SHARE",
+    [input.run.id],
+  );
+  const row = existing.rows[0];
+  if (!row) return undefined;
+  if (row.conversation_id !== input.run.conversationId || !isDeepStrictEqual(row.request_json, input.run.request)) {
+    return false;
+  }
+  const binding = await client.query<{ intent_scope_id: string; intent_version_id: string }>(
+    "SELECT intent_scope_id,intent_version_id FROM run_intent_bindings WHERE run_id=$1",
+    [input.run.id],
+  );
+  const rowBinding = binding.rows[0];
+  if (!input.intentBinding) return rowBinding === undefined;
+  return rowBinding?.intent_scope_id === input.intentBinding.intentScopeId
+    && rowBinding.intent_version_id === input.intentBinding.intentVersionId;
+}
+
+async function writeIdempotency(
+  client: PoolClient,
+  input: ApiIdempotencyInput,
+  runId: string,
+  response: ApiAcceptedRunResponse,
+): Promise<boolean> {
+  const inserted = await client.query(
+    `INSERT INTO api_idempotency_keys(
+       scope_key,http_method,canonical_route,idempotency_key,request_hash,
+       response_status,response_json,run_id,expires_at
+     ) VALUES ($1,$2,$3,$4,$5,202,$6::jsonb,$7,$8)
+     ON CONFLICT (scope_key,http_method,canonical_route,idempotency_key) DO NOTHING`,
+    [
+      input.scopeKey,
+      input.httpMethod,
+      input.canonicalRoute,
+      input.idempotencyKey,
+      input.requestHash,
+      JSON.stringify(response),
+      runId,
+      input.expiresAt,
+    ],
+  );
+  return (inserted.rowCount ?? 0) === 1;
+}
+
 async function readSupersession(
   client: PoolClient,
   column: "supersession_id" | "predecessor_run_id",
@@ -230,6 +280,25 @@ export class PostgresApiRunControlStore implements ApiRunControlStore {
             input.idempotency.idempotencyKey,
           ],
         );
+
+        const existingRun = await existingRunMatchesSubmission(client, input);
+        if (existingRun !== undefined) {
+          if (!existingRun) {
+            await client.query("ROLLBACK");
+            return { outcome: "conflict" };
+          }
+          const inserted = await writeIdempotency(client, input.idempotency, input.run.id, response);
+          if (!inserted) {
+            await client.query("ROLLBACK");
+            const raced = await readIdempotency(this.pool, input.idempotency);
+            if (!raced) throw new Error("Concurrent API idempotency recovery produced no durable response record.");
+            return raced.request_hash === input.idempotency.requestHash
+              ? { outcome: "existing", response: raced.response_json }
+              : { outcome: "conflict" };
+          }
+          await client.query("COMMIT");
+          return { outcome: "existing", response };
+        }
       }
 
       await insertRun(client, input.run);
@@ -238,24 +307,8 @@ export class PostgresApiRunControlStore implements ApiRunControlStore {
       }
 
       if (input.idempotency) {
-        const inserted = await client.query(
-          `INSERT INTO api_idempotency_keys(
-             scope_key,http_method,canonical_route,idempotency_key,request_hash,
-             response_status,response_json,run_id,expires_at
-           ) VALUES ($1,$2,$3,$4,$5,202,$6::jsonb,$7,$8)
-           ON CONFLICT (scope_key,http_method,canonical_route,idempotency_key) DO NOTHING`,
-          [
-            input.idempotency.scopeKey,
-            input.idempotency.httpMethod,
-            input.idempotency.canonicalRoute,
-            input.idempotency.idempotencyKey,
-            input.idempotency.requestHash,
-            JSON.stringify(response),
-            input.run.id,
-            input.idempotency.expiresAt,
-          ],
-        );
-        if ((inserted.rowCount ?? 0) !== 1) {
+        const inserted = await writeIdempotency(client, input.idempotency, input.run.id, response);
+        if (!inserted) {
           await client.query("ROLLBACK");
           const raced = await readIdempotency(this.pool, input.idempotency);
           if (!raced) throw new Error("Concurrent API idempotency conflict produced no durable response record.");
