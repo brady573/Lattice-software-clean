@@ -118,6 +118,8 @@ jobs:
           LATTICE_TRUTH_MODE: v36-offline
           LATTICE_AUTHENTICATION_MODE: development-fixture
           LATTICE_DEVELOPMENT_FIXTURE_SUBJECT_ID: browser-validation-subject
+          LATTICE_SOLANDRA_COGNITION_ROUTE: groq-gpt-oss-120b
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           LATTICE_AUTO_MIGRATE: 'false'
           LATTICE_RUN_WORKER_LEASE_MS: '5000'
           LATTICE_RUN_WORKER_RETRY_DELAY_MS: '5'
@@ -131,6 +133,7 @@ jobs:
           M7_BROWSER_ARTIFACT_DIR: artifacts/browser-lifecycle
         run: |
           set -euo pipefail
+          test -n "${GROQ_API_KEY:-}"
           node tools/m7-browser-lifecycle.mjs
           node tools/issue-46-browser-prepared-message.mjs
           test "$(git rev-parse HEAD)" = "$SUBJECT_SOURCE_SHA"
