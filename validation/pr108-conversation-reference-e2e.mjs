@@ -9,6 +9,7 @@ import { OfflineFixtureTruthPipeline } from '../product/src/truth/execution-pipe
 const FINDING = 'Stable identifiers help preserve exact relationships across software restarts when the identifiers and their governed bindings are durably retained.';
 const initialMessage = 'Please find trustworthy external sources about whether stable identifiers help preserve continuity across software restarts, and summarize the supported evidence.';
 const followupMessage = 'Can you show me the source behind what you just told me?';
+const expectedCanonicalSource = 'fixture://pr108-live-source';
 
 const truthPipeline = new OfflineFixtureTruthPipeline({
   evidence: [{
@@ -124,9 +125,21 @@ try {
   assert.equal(followup.statusCode, 200, followup.body);
   const followupBody = followup.json();
   assert.equal(followupBody.status, 'REFERENCE_RESOLVED');
-  assert.equal(followupBody.interpretation.requestedHelp, 'SOURCES_REFERENCE');
+  assert.equal(Object.prototype.hasOwnProperty.call(followupBody, 'runId'), false);
   assert.equal(followupBody.interpretation.referencedKnowledgeId, knowledgeReference.knowledgeId);
   assert.equal(followupBody.knowledgeReference.knowledgeId, knowledgeReference.knowledgeId);
+
+  const governedSource = followupBody.knowledge.provenance.find((source) =>
+    source.canonicalUri === expectedCanonicalSource);
+  assert.ok(governedSource, 'referenced Knowledge must retain the admitted governed source');
+  assert.equal(governedSource.publisher, 'Lattice deterministic fixture');
+  assert.equal(governedSource.provenanceConfidence, 'HIGH');
+  assert.equal(governedSource.authoritativePrimary, true);
+  assert.match(followupBody.presentation.assistantMessage, /Sources:/u);
+  assert.ok(
+    followupBody.presentation.assistantMessage.includes(governedSource.canonicalUri),
+    'USER presentation must expose the exact governed source URI from the referenced Knowledge',
+  );
 
   const liveFollowupCall = calls.at(-1);
   assert.ok(liveFollowupCall);
@@ -161,6 +174,16 @@ try {
   assert.equal(consumed.parentReferenceId, produced.referenceId);
   assert.equal(afterBody.recommendations.length, 0);
   assert.equal(afterBody.acceptedChoices.length, 0);
+  for (const authorityField of [
+    'recommendationReference',
+    'acceptedChoice',
+    'authorization',
+    'actionProposal',
+    'executionReceipt',
+    'verification',
+  ]) {
+    assert.equal(Object.prototype.hasOwnProperty.call(followupBody, authorityField), false);
+  }
 
   console.log(JSON.stringify({
     productSha: process.env.EXPECTED_PRODUCT_SHA,
@@ -169,8 +192,16 @@ try {
     initialRequestedHelp: initialBody.interpretation.requestedHelp,
     followupRequestedHelp: followupBody.interpretation.requestedHelp,
     knowledgeId: knowledgeReference.knowledgeId,
+    sourceCanonicalUri: governedSource.canonicalUri,
+    sourcePublisher: governedSource.publisher,
+    sourceProvenanceConfidence: governedSource.provenanceConfidence,
+    sourceAuthoritativePrimary: governedSource.authoritativePrimary,
+    presentation: followupBody.presentation.assistantMessage,
     producedReferenceId: produced.referenceId,
     consumedReferenceId: consumed.referenceId,
+    followupUserMessageId: followupUserMessage.id,
+    followupIntentVersionId: followupBody.intentVersionId,
+    consumedParentReferenceId: consumed.parentReferenceId,
     actualProvider: provenance.actualProvider,
     actualModel: provenance.actualModel,
     routeProvenance: provenance.routeProvenance,
