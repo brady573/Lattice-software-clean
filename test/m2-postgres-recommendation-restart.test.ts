@@ -325,7 +325,7 @@ test("M2 PostgreSQL restart preserves exact Recommendation identity, claim prove
     });
     assert.equal(why.statusCode, 200, why.body);
     assert.equal(why.json<{ recommendationReference: { recommendationId: string } }>().recommendationReference.recommendationId, recommendationId);
-    assert.match(why.json<{ presentation: { assistantMessage: string } }>().presentation.assistantMessage, /Established support:/u);
+    assert.match(why.json<{ presentation: { assistantMessage: string } }>().presentation.assistantMessage, /What supports this:/u);
     assert.equal(advisory.calls, callsAtPersistence);
     assert.equal(acquisition.requests.length, 1);
 

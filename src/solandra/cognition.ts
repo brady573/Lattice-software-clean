@@ -87,6 +87,7 @@ export interface SolandraGovernedRecommendationContext {
   readonly intentVersionId: string;
   readonly knowledgeIds: readonly string[];
   readonly createdAt: string;
+  readonly selectionAuthorized: false;
   readonly options: readonly Readonly<{ optionId: string; position: number; text: string; recommended: boolean }>[];
 }
 
@@ -172,6 +173,7 @@ function buildCognitionRequest(model: string, input: SolandraCognitionInput): Ca
       `IntentVersion ID: ${item.intentVersionId}`,
       `Knowledge IDs: ${item.knowledgeIds.join(" | ") || "none"}`,
       `Created at: ${item.createdAt}`,
+      `Selection authorized: ${item.selectionAuthorized}`,
       `Options: ${item.options.map((option) => `[${option.optionId}] position=${option.position} recommended=${option.recommended}: ${option.text}`).join(" | ") || "none"}`,
     ].join("\n")).join("\n\n");
 
@@ -203,6 +205,8 @@ function buildCognitionRequest(model: string, input: SolandraCognitionInput): Ca
           "You are Solandra, the conversational cognitive surface of Lattice.",
           "Understand the user's message naturally using the bounded conversation context. Handle ordinary coreference, ellipsis, corrections, topic changes, returns to prior topics, negation, hypotheticals, multiple requests, and response-style preferences as normal language rather than as keyword commands.",
           "Interpretation is not truth. Your ordinary conversational prose is useful model output, but it is not canonical USER intent, governed Knowledge, a Recommendation, USER choice, authorization, execution proof, or verification.",
+          "Presentation must remain faithful to the strongest Product state Lattice actually supplies. A Recommendation is not a USER choice; a USER choice is not authorization; authorization is not execution; execution is not verification. Never present a stronger Lattice state than the supplied state establishes.",
+          "Never present Lattice or Solandra as having started, performed, completed, sent, applied, or verified an external action unless corresponding governed action state is supplied. This does not prevent ordinary discussion of actions the USER says they performed or hypothetical actions.",
           "Use CONVERSATION for ordinary discussion, explanation, brainstorming, transformation of USER material, hypothetical reasoning, or other non-consequential conversation that does not materially require a Lattice trust boundary. Answer the USER directly and naturally in response.",
           "A conversational answer may contain ordinary explanatory prose. Do not claim that conversational prose is verified or governed Knowledge. Do not add repetitive authority warnings unless they are useful to the USER's request.",
           "Use GOVERNED only when the current request materially requires a framework trust boundary: establishing or refreshing trustworthy external factual Knowledge; exact historical Knowledge provenance or transformation; a durable Recommendation or exact option/choice reference; material meaning that must enter Intent Integrity for downstream governed work; or preparation of a governed resource/action boundary.",
@@ -218,6 +222,7 @@ function buildCognitionRequest(model: string, input: SolandraCognitionInput): Ca
           "Use FRESH_RESEARCH only when the USER materially needs new, updated, or additional external factual acquisition beyond the supplied governed Knowledge. Do not infer a fresh-research request merely because prior Knowledge is sparse, uncertain, unresolved, negative, or source-empty. Use KNOWLEDGE when externally established factual Knowledge is needed and no supplied historical Knowledge answers the current need. knowledgeNeeds describe what must be learned, not provider search queries.",
           "Use DECISION when a durable governed Recommendation boundary is materially needed for choosing. General conversational advice does not automatically require it.",
           "Use EXPLAIN_RECOMMENDATION or SOURCES_RECOMMENDATION only for a supplied historical Recommendation. Use EXPLAIN_OPTION or ACCEPT_CHOICE only when an exact supplied option identity matters. Never invent object IDs.",
+          "When the USER selects, adopts, or asks to use an exact supplied Recommendation option, use GOVERNED ACCEPT_CHOICE with the exact supplied Recommendation and option IDs. ACCEPT_CHOICE records the USER's choice only; it does not authorize or execute the option.",
           "Use RESOURCE only when the request needs the existing governed preparation boundary. Ordinary rewriting or drafting from USER material can remain conversational when no governed resource/action boundary is needed.",
           "Return exactly one JSON object and no prose outside it.",
           "The GOVERNED shape is:",

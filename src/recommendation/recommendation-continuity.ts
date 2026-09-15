@@ -108,9 +108,9 @@ function governedSupportLine(finding: LoadedKnowledge["knowledge"]["findings"][n
   }
   switch (finding.status) {
     case "SUPPORTED": return finding.text;
-    case "REFUTED": return `The governed evidence refutes this claim: ${finding.text}`;
-    case "CONFLICTED": return `The governed evidence remains materially conflicted on this claim: ${finding.text}`;
-    case "UNRESOLVED": return `The governed evidence does not establish this claim strongly enough: ${finding.text}`;
+    case "REFUTED": return `The evidence refutes this: ${finding.text}`;
+    case "CONFLICTED": return `The evidence remains materially conflicted on this: ${finding.text}`;
+    case "UNRESOLVED": return `The available evidence does not establish this strongly enough: ${finding.text}`;
   }
 }
 
@@ -396,12 +396,12 @@ export function renderRecommendation(record: RecommendationRecord): string {
     sections.push(`From your message:\n${record.assumptions.map((item) => `- ${item}`).join("\n")}`);
   }
   if (record.rationale.length > 0) {
-    sections.push(`Established support:\n${record.rationale.map((item) => `- ${item}`).join("\n")}`);
+    sections.push(`What supports this:\n${record.rationale.map((item) => `- ${item}`).join("\n")}`);
   }
   if (record.uncertainties.length > 0) {
-    sections.push(`Known uncertainty:\n${record.uncertainties.map((item) => `- ${item}`).join("\n")}`);
+    sections.push(`What remains uncertain:\n${record.uncertainties.map((item) => `- ${item}`).join("\n")}`);
   }
-  sections.push("Solandra's proposal wording and ranking are advisory judgment. Only the facts listed under Established support are governed factual support; choosing an option does not make proposal wording factual Knowledge or authorize action.");
+  sections.push("This is a recommendation, not an action. Choosing an option records your choice; it does not carry anything out.");
   return sections.join("\n\n");
 }
 
@@ -414,7 +414,7 @@ export function renderHistoricalRecommendationSources(loaded: LoadedRecommendati
   const sourceKeys = new Set(traces.flatMap((trace) => trace.sourceIds.map((sourceId) => `${trace.knowledgeId}\u001f${sourceId}`)));
   const sources = loaded.knowledge.flatMap((knowledge) => knowledge.knowledge.provenance
     .filter((source) => sourceKeys.has(`${knowledge.record.knowledgeId}\u001f${source.sourceId}`)));
-  if (sources.length === 0) return "I don't have admitted evidence/source provenance linked to the exact claims used by that recommendation.";
+  if (sources.length === 0) return "I don't have linked source evidence for the facts used by that recommendation.";
   const unique = sources.filter((source, index, values) =>
     values.findIndex((candidate) => candidate.sourceId === source.sourceId && candidate.canonicalUri === source.canonicalUri) === index);
   const lines = unique.map((source) => {
@@ -422,7 +422,7 @@ export function renderHistoricalRecommendationSources(loaded: LoadedRecommendati
     const publisher = source.publisher ? ` — ${source.publisher}` : "";
     return `- ${title}${publisher}\n  ${source.canonicalUri}`;
   });
-  return `Sources for the exact governed claim basis used by that recommendation:\n${lines.join("\n")}`;
+  return `Sources used for the facts behind that recommendation:\n${lines.join("\n")}`;
 }
 
 export function recommendationContext(record: RecommendationRecord): Readonly<{
@@ -431,6 +431,7 @@ export function recommendationContext(record: RecommendationRecord): Readonly<{
   intentVersionId: string;
   knowledgeIds: string[];
   createdAt: string;
+  selectionAuthorized: false;
   options: ReturnType<typeof recommendationOptions>;
 }> {
   const options = recommendationOptions(record);
@@ -442,6 +443,7 @@ export function recommendationContext(record: RecommendationRecord): Readonly<{
     intentVersionId: record.intentVersionId,
     knowledgeIds: [...record.knowledgeIds],
     createdAt: record.createdAt,
+    selectionAuthorized: record.selectionAuthorized,
     options,
   });
 }

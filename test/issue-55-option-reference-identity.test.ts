@@ -22,6 +22,7 @@ function recommendation(
     intentVersionId: `intent-${recommendationId}`,
     knowledgeIds: [],
     createdAt: "2026-09-10T00:00:00.000Z",
+    selectionAuthorized: false,
     options: [{
       optionId,
       position: 1,
