@@ -260,10 +260,6 @@ export class PostgresKnowledgeRecordStore implements KnowledgeRecordStore {
     } finally {
       await pool.end();
     }
-    const { backfillLegacyConversationKnowledgeReferences } = await import(
-      "../conversation/conversation-reference-backfill.js"
-    );
-    await backfillLegacyConversationKnowledgeReferences(databaseUrl);
   }
 
   static async connect(databaseUrl: string): Promise<PostgresKnowledgeRecordStore> {
