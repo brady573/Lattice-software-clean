@@ -121,15 +121,25 @@ jobs:
           const governed = 'const knowledgeMessage = "Please find trustworthy external sources about the tradeoffs of keeping a local-first hobby app simple while preserving recoverability, and summarize the supported evidence.";';
           const localWait = 'async function waitFor(description, probe, timeoutMs = 15_000, intervalMs = 50) {';
           const remoteWait = 'async function waitFor(description, probe, timeoutMs = 60_000, intervalMs = 50) {';
-          if (!source.includes(ambiguous) || !source.includes(localWait)) {
+          const resourceStartMarker = '    await submitBrowserTurn(cdp, resourceMessage);\n';
+          const mobileStartMarker = '    await cdp.send("Emulation.setDeviceMetricsOverride", {\n';
+          const continuityTail = '    assert.equal(continuity.messages.length, 2);\n    assert.equal(continuity.messages[0].content, knowledgeMessage);\n    assert.equal(continuity.messages[1].content, resourceMessage);';
+          const knowledgeOnlyTail = '    assert.equal(continuity.messages.length, 1);\n    assert.equal(continuity.messages[0].content, knowledgeMessage);';
+          if (!source.includes(ambiguous) || !source.includes(localWait) || !source.includes(continuityTail)) {
             throw new Error('Legacy browser harness shape changed; update this bounded validation adaptation instead of guessing.');
           }
+          const resourceStart = source.indexOf(resourceStartMarker);
+          const mobileStart = source.indexOf(mobileStartMarker, resourceStart);
+          if (resourceStart < 0 || mobileStart <= resourceStart) {
+            throw new Error('Legacy resource-routing block could not be isolated safely.');
+          }
+          const withoutResourceRouting = source.slice(0, resourceStart) + source.slice(mobileStart);
+          const adapted = withoutResourceRouting
+            .replace(ambiguous, governed)
+            .replace(localWait, remoteWait)
+            .replace(continuityTail, knowledgeOnlyTail);
           mkdirSync('artifacts', { recursive: true });
-          writeFileSync(
-            'artifacts/issue91-m7-browser-lifecycle.mjs',
-            source.replace(ambiguous, governed).replace(localWait, remoteWait),
-            'utf8',
-          );
+          writeFileSync('artifacts/issue91-m7-browser-lifecycle.mjs', adapted, 'utf8');
           NODE
           node --check artifacts/issue91-m7-browser-lifecycle.mjs
           git diff --exit-code
