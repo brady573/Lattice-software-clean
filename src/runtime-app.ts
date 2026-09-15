@@ -27,6 +27,7 @@ import {
 import { registerConsultationIntake } from "./consultation-intake.js";
 import { buildCanonicalApp } from "./http-app.js";
 import { registerConversationApi } from "./conversation/conversation-api.js";
+import { backfillLegacyConversationKnowledgeReferences } from "./conversation/conversation-reference-backfill.js";
 import { registerConversationMembershipGuard } from "./conversation/conversation-membership-guard.js";
 import { registerConversationContinuityApi } from "./conversation/continuity-api.js";
 import {
@@ -277,6 +278,7 @@ export async function migrateRuntimeDatabase(databaseUrl: string): Promise<void>
   await PostgresUserPreferenceStore.migrate(databaseUrl);
   await PostgresModelAssistanceAuthorizationStore.migrate(databaseUrl);
   await PostgresKnowledgeRecordStore.migrate(databaseUrl);
+  await backfillLegacyConversationKnowledgeReferences(databaseUrl);
   await PostgresRecommendationStore.migrate(databaseUrl);
   await PostgresPreparedResourceStore.migrate(databaseUrl);
   await PostgresCapabilityAuthorizationStore.migrate(databaseUrl);
