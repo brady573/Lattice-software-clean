@@ -25,6 +25,7 @@ const evidence = {
     preAuthority: null,
     clarificationCorrection: null,
     clarificationConfirmation: null,
+    recoveryBoundaries: [],
     ime: null,
     shiftEnter: null,
     knowledge: null,
@@ -189,6 +190,10 @@ class Cdp {
     const listeners = this.listeners.get(method) ?? new Set();
     listeners.add(listener);
     this.listeners.set(method, listeners);
+    return () => {
+      listeners.delete(listener);
+      if (listeners.size === 0) this.listeners.delete(method);
+    };
   }
 
   send(method, params = {}) {
@@ -284,6 +289,46 @@ async function submitBrowserTurn(cdp, message) {
     send.click();
     return true;
   })()`);
+}
+
+async function reloadThroughRecoveryBoundary(cdp, marker) {
+  let pausedRecoveryRequestId = null;
+  const removePausedListener = cdp.on("Fetch.requestPaused", (params) => {
+    pausedRecoveryRequestId = params.requestId;
+  });
+  await cdp.send("Fetch.enable", {
+    patterns: [{ urlPattern: "*/api/v1/conversations/*/continuity", requestStage: "Request" }],
+  });
+  try {
+    await cdp.eval(`window.__latticeReloadMarker=${JSON.stringify(marker)}`);
+    await cdp.send("Page.reload", { ignoreCache: true });
+    const requestId = await waitFor("paused canonical recovery request", async () => pausedRecoveryRequestId);
+    const unresolved = await waitFor("composer disabled while recovery is unresolved", async () => cdp.eval(`(() => {
+      const input=document.getElementById('conversationInput');
+      const send=document.getElementById('sendButton');
+      if(window.__latticeReloadMarker===${JSON.stringify(marker)})return null;
+      if(document.readyState!=='complete')return null;
+      if(!(input instanceof HTMLTextAreaElement)||!(send instanceof HTMLButtonElement))return null;
+      return input.disabled&&send.disabled ? {inputDisabled:input.disabled,sendDisabled:send.disabled} : null;
+    })()`));
+    assert.equal(unresolved.inputDisabled, true);
+    assert.equal(unresolved.sendDisabled, true);
+    await cdp.send("Fetch.continueRequest", { requestId });
+    pausedRecoveryRequestId = null;
+    const ready = await waitFor("composer ready after canonical recovery", async () => cdp.eval(`(() => {
+      const input=document.getElementById('conversationInput');
+      const send=document.getElementById('sendButton');
+      if(document.readyState!=='complete')return null;
+      if(!(input instanceof HTMLTextAreaElement)||!(send instanceof HTMLButtonElement))return null;
+      return !input.disabled&&!send.disabled ? {inputDisabled:input.disabled,sendDisabled:send.disabled} : null;
+    })()`));
+    assert.equal(ready.inputDisabled, false);
+    assert.equal(ready.sendDisabled, false);
+    return { marker, unresolved, ready };
+  } finally {
+    await cdp.send("Fetch.disable").catch(() => {});
+    removePausedListener();
+  }
 }
 
 async function main() {
@@ -401,13 +446,7 @@ async function main() {
     assert.doesNotMatch(correctionRouting.composerText, /Do you mean the inferred comparison\?|Explain the evidence instead\.|Accepted understanding|semantic status/i);
     evidence.browser.clarificationCorrection = correctionRouting;
 
-    await cdp.eval(`window.__latticeReloadMarker='clarification-correction'`);
-    await cdp.send("Page.reload", { ignoreCache: true });
-    await waitFor("reloaded canonical Solandra client", async () => cdp.eval(`
-      window.__latticeReloadMarker!=='clarification-correction'
-      && document.readyState==='complete'
-      && document.getElementById('conversationInput') instanceof HTMLTextAreaElement
-    `));
+    evidence.browser.recoveryBoundaries.push(await reloadThroughRecoveryBoundary(cdp, "clarification-correction"));
     await installClarificationFixture();
     await submitBrowserTurn(cdp, "Help me compare these approaches.");
     await waitFor("browser pending clarification before confirmation", async () => cdp.eval(`(() => {
@@ -427,13 +466,7 @@ async function main() {
     assert.equal(confirmationRouting.requests.filter((item) => item.path.includes('/confirm')).length, 1);
     evidence.browser.clarificationConfirmation = confirmationRouting;
 
-    await cdp.eval(`window.__latticeReloadMarker='clarification-confirmation'`);
-    await cdp.send("Page.reload", { ignoreCache: true });
-    await waitFor("canonical client after clarification browser checks", async () => cdp.eval(`
-      window.__latticeReloadMarker!=='clarification-confirmation'
-      && document.readyState==='complete'
-      && document.getElementById('conversationInput') instanceof HTMLTextAreaElement
-    `));
+    evidence.browser.recoveryBoundaries.push(await reloadThroughRecoveryBoundary(cdp, "clarification-confirmation"));
 
     const ime = await cdp.eval(`(() => {
       const input=document.getElementById('conversationInput');
