@@ -213,7 +213,10 @@ export async function backfillLegacyConversationKnowledgeReferences(
       }
     }
 
-    await pool.query("INSERT INTO schema_migrations(name) VALUES ($1)", [migration]);
+    await pool.query(
+      "INSERT INTO schema_migrations(name) VALUES ($1) ON CONFLICT(name) DO NOTHING",
+      [migration],
+    );
     return {
       alreadyApplied: false,
       legacyRows: legacy.rows.length,
