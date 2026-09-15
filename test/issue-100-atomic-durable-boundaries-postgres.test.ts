@@ -340,7 +340,8 @@ test("Issue #100: PostgreSQL qualified Run exact replay/conflict/concurrency/exp
   try {
     const intentVersionId = await createExactIntent(intentStore, intentScopeId, "Choose the most reliable bounded option");
     const request = qualifiedRequest(intentScopeId, intentVersionId);
-    const run = createPendingRun(conversationId, request, randomUUID());
+    const runId = randomUUID();
+    const run = createPendingRun(conversationId, request, runId);
     const idem = idempotency(run);
     const input = submission(run, intentScopeId, intentVersionId, idem);
 
@@ -389,7 +390,7 @@ test("Issue #100: PostgreSQL qualified Run exact replay/conflict/concurrency/exp
     const conflictingRun = createPendingRun(
       conversationId,
       qualifiedRequest(intentScopeId, intentVersionId, "A conflicting objective must not rebind the committed Run"),
-      run.id,
+      runId,
     );
     const conflictIdem: ApiIdempotencyInput = {
       ...idem,
