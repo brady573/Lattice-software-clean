@@ -193,7 +193,7 @@ class DeferredMemoryApiRunControlStore implements ApiRunControlStore {
   private closed = false;
 
   constructor(
-    private readonly base: MemoryApiRunControlStore,
+    private readonly base: ApiRunControlStore,
     private readonly runStore: RunStore,
     private readonly truthPipeline: TruthExecutionPipeline,
     private readonly dispatchDelayMs: number,
@@ -288,6 +288,11 @@ export async function migrateRuntimeDatabase(databaseUrl: string): Promise<void>
   await apiControlStore.close();
 }
 
+export interface PostgresRuntimeConnectionOptions {
+  conversationReferenceStore?: ConversationReferenceStore;
+  connectConversationReferenceStore?: typeof PostgresConversationReferenceStore.connect;
+}
+
 /**
  * Connect the canonical PostgreSQL-backed stores and recording adapters used
  * by createRuntimeApp. An optional planning-fidelity policy is accepted only
@@ -297,6 +302,7 @@ export async function connectPostgresRuntimeStores(
   databaseUrl: string,
   autoMigrate: boolean,
   decisionPlanFidelityPolicy?: DecisionPlanFidelityPolicy,
+  connectionOptions: PostgresRuntimeConnectionOptions = {},
 ): Promise<{
   runStore: RunStore;
   apiControlStore: ApiRunControlStore;
@@ -305,6 +311,7 @@ export async function connectPostgresRuntimeStores(
   userPreferenceStore: UserPreferenceStore;
   conversationStore: ConversationStore;
   conversationResponseStore: ConversationResponseStore;
+  conversationReferenceStore: ConversationReferenceStore;
   decisionPlanStore: DecisionPlanStore;
   runIndexStore: ConversationRunIndexStore;
   knowledgeStore: KnowledgeRecordStore;
@@ -326,7 +333,10 @@ export async function connectPostgresRuntimeStores(
           try {
             const runStore = await PostgresRunStore.connect(databaseUrl, { migrate: false });
             try {
-              const baseApiControlStore = await PostgresApiRunControlStore.connect(databaseUrl, { migrate: false });
+              const baseApiControlStore = await PostgresApiRunControlStore.connect(databaseUrl, {
+                migrate: false,
+                ...(decisionPlanFidelityPolicy ? { decisionPlanFidelityPolicy } : {}),
+              });
               try {
                 const decisionPlanStore = await PostgresDecisionPlanStore.connect(databaseUrl, {
                   migrate: false,
@@ -342,23 +352,43 @@ export async function connectPostgresRuntimeStores(
                         const acceptedChoiceStore = await PostgresAcceptedChoiceStore.connect(databaseUrl);
                         try {
                           const preparedResourceStore = await PostgresPreparedResourceStore.connect(databaseUrl);
-                          const decisionPlanControl = new DecisionPlanRecordingApiRunControlStore(baseApiControlStore, decisionPlanStore);
-                          const apiControlStore = new ConversationRunIndexRecordingApiRunControlStore(decisionPlanControl, runIndexStore);
-                          return {
-                            runStore,
-                            apiControlStore,
-                            intentStore,
-                            userMessageStore,
-                            userPreferenceStore,
-                            conversationStore,
-                            conversationResponseStore,
-                            decisionPlanStore,
-                            runIndexStore,
-                            knowledgeStore,
-                            recommendationStore,
-                            acceptedChoiceStore,
-                            preparedResourceStore,
-                          };
+                          try {
+                            const connectConversationReferenceStore = connectionOptions.connectConversationReferenceStore
+                              ?? PostgresConversationReferenceStore.connect;
+                            const conversationReferenceStore = connectionOptions.conversationReferenceStore
+                              ?? await connectConversationReferenceStore(databaseUrl, {
+                                conversationStore,
+                                userMessageStore,
+                                intentStore,
+                                knowledgeStore,
+                                recommendationStore,
+                                acceptedChoiceStore,
+                                preparedResourceStore,
+                              });
+                            const apiControlStore = new ConversationRunIndexRecordingApiRunControlStore(
+                              baseApiControlStore,
+                              runIndexStore,
+                            );
+                            return {
+                              runStore,
+                              apiControlStore,
+                              intentStore,
+                              userMessageStore,
+                              userPreferenceStore,
+                              conversationStore,
+                              conversationResponseStore,
+                              conversationReferenceStore,
+                              decisionPlanStore,
+                              runIndexStore,
+                              knowledgeStore,
+                              recommendationStore,
+                              acceptedChoiceStore,
+                              preparedResourceStore,
+                            };
+                          } catch (error) {
+                            await preparedResourceStore.close();
+                            throw error;
+                          }
                         } catch (error) {
                           await acceptedChoiceStore.close();
                           throw error;
@@ -446,23 +476,19 @@ export async function createRuntimeApp(
       userPreferenceStore,
       conversationStore,
       conversationResponseStore,
+      conversationReferenceStore,
       decisionPlanStore,
       runIndexStore,
       knowledgeStore,
       recommendationStore,
       acceptedChoiceStore,
       preparedResourceStore,
-    } = await connectPostgresRuntimeStores(config.databaseUrl, config.autoMigrate));
-    conversationReferenceStore = options.conversationReferenceStore
-      ?? await PostgresConversationReferenceStore.connect(config.databaseUrl, {
-        conversationStore,
-        userMessageStore,
-        intentStore,
-        knowledgeStore,
-        recommendationStore,
-        acceptedChoiceStore,
-        preparedResourceStore,
-      });
+    } = await connectPostgresRuntimeStores(
+      config.databaseUrl,
+      config.autoMigrate,
+      undefined,
+      options.conversationReferenceStore ? { conversationReferenceStore: options.conversationReferenceStore } : {},
+    ));
   } else {
     const memoryRunStore = new MemoryRunStore();
     const memoryIntentStore = new MemoryIntentAuthorityStore();
@@ -471,7 +497,7 @@ export async function createRuntimeApp(
     const memoryConversationStore = new MemoryConversationStore();
     const memoryConversationResponseStore = options.conversationResponseStore ?? new MemoryConversationResponseStore();
     const memoryDecisionPlanStore = new MemoryDecisionPlanStore(memoryIntentStore);
-    const memoryRunIndexStore = new MemoryConversationRunIndexStore();
+    const memoryRunIndexStore = new MemoryConversationRunIndexStore(memoryRunStore);
     const memoryKnowledgeStore = options.knowledgeStore ?? new MemoryKnowledgeRecordStore();
     const memoryRecommendationStore = options.recommendationStore ?? new MemoryRecommendationStore();
     const memoryAcceptedChoiceStore = options.acceptedChoiceStore ?? new MemoryAcceptedChoiceStore();
@@ -500,8 +526,12 @@ export async function createRuntimeApp(
     acceptedChoiceStore = memoryAcceptedChoiceStore;
     preparedResourceStore = memoryPreparedResourceStore;
     const decisionPlanControl = new DecisionPlanRecordingApiRunControlStore(
+      new MemoryApiRunControlStore(memoryRunStore, intentBoundRuns),
+      memoryDecisionPlanStore,
+    );
+    apiControlStore = new ConversationRunIndexRecordingApiRunControlStore(
       new DeferredMemoryApiRunControlStore(
-        new MemoryApiRunControlStore(memoryRunStore, intentBoundRuns),
+        decisionPlanControl,
         memoryRunStore,
         truthPipeline,
         memoryDispatchDelayMs,
@@ -510,10 +540,6 @@ export async function createRuntimeApp(
           : undefined,
         decisionEvidenceProvider,
       ),
-      memoryDecisionPlanStore,
-    );
-    apiControlStore = new ConversationRunIndexRecordingApiRunControlStore(
-      decisionPlanControl,
       memoryRunIndexStore,
     );
   }
@@ -587,6 +613,7 @@ export async function createRuntimeApp(
     await recommendationStore.close();
     await knowledgeStore.close();
     await conversationReferenceStore.close();
+    if (decisionPlanStore.kind === "postgres") await decisionPlanStore.close();
     await conversationResponseStore.close();
     await conversationStore.close();
     await userMessageStore.close();

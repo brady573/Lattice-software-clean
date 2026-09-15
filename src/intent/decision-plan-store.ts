@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
-import { Pool } from "pg";
+import { Pool, type PoolClient } from "pg";
 import {
   type RunRequest,
 } from "../domain.js";
@@ -235,10 +235,12 @@ export class PostgresDecisionPlanStore implements DecisionPlanStore {
     }
   }
 
-  async bind(
+  static async bindWithClient(
+    client: PoolClient,
     input: Omit<DurableDecisionPlan<DecisionPlanningMaterial>, "boundAt">,
+    fidelityPolicy: DecisionPlanFidelityPolicy = assertCanonicalConsultationPlanningFidelity,
   ): Promise<DurableDecisionPlan<DecisionPlanningMaterial>> {
-    const exact = await this.pool.query<{ intent_version_id: string; state_json: IntentState }>(
+    const exact = await client.query<{ intent_version_id: string; state_json: IntentState }>(
       "SELECT intent_version_id,state_json FROM intent_versions WHERE intent_scope_id=$1 AND intent_version_id=$2",
       [input.intentScopeId, input.intentVersionId],
     );
@@ -250,9 +252,9 @@ export class PostgresDecisionPlanStore implements DecisionPlanStore {
     )) {
       throw new Error("Consultation DecisionPlan request identity does not match its exact IntentVersion binding.");
     }
-    this.fidelityPolicy(exactRow.state_json, input.planningMaterial);
+    fidelityPolicy(exactRow.state_json, input.planningMaterial);
 
-    const inserted = await this.pool.query<{
+    const inserted = await client.query<{
       decision_plan_id: string;
       run_id: string;
       intent_scope_id: string;
@@ -277,11 +279,42 @@ export class PostgresDecisionPlanStore implements DecisionPlanStore {
         boundAt: row.bound_at instanceof Date ? row.bound_at.toISOString() : new Date(row.bound_at).toISOString(),
       };
     }
-    const existing = await this.getByRunId(input.runId);
+
+    const existingResult = await client.query<{
+      decision_plan_id: string;
+      run_id: string;
+      intent_scope_id: string;
+      intent_version_id: string;
+      planning_material_json: DecisionPlanningMaterial;
+      bound_at: Date | string;
+    }>(
+      "SELECT decision_plan_id,run_id,intent_scope_id,intent_version_id,planning_material_json,bound_at FROM decision_plans WHERE run_id=$1",
+      [input.runId],
+    );
+    const existingRow = existingResult.rows[0];
+    const existing = existingRow ? {
+      decisionPlanId: existingRow.decision_plan_id,
+      runId: existingRow.run_id,
+      intentScopeId: existingRow.intent_scope_id,
+      intentVersionId: existingRow.intent_version_id,
+      planningMaterial: existingRow.planning_material_json,
+      boundAt: existingRow.bound_at instanceof Date ? existingRow.bound_at.toISOString() : new Date(existingRow.bound_at).toISOString(),
+    } : undefined;
     if (!existing || !samePlan(existing, input)) {
       throw new Error("Run DecisionPlan identity was reused with different planning material.");
     }
     return existing;
+  }
+
+  async bind(
+    input: Omit<DurableDecisionPlan<DecisionPlanningMaterial>, "boundAt">,
+  ): Promise<DurableDecisionPlan<DecisionPlanningMaterial>> {
+    const client = await this.pool.connect();
+    try {
+      return await PostgresDecisionPlanStore.bindWithClient(client, input, this.fidelityPolicy);
+    } finally {
+      client.release();
+    }
   }
 
   async getByRunId(runId: string): Promise<DurableDecisionPlan<DecisionPlanningMaterial> | undefined> {

@@ -7,7 +7,7 @@ import {
   AlphaDecisionKnowledgeAcquisitionProvider,
 } from "../knowledge/npm-decision-acquisition.js";
 import { WikimediaKnowledgeAcquisitionProvider } from "../knowledge/wikimedia-acquisition.js";
-import { resolveRuntimeConfig, type TruthMode } from "../runtime-config.js";
+import { resolveRuntimeConfig, type RuntimeConfig, type TruthMode } from "../runtime-config.js";
 import { createConfiguredSolandraKnowledgeInvestigator } from "../solandra/knowledge-investigator.js";
 import {
   createDefaultOfflineTruthPipeline,
@@ -16,40 +16,36 @@ import {
 import { KnowledgeAcquisitionTruthPipeline } from "./knowledge-acquisition-pipeline.js";
 import { AlphaDecisionKnowledgeEvidenceAdmissionPolicy } from "./npm-decision-admission.js";
 
-const unavailableGeneralKnowledgeProvider: KnowledgeAcquisitionProvider = Object.freeze({
-  kind: "solandra-investigation-unavailable",
-  async acquire() {
-    throw new Error("Live general Knowledge requires configured Solandra semantic investigation.");
-  },
-});
-
 /**
  * Explicit runtime composition. Live general Knowledge uses Solandra for
  * non-authoritative investigation planning and semantic responsiveness before
  * candidate information enters the unchanged V36 admission boundary.
  *
- * Runtime surfaces that do not invoke general Knowledge may still be composed
- * without a Solandra investigator. If general Knowledge is later requested,
- * that path fails closed rather than falling back to deterministic semantics.
- * An explicitly injected acquisition provider without an investigator remains
- * an integration/test seam rather than the canonical live Product composition.
+ * Canonical v36-live composition requires an actually configured Solandra
+ * investigator at composition time. An explicitly injected acquisition
+ * provider remains an integration/test seam and does not advertise canonical
+ * live general-Knowledge capability.
  */
 export function createConfiguredTruthPipeline(
   mode: TruthMode,
   provider?: KnowledgeAcquisitionProvider,
   investigator?: KnowledgeInvestigator,
+  runtimeConfig: RuntimeConfig = resolveRuntimeConfig(),
 ): TruthExecutionPipeline {
   if (mode === "v36-offline") return createDefaultOfflineTruthPipeline();
 
   const semanticInvestigator = investigator
     ?? (provider === undefined
-      ? createConfiguredSolandraKnowledgeInvestigator(resolveRuntimeConfig())
+      ? createConfiguredSolandraKnowledgeInvestigator(runtimeConfig)
       : undefined);
 
-  const rawFallback = provider
-    ?? (semanticInvestigator === undefined
-      ? unavailableGeneralKnowledgeProvider
-      : new WikimediaKnowledgeAcquisitionProvider());
+  if (provider === undefined && semanticInvestigator === undefined) {
+    throw new Error(
+      "LATTICE_TRUTH_MODE=v36-live requires configured Solandra Knowledge investigation via LATTICE_SOLANDRA_COGNITION_ROUTE=groq-gpt-oss-120b or a development local model provider.",
+    );
+  }
+
+  const rawFallback = provider ?? new WikimediaKnowledgeAcquisitionProvider();
   const fallback = semanticInvestigator
     ? new RelevantKnowledgeAcquisitionProvider(rawFallback, semanticInvestigator)
     : rawFallback;
