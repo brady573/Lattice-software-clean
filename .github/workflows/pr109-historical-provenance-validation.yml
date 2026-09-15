@@ -1,0 +1,90 @@
+name: Validation — PR #109 Historical Knowledge Provenance
+
+on:
+  push:
+    branches:
+      - validation/pr109-historical-knowledge-provenance
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      EXPECTED_PRODUCT_SHA: 86835455125c46d7aa697bdb3070b722ac4e50ff
+      EXPECTED_PRODUCT_TREE: 05bd8077be49973c0b8f350227180e7d908e8787
+      DATABASE_URL: postgresql://lattice:lattice@127.0.0.1:55434/lattice_test
+
+    services:
+      postgres:
+        image: postgres:18.6
+        env:
+          POSTGRES_USER: lattice
+          POSTGRES_PASSWORD: lattice
+          POSTGRES_DB: lattice_test
+        ports:
+          - 55434:5432
+        options: >-
+          --health-cmd "pg_isready -U lattice -d lattice_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - name: Checkout validation infrastructure
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Checkout exact Product candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: 86835455125c46d7aa697bdb3070b722ac4e50ff
+          path: product
+          persist-credentials: false
+
+      - name: Provision Node 24
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+
+      - name: Verify frozen Product identity
+        run: |
+          set -euo pipefail
+          test "$(git -C product rev-parse HEAD)" = "$EXPECTED_PRODUCT_SHA"
+          test "$(git -C product rev-parse HEAD^{tree})" = "$EXPECTED_PRODUCT_TREE"
+          git -C product diff --exit-code
+          test "$(node -p "process.versions.node.split('.')[0]")" = "24"
+          echo "PRODUCT_IDENTITY=PASS sha=$EXPECTED_PRODUCT_SHA tree=$EXPECTED_PRODUCT_TREE"
+
+      - name: Install locked Product dependencies
+        working-directory: product
+        run: npm ci --no-audit --no-fund
+
+      - name: Run focused historical-reference gate
+        working-directory: product
+        run: |
+          set -euo pipefail
+          node --import tsx --test test/issue-91-conversation-reference-integrity.test.ts test/issue-91-conversation-reference-consolidation.test.ts test/issue-91-historical-knowledge-provenance-fallback.test.ts
+          echo 'PR109_FOCUSED_HISTORICAL_REFERENCE=PASS'
+
+      - name: Run real-Groq historical-Knowledge journeys
+        working-directory: product
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "${GROQ_API_KEY:-}"
+          test "$(git rev-parse HEAD)" = "$EXPECTED_PRODUCT_SHA"
+          test "$(git rev-parse HEAD^{tree})" = "$EXPECTED_PRODUCT_TREE"
+          git diff --exit-code
+          node --import tsx ../validation/pr109-historical-provenance-e2e.mjs
+          test "$(git rev-parse HEAD)" = "$EXPECTED_PRODUCT_SHA"
+          test "$(git rev-parse HEAD^{tree})" = "$EXPECTED_PRODUCT_TREE"
+          git diff --exit-code
+          echo 'PRODUCTION_DEPLOYMENT=NOT_PERFORMED'
+          echo 'CONNECTED_SOLANDRA_DATABASE=NOT_TOUCHED'
