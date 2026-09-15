@@ -72,14 +72,18 @@ jobs:
           echo 'PR108_FOCUSED_CONSOLIDATION=PASS'
 
       - name: Run live Solandra historical-Knowledge journey
+        working-directory: product
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
         run: |
           set -euo pipefail
           test -n "${GROQ_API_KEY:-}"
-          node --import tsx validation/pr108-conversation-reference-e2e.mjs
-          test "$(git -C product rev-parse HEAD)" = "$EXPECTED_PRODUCT_SHA"
-          test "$(git -C product rev-parse HEAD^{tree})" = "$EXPECTED_PRODUCT_TREE"
-          git -C product diff --exit-code
+          test "$(git rev-parse HEAD)" = "$EXPECTED_PRODUCT_SHA"
+          test "$(git rev-parse HEAD^{tree})" = "$EXPECTED_PRODUCT_TREE"
+          git diff --exit-code
+          node --import tsx ../validation/pr108-conversation-reference-e2e.mjs
+          test "$(git rev-parse HEAD)" = "$EXPECTED_PRODUCT_SHA"
+          test "$(git rev-parse HEAD^{tree})" = "$EXPECTED_PRODUCT_TREE"
+          git diff --exit-code
           echo 'PRODUCTION_DEPLOYMENT=NOT_PERFORMED'
           echo 'CONNECTED_SOLANDRA_DATABASE=NOT_TOUCHED'
