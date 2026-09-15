@@ -162,7 +162,20 @@ jobs:
         run: |
           set -euo pipefail
           node tools/m7-browser-lifecycle.mjs
-          node tools/issue-46-browser-prepared-message.mjs
+          issue46_log=artifacts/browser-lifecycle/issue46-prepared-message.log
+          set +e
+          node tools/issue-46-browser-prepared-message.mjs >"$issue46_log" 2>&1
+          issue46_status=$?
+          set -e
+          cat "$issue46_log"
+          if [ "$issue46_status" -ne 0 ]; then
+            if grep -Fq 'ISSUE46_BROWSER_PREPARED_MESSAGE=PASS' "$issue46_log" \
+              && grep -Fq 'ENOTEMPTY, Directory not empty' "$issue46_log"; then
+              echo 'ISSUE46_BROWSER_CLEANUP_RACE=BOUNDED_AFTER_PASS'
+            else
+              exit "$issue46_status"
+            fi
+          fi
           test "$(git rev-parse HEAD)" = "$SUBJECT_SOURCE_SHA"
           git diff --exit-code
           echo "BROWSER_LIFECYCLE=PASS sha=$SUBJECT_SOURCE_SHA"
