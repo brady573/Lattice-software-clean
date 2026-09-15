@@ -537,7 +537,12 @@ export class PostgresOrchestrationStore implements DurableOrchestrationStore {
          FROM run_task_attempts WHERE task_id=$1 AND attempt_number=$2 FOR UPDATE`,
         [task.id, input.attemptNumber],
       );
-      if (!attempt.rows[0] || attempt.rows[0].status !== "RUNNING" || attempt.rows[0].worker_id !== input.workerId) {
+      if (
+        !attempt.rows[0]
+        || attempt.rows[0].status !== "RUNNING"
+        || attempt.rows[0].worker_id !== input.workerId
+        || new Date(attempt.rows[0].lease_expires_at) <= input.now
+      ) {
         await client.query("ROLLBACK");
         return { outcome: "stale" };
       }
@@ -595,10 +600,11 @@ export class PostgresOrchestrationStore implements DurableOrchestrationStore {
         await client.query("ROLLBACK");
         return { outcome: "stale" };
       }
+      const leaseValid = task.leaseExpiresAt !== null && new Date(task.leaseExpiresAt) > input.now;
       if (
         !run || isTerminal(run.status) || run.version !== task.runEpoch
         || task.status !== "RUNNING" || task.currentAttempt !== input.attemptNumber
-        || task.leaseOwner !== input.workerId
+        || task.leaseOwner !== input.workerId || !leaseValid
       ) {
         await client.query("ROLLBACK");
         return { outcome: "stale" };
@@ -608,7 +614,12 @@ export class PostgresOrchestrationStore implements DurableOrchestrationStore {
          FROM run_task_attempts WHERE task_id=$1 AND attempt_number=$2 FOR UPDATE`,
         [task.id, input.attemptNumber],
       );
-      if (!attempt.rows[0] || attempt.rows[0].status !== "RUNNING" || attempt.rows[0].worker_id !== input.workerId) {
+      if (
+        !attempt.rows[0]
+        || attempt.rows[0].status !== "RUNNING"
+        || attempt.rows[0].worker_id !== input.workerId
+        || new Date(attempt.rows[0].lease_expires_at) <= input.now
+      ) {
         await client.query("ROLLBACK");
         return { outcome: "stale" };
       }
@@ -696,18 +707,20 @@ export class PostgresOrchestrationStore implements DurableOrchestrationStore {
     const result = await this.pool.query(
       `UPDATE dispatch_outbox
        SET dispatched_at=$3,lease_owner=NULL,lease_expires_at=NULL
-       WHERE id=$1 AND dispatched_at IS NULL AND lease_owner=$2`,
+       WHERE id=$1 AND dispatched_at IS NULL AND lease_owner=$2
+         AND lease_expires_at IS NOT NULL AND lease_expires_at > $3`,
       [input.id, input.workerId, input.now],
     );
     return (result.rowCount ?? 0) === 1 ? { outcome: "updated" } : { outcome: "stale" };
   }
 
-  async releaseDispatch(input: { id: number; workerId: string; availableAt: Date }): Promise<DispatchMutationResult> {
+  async releaseDispatch(input: { id: number; workerId: string; now: Date; availableAt: Date }): Promise<DispatchMutationResult> {
     const result = await this.pool.query(
       `UPDATE dispatch_outbox
-       SET lease_owner=NULL,lease_expires_at=NULL,available_at=$3
-       WHERE id=$1 AND dispatched_at IS NULL AND lease_owner=$2`,
-      [input.id, input.workerId, input.availableAt],
+       SET lease_owner=NULL,lease_expires_at=NULL,available_at=$4
+       WHERE id=$1 AND dispatched_at IS NULL AND lease_owner=$2
+         AND lease_expires_at IS NOT NULL AND lease_expires_at > $3`,
+      [input.id, input.workerId, input.now, input.availableAt],
     );
     return (result.rowCount ?? 0) === 1 ? { outcome: "updated" } : { outcome: "stale" };
   }

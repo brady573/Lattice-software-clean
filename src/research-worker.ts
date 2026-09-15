@@ -103,11 +103,12 @@ async function release(
   store: DurableOrchestrationStore,
   dispatchId: number,
   workerId: string,
+  now: Date,
   availableAt: Date,
   runId: string,
   taskId: string | null,
 ): Promise<ResearchDispatchOutcome> {
-  const result = await store.releaseDispatch({ id: dispatchId, workerId, availableAt });
+  const result = await store.releaseDispatch({ id: dispatchId, workerId, now, availableAt });
   return {
     dispatchId,
     runId,
@@ -118,9 +119,9 @@ async function release(
 
 /**
  * Consume at-least-once `lattice.research` dispatches while preserving the
- * durable task/attempt contract as the operational source of truth. Executor
- * output is persisted only as an immutable task result; V36 admission and
- * epistemic continuation are intentionally outside this worker.
+ * durable task/attempt contract as the operational source of truth. Work is
+ * claimed immediately before local execution, and every task/dispatch
+ * mutation uses fresh time rather than a poll-start timestamp.
  */
 export async function processResearchDispatches(
   input: ProcessResearchDispatchesInput,
@@ -128,24 +129,27 @@ export async function processResearchDispatches(
   const leaseMs = input.leaseMs ?? 30_000;
   const retryDelayMs = input.retryDelayMs ?? 1_000;
   const limit = input.limit ?? 10;
-  const clock = input.clock ?? (() => new Date());
-  const dispatches = await input.orchestrationStore.claimDispatches({
-    queueName: "lattice.research",
-    workerId: input.workerId,
-    now: input.now,
-    leaseMs,
-    limit,
-  });
-
+  const clock = input.clock ?? (() => new Date(Math.max(input.now.getTime(), Date.now())));
   const outcomes: ResearchDispatchOutcome[] = [];
-  for (const dispatch of dispatches) {
+
+  for (let processed = 0; processed < limit; processed += 1) {
+    const claimTime = clock();
+    const dispatch = (await input.orchestrationStore.claimDispatches({
+      queueName: "lattice.research",
+      workerId: input.workerId,
+      now: claimTime,
+      leaseMs,
+      limit: 1,
+    }))[0];
+    if (!dispatch) break;
+
     const payload = parseResearchDispatchPayload(dispatch.payload);
     if (!payload) {
       outcomes.push(await acknowledge(
         input.orchestrationStore,
         dispatch.id,
         input.workerId,
-        input.now,
+        clock(),
         "discarded",
         dispatch.runId,
         null,
@@ -164,7 +168,7 @@ export async function processResearchDispatches(
         input.orchestrationStore,
         dispatch.id,
         input.workerId,
-        input.now,
+        clock(),
         "discarded",
         dispatch.runId,
         payload.taskId,
@@ -172,19 +176,22 @@ export async function processResearchDispatches(
       continue;
     }
 
+    const taskClaimTime = clock();
     const claim = await input.orchestrationStore.claimResearchTask({
       taskId: payload.taskId,
       workerId: input.workerId,
-      now: input.now,
+      now: taskClaimTime,
       leaseMs,
     });
 
     if (claim.outcome === "busy") {
+      const releaseTime = clock();
       outcomes.push(await release(
         input.orchestrationStore,
         dispatch.id,
         input.workerId,
-        new Date(input.now.getTime() + retryDelayMs),
+        releaseTime,
+        new Date(releaseTime.getTime() + retryDelayMs),
         dispatch.runId,
         payload.taskId,
       ));
@@ -195,7 +202,7 @@ export async function processResearchDispatches(
         input.orchestrationStore,
         dispatch.id,
         input.workerId,
-        input.now,
+        clock(),
         "existing",
         dispatch.runId,
         payload.taskId,
@@ -207,7 +214,7 @@ export async function processResearchDispatches(
         input.orchestrationStore,
         dispatch.id,
         input.workerId,
-        input.now,
+        clock(),
         "exhausted",
         dispatch.runId,
         payload.taskId,
@@ -219,7 +226,7 @@ export async function processResearchDispatches(
         input.orchestrationStore,
         dispatch.id,
         input.workerId,
-        input.now,
+        clock(),
         "discarded",
         dispatch.runId,
         payload.taskId,
@@ -241,11 +248,13 @@ export async function processResearchDispatches(
         retryAt: new Date(failureTime.getTime() + retryDelayMs),
       });
       if (failed.outcome === "stale") {
+        const releaseTime = clock();
         outcomes.push(await release(
           input.orchestrationStore,
           dispatch.id,
           input.workerId,
-          new Date(failureTime.getTime() + retryDelayMs),
+          releaseTime,
+          new Date(releaseTime.getTime() + retryDelayMs),
           dispatch.runId,
           payload.taskId,
         ));
@@ -255,7 +264,7 @@ export async function processResearchDispatches(
         input.orchestrationStore,
         dispatch.id,
         input.workerId,
-        failureTime,
+        clock(),
         failed.outcome,
         dispatch.runId,
         payload.taskId,
@@ -272,11 +281,13 @@ export async function processResearchDispatches(
       now: completionTime,
     });
     if (completed.outcome === "stale") {
+      const releaseTime = clock();
       outcomes.push(await release(
         input.orchestrationStore,
         dispatch.id,
         input.workerId,
-        new Date(completionTime.getTime() + retryDelayMs),
+        releaseTime,
+        new Date(releaseTime.getTime() + retryDelayMs),
         dispatch.runId,
         payload.taskId,
       ));
@@ -287,7 +298,7 @@ export async function processResearchDispatches(
       input.orchestrationStore,
       dispatch.id,
       input.workerId,
-      completionTime,
+      clock(),
       completed.outcome === "accepted" ? "completed" : "existing",
       dispatch.runId,
       payload.taskId,
