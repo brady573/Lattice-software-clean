@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
+import { setTimeout as delay } from "node:timers/promises";
 import { Pool } from "pg";
 import {
   MemoryApiRunControlStore,
@@ -43,6 +44,9 @@ import {
 const databaseUrl = process.env.DATABASE_URL;
 const allowExactTestPlanning: DecisionPlanFidelityPolicy = () => {};
 const injectedTriggerFunction = "issue100_injected_insert_failure";
+const connectionObservationPollMs = 25;
+const connectionObservationDeadlineMs = 2_000;
+const stableBaselineSamples = 3;
 
 function initialTransition(intentScopeId: string, objective: string): IntentTransitionCommand {
   return {
@@ -208,6 +212,33 @@ async function cleanupConversation(pool: Pool, conversationId: string, intentSco
   );
   await pool.query("DELETE FROM runs WHERE conversation_id=$1", [conversationId]);
   if (intentScopeId) await pool.query("DELETE FROM intent_scopes WHERE intent_scope_id=$1", [intentScopeId]);
+}
+
+async function cleanupSupersessionConversation(
+  pool: Pool,
+  conversationId: string,
+  intentScopeId: string,
+): Promise<void> {
+  await pool.query(
+    `DELETE FROM run_supersessions
+     WHERE predecessor_run_id IN (SELECT id FROM runs WHERE conversation_id=$1)
+        OR successor_run_id IN (SELECT id FROM runs WHERE conversation_id=$1)`,
+    [conversationId],
+  );
+  await cleanupConversation(pool, conversationId, intentScopeId);
+}
+
+async function runCleanupSteps(steps: readonly (() => Promise<void>)[]): Promise<void> {
+  const failures: unknown[] = [];
+  for (const step of steps) {
+    try {
+      await step();
+    } catch (error) {
+      failures.push(error);
+    }
+  }
+  if (failures.length === 1) throw failures[0];
+  if (failures.length > 1) throw new AggregateError(failures, "Issue #100 test cleanup encountered multiple failures.");
 }
 
 class FailOnceRunIndexStore implements ConversationRunIndexStore {
@@ -537,12 +568,16 @@ test("Issue #100: DecisionPlan failure cannot escape through material-correction
     );
     assert.equal(lineage.rows[0]?.count, "1");
   } finally {
-    if (triggerInstalled) await removeFailureTrigger(pool, "decision_plans", planFailureTrigger);
-    await removeFailureFunction(pool);
-    await cleanupConversation(pool, conversationId, intentScopeId);
-    await control.close();
-    await intentStore.close();
-    await pool.end();
+    await runCleanupSteps([
+      async () => {
+        if (triggerInstalled) await removeFailureTrigger(pool, "decision_plans", planFailureTrigger);
+      },
+      () => removeFailureFunction(pool),
+      () => cleanupSupersessionConversation(pool, conversationId, intentScopeId),
+      () => control.close(),
+      () => intentStore.close(),
+      () => pool.end(),
+    ]);
   }
 });
 
@@ -712,7 +747,26 @@ test("Issue #100: final PostgreSQL ConversationReference connection failure clos
       );
       return Number(result.rows[0]?.count ?? 0);
     };
-    const baseline = await countConnections();
+
+    const baselineDeadline = Date.now() + connectionObservationDeadlineMs;
+    let baseline = await countConnections();
+    let stableSamples = 1;
+    while (stableSamples < stableBaselineSamples && Date.now() < baselineDeadline) {
+      await delay(connectionObservationPollMs);
+      const current = await countConnections();
+      if (current === baseline) {
+        stableSamples += 1;
+      } else {
+        baseline = current;
+        stableSamples = 1;
+      }
+    }
+    assert.equal(
+      stableSamples,
+      stableBaselineSamples,
+      `PostgreSQL connection baseline did not stabilize within ${connectionObservationDeadlineMs}ms.`,
+    );
+
     await assert.rejects(
       () => connectPostgresRuntimeStores(
         databaseUrl,
@@ -726,7 +780,24 @@ test("Issue #100: final PostgreSQL ConversationReference connection failure clos
       ),
       /issue100 injected final ConversationReference connection failure/,
     );
-    assert.equal(await countConnections(), baseline);
+
+    const observationStartedAt = Date.now();
+    const immediateCount = await countConnections();
+    let eventualCount = immediateCount;
+    while (eventualCount !== baseline && Date.now() - observationStartedAt < connectionObservationDeadlineMs) {
+      await delay(connectionObservationPollMs);
+      eventualCount = await countConnections();
+    }
+    const elapsedMs = Date.now() - observationStartedAt;
+    console.info(
+      `ISSUE100_STARTUP_CONNECTION_CLEANUP baseline=${baseline} immediate=${immediateCount} eventual=${eventualCount} elapsedMs=${elapsedMs}`,
+    );
+    assert.equal(
+      eventualCount,
+      baseline,
+      `Failed runtime composition left persistent PostgreSQL connections after ${elapsedMs}ms `
+        + `(baseline=${baseline}, immediate=${immediateCount}, eventual=${eventualCount}).`,
+    );
   } finally {
     await observer.end();
   }
