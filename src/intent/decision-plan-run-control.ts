@@ -5,11 +5,32 @@ import type {
   ApiRunSupersessionInput,
   ApiRunSupersessionResult,
 } from "../api-control-store.js";
+import { isConsultationRunRequest, type LatticeRun } from "../domain.js";
 import {
   decisionPlanIdForRun,
+  type DecisionPlanningMaterial,
   type DecisionPlanStore,
+  type DurableDecisionPlan,
 } from "./decision-plan-store.js";
-import { isConsultationRunRequest } from "../domain.js";
+import type { RunIntentBindingInput } from "./run-binding.js";
+
+export function decisionPlanBindingForRun(
+  run: Pick<LatticeRun, "id" | "request">,
+  intentBinding: RunIntentBindingInput | undefined,
+): Omit<DurableDecisionPlan<DecisionPlanningMaterial>, "boundAt"> | undefined {
+  if (!intentBinding) return undefined;
+  const request = run.request;
+  if (isConsultationRunRequest(request) && request.decisionNeed !== "QUALIFIED") return undefined;
+  return {
+    decisionPlanId: decisionPlanIdForRun(run.id),
+    runId: run.id,
+    intentScopeId: intentBinding.intentScopeId,
+    intentVersionId: intentBinding.intentVersionId,
+    planningMaterial: structuredClone(
+      isConsultationRunRequest(request) ? request.decisionInput! : request,
+    ),
+  };
+}
 
 export class DecisionPlanRecordingApiRunControlStore implements ApiRunControlStore {
   constructor(
@@ -18,25 +39,11 @@ export class DecisionPlanRecordingApiRunControlStore implements ApiRunControlSto
   ) {}
 
   private async bindPlan(input: ApiRunSubmissionInput): Promise<void> {
-    if (!input.intentBinding) return;
-    const request = input.run.request;
-    if (isConsultationRunRequest(request) && request.decisionNeed !== "QUALIFIED") return;
-    await this.decisionPlanStore.bind({
-      decisionPlanId: decisionPlanIdForRun(input.run.id),
-      runId: input.run.id,
-      intentScopeId: input.intentBinding.intentScopeId,
-      intentVersionId: input.intentBinding.intentVersionId,
-      planningMaterial: structuredClone(
-        isConsultationRunRequest(request) ? request.decisionInput! : request,
-      ),
-    });
+    const binding = decisionPlanBindingForRun(input.run, input.intentBinding);
+    if (binding) await this.decisionPlanStore.bind(binding);
   }
 
   async submitRun(input: ApiRunSubmissionInput): Promise<ApiRunSubmissionResult> {
-    // The Run is the primary durable operation. A qualified decision response
-    // is not acknowledged until its exact DecisionPlan binding is present.
-    // If plan persistence fails after the Run commits, replay reconnects to the
-    // same immutable Run and idempotently repairs the binding before returning.
     const result = await this.base.submitRun(input);
     if (result.outcome === "created" || result.outcome === "existing") {
       await this.bindPlan(input);
@@ -48,17 +55,11 @@ export class DecisionPlanRecordingApiRunControlStore implements ApiRunControlSto
     const result = await this.base.supersedeRun(input);
     if (result.outcome !== "superseded" && result.outcome !== "replayed") return result;
 
-    const request = input.supersession.successorRun.request;
-    if (isConsultationRunRequest(request) && request.decisionNeed !== "QUALIFIED") return result;
-    await this.decisionPlanStore.bind({
-      decisionPlanId: decisionPlanIdForRun(input.supersession.successorRun.id),
-      runId: input.supersession.successorRun.id,
-      intentScopeId: input.supersession.successorBinding.intentScopeId,
-      intentVersionId: input.supersession.successorBinding.intentVersionId,
-      planningMaterial: structuredClone(
-        isConsultationRunRequest(request) ? request.decisionInput! : request,
-      ),
-    });
+    const binding = decisionPlanBindingForRun(
+      input.supersession.successorRun,
+      input.supersession.successorBinding,
+    );
+    if (binding) await this.decisionPlanStore.bind(binding);
     return result;
   }
 
