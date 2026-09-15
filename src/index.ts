@@ -20,10 +20,10 @@ try {
     await assertDurableProcessSchemaReady(config.databaseUrl, "api");
   }
 
+  const solandra = requireConfiguredSolandraCognition(config);
   const modelAssistance = await createConfiguredModelAssistanceCapability(config);
   const capabilityComposition = await createConfiguredCapabilityBroker(config);
   const decisionCapability = createAlphaDecisionRuntimeComposition();
-  const solandra = requireConfiguredSolandraCognition(config);
   const authenticatedSubjectResolver = resolveCanonicalOwnerSubjectResolver(config);
   let app;
   try {
