@@ -39,10 +39,16 @@ const request: RunRequest = {
   priorities: [],
 };
 
+const EPOCH_RACE_RUN_ID = "00000000-0000-4000-8000-000000001601";
+const LEASE_GUARD_RUN_ID = "00000000-0000-4000-8000-000000001602";
+const TERMINAL_RUN_ONE_ID = "00000000-0000-4000-8000-000000001603";
+const TERMINAL_RUN_TWO_ID = "00000000-0000-4000-8000-000000001604";
+const RESEARCH_RUN_ID = "00000000-0000-4000-8000-000000001605";
+
 class EpochRaceRunStore implements RunStore {
   readonly kind = "memory" as const;
   run: LatticeRun = {
-    ...createPendingRun("epoch-race", request, "run-epoch-race"),
+    ...createPendingRun("epoch-race", request, EPOCH_RACE_RUN_ID),
     status: "INVESTIGATING",
     version: 4,
     events: [
@@ -127,7 +133,7 @@ function at(ms: number): Date {
 
 test("expired research and dispatch leases cannot mutate newer ownership", async () => {
   const runStore = new MemoryRunStore();
-  const run = createPendingRun("lease-guard", request, "run-lease-guard");
+  const run = createPendingRun("lease-guard", request, LEASE_GUARD_RUN_ID);
   await runStore.create(run);
   const store = new MemoryOrchestrationStore(runStore);
   try {
@@ -217,10 +223,10 @@ class ClaimRecordingOrchestrationStore implements DurableOrchestrationStore {
   private readonly task: DurableResearchTask;
 
   constructor() {
-    this.runDispatches = [1, 2].map((id) => ({
-      id,
-      logicalKey: `run-${id}`,
-      runId: `terminal-${id}`,
+    this.runDispatches = [TERMINAL_RUN_ONE_ID, TERMINAL_RUN_TWO_ID].map((runId, index) => ({
+      id: index + 1,
+      logicalKey: `run-${index + 1}`,
+      runId,
       queueName: "lattice.run",
       payload: {},
       availableAt: at(0).toISOString(),
@@ -231,7 +237,7 @@ class ClaimRecordingOrchestrationStore implements DurableOrchestrationStore {
     }));
     this.task = {
       id: "research-task",
-      runId: "research-run",
+      runId: RESEARCH_RUN_ID,
       taskFingerprint: "fingerprint",
       planVersion: 1,
       taskType: "RESEARCH",
@@ -290,8 +296,14 @@ class TerminalRunStore implements RunStore {
   async persistDecision(): Promise<RunTransitionResult> { throw new Error("unused"); }
   async complete(): Promise<RunTransitionResult> { throw new Error("unused"); }
   async get(runId: string): Promise<LatticeRun | undefined> {
+    const canonicalRunId = runId === TERMINAL_RUN_ONE_ID
+      ? TERMINAL_RUN_ONE_ID
+      : runId === TERMINAL_RUN_TWO_ID
+        ? TERMINAL_RUN_TWO_ID
+        : undefined;
+    if (!canonicalRunId) return undefined;
     return {
-      ...createPendingRun("dispatch-fresh-time", request, runId),
+      ...createPendingRun("dispatch-fresh-time", request, canonicalRunId),
       status: "COMPLETED",
       version: 8,
     };
