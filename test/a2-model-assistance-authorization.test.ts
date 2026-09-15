@@ -146,7 +146,7 @@ test("authenticated capability API is subject-bound and unavailable configuratio
   );
   const config = resolveRuntimeConfig({
     LATTICE_DEPLOYMENT_MODE: "development",
-    LATTICE_TRUTH_MODE: "v36-live",
+    LATTICE_TRUTH_MODE: "v36-offline",
   } as NodeJS.ProcessEnv);
   const app = await createRuntimeApp(config, {
     modelAssistanceService: service,

@@ -12,7 +12,7 @@ The canonical slice accepts a free-form conversation turn, records USER provenan
 
 The decision fixture demonstrates qualified requirement eligibility and meaningful-difference/frontier semantics without summing incompatible raw criterion scales.
 
-No paid provider, queue service, or cloud service is required for local Knowledge Consultation. Deterministic CI remains offline; an explicit zero-cost live development mode retrieves current external source material from Wikimedia without credentials.
+No paid provider, queue service, or cloud service is required for local Knowledge Consultation. Deterministic CI remains offline. Canonical live external Knowledge requires both `LATTICE_TRUTH_MODE=v36-live` and a configured Solandra Knowledge-investigation route: either the qualified Groq cognition route with its runtime credential or a development local OpenAI-compatible model. External source acquisition remains credential-free Wikimedia after Solandra formulates the investigation.
 
 ## Solandra conversation UI
 
@@ -49,13 +49,18 @@ npm run dev
 
 The API listens on `127.0.0.1:3000` by default. Without `DATABASE_URL`, development mode uses the in-memory Run store. When `DATABASE_URL` is supplied, the application uses the PostgreSQL Run store. `LATTICE_DEPLOYMENT_MODE=durable` fails closed unless `DATABASE_URL` is configured.
 
-The default truth mode is `LATTICE_TRUTH_MODE=v36-offline`, preserving deterministic fixture execution for CI and architecture tests. To exercise real external Knowledge Consultation locally, use:
+The default truth mode is `LATTICE_TRUTH_MODE=v36-offline`, preserving deterministic fixture execution for CI and architecture tests. Canonical `v36-live` is not enabled by that variable alone: it also requires a usable Solandra Knowledge investigator. For zero-cost local development, configure the existing local OpenAI-compatible route, for example:
 
 ```bash
-LATTICE_TRUTH_MODE=v36-live npm run dev
+LATTICE_TRUTH_MODE=v36-live \
+LATTICE_LOCAL_MODEL_PROVIDER_BASE_URL=http://127.0.0.1:11434/v1 \
+LATTICE_LOCAL_MODEL_PROVIDER_MODEL=qwen3:4b-instruct \
+npm run dev
 ```
 
-The live mode uses a replaceable, provider-neutral acquisition boundary with a credential-free Wikimedia adapter by default. Retrieved pages and excerpts enter the investigation as untrusted information. V36—not the adapter—may admit only exact, content-integrity-bound source reports. A supported source report establishes what that source says; it does not independently verify every broader claim in the report. Solandra therefore presents source identity, retrieval provenance, supporting or rejected evidence, and unresolved/conflicting material alongside the explanation.
+The qualified hosted route is the existing `LATTICE_SOLANDRA_COGNITION_ROUTE=groq-gpt-oss-120b` configuration with `GROQ_API_KEY` supplied at runtime. Missing live-investigation capability fails canonical composition before the application or standalone Run worker reports ready.
+
+Live mode uses Solandra for non-authoritative semantic investigation and the credential-free Wikimedia acquisition adapter for external source retrieval. Retrieved pages and excerpts enter the investigation as untrusted information. V36—not Solandra or the adapter—may admit only exact, content-integrity-bound source reports. A supported source report establishes what that source says; it does not independently verify every broader claim in the report. Solandra therefore presents source identity, retrieval provenance, supporting or rejected evidence, and unresolved/conflicting material alongside the explanation.
 
 This v0.1 path is deliberately conservative. It is extractive rather than model-synthesized, public search relevance can vary, and the default adapter does not independently corroborate a source's wider claims. Acquisition failure yields an unresolved Knowledge outcome rather than confident fallback prose. Live-network execution is opt-in and is not part of deterministic CI.
 
@@ -133,7 +138,7 @@ The repository PostgreSQL validation lane exercises restart survival, Run epoch/
 - **Lattice Intent Authority** owns canonical versioned USER intent. `DecisionPlan` is a conditional durable exact IntentVersion-to-DecisionInput binding for qualified decision work, not universal Run planning state or a separate Product authority.
 - **Lattice Execution Runtime** owns durable Run lifecycle, coordination, cancellation, recovery, and research execution. The separated durable API/Run-worker/Research-worker composition established through M3 remains operational infrastructure, not truth or decision authority.
 - **V36 Truth Core** is the protected epistemic authority for external factual evidence used by Knowledge outcomes or authoritative decisions. The durable V36 research continuation contract established through M4 preserves V36-only admission/sufficiency authority even when Runtime workers execute research.
-- The default V36 truth pipeline remains deterministic/offline. Explicit `v36-live` development mode adds credential-free external acquisition while preserving the same authority boundary; this Product proof is not production-provider qualification or production readiness.
+- The default V36 truth pipeline remains deterministic/offline. Canonical `v36-live` adds external Wikimedia acquisition only when a usable configured Solandra Knowledge investigator is present; startup fails closed otherwise. This Product proof is not production-provider qualification or production readiness.
 - `src/model/` is the non-authoritative **Lattice Model Gateway**. Model/provider output is proposal, interpretation, or rendering material until the owning Product authority accepts it under its own contract.
 - **Lattice Decision Engine** conditionally owns authoritative eligibility, typed comparison, trade-off, frontier, licensed selection, and `StructuredDecision` semantics from an exact DecisionPlan plus a decision-specific projection of V36-admitted evidence. Knowledge and non-decision Action Preparation bypass it.
 - **Solandra Experience** is downstream of Product authority. Conversation carries questions, clarifications, acknowledgements, and concise explanation; Composer is the adaptive visual information surface. Neither may dictate backend behavior or silently create USER intent, V36 truth, eligibility, ranking, or winner identity.
