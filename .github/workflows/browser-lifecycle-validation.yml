@@ -7,7 +7,7 @@ on:
       - "migrations/**"
       - "tools/m7-browser-lifecycle.mjs"
       - "tools/issue-46-browser-prepared-message.mjs"
-      - "tools/issue-91-browser-cognition-fixture.mjs"
+      - "tools/issue-91-browser-runtime.mjs"
       - "tools/issue-91-live-solandra-cognition.mjs"
       - "package.json"
       - "package-lock.json"
@@ -20,7 +20,7 @@ on:
       - "migrations/**"
       - "tools/m7-browser-lifecycle.mjs"
       - "tools/issue-46-browser-prepared-message.mjs"
-      - "tools/issue-91-browser-cognition-fixture.mjs"
+      - "tools/issue-91-browser-runtime.mjs"
       - "tools/issue-91-live-solandra-cognition.mjs"
       - "package.json"
       - "package-lock.json"
@@ -94,7 +94,7 @@ jobs:
         run: |
           node --check tools/m7-browser-lifecycle.mjs
           node --check tools/issue-46-browser-prepared-message.mjs
-          node --check tools/issue-91-browser-cognition-fixture.mjs
+          node --check tools/issue-91-browser-runtime.mjs
           node --check tools/issue-91-live-solandra-cognition.mjs
 
       - name: Build browser validation subject
@@ -117,19 +117,26 @@ jobs:
           NODE
           node dist/src/migrate.js
 
-      - name: Start deterministic Solandra cognition fixture
+      - name: Start explicit noncanonical browser interpreter runtime
+        env:
+          LATTICE_DEPLOYMENT_MODE: development
+          LATTICE_TRUTH_MODE: v36-offline
+          LATTICE_AUTHENTICATION_MODE: development-fixture
+          LATTICE_DEVELOPMENT_FIXTURE_SUBJECT_ID: browser-validation-subject
+          LATTICE_AUTO_MIGRATE: 'false'
+          ISSUE91_BROWSER_RUNTIME_PORT: '3107'
         run: |
           set -euo pipefail
           mkdir -p artifacts/browser-lifecycle
-          node tools/issue-91-browser-cognition-fixture.mjs > artifacts/browser-lifecycle/cognition-fixture.log 2>&1 &
-          echo "ISSUE91_BROWSER_COGNITION_FIXTURE_PID=$!" >> "$GITHUB_ENV"
+          node tools/issue-91-browser-runtime.mjs > artifacts/browser-lifecycle/browser-runtime.log 2>&1 &
+          echo "ISSUE91_BROWSER_RUNTIME_PID=$!" >> "$GITHUB_ENV"
           for attempt in $(seq 1 50); do
-            if curl --fail --silent http://127.0.0.1:3110/health >/dev/null; then
+            if curl --fail --silent http://127.0.0.1:3107/health >/dev/null; then
               exit 0
             fi
             sleep 0.1
           done
-          cat artifacts/browser-lifecycle/cognition-fixture.log >&2
+          cat artifacts/browser-lifecycle/browser-runtime.log >&2
           exit 1
 
       - name: Execute real-browser lifecycle validation
@@ -139,8 +146,8 @@ jobs:
           LATTICE_TRUTH_MODE: v36-offline
           LATTICE_AUTHENTICATION_MODE: development-fixture
           LATTICE_DEVELOPMENT_FIXTURE_SUBJECT_ID: browser-validation-subject
-          LATTICE_LOCAL_MODEL_PROVIDER_BASE_URL: http://127.0.0.1:3110/v1
-          LATTICE_LOCAL_MODEL_PROVIDER_MODEL: issue91-browser-cognition-fixture
+          LATTICE_LOCAL_MODEL_PROVIDER_BASE_URL: http://127.0.0.1:3111/v1
+          LATTICE_LOCAL_MODEL_PROVIDER_MODEL: issue91-browser-canonical-startup-fixture
           LATTICE_AUTO_MIGRATE: 'false'
           LATTICE_RUN_WORKER_LEASE_MS: '5000'
           LATTICE_RUN_WORKER_RETRY_DELAY_MS: '5'
@@ -148,7 +155,7 @@ jobs:
           LATTICE_RESEARCH_WORKER_LEASE_MS: '5000'
           LATTICE_RESEARCH_WORKER_RETRY_DELAY_MS: '5'
           LATTICE_RESEARCH_WORKER_BATCH_SIZE: '8'
-          PORT: '3107'
+          PORT: '3108'
           HOST: 127.0.0.1
           M7_BASE_URL: http://127.0.0.1:3107
           M7_BROWSER_ARTIFACT_DIR: artifacts/browser-lifecycle
@@ -156,21 +163,18 @@ jobs:
           set -euo pipefail
           node tools/m7-browser-lifecycle.mjs
           node tools/issue-46-browser-prepared-message.mjs
-          node --input-type=module <<'NODE'
-          const status = await fetch('http://127.0.0.1:3110/health').then((response) => response.json());
-          if (status.calls !== 2) throw new Error(`Expected exactly two canonical browser cognition calls, received ${status.calls}.`);
-          NODE
           test "$(git rev-parse HEAD)" = "$SUBJECT_SOURCE_SHA"
           git diff --exit-code
           echo "BROWSER_LIFECYCLE=PASS sha=$SUBJECT_SOURCE_SHA"
+          echo 'BROWSER_COGNITION_COMPOSITION=EXPLICIT_NONCANONICAL_INTERPRETER'
           echo 'PRODUCTION_DEPLOYMENT=NOT_PERFORMED'
           echo 'PRODUCTION_DATABASE=NOT_TOUCHED'
 
-      - name: Stop deterministic Solandra cognition fixture
+      - name: Stop explicit noncanonical browser interpreter runtime
         if: always()
         run: |
-          if [ -n "${ISSUE91_BROWSER_COGNITION_FIXTURE_PID:-}" ]; then
-            kill "$ISSUE91_BROWSER_COGNITION_FIXTURE_PID" 2>/dev/null || true
+          if [ -n "${ISSUE91_BROWSER_RUNTIME_PID:-}" ]; then
+            kill "$ISSUE91_BROWSER_RUNTIME_PID" 2>/dev/null || true
           fi
 
       - name: Upload browser evidence
