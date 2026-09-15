@@ -87,7 +87,11 @@ test('browser lane is bounded to browser behavior and short-lived evidence', () 
     0,
   );
   assert.match(text, /M7_BROWSER_EXECUTABLE=/u);
-  assert.match(text, /node artifacts\/issue91-m7-browser-lifecycle\.mjs/u);
+  assert.match(text, /node tools\/m7-browser-lifecycle\.mjs/u);
+  assert.doesNotMatch(text, /artifacts\/issue91-m7-browser-lifecycle\.mjs/u);
+  assert.match(text, /LATTICE_LOCAL_MODEL_PROVIDER_BASE_URL:\s*http:\/\/127\.0\.0\.1:3110\/v1/u);
+  assert.match(text, /name:\s*Live model-owned Solandra cognition validation/u);
+  assert.match(text, /node --import tsx tools\/issue-91-live-solandra-cognition\.mjs/u);
   assert.match(text, /actions\/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a\s+# v7\.0\.1/u);
   assert.match(text, /retention-days:\s*7/u);
 });
