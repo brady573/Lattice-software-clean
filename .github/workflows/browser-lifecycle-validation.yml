@@ -111,6 +111,29 @@ jobs:
           NODE
           node dist/src/migrate.js
 
+      - name: Prepare LLM-owned browser validation harness
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+          const source = readFileSync('tools/m7-browser-lifecycle.mjs', 'utf8');
+          const ambiguous = 'const knowledgeMessage = "Explain the tradeoffs of keeping a local-first hobby app simple while preserving recoverability.";';
+          const governed = 'const knowledgeMessage = "Please find trustworthy external sources about the tradeoffs of keeping a local-first hobby app simple while preserving recoverability, and summarize the supported evidence.";';
+          const localWait = 'async function waitFor(description, probe, timeoutMs = 15_000, intervalMs = 50) {';
+          const remoteWait = 'async function waitFor(description, probe, timeoutMs = 60_000, intervalMs = 50) {';
+          if (!source.includes(ambiguous) || !source.includes(localWait)) {
+            throw new Error('Legacy browser harness shape changed; update this bounded validation adaptation instead of guessing.');
+          }
+          mkdirSync('artifacts', { recursive: true });
+          writeFileSync(
+            'artifacts/issue91-m7-browser-lifecycle.mjs',
+            source.replace(ambiguous, governed).replace(localWait, remoteWait),
+            'utf8',
+          );
+          NODE
+          node --check artifacts/issue91-m7-browser-lifecycle.mjs
+          git diff --exit-code
+
       - name: Execute real-browser lifecycle validation
         env:
           SUBJECT_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
@@ -134,9 +157,10 @@ jobs:
         run: |
           set -euo pipefail
           test -n "${GROQ_API_KEY:-}"
-          node tools/m7-browser-lifecycle.mjs
+          node artifacts/issue91-m7-browser-lifecycle.mjs
           node tools/issue-46-browser-prepared-message.mjs
           test "$(git rev-parse HEAD)" = "$SUBJECT_SOURCE_SHA"
+          git diff --exit-code
           echo "BROWSER_LIFECYCLE=PASS sha=$SUBJECT_SOURCE_SHA"
           echo 'PRODUCTION_DEPLOYMENT=NOT_PERFORMED'
           echo 'PRODUCTION_DATABASE=NOT_TOUCHED'
