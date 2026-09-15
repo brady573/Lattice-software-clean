@@ -18,10 +18,11 @@ export class ConversationRunIndexRecordingApiRunControlStore implements ApiRunCo
     try {
       await this.runIndexStore.record(run);
     } catch {
-      // The conversation Run index is a deterministic projection, not Run
-      // authority. A projection outage must not turn an already committed Run
-      // into an apparent failed submission. Any later exact replay retries the
-      // same idempotent projection write from authoritative Run identity.
+      // The conversation Run index is a derived projection, not Run authority.
+      // Do not convert an already committed Run into an apparent failed
+      // submission, but do make the projection failure observable. Durable
+      // reconnect reads reconcile from authoritative Run/conversation state.
+      console.warn("Conversation Run index projection write failed; authoritative Run remains committed and reconnect reconciliation is required.");
     }
   }
 
