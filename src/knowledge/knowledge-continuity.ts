@@ -1,12 +1,11 @@
+import type { ConversationReferenceStore } from "../conversation/conversation-reference-store.js";
 import { isConsultationRunRequest, type LatticeRun } from "../domain.js";
 import { buildKnowledgeOutcome, type KnowledgeOutcome } from "../outcome.js";
 import type { RunStore } from "../run-store.js";
 import type { SolandraGovernedKnowledgeContext } from "../solandra/cognition.js";
 import type { TruthBundle } from "../truth/types.js";
 import {
-  buildConversationKnowledgeReference,
   buildKnowledgeRecord,
-  type ConversationKnowledgeReference,
   type KnowledgeRecord,
   type KnowledgeRecordStore,
 } from "./knowledge-record-store.js";
@@ -78,7 +77,7 @@ export async function establishKnowledge(
   run: LatticeRun,
   truth: TruthBundle,
   knowledge: KnowledgeOutcome,
-): Promise<{ record: KnowledgeRecord; reference: ConversationKnowledgeReference }> {
+): Promise<KnowledgeRecord> {
   let record = await store.getKnowledgeByRunId(run.id);
   if (!record) {
     const candidate = buildKnowledgeRecord(run, truth, knowledge);
@@ -95,51 +94,7 @@ export async function establishKnowledge(
     }
   }
   assertRecordIntegrity({ record, run, truth, knowledge });
-
-  const references = await store.listReferences(run.conversationId);
-  const responseId = `run:${run.id}:outcome`;
-  const existingReference = references.find((reference) =>
-    reference.referenceKind === "ESTABLISHED"
-    && reference.userMessageId === record.sourceMessageId
-    && reference.responseId === responseId
-    && reference.knowledgeId === record.knowledgeId);
-  if (existingReference) return { record, reference: existingReference };
-
-  const latest = references.at(-1);
-  const reference = await store.putReference(buildConversationKnowledgeReference({
-    conversationId: run.conversationId,
-    userMessageId: record.sourceMessageId,
-    responseId,
-    intentVersionId: record.intentVersionId,
-    knowledgeId: record.knowledgeId,
-    referenceKind: "ESTABLISHED",
-    parentReferenceId: latest?.referenceId ?? null,
-    createdAt: record.createdAt,
-  }));
-  return { record, reference };
-}
-
-export async function referenceKnowledge(
-  store: KnowledgeRecordStore,
-  input: {
-    knowledge: KnowledgeRecord;
-    userMessageId: string;
-    intentVersionId: string;
-    createdAt: string;
-  },
-): Promise<ConversationKnowledgeReference> {
-  const latest = await store.latestReference(input.knowledge.conversationId);
-  const draft = buildConversationKnowledgeReference({
-    conversationId: input.knowledge.conversationId,
-    userMessageId: input.userMessageId,
-    responseId: `knowledge:${input.knowledge.knowledgeId}:reference:${input.userMessageId}`,
-    intentVersionId: input.intentVersionId,
-    knowledgeId: input.knowledge.knowledgeId,
-    referenceKind: "REFERENCED",
-    parentReferenceId: latest?.referenceId ?? null,
-    createdAt: input.createdAt,
-  });
-  return await store.putReference(draft);
+  return record;
 }
 
 export function governedKnowledgeContext(loaded: LoadedKnowledge): SolandraGovernedKnowledgeContext {
@@ -158,14 +113,17 @@ export function governedKnowledgeContext(loaded: LoadedKnowledge): SolandraGover
 
 export async function recentGovernedKnowledge(
   store: KnowledgeRecordStore,
+  conversationReferenceStore: ConversationReferenceStore,
   runStore: RunStore,
   conversationId: string,
   limit = 4,
 ): Promise<LoadedKnowledge[]> {
-  const references = await store.listReferences(conversationId);
+  const references = await conversationReferenceStore.listByConversation(conversationId);
   const knowledgeIds = [...references]
     .reverse()
-    .map((reference) => reference.knowledgeId)
+    .flatMap((reference) => reference.targets
+      .filter((target) => target.kind === "KNOWLEDGE")
+      .map((target) => target.targetId))
     .filter((knowledgeId, index, values) => values.indexOf(knowledgeId) === index)
     .slice(0, limit);
   const loaded = await Promise.all(knowledgeIds.map((knowledgeId) => loadKnowledge(store, runStore, knowledgeId)));
