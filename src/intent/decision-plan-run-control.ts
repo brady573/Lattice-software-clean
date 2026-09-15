@@ -33,15 +33,23 @@ export class DecisionPlanRecordingApiRunControlStore implements ApiRunControlSto
   }
 
   async submitRun(input: ApiRunSubmissionInput): Promise<ApiRunSubmissionResult> {
-    await this.bindPlan(input);
-    return this.base.submitRun(input);
+    // The Run is the primary durable operation. A qualified decision response
+    // is not acknowledged until its exact DecisionPlan binding is present.
+    // If plan persistence fails after the Run commits, replay reconnects to the
+    // same immutable Run and idempotently repairs the binding before returning.
+    const result = await this.base.submitRun(input);
+    if (result.outcome === "created" || result.outcome === "existing") {
+      await this.bindPlan(input);
+    }
+    return result;
   }
 
   async supersedeRun(input: ApiRunSupersessionInput): Promise<ApiRunSupersessionResult> {
+    const result = await this.base.supersedeRun(input);
+    if (result.outcome !== "superseded" && result.outcome !== "replayed") return result;
+
     const request = input.supersession.successorRun.request;
-    if (isConsultationRunRequest(request) && request.decisionNeed !== "QUALIFIED") {
-      return this.base.supersedeRun(input);
-    }
+    if (isConsultationRunRequest(request) && request.decisionNeed !== "QUALIFIED") return result;
     await this.decisionPlanStore.bind({
       decisionPlanId: decisionPlanIdForRun(input.supersession.successorRun.id),
       runId: input.supersession.successorRun.id,
@@ -51,7 +59,7 @@ export class DecisionPlanRecordingApiRunControlStore implements ApiRunControlSto
         isConsultationRunRequest(request) ? request.decisionInput! : request,
       ),
     });
-    return this.base.supersedeRun(input);
+    return result;
   }
 
   async close(): Promise<void> {
