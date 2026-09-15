@@ -57,3 +57,20 @@ export function createConfiguredSolandraCognition(
 
   return undefined;
 }
+
+/**
+ * Canonical Solandra must have model-owned cognition. Optional composition is
+ * retained only for explicit noncanonical/test callers that choose their own
+ * consultation interpreter or cognition runtime.
+ */
+export function requireConfiguredSolandraCognition(
+  config: RuntimeConfig,
+): SolandraCognitionComposition {
+  const configured = createConfiguredSolandraCognition(config);
+  if (configured === undefined) {
+    throw new Error(
+      "Canonical Solandra requires configured cognition; configure LATTICE_SOLANDRA_COGNITION_ROUTE or a development local model provider.",
+    );
+  }
+  return configured;
+}
