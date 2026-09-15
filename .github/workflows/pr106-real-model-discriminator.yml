@@ -1,0 +1,100 @@
+name: Validation — PR #106 Real Model Discriminator
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - validation/pr106-real-model-discriminator
+    paths:
+      - validation/pr106-real-model-discriminator.mjs
+      - .github/workflows/pr106-real-model-discriminator.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr106-real-model-discriminator
+  cancel-in-progress: false
+
+jobs:
+  discriminator:
+    name: Frozen PR #106 real-model discriminator
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      EXPECTED_PRODUCT_SHA: d5fd727f5c85a244cba4d795d7d02fce08a5ee66
+      EXPECTED_PRODUCT_TREE: 7df1556665bd7ec010cb9895d03d65e68dbbe7a5
+      LATTICE_SOLANDRA_COGNITION_ROUTE: groq-gpt-oss-120b
+
+    steps:
+      - name: Checkout validation infrastructure
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          path: infra
+          persist-credentials: false
+
+      - name: Checkout exact frozen Product candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: d5fd727f5c85a244cba4d795d7d02fce08a5ee66
+          path: product
+          persist-credentials: false
+
+      - name: Provision Node 24
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+
+      - name: Verify exact frozen Product candidate
+        working-directory: product
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_PRODUCT_SHA"
+          test "$(git rev-parse HEAD^{tree})" = "$EXPECTED_PRODUCT_TREE"
+          test "$(node -p "process.versions.node.split('.')[0]")" = "24"
+          test "$(npm --version | cut -d. -f1)" = "11"
+          echo "PR106_PRODUCT_SHA=$EXPECTED_PRODUCT_SHA"
+          echo "PR106_PRODUCT_TREE=$EXPECTED_PRODUCT_TREE"
+
+      - name: Install frozen candidate dependencies
+        working-directory: product
+        run: npm ci --no-audit --no-fund
+
+      - name: Build frozen candidate
+        working-directory: product
+        run: npm run build
+
+      - name: Confirm Groq repository secret is mapped
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "${GROQ_API_KEY:-}"
+          echo 'GROQ_API_KEY=CONFIGURED'
+
+      - name: Execute held-out Recommendation-selection discriminator
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          PRODUCT_DIR: ${{ github.workspace }}/product
+          VALIDATION_ARTIFACT_DIR: ${{ github.workspace }}/artifacts/pr106-real-model
+        run: |
+          set -euo pipefail
+          node infra/validation/pr106-real-model-discriminator.mjs
+
+      - name: Upload sanitized discriminator evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: pr106-real-model-discriminator-${{ github.run_id }}
+          path: artifacts/pr106-real-model/
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Record validation scope
+        if: always()
+        run: |
+          echo 'PRODUCT_CANDIDATE_MUTATION=NOT_AUTHORIZED'
+          echo 'PRODUCT_DEPLOYMENT=NOT_PERFORMED'
+          echo 'PR106_MERGE=NOT_PERFORMED'
+          echo 'VALIDATION_ONLY=TRUE'
