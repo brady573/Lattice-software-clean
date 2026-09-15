@@ -173,6 +173,11 @@ export async function createStandaloneRunWorker(
   config: RunWorkerProcessConfig,
   options: StandaloneRunWorkerOptions = {},
 ): Promise<StandaloneRunWorker> {
+  // Capability truth is established before durable resources are opened. A
+  // canonical v36-live worker that cannot investigate Knowledge must fail
+  // composition rather than report readiness and discover the defect later.
+  const truthPipeline = options.truthPipeline ?? createConfiguredTruthPipeline(config.truthMode ?? "v36-offline");
+
   await assertV36ResearchContinuationRoundsReady(config.databaseUrl);
   const runStore = await PostgresRunStore.connect(config.databaseUrl, { migrate: false });
   let orchestrationStore: PostgresOrchestrationStore | undefined;
@@ -197,7 +202,6 @@ export async function createStandaloneRunWorker(
   const generalizedDecisionAdapter = options.criterionCatalog
     ? createIntentAuthorityGeneralizedDecisionAdapter(intentStore, options.criterionCatalog)
     : undefined;
-  const truthPipeline = options.truthPipeline ?? createConfiguredTruthPipeline(config.truthMode ?? "v36-offline");
   const decisionEvidenceProvider = options.decisionEvidenceProvider;
   const loop = new PollingRunWorkerLoop({
     pollMs: config.pollMs,
