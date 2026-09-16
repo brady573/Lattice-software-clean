@@ -393,6 +393,10 @@ export function renderSolandraAuthoritativeConversationPage(): string {
     )
     .replace(legacyPreparedResourceRendering, preparedResourceTrustRendering)
     .replace(
+      '        if (outcome.kind === "KNOWLEDGE") {\n          composer.innerHTML = renderKnowledge(outcome);',
+      '        if (outcome.kind === "KNOWLEDGE") {\n          const authorityContext = document.getElementById("conversationAuthorityContext");\n          if (authorityContext) authorityContext.hidden = true;\n          composer.innerHTML = renderKnowledge(outcome);',
+    )
+    .replace(
       '          renderPreparedResource(outcome.resource.title, options.preparedBody ?? outcome.resource.body);',
       '          renderPreparedResource(outcome.resource, outcome.knowledge, options.preparedBody ?? outcome.resource.body);',
     )
