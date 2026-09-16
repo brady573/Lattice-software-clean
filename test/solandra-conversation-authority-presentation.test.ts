@@ -8,106 +8,171 @@ type ConversationBody = {
   conversationResponse?: { factualAuthority?: boolean };
 };
 
+type TurnBody = {
+  status: string;
+  presentation?: { assistantMessage?: string };
+  conversationResponse?: { factualAuthority?: boolean };
+  proposalId?: string;
+  question?: string;
+  confirmationExample?: string;
+  knowledge?: unknown;
+  runId?: string;
+};
+
+type Outcome = {
+  kind: string;
+  resource?: {
+    title: string;
+    body: string;
+  };
+  knowledge?: unknown;
+  explanation?: string;
+};
+
 type RenderState = {
   visibleTurns: string[];
   authorityContextHidden: boolean;
 };
 
-function renderedConversationHandler(): (
-  body: ConversationBody,
+type TurnRecord = {
+  conversationId: string;
+  message: string;
+};
+
+type RenderOptions = {
+  recovered?: boolean;
+  preparedBody?: string;
+};
+
+function renderedTurnResponseHandler(): (
+  body: TurnBody,
+  record: TurnRecord,
+  setOrdinaryConversationContext: (visible: boolean) => void,
+  setClarification: (value: unknown) => void,
   appendSolandraTurn: (text: string) => void,
-  document: { getElementById(id: string): { hidden: boolean } | null },
+  renderOutcome: (outcome: unknown, presentation: unknown) => void,
+  setActiveWork: (work: unknown, cancellable: boolean) => void,
+  pollOutcome: (work: unknown) => Promise<void>,
 ) => Promise<void> {
   const html = renderSolandraAuthoritativeConversationPage();
-  const match = /if \(body\.status === "CONVERSATION_COMPLETED"\) \{([\s\S]*?)\n        \}\n        if \(body\.status === "COGNITIVE_ASSISTANCE_COMPLETED"\)/u.exec(html);
-  assert.ok(match?.[1], "Canonical rendered page must include direct conversation handling");
+  const match = /const handleTurnResponse = async \(body, record\) => \{([\s\S]*?)\n      \};\n\n      const postTurnRecord/u.exec(html);
+  assert.ok(match?.[1], "Canonical rendered page must include the structural turn-response dispatcher");
   return new Function(
     "body",
+    "record",
+    "setOrdinaryConversationContext",
+    "setClarification",
     "appendSolandraTurn",
-    "document",
-    `return (async () => { if (body.status === "CONVERSATION_COMPLETED") {${match[1]}\n        } })();`,
+    "renderOutcome",
+    "setActiveWork",
+    "pollOutcome",
+    `return (async () => {${match[1]}\n      })();`,
   ) as (
-    body: ConversationBody,
+    body: TurnBody,
+    record: TurnRecord,
+    setOrdinaryConversationContext: (visible: boolean) => void,
+    setClarification: (value: unknown) => void,
     appendSolandraTurn: (text: string) => void,
-    document: { getElementById(id: string): { hidden: boolean } | null },
+    renderOutcome: (outcome: unknown, presentation: unknown) => void,
+    setActiveWork: (work: unknown, cancellable: boolean) => void,
+    pollOutcome: (work: unknown) => Promise<void>,
   ) => Promise<void>;
 }
 
-function renderedKnowledgeHandler(): (
-  outcome: { kind: "KNOWLEDGE" },
+function renderedOutcomeHandler(): (
+  outcome: Outcome,
   presentation: { assistantMessage?: string },
-  options: { recovered?: boolean },
+  options: RenderOptions,
+  setOrdinaryConversationContext: (visible: boolean) => void,
   composer: { innerHTML: string },
-  renderKnowledge: (outcome: { kind: "KNOWLEDGE" }) => string,
+  renderKnowledge: (outcome: unknown) => string,
   appendSolandraTurn: (text: string) => void,
-  document: { getElementById(id: string): { hidden: boolean } | null },
+  renderPreparedResource: (resource: unknown, knowledge: unknown, body: string) => void,
 ) => void {
   const html = renderSolandraAuthoritativeConversationPage();
-  const match = /if \(outcome\.kind === "KNOWLEDGE"\) \{([\s\S]*?)\n        \}\n        if \(outcome\.kind === "ACTION_PREPARATION"\)/u.exec(html);
-  assert.ok(match?.[1], "Canonical rendered page must include governed Knowledge handling");
+  const match = /const renderOutcome = \(outcome, presentation, options = \{\}\) => \{([\s\S]*?)\n      \};\n\n      const productFailureMessage/u.exec(html);
+  assert.ok(match?.[1], "Canonical rendered page must include the governed outcome dispatcher");
   return new Function(
     "outcome",
     "presentation",
     "options",
+    "setOrdinaryConversationContext",
     "composer",
     "renderKnowledge",
     "appendSolandraTurn",
-    "document",
-    `if (outcome.kind === "KNOWLEDGE") {${match[1]}\n        }`,
+    "renderPreparedResource",
+    `let composerHasProductContent = false;${match[1]}`,
   ) as (
-    outcome: { kind: "KNOWLEDGE" },
+    outcome: Outcome,
     presentation: { assistantMessage?: string },
-    options: { recovered?: boolean },
+    options: RenderOptions,
+    setOrdinaryConversationContext: (visible: boolean) => void,
     composer: { innerHTML: string },
-    renderKnowledge: (outcome: { kind: "KNOWLEDGE" }) => string,
+    renderKnowledge: (outcome: unknown) => string,
     appendSolandraTurn: (text: string) => void,
-    document: { getElementById(id: string): { hidden: boolean } | null },
+    renderPreparedResource: (resource: unknown, knowledge: unknown, body: string) => void,
   ) => void;
 }
 
-async function renderConversationTurn(body: ConversationBody, state?: RenderState): Promise<RenderState> {
+function setConversationContext(state: RenderState, visible: boolean): void {
+  state.authorityContextHidden = !visible;
+}
+
+async function presentTurn(body: TurnBody, state?: RenderState): Promise<RenderState> {
   const current = state ?? { visibleTurns: [], authorityContextHidden: true };
-  const authorityContext = { hidden: current.authorityContextHidden };
-  const document = {
-    getElementById(id: string) {
-      return id === "conversationAuthorityContext" ? authorityContext : null;
-    },
-  };
-  const handler = renderedConversationHandler();
-  await handler(body, (text) => current.visibleTurns.push(text), document);
-  current.authorityContextHidden = authorityContext.hidden;
+  const handler = renderedTurnResponseHandler();
+  await handler(
+    body,
+    { conversationId: "conversation-1", message: "test message" },
+    (visible) => setConversationContext(current, visible),
+    () => {},
+    (text) => current.visibleTurns.push(text),
+    () => {},
+    () => {},
+    async () => {},
+  );
   return current;
 }
 
-function renderKnowledgeOutcome(state: RenderState): RenderState {
-  const authorityContext = { hidden: state.authorityContextHidden };
-  const document = {
-    getElementById(id: string) {
-      return id === "conversationAuthorityContext" ? authorityContext : null;
-    },
-  };
+function presentOutcome(
+  outcome: Outcome,
+  presentation: { assistantMessage?: string },
+  state: RenderState,
+): { composerHtml: string; preparedBody: string | null } {
   const composer = { innerHTML: "" };
-  const handler = renderedKnowledgeHandler();
+  let preparedBody: string | null = null;
+  const handler = renderedOutcomeHandler();
   handler(
-    { kind: "KNOWLEDGE" },
-    { assistantMessage: "I established the requested Knowledge and preserved its evidence below." },
+    outcome,
+    presentation,
     {},
+    (visible) => setConversationContext(state, visible),
     composer,
     () => "<section>Governed Knowledge</section>",
-    () => {},
-    document,
+    (text) => state.visibleTurns.push(text),
+    (_resource, _knowledge, body) => {
+      preparedBody = body;
+      composer.innerHTML = "<section>Prepared material</section>";
+    },
   );
-  assert.equal(composer.innerHTML, "<section>Governed Knowledge</section>");
-  state.authorityContextHidden = authorityContext.hidden;
-  return state;
+  return { composerHtml: composer.innerHTML, preparedBody };
+}
+
+async function presentOrdinaryConversation(
+  assistantMessage: string,
+  state?: RenderState,
+): Promise<RenderState> {
+  return await presentTurn({
+    status: "CONVERSATION_COMPLETED",
+    presentation: { assistantMessage },
+    conversationResponse: { factualAuthority: false },
+  }, state);
 }
 
 test("ordinary factual guidance remains unchanged while general-conversation context becomes visible", async () => {
-  const state = await renderConversationTurn({
-    status: "CONVERSATION_COMPLETED",
-    presentation: { assistantMessage: "A practical first step is to compare the two options under the conditions you actually expect." },
-    conversationResponse: { factualAuthority: false },
-  });
+  const state = await presentOrdinaryConversation(
+    "A practical first step is to compare the two options under the conditions you actually expect.",
+  );
 
   assert.deepEqual(state.visibleTurns, [
     "A practical first step is to compare the two options under the conditions you actually expect.",
@@ -120,11 +185,9 @@ test("ordinary factual guidance remains unchanged while general-conversation con
 });
 
 test("non-factual brainstorming stays natural and does not receive a source-verification warning", async () => {
-  const state = await renderConversationTurn({
-    status: "CONVERSATION_COMPLETED",
-    presentation: { assistantMessage: "Here are three playful names: Lantern Fox, Pebble & Pine, and Juniper Kite." },
-    conversationResponse: { factualAuthority: false },
-  });
+  const state = await presentOrdinaryConversation(
+    "Here are three playful names: Lantern Fox, Pebble & Pine, and Juniper Kite.",
+  );
 
   assert.deepEqual(state.visibleTurns, [
     "Here are three playful names: Lantern Fox, Pebble & Pine, and Juniper Kite.",
@@ -136,48 +199,78 @@ test("non-factual brainstorming stays natural and does not receive a source-veri
 test("governed Knowledge keeps its separate findings, uncertainty, and source presentation path", () => {
   const html = renderSolandraAuthoritativeConversationPage();
   const knowledgeStart = html.indexOf('const renderKnowledge = (knowledge) => {');
-  const outcomeStart = html.indexOf('const renderOutcome = (outcome, presentation, options = {}) => {');
-  assert.ok(knowledgeStart >= 0 && outcomeStart > knowledgeStart, "Governed Knowledge renderer must remain present");
-  const knowledgeRenderer = html.slice(knowledgeStart, outcomeStart);
+  const lifecycleStart = html.indexOf('const setOrdinaryConversationContext = (visible) => {');
+  assert.ok(knowledgeStart >= 0 && lifecycleStart > knowledgeStart, "Governed Knowledge renderer must remain present");
+  const knowledgeRenderer = html.slice(knowledgeStart, lifecycleStart);
   assert.match(knowledgeRenderer, /What remains uncertain/u);
   assert.match(knowledgeRenderer, /Sources/u);
   assert.doesNotMatch(knowledgeRenderer, /conversationAuthorityContext|General conversation/u);
 });
 
 test("conversation authority context follows conversation to governed Knowledge and back", async () => {
-  const state = await renderConversationTurn({
-    status: "CONVERSATION_COMPLETED",
-    presentation: { assistantMessage: "Start with a general explanation." },
-    conversationResponse: { factualAuthority: false },
-  });
+  const state = await presentOrdinaryConversation("Start with a general explanation.");
   assert.equal(state.authorityContextHidden, false);
 
-  renderKnowledgeOutcome(state);
+  const rendered = presentOutcome(
+    { kind: "KNOWLEDGE" },
+    { assistantMessage: "I established the requested Knowledge and preserved its evidence below." },
+    state,
+  );
+  assert.equal(rendered.composerHtml, "<section>Governed Knowledge</section>");
   assert.equal(state.authorityContextHidden, true);
 
-  await renderConversationTurn({
-    status: "CONVERSATION_COMPLETED",
-    presentation: { assistantMessage: "Now let's brainstorm what to do with those findings." },
-    conversationResponse: { factualAuthority: false },
-  }, state);
+  await presentOrdinaryConversation("Now let's brainstorm what to do with those findings.", state);
   assert.equal(state.authorityContextHidden, false);
   assert.deepEqual(state.visibleTurns, [
     "Start with a general explanation.",
+    "I established the requested Knowledge and preserved its evidence below.",
     "Now let's brainstorm what to do with those findings.",
   ]);
 });
 
-test("two-turn ordinary conversation remains fluid without repeated trust-warning text", async () => {
-  const state = await renderConversationTurn({
-    status: "CONVERSATION_COMPLETED",
-    presentation: { assistantMessage: "Start with the smaller change and observe the result." },
-    conversationResponse: { factualAuthority: false },
-  });
-  await renderConversationTurn({
-    status: "CONVERSATION_COMPLETED",
-    presentation: { assistantMessage: "Given that result, the second option may be worth comparing next." },
-    conversationResponse: { factualAuthority: false },
+test("direct Recommendation-family presentation hides general conversation and later conversation reveals it", async () => {
+  const state = await presentOrdinaryConversation("Give me a general framing first.");
+  assert.equal(state.authorityContextHidden, false);
+
+  await presentTurn({
+    status: "RECOMMENDATION_REFERENCE_RESOLVED",
+    presentation: { assistantMessage: "I restored the referenced recommendation without changing its authority." },
   }, state);
+  assert.equal(state.authorityContextHidden, true);
+  assert.equal(state.visibleTurns.at(-1), "I restored the referenced recommendation without changing its authority.");
+
+  await presentOrdinaryConversation("Now explain the trade-off conversationally.", state);
+  assert.equal(state.authorityContextHidden, false);
+  assert.equal(state.visibleTurns.at(-1), "Now explain the trade-off conversationally.");
+});
+
+test("ACTION_PREPARATION presentation hides general conversation and later conversation reveals it", async () => {
+  const state = await presentOrdinaryConversation("Help me think through the wording first.");
+  assert.equal(state.authorityContextHidden, false);
+
+  const rendered = presentOutcome({
+    kind: "ACTION_PREPARATION",
+    resource: {
+      title: "Prepared note",
+      body: "Editable prepared material",
+    },
+  }, {}, state);
+  assert.equal(rendered.preparedBody, "Editable prepared material");
+  assert.equal(rendered.composerHtml, "<section>Prepared material</section>");
+  assert.equal(state.authorityContextHidden, true);
+  assert.equal(state.visibleTurns.at(-1), "I prepared editable material in the Composer. Nothing has been sent or executed.");
+
+  await presentOrdinaryConversation("Let's discuss whether that wording sounds right.", state);
+  assert.equal(state.authorityContextHidden, false);
+  assert.equal(state.visibleTurns.at(-1), "Let's discuss whether that wording sounds right.");
+});
+
+test("two-turn ordinary conversation remains fluid without repeated trust-warning text", async () => {
+  const state = await presentOrdinaryConversation("Start with the smaller change and observe the result.");
+  await presentOrdinaryConversation(
+    "Given that result, the second option may be worth comparing next.",
+    state,
+  );
 
   assert.deepEqual(state.visibleTurns, [
     "Start with the smaller change and observe the result.",
@@ -193,12 +286,14 @@ test("structural factual-authority metadata controls the context without prose i
     presentation: { assistantMessage: "This sentence could sound factual, but presentation does not classify its words." },
   };
   const before = structuredClone(body);
-  const state = await renderConversationTurn(body);
+  const state = await presentTurn(body);
 
   assert.equal(state.authorityContextHidden, true);
   assert.deepEqual(body, before);
 
   const html = renderSolandraAuthoritativeConversationPage();
-  assert.match(html, /body\.conversationResponse\?\.factualAuthority === false/u);
+  assert.match(html, /setOrdinaryConversationContext\(body\.conversationResponse\?\.factualAuthority === false\)/u);
+  assert.match(html, /const handleTurnResponse = async \(body, record\) => \{\n        setOrdinaryConversationContext\(false\);/u);
+  assert.match(html, /const renderOutcome = \(outcome, presentation, options = \{\}\) => \{\n        setOrdinaryConversationContext\(false\);/u);
   assert.doesNotMatch(html, /General guidance · Not verified against sources/u);
 });
