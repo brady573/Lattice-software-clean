@@ -65,7 +65,7 @@ class ProposalProvider implements ModelProvider {
       response: {
         id: `issue-55-response-${this.calls}`,
         model: request.model,
-        output: [{ type: "text", text: JSON.stringify({ mode: "GOVERNED", projection: this.responseProposal }) }],
+        output: [{ type: "text", text: JSON.stringify({ mode: "GOVERNED", response: null, projection: this.responseProposal }) }],
       },
       route: {
         actualProvider: this.kind,
