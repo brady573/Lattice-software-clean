@@ -42,7 +42,7 @@ function renderedKnowledgeHandler(): (
   document: { getElementById(id: string): { hidden: boolean } | null },
 ) => void {
   const html = renderSolandraAuthoritativeConversationPage();
-  const match = /if \(outcome\.kind === "KNOWLEDGE"\) \{([\s\S]*?)\n        \}\n        if \(outcome\.kind === "RESOURCE"\)/u.exec(html);
+  const match = /if \(outcome\.kind === "KNOWLEDGE"\) \{([\s\S]*?)\n        \}\n        if \(outcome\.kind === "ACTION_PREPARATION"\)/u.exec(html);
   assert.ok(match?.[1], "Canonical rendered page must include governed Knowledge handling");
   return new Function(
     "outcome",
