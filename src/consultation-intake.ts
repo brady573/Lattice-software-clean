@@ -389,22 +389,12 @@ function conversationResponsePayload(response: ConversationResponse): Record<str
 
 function conversationPresentationPayload(response: ConversationResponse): Record<string, unknown> {
   const composition = response.presentation ?? {
-    opening: response.content,
+    conversationText: response.content,
     composerBody: null,
-    closing: null,
   };
-  const assistantMessage = [composition.opening, composition.closing]
-    .filter((part): part is string => part !== null)
-    .join("\n\n");
   return {
-    assistantMessage,
-    conversation: {
-      opening: composition.opening,
-      closing: composition.closing,
-    },
-    composer: composition.composerBody === null
-      ? null
-      : { body: composition.composerBody },
+    conversationText: composition.conversationText,
+    composerBody: composition.composerBody,
   };
 }
 

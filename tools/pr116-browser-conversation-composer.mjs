@@ -16,7 +16,10 @@ const cases = [
   {
     id: "cat6-canary",
     message: "Give me instructions on how to setup a cat6 patch panel in my house",
-    opening: "Sure — the cleanest way to approach this is to treat the patch panel as the fixed termination point for your home runs.",
+    conversationText: [
+      "Sure — the cleanest way to approach this is to treat the patch panel as the fixed termination point for your home runs.",
+      "If you want, we can also turn that into a room-by-room labeling and test checklist.",
+    ].join("\n\n"),
     body: [
       "1. Choose a reachable location for the patch panel and network equipment.",
       "2. Mount the panel securely and route each cable to it with enough service slack to work comfortably.",
@@ -26,12 +29,14 @@ const cases = [
       "6. Add strain relief and cable management so the terminations are not supporting cable weight.",
       "7. Terminate the room ends consistently, then test every run end-to-end before connecting switches or other equipment.",
     ].join("\n"),
-    closing: "If you want, we can also turn that into a room-by-room labeling and test checklist.",
   },
   {
     id: "moving-checklist",
     message: "Make me a detailed moving-day checklist for relocating from one apartment to another without forgetting the practical handoff tasks.",
-    opening: "A good moving-day checklist should separate what must happen before loading, during the move, and at each handoff.",
+    conversationText: [
+      "A good moving-day checklist should separate what must happen before loading, during the move, and at each handoff.",
+      "You can keep this as the master list and add address-specific tasks underneath each section.",
+    ].join("\n\n"),
     body: [
       "Before loading",
       "- Pack a first-night bag and keep documents, keys, chargers, medicine, and valuables with you.",
@@ -44,12 +49,14 @@ const cases = [
       "- Return keys or access devices as agreed and save the handoff confirmation.",
       "- Photograph the new apartment before unpacking and note any pre-existing issues.",
     ].join("\n"),
-    closing: "You can keep this as the master list and add address-specific tasks underneath each section.",
   },
   {
     id: "piano-plan",
     message: "Create a four-week practice plan for learning a short piano piece, with a clear focus for each week and concrete practice tasks.",
-    opening: "Here’s a four-week structure that keeps the piece moving forward without making every session about full-speed play-throughs.",
+    conversationText: [
+      "Here’s a four-week structure that keeps the piece moving forward without making every session about full-speed play-throughs.",
+      "If you tell me roughly how long you practice each day, we can scale the sessions without changing the four-week structure.",
+    ].join("\n\n"),
     body: [
       "Week 1 — Map the piece",
       "- Mark sections, fingerings, difficult transitions, and a comfortable starting tempo.",
@@ -64,12 +71,12 @@ const cases = [
       "- Alternate full play-throughs with focused repair of the few remaining weak spots.",
       "- Record at least one run and use it to choose the final refinements.",
     ].join("\n"),
-    closing: "If you tell me roughly how long you practice each day, we can scale the sessions without changing the four-week structure.",
   },
 ];
+
 const shortFollowUp = {
   message: "What should I focus on first?",
-  opening: "Start with the first concrete item that reduces uncertainty for the rest of the work, then reassess before adding more detail.",
+  conversationText: "Start with the first concrete item that reduces uncertainty for the rest of the work, then reassess before adding more detail.",
 };
 
 mkdirSync(artifactDir, { recursive: true });
@@ -150,14 +157,14 @@ function modelOutputFor(prompt) {
     if (prompt.includes(`Current USER message: ${entry.message}`)) {
       return {
         mode: "CONVERSATION",
-        presentation: { opening: entry.opening, composerBody: entry.body, closing: entry.closing },
+        presentation: { conversationText: entry.conversationText, composerBody: entry.body },
       };
     }
   }
   if (prompt.includes(`Current USER message: ${shortFollowUp.message}`)) {
     return {
       mode: "CONVERSATION",
-      presentation: { opening: shortFollowUp.opening, composerBody: null, closing: null },
+      presentation: { conversationText: shortFollowUp.conversationText, composerBody: null },
     };
   }
   throw new Error("PR #116 browser model fixture received an unexpected prompt.");
@@ -303,24 +310,23 @@ async function observeCase(cdp, entry) {
     const cue=document.getElementById('conversationAuthorityContext');
     const solandra=turns.filter((turn)=>turn.solandra);
     const user=turns.filter((turn)=>turn.user);
-    if(solandra.length<${before + 2}||!composer||!cue)return null;
+    if(solandra.length<${before + 1}||!composer||!cue)return null;
     return {turns,composerText:composer.textContent||'',cueHidden:cue.hidden,cueText:cue.textContent||'',bodyText:document.body.innerText};
   })()`));
 
-  const solandraTurns = observed.turns.filter((turn) => turn.solandra).slice(-2).map((turn) => turn.text);
+  const lastSolandra = observed.turns.filter((turn) => turn.solandra).at(-1)?.text;
   const lastUser = observed.turns.filter((turn) => turn.user).at(-1)?.text;
   assert.equal(lastUser, entry.message);
-  assert.deepEqual(solandraTurns, [entry.opening, entry.closing]);
+  assert.equal(lastSolandra, entry.conversationText);
   assert.equal(observed.composerText, entry.body);
   assert.equal(observed.cueHidden, false);
   assert.equal(observed.cueText.trim(), "General conversation");
-  assert.ok(solandraTurns.every((turn) => !turn.includes(entry.body)), `${entry.id} body must not be duplicated into Conversation.`);
+  assert.ok(!lastSolandra.includes(entry.body), `${entry.id} body must not be duplicated into Conversation.`);
   assert.doesNotMatch(observed.bodyText, /CONVERSATION_COMPLETED|composerBody|factualAuthority|NON_AUTHORITATIVE_CONVERSATION|runId/u);
   return {
     id: entry.id,
     userTurn: lastUser,
-    conversationOpening: solandraTurns[0],
-    conversationClosing: solandraTurns[1],
+    conversationText: lastSolandra,
     composerBody: observed.composerText,
     generalConversationVisible: !observed.cueHidden,
   };
@@ -378,7 +384,7 @@ async function main() {
         cueHidden:document.getElementById('conversationAuthorityContext')?.hidden ?? true,
       };
     })()`));
-    assert.equal(continuity.lastSolandra, shortFollowUp.opening);
+    assert.equal(continuity.lastSolandra, shortFollowUp.conversationText);
     assert.equal(continuity.composerText, composerBeforeFollowUp);
     assert.equal(continuity.cueHidden, false);
     evidence.continuity = continuity;

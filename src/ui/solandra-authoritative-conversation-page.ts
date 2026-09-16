@@ -315,28 +315,19 @@ const capabilityScript = `
   </script>`;
 
 const directConversationHandling = `        if (body.status === "CONVERSATION_COMPLETED") {
-          const structuralConversation = body.presentation?.conversation;
-          const opening = typeof structuralConversation?.opening === "string"
-            ? structuralConversation.opening.trim()
+          const conversationText = typeof body.presentation?.conversationText === "string"
+            ? body.presentation.conversationText.trim()
             : "";
-          const closing = typeof structuralConversation?.closing === "string"
-            ? structuralConversation.closing.trim()
-            : "";
-          const legacyAssistantMessage = typeof body.presentation?.assistantMessage === "string"
-            ? body.presentation.assistantMessage.trim()
-            : "";
-          const firstConversationMessage = opening || legacyAssistantMessage;
-          if (!firstConversationMessage) throw new Error("Solandra returned no usable response.");
+          if (!conversationText) throw new Error("Solandra returned no usable response.");
           setOrdinaryConversationContext(body.conversationResponse?.factualAuthority === false);
-          appendSolandraTurn(firstConversationMessage);
-          const composerBody = typeof body.presentation?.composer?.body === "string"
-            ? body.presentation.composer.body.trim()
+          appendSolandraTurn(conversationText);
+          const composerBody = typeof body.presentation?.composerBody === "string"
+            ? body.presentation.composerBody.trim()
             : "";
           if (composerBody) {
             composerHasProductContent = true;
             composer.innerHTML = '<div class="conversation-composer-body" data-presentation-role="ordinary-generated-work">' + escapeHtml(composerBody) + '</div>';
           }
-          if (opening && closing) appendSolandraTurn(closing);
           return;
         }
         if (body.status === "COGNITIVE_ASSISTANCE_COMPLETED") {

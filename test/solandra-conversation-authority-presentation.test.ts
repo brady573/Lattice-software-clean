@@ -4,13 +4,17 @@ import { renderSolandraAuthoritativeConversationPage } from "../src/ui/solandra-
 
 type ConversationBody = {
   status: "CONVERSATION_COMPLETED";
-  presentation: { assistantMessage: string };
+  presentation: { conversationText: string; composerBody: string | null };
   conversationResponse?: { factualAuthority?: boolean };
 };
 
 type TurnBody = {
   status: string;
-  presentation?: { assistantMessage?: string };
+  presentation?: {
+    assistantMessage?: string;
+    conversationText?: string;
+    composerBody?: string | null;
+  };
   conversationResponse?: { factualAuthority?: boolean };
   proposalId?: string;
   question?: string;
@@ -159,12 +163,12 @@ function presentOutcome(
 }
 
 async function presentOrdinaryConversation(
-  assistantMessage: string,
+  conversationText: string,
   state?: RenderState,
 ): Promise<RenderState> {
   return await presentTurn({
     status: "CONVERSATION_COMPLETED",
-    presentation: { assistantMessage },
+    presentation: { conversationText, composerBody: null },
     conversationResponse: { factualAuthority: false },
   }, state);
 }
@@ -283,7 +287,10 @@ test("two-turn ordinary conversation remains fluid without repeated trust-warnin
 test("structural factual-authority metadata controls the context without prose inference or mutation", async () => {
   const body: ConversationBody = {
     status: "CONVERSATION_COMPLETED",
-    presentation: { assistantMessage: "This sentence could sound factual, but presentation does not classify its words." },
+    presentation: {
+      conversationText: "This sentence could sound factual, but presentation does not classify its words.",
+      composerBody: null,
+    },
   };
   const before = structuredClone(body);
   const state = await presentTurn(body);

@@ -11,12 +11,8 @@ import { renderSolandraAuthoritativeConversationPage } from "../src/ui/solandra-
 type StructuredConversationBody = {
   status: "CONVERSATION_COMPLETED";
   presentation: {
-    assistantMessage: string;
-    conversation: {
-      opening: string;
-      closing: string | null;
-    };
-    composer: { body: string } | null;
+    conversationText: string;
+    composerBody: string | null;
   };
   conversationResponse: { factualAuthority: false };
 };
@@ -92,22 +88,20 @@ function escapeHtml(value: unknown): string {
     .replaceAll("'", "&#039;");
 }
 
-test("ordinary cognition carries structural Conversation and Composer roles through durable turn replay", async () => {
+test("ordinary cognition carries two-surface Conversation and Composer presentation through durable turn replay", async () => {
   const provider = new QueueConversationProvider([
     {
       mode: "CONVERSATION",
       presentation: {
-        opening: "A brief frame for the work.",
+        conversationText: "A brief frame for the work.\n\nWe can refine any part of that next.",
         composerBody: ["Substantive body", "", "  ", "- first item", "", "- second item"],
-        closing: "We can refine any part of that next.",
       },
     },
     {
       mode: "CONVERSATION",
       presentation: {
-        opening: "A short conversational continuation.",
+        conversationText: "A short conversational continuation.",
         composerBody: null,
-        closing: null,
       },
     },
   ]);
@@ -127,21 +121,17 @@ test("ordinary cognition carries structural Conversation and Composer roles thro
     assert.equal(first.statusCode, 200);
     const firstBody = first.json();
     assert.equal(firstBody.status, "CONVERSATION_COMPLETED");
-    assert.deepEqual(firstBody.presentation.conversation, {
-      opening: "A brief frame for the work.",
-      closing: "We can refine any part of that next.",
+    assert.deepEqual(firstBody.presentation, {
+      conversationText: "A brief frame for the work.\n\nWe can refine any part of that next.",
+      composerBody: "Substantive body\n\n- first item\n\n- second item",
     });
-    assert.deepEqual(firstBody.presentation.composer, {
-      body: "Substantive body\n\n- first item\n\n- second item",
-    });
-    assert.equal(firstBody.presentation.assistantMessage, "A brief frame for the work.\n\nWe can refine any part of that next.");
     assert.equal(firstBody.conversationResponse.authority, "NON_AUTHORITATIVE_CONVERSATION");
     assert.equal(firstBody.conversationResponse.factualAuthority, false);
 
     const replay = await app.inject(firstRequest);
     assert.equal(replay.statusCode, 200);
     assert.deepEqual(replay.json().presentation, firstBody.presentation);
-    assert.equal(provider.requests.length, 1, "Durable replay must reuse the same structural presentation.");
+    assert.equal(provider.requests.length, 1, "Durable replay must reuse the same two-surface presentation.");
 
     const second = await app.inject({
       method: "POST",
@@ -150,11 +140,10 @@ test("ordinary cognition carries structural Conversation and Composer roles thro
     });
     assert.equal(second.statusCode, 200);
     const secondBody = second.json();
-    assert.deepEqual(secondBody.presentation.conversation, {
-      opening: "A short conversational continuation.",
-      closing: null,
+    assert.deepEqual(secondBody.presentation, {
+      conversationText: "A short conversational continuation.",
+      composerBody: null,
     });
-    assert.equal(secondBody.presentation.composer, null);
 
     const continuity = await app.inject({
       method: "GET",
@@ -175,9 +164,8 @@ test("Composer segment normalization rejects an empty normalized body", async ()
     {
       mode: "CONVERSATION",
       presentation: {
-        opening: "A brief frame.",
+        conversationText: "A brief frame.",
         composerBody: ["", "   ", "\t"],
-        closing: null,
       },
     },
   ]);
@@ -192,7 +180,7 @@ test("Composer segment normalization rejects an empty normalized body", async ()
   }));
 });
 
-test("rendered ordinary composition keeps framing in Conversation, work in Composer, and the cue scoped to Conversation", () => {
+test("rendered ordinary composition keeps conversational content together in Conversation and substantive work in Composer", () => {
   const handler = renderedConversationCompletionHandler();
   const turns: string[] = [];
   const composer = { innerHTML: "<p>prior composer state</p>" };
@@ -201,17 +189,13 @@ test("rendered ordinary composition keeps framing in Conversation, work in Compo
   handler({
     status: "CONVERSATION_COMPLETED",
     presentation: {
-      assistantMessage: "Opening frame.\n\nClosing continuation.",
-      conversation: {
-        opening: "Opening frame.",
-        closing: "Closing continuation.",
-      },
-      composer: { body: "Substantive body with <literal> text." },
+      conversationText: "Opening frame.\n\nClosing continuation.",
+      composerBody: "Substantive body with <literal> text.",
     },
     conversationResponse: { factualAuthority: false },
   }, (text) => turns.push(text), (visible) => { generalConversationVisible = visible; }, composer, escapeHtml);
 
-  assert.deepEqual(turns, ["Opening frame.", "Closing continuation."]);
+  assert.deepEqual(turns, ["Opening frame.\n\nClosing continuation."]);
   assert.equal(generalConversationVisible, true);
   assert.match(composer.innerHTML, /data-presentation-role="ordinary-generated-work"/u);
   assert.match(composer.innerHTML, /Substantive body with &lt;literal&gt; text\./u);
@@ -221,12 +205,8 @@ test("rendered ordinary composition keeps framing in Conversation, work in Compo
   handler({
     status: "CONVERSATION_COMPLETED",
     presentation: {
-      assistantMessage: "A brief follow-up.",
-      conversation: {
-        opening: "A brief follow-up.",
-        closing: null,
-      },
-      composer: null,
+      conversationText: "A brief follow-up.",
+      composerBody: null,
     },
     conversationResponse: { factualAuthority: false },
   }, (text) => turns.push(text), (visible) => { generalConversationVisible = visible; }, composer, escapeHtml);
@@ -236,10 +216,11 @@ test("rendered ordinary composition keeps framing in Conversation, work in Compo
   assert.equal(generalConversationVisible, true);
 });
 
-test("ordinary Composer placement is structural and introduces no prose classifier", () => {
+test("ordinary Composer placement is two-surface structural output and introduces no prose classifier", () => {
   const html = renderSolandraAuthoritativeConversationPage();
-  assert.match(html, /body\.presentation\?\.composer\?\.body/u);
-  assert.match(html, /body\.presentation\?\.conversation/u);
+  assert.match(html, /body\.presentation\?\.conversationText/u);
+  assert.match(html, /body\.presentation\?\.composerBody/u);
+  assert.doesNotMatch(html, /structuralConversation|presentation\?\.conversation\?\.|presentation\?\.composer\?\./u);
   assert.doesNotMatch(html, /Cat6|patch panel|step-by-step|markdown|first sentence|last sentence/iu);
   assert.match(html, /data-presentation-role="ordinary-generated-work"/u);
 });

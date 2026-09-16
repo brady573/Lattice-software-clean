@@ -8,13 +8,12 @@ const migrations = [
 ] as const;
 const MAX_ID_CHARS = 256;
 const MAX_CONTENT_CHARS = 32_000;
-const MAX_FRAME_CHARS = 4_000;
+const MAX_CONVERSATION_CHARS = 8_000;
 const MAX_COMPOSER_CHARS = 24_000;
 
 export interface ConversationResponsePresentation {
-  opening: string;
+  conversationText: string;
   composerBody: string | null;
-  closing: string | null;
 }
 
 export interface ConversationResponse {
@@ -23,7 +22,7 @@ export interface ConversationResponse {
   sourceMessageId: string;
   /** Full ordinary response text retained for bounded cognition continuity. */
   content: string;
-  /** Structural surface roles. Older rows may legitimately omit this field. */
+  /** Two-surface ordinary presentation. Older rows may legitimately omit this field. */
   presentation?: ConversationResponsePresentation;
   origin: "SOLANDRA";
   authority: "NON_AUTHORITATIVE_CONVERSATION";
@@ -58,14 +57,13 @@ function normalizeNullableText(value: string | null, name: string, max: number):
 
 function normalizedPresentation(value: ConversationResponsePresentation): ConversationResponsePresentation {
   return {
-    opening: boundedText(value.opening, "Conversation opening", MAX_FRAME_CHARS),
+    conversationText: boundedText(value.conversationText, "Conversation text", MAX_CONVERSATION_CHARS),
     composerBody: normalizeNullableText(value.composerBody, "Conversation Composer body", MAX_COMPOSER_CHARS),
-    closing: normalizeNullableText(value.closing, "Conversation closing", MAX_FRAME_CHARS),
   };
 }
 
 function presentationText(value: ConversationResponsePresentation): string {
-  return [value.opening, value.composerBody, value.closing]
+  return [value.conversationText, value.composerBody]
     .filter((part): part is string => part !== null)
     .join("\n\n");
 }
@@ -157,16 +155,14 @@ function presentationFromRow(value: unknown): ConversationResponsePresentation |
   }
   const record = value as Record<string, unknown>;
   if (
-    typeof record.opening !== "string"
+    typeof record.conversationText !== "string"
     || !(typeof record.composerBody === "string" || record.composerBody === null)
-    || !(typeof record.closing === "string" || record.closing === null)
   ) {
     throw new Error("Persisted conversation response presentation is invalid.");
   }
   return normalizedPresentation({
-    opening: record.opening,
+    conversationText: record.conversationText,
     composerBody: record.composerBody,
-    closing: record.closing,
   });
 }
 

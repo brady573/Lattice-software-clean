@@ -18,17 +18,14 @@ const cases = [
   {
     id: 'cat6-canary',
     message: 'Give me instructions on how to setup a cat6 patch panel in my house',
-    requireClosing: true,
   },
   {
     id: 'moving-checklist',
     message: 'Make me a detailed moving-day checklist for relocating from one apartment to another without forgetting the practical handoff tasks.',
-    requireClosing: false,
   },
   {
     id: 'piano-practice-plan',
     message: 'Create a four-week practice plan for learning a short piano piece, with a clear focus for each week and concrete practice tasks.',
-    requireClosing: false,
   },
 ];
 
@@ -50,20 +47,15 @@ for (const entry of cases) {
   assert.equal(result.invocationProvenance.routeProvenance, 'COMPLETE');
 
   const presentation = conversationPresentationFor(result);
-  assert.ok(presentation.opening.trim().length > 0, `${entry.id} requires conversational framing.`);
+  assert.ok(presentation.conversationText.trim().length > 0, `${entry.id} requires Conversation content.`);
   assert.ok((presentation.composerBody?.trim().length ?? 0) > 0, `${entry.id} requires substantive Composer work.`);
-  if (entry.requireClosing) {
-    assert.ok((presentation.closing?.trim().length ?? 0) > 0, `${entry.id} requires a conversational continuation/closing.`);
-  }
-  assert.notEqual(presentation.opening.trim(), presentation.composerBody?.trim());
-  if (presentation.closing) assert.notEqual(presentation.closing.trim(), presentation.composerBody?.trim());
+  assert.notEqual(presentation.conversationText.trim(), presentation.composerBody?.trim());
 
   evidence.push({
     id: entry.id,
     mode: result.mode,
-    openingLength: presentation.opening.length,
+    conversationTextLength: presentation.conversationText.length,
     composerBodyLength: presentation.composerBody?.length ?? 0,
-    closingLength: presentation.closing?.length ?? 0,
     actualProvider: result.invocationProvenance.actualProvider,
     actualModel: result.invocationProvenance.actualModel,
     routeProvenance: result.invocationProvenance.routeProvenance,

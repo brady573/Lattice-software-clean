@@ -55,19 +55,17 @@ export const solandraSemanticProposalSchema = z.object({
 export type SolandraSemanticProposal = z.infer<typeof solandraSemanticProposalSchema>;
 
 export const solandraConversationPresentationSchema = z.object({
-  opening: z.string().min(1).max(4_000),
+  conversationText: z.string().min(1).max(8_000),
   composerBody: z.string().min(1).max(16_000).nullable(),
-  closing: z.string().min(1).max(4_000).nullable(),
 }).strict();
 export type SolandraConversationPresentation = z.infer<typeof solandraConversationPresentationSchema>;
 
 const solandraConversationPresentationOutputSchema = z.object({
-  opening: z.string().min(1).max(4_000),
+  conversationText: z.string().min(1).max(8_000),
   composerBody: z.union([
     z.string().max(16_000),
     z.array(z.string().max(4_000)).min(1).max(64),
   ]).nullable(),
-  closing: z.string().min(1).max(4_000).nullable(),
 }).strict();
 
 type SolandraConversationPresentationOutput = z.infer<typeof solandraConversationPresentationOutputSchema>;
@@ -136,7 +134,7 @@ export type SolandraConversationCognitionResult = Readonly<{
   mode: "CONVERSATION";
   /** Full ordinary response text retained for bounded cognition continuity and legacy injected runtimes. */
   response: string;
-  /** Structural presentation roles. Absence is compatibility-only and means response belongs wholly in Conversation. */
+  /** Two-surface ordinary presentation. Absence is compatibility-only and means response belongs wholly in Conversation. */
   presentation?: SolandraConversationPresentation;
   invocationProvenance: ModelInvocationProvenance;
 }>;
@@ -165,14 +163,13 @@ export function conversationPresentationFor(
 ): SolandraConversationPresentation {
   if (result.presentation) return structuredClone(result.presentation);
   return {
-    opening: result.response.trim(),
+    conversationText: result.response.trim(),
     composerBody: null,
-    closing: null,
   };
 }
 
 export function conversationPresentationText(presentation: SolandraConversationPresentation): string {
-  return [presentation.opening, presentation.composerBody, presentation.closing]
+  return [presentation.conversationText, presentation.composerBody]
     .filter((part): part is string => typeof part === "string" && part.trim().length > 0)
     .map((part) => part.trim())
     .join("\n\n");
@@ -185,9 +182,8 @@ function normalizedConversationPresentation(
     ? presentation.composerBody.map((part) => part.trim()).filter((part) => part.length > 0).join("\n\n")
     : presentation.composerBody?.trim() ?? null;
   return solandraConversationPresentationSchema.parse({
-    opening: presentation.opening,
+    conversationText: presentation.conversationText,
     composerBody,
-    closing: presentation.closing,
   });
 }
 
@@ -257,9 +253,8 @@ function buildCognitionRequest(model: string, input: SolandraCognitionInput): Ca
   const conversationShape = JSON.stringify({
     mode: "CONVERSATION",
     presentation: {
-      opening: "brief natural conversational framing or the complete short response",
+      conversationText: "natural conversational framing/content for this turn",
       composerBody: "substantive work as one string or an array of text segments when useful, otherwise null",
-      closing: "brief natural continuation or closing when useful, otherwise null",
     },
   });
 
@@ -275,11 +270,11 @@ function buildCognitionRequest(model: string, input: SolandraCognitionInput): Ca
           "Presentation must remain faithful to the strongest Product state Lattice actually supplies. A Recommendation is not a USER choice; a USER choice is not authorization; authorization is not execution; execution is not verification. Never present a stronger Lattice state than the supplied state establishes.",
           "Never present Lattice or Solandra as having started, performed, completed, sent, applied, or verified an external action unless corresponding governed action state is supplied. This does not prevent ordinary discussion of actions the USER says they performed or hypothetical actions.",
           "Use CONVERSATION for ordinary discussion, explanation, brainstorming, transformation of USER material, hypothetical reasoning, or other non-consequential conversation that does not materially require a Lattice trust boundary. Answer the USER directly and naturally.",
-          "Conversation and Composer are simultaneous presentation surfaces. Conversation frames and continues the interaction; Composer can carry substantial ordinary generated work when that makes the response easier to use.",
-          "For a short ordinary response that does not warrant a substantive Composer body, put the response in opening, set composerBody to null, and use closing only if it adds a natural continuation.",
-          "For an ordinary response with substantial structured work such as a procedure, checklist, plan, detailed explanation, or similar body, keep opening and closing conversational and concise, place the substantive body in composerBody, and do not duplicate that body into opening or closing.",
+          "Conversation and Composer are simultaneous presentation surfaces. conversationText carries the natural conversational framing/content for the turn; Composer can carry substantial ordinary generated work when that makes the response easier to use.",
+          "For a short ordinary response that does not warrant substantive Composer work, put the whole response in conversationText and set composerBody to null.",
+          "For an ordinary response with substantial structured work such as a procedure, checklist, plan, detailed explanation, or similar body, put the natural conversational framing or continuation together in conversationText, place the substantive work in composerBody, and do not duplicate the Composer body into conversationText.",
           "composerBody may be one string or an array of text segments; both representations mean the same Composer presentation role and are normalized by Lattice without semantic reclassification.",
-          "Choose these presentation roles from the meaning and shape of the work itself, not from keywords, punctuation, formatting tokens, or a fixed domain taxonomy.",
+          "Choose the Conversation and Composer presentation surfaces from the meaning and shape of the work itself, not from keywords, punctuation, formatting tokens, or a fixed domain taxonomy.",
           "Composer placement does not grant authority. All CONVERSATION output remains ordinary non-authoritative generated guidance even when part of it is placed in Composer.",
           "A conversational answer may contain ordinary explanatory prose. Do not claim that conversational prose is verified or governed Knowledge. Do not add repetitive authority warnings unless they are useful to the USER's request.",
           "Use GOVERNED only when the current request materially requires a framework trust boundary: establishing or refreshing trustworthy external factual Knowledge; exact historical Knowledge provenance or transformation; a durable Recommendation or exact option/choice reference; material meaning that must enter Intent Integrity for downstream governed work; or preparation of a governed resource/action boundary.",
@@ -418,7 +413,7 @@ export class ModelSolandraCognitiveRuntime implements SolandraCognitiveRuntime {
     if (parsed.mode === "CONVERSATION") {
       const presentation: SolandraConversationPresentation = "presentation" in parsed
         ? normalizedConversationPresentation(parsed.presentation)
-        : { opening: parsed.response.trim(), composerBody: null, closing: null };
+        : { conversationText: parsed.response.trim(), composerBody: null };
       return Object.freeze({
         mode: "CONVERSATION" as const,
         response: conversationPresentationText(presentation),
