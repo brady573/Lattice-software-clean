@@ -98,7 +98,7 @@ test("ordinary cognition carries structural Conversation and Composer roles thro
       mode: "CONVERSATION",
       presentation: {
         opening: "A brief frame for the work.",
-        composerBody: "Substantive body\n- first item\n- second item",
+        composerBody: ["Substantive body", "- first item", "- second item"],
         closing: "We can refine any part of that next.",
       },
     },
@@ -132,7 +132,7 @@ test("ordinary cognition carries structural Conversation and Composer roles thro
       closing: "We can refine any part of that next.",
     });
     assert.deepEqual(firstBody.presentation.composer, {
-      body: "Substantive body\n- first item\n- second item",
+      body: "Substantive body\n\n- first item\n\n- second item",
     });
     assert.equal(firstBody.presentation.assistantMessage, "A brief frame for the work.\n\nWe can refine any part of that next.");
     assert.equal(firstBody.conversationResponse.authority, "NON_AUTHORITATIVE_CONVERSATION");
