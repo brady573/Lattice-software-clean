@@ -92,6 +92,13 @@ function parseGroqProviderError(text: string): ModelProviderUpstreamError | null
     : parsed;
 }
 
+function isKnownGroqStructuredContractRejection(error: ModelProviderUpstreamError | null): boolean {
+  return error?.code === "invalid_request_error"
+    && error.type === "invalid_request_error"
+    && error.param === "response_format"
+    && error.message?.toLowerCase().startsWith("schema must ") === true;
+}
+
 function structuredResponseFormat(request: CanonicalModelRequest): unknown {
   const contract = request.structuredOutput;
   if (contract === undefined) return undefined;
@@ -230,9 +237,16 @@ export class GroqKnowledgeSimplifierModelProvider implements ModelProvider {
             { statusCode: 400, providerError },
           );
         }
+        if (isKnownGroqStructuredContractRejection(providerError)) {
+          throw new ModelProviderError(
+            "unsupported_capability",
+            "Groq rejected the required structured-output contract.",
+            { statusCode: 400, providerError },
+          );
+        }
         throw new ModelProviderError(
-          "unsupported_capability",
-          "Groq rejected the required structured-output contract.",
+          "unavailable",
+          "Groq Knowledge simplifier returned HTTP 400 for the structured-output request.",
           { statusCode: 400, providerError },
         );
       }
