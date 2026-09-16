@@ -9,18 +9,19 @@ import type {
 } from "../src/model/types.js";
 import { isConversationalCognition, ModelSolandraCognitiveRuntime } from "../src/solandra/cognition.js";
 
-class RedundantMetadataProvider implements ModelProvider {
-  readonly kind = "m1-redundant-cognition-metadata";
+class GovernedCognitionProvider implements ModelProvider {
+  readonly kind = "m1-governed-cognition";
 
   async generate(request: CanonicalModelRequest, _context: ModelCallContext): Promise<ModelProviderResult> {
     return {
       response: {
-        id: "m1-redundant-cognition-response",
+        id: "m1-governed-cognition-response",
         model: request.model,
         output: [{
           type: "text",
           text: JSON.stringify({
             mode: "GOVERNED",
+            response: null,
             projection: {
               objectiveRelation: "NEW_OBJECTIVE",
               proposedObjective: "A non-authoritative normalized objective.",
@@ -33,7 +34,8 @@ class RedundantMetadataProvider implements ModelProvider {
               knowledgeNeeds: ["current external information needed to answer the request"],
               materialAmbiguity: null,
               referencedKnowledgeId: null,
-              proposedNextStep: "FRESH_RESEARCH",
+              referencedRecommendationId: null,
+              referencedOptionId: null,
             },
           }),
         }],
@@ -41,15 +43,15 @@ class RedundantMetadataProvider implements ModelProvider {
       route: {
         actualProvider: this.kind,
         actualModel: request.model,
-        upstreamRequestId: "m1-redundant-cognition-request",
+        upstreamRequestId: "m1-governed-cognition-request",
       },
     };
   }
 }
 
-test("redundant non-authoritative next-step metadata cannot block Solandra cognition", async () => {
+test("strict governed cognition preserves requested-help semantics without redundant next-step metadata", async () => {
   const cognition = new ModelSolandraCognitiveRuntime(
-    new ModelRuntime(new RedundantMetadataProvider()),
+    new ModelRuntime(new GovernedCognitionProvider()),
     "m1-cognition-contract-model",
   );
   const result = await cognition.interpret({
@@ -63,6 +65,6 @@ test("redundant non-authoritative next-step metadata cannot block Solandra cogni
   if (isConversationalCognition(result)) assert.fail("expected governed cognition");
   assert.equal(result.proposal.requestedHelp, "FRESH_RESEARCH");
   assert.deepEqual(result.proposal.knowledgeNeeds, ["current external information needed to answer the request"]);
-  assert.equal(result.proposal.proposedNextStep, "FRESH_RESEARCH");
-  assert.equal(result.invocationProvenance.actualProvider, "m1-redundant-cognition-metadata");
+  assert.equal(result.proposal.proposedNextStep, undefined);
+  assert.equal(result.invocationProvenance.actualProvider, "m1-governed-cognition");
 });
