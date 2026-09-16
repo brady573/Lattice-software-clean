@@ -64,8 +64,8 @@ export type SolandraConversationPresentation = z.infer<typeof solandraConversati
 const solandraConversationPresentationOutputSchema = z.object({
   opening: z.string().min(1).max(4_000),
   composerBody: z.union([
-    z.string().min(1).max(16_000),
-    z.array(z.string().min(1).max(4_000)).min(1).max(64),
+    z.string().max(16_000),
+    z.array(z.string().max(4_000)).min(1).max(64),
   ]).nullable(),
   closing: z.string().min(1).max(4_000).nullable(),
 }).strict();
@@ -183,7 +183,7 @@ function normalizedConversationPresentation(
 ): SolandraConversationPresentation {
   const composerBody = Array.isArray(presentation.composerBody)
     ? presentation.composerBody.map((part) => part.trim()).filter((part) => part.length > 0).join("\n\n")
-    : presentation.composerBody;
+    : presentation.composerBody?.trim() ?? null;
   return solandraConversationPresentationSchema.parse({
     opening: presentation.opening,
     composerBody,
