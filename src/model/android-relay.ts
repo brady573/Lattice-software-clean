@@ -239,6 +239,12 @@ export class AndroidRelayModelProvider implements ModelProvider {
     request: CanonicalModelRequest,
     context: ModelCallContext,
   ): Promise<ModelProviderResult> {
+    if (request.structuredOutput !== undefined) {
+      throw new ModelProviderError(
+        "unsupported_capability",
+        "Android relay is not qualified for required structured output.",
+      );
+    }
     if (context.signal.aborted) {
       throw new ModelProviderError("cancelled", "Android relay request was cancelled before dispatch.");
     }
