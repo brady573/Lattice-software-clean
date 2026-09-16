@@ -126,17 +126,13 @@ const ownerAccessScript = `
         }
         try {
           const response = await nativeFetch("/api/v1/capabilities/model-assistance");
-          if (response.ok) {
-            hideGate();
-            return;
-          }
           if (response.status === 401) {
             showGate();
             return;
           }
-          showGate("Solandra couldn't confirm access right now. Please try again.");
+          hideGate();
         } catch {
-          showGate("Solandra couldn't confirm access right now. Please try again.");
+          hideGate();
         }
       };
       void initializeAccess();
