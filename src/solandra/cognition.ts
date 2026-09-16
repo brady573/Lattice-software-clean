@@ -323,7 +323,7 @@ function buildCognitionRequest(model: string, input: SolandraCognitionInput): Ca
       },
     ],
     temperature: 0.2,
-    maxOutputTokens: 1_600,
+    maxOutputTokens: 4_096,
     seed: 0,
   };
 }
