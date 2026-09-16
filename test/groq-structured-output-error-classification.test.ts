@@ -92,7 +92,33 @@ test("Groq json_validate_failed is invalid output rather than unsupported capabi
   );
 });
 
-test("Groq structured 400 detail remains optional when the provider body is not structured JSON", async () => {
+test("Groq opaque structured 400 remains unavailable rather than becoming a capability verdict", async () => {
+  const runtime = new ModelRuntime(providerForError({
+    code: "invalid_request_error",
+    type: "invalid_request_error",
+    param: "response_format",
+    message: "request could not be processed",
+  }));
+
+  await assert.rejects(
+    () => runtime.call(STRUCTURED_REQUEST, { correlationId: "opaque-structured-400" }),
+    (error: unknown) => {
+      assert.ok(error instanceof ModelProviderError);
+      assert.equal(error.code, "unavailable");
+      assert.equal(error.statusCode, 400);
+      assert.equal(error.retryable, false);
+      assert.deepEqual(error.providerError, {
+        code: "invalid_request_error",
+        type: "invalid_request_error",
+        param: "response_format",
+        message: "request could not be processed",
+      });
+      return true;
+    },
+  );
+});
+
+test("Groq unparseable structured 400 remains unavailable without inventing provider detail", async () => {
   const provider = new GroqKnowledgeSimplifierModelProvider({
     apiKey: "gsk_test_structured_output_error_key",
     fetchImpl: async () => new Response("not-json", { status: 400 }),
@@ -102,7 +128,9 @@ test("Groq structured 400 detail remains optional when the provider body is not 
     () => new ModelRuntime(provider).call(STRUCTURED_REQUEST, { correlationId: "unparseable-error-body" }),
     (error: unknown) => {
       assert.ok(error instanceof ModelProviderError);
-      assert.equal(error.code, "unsupported_capability");
+      assert.equal(error.code, "unavailable");
+      assert.equal(error.statusCode, 400);
+      assert.equal(error.retryable, false);
       assert.equal(error.providerError, null);
       return true;
     },
