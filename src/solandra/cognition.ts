@@ -81,22 +81,20 @@ const solandraConversationOutputSchema = z.object({
   presentation: solandraConversationPresentationOutputSchema,
 }).strict();
 
-/** Compatibility for pre-composition injected/model fixtures; canonical prompting no longer requests this shape. */
-const legacySolandraConversationOutputSchema = z.object({
-  mode: z.literal("CONVERSATION"),
-  response: z.string().min(1).max(16_000),
-}).strict();
-
 const solandraGovernedOutputSchema = z.object({
   mode: z.literal("GOVERNED"),
   projection: solandraSemanticProposalSchema,
 }).strict();
 
-const solandraCognitionOutputSchema = z.union([
-  solandraConversationOutputSchema,
-  legacySolandraConversationOutputSchema,
-  solandraGovernedOutputSchema,
-]);
+const solandraStructuredCognitionEnvelopeSchema = z.object({
+  mode: z.enum(["CONVERSATION", "GOVERNED"]),
+  presentation: solandraConversationPresentationOutputSchema.nullable(),
+  projection: solandraSemanticProposalSchema.nullable(),
+}).strict();
+
+type SolandraStructuredCognitionOutput =
+  | z.infer<typeof solandraConversationOutputSchema>
+  | z.infer<typeof solandraGovernedOutputSchema>;
 
 const nullableStringSchema: CanonicalModelJsonSchema = Object.freeze({
   anyOf: Object.freeze([
@@ -201,28 +199,32 @@ const conversationPresentationOutputJsonSchema: CanonicalModelJsonSchema = Objec
   additionalProperties: false,
 });
 
+const nullableConversationPresentationOutputJsonSchema: CanonicalModelJsonSchema = Object.freeze({
+  anyOf: Object.freeze([
+    conversationPresentationOutputJsonSchema,
+    Object.freeze({ type: "null" as const }),
+  ]),
+});
+
+const nullableSemanticProposalOutputSchema: CanonicalModelJsonSchema = Object.freeze({
+  anyOf: Object.freeze([
+    semanticProposalOutputSchema,
+    Object.freeze({ type: "null" as const }),
+  ]),
+});
+
 const solandraCognitionStructuredOutputSchema: CanonicalModelJsonSchema = Object.freeze({
   type: "object",
-  anyOf: Object.freeze([
-    Object.freeze({
-      type: "object" as const,
-      properties: Object.freeze({
-        mode: Object.freeze({ type: "string" as const, enum: Object.freeze(["CONVERSATION"]) }),
-        presentation: conversationPresentationOutputJsonSchema,
-      }),
-      required: Object.freeze(["mode", "presentation"]),
-      additionalProperties: false as const,
+  properties: Object.freeze({
+    mode: Object.freeze({
+      type: "string" as const,
+      enum: Object.freeze(["CONVERSATION", "GOVERNED"]),
     }),
-    Object.freeze({
-      type: "object" as const,
-      properties: Object.freeze({
-        mode: Object.freeze({ type: "string" as const, enum: Object.freeze(["GOVERNED"]) }),
-        projection: semanticProposalOutputSchema,
-      }),
-      required: Object.freeze(["mode", "projection"]),
-      additionalProperties: false as const,
-    }),
-  ]),
+    presentation: nullableConversationPresentationOutputJsonSchema,
+    projection: nullableSemanticProposalOutputSchema,
+  }),
+  required: Object.freeze(["mode", "presentation", "projection"]),
+  additionalProperties: false,
 });
 
 export interface SolandraGovernedKnowledgeContext {
@@ -334,15 +336,24 @@ function parseJsonObject(text: string): unknown {
   }
 }
 
-function normalizeStructuredCognitionOutput(value: unknown): z.infer<typeof solandraCognitionOutputSchema> {
-  const parsed = solandraCognitionOutputSchema.parse(value);
-  if (parsed.mode === "CONVERSATION" && !("presentation" in parsed)) {
+function normalizeStructuredCognitionOutput(value: unknown): SolandraStructuredCognitionOutput {
+  const parsed = solandraStructuredCognitionEnvelopeSchema.parse(value);
+  if (parsed.mode === "CONVERSATION") {
+    if (parsed.presentation === null || parsed.projection !== null) {
+      throw new ModelProviderError(
+        "invalid_output",
+        "Structured conversation cognition must provide presentation and no governed projection.",
+      );
+    }
+    return { mode: "CONVERSATION", presentation: parsed.presentation };
+  }
+  if (parsed.presentation !== null || parsed.projection === null) {
     throw new ModelProviderError(
       "invalid_output",
-      "Required structured conversation cognition must provide explicit presentation roles.",
+      "Structured governed cognition must provide projection and no conversation presentation.",
     );
   }
-  return parsed;
+  return { mode: "GOVERNED", projection: parsed.projection };
 }
 
 function conversationContext(input: SolandraCognitionInput): string {
@@ -378,6 +389,7 @@ function buildCognitionRequest(model: string, input: SolandraCognitionInput): Ca
 
   const governedShape = JSON.stringify({
     mode: "GOVERNED",
+    presentation: null,
     projection: {
       objectiveRelation: "NEW_OBJECTIVE|CONTINUE|CORRECTION",
       proposedObjective: "string or null",
@@ -401,6 +413,7 @@ function buildCognitionRequest(model: string, input: SolandraCognitionInput): Ca
       composerBody: "substantive work as one string or an array of text segments when useful, otherwise null",
       closing: "brief natural continuation or closing when useful, otherwise null",
     },
+    projection: null,
   });
 
   return {
@@ -563,9 +576,7 @@ export class ModelSolandraCognitiveRuntime implements SolandraCognitiveRuntime {
     }
     const parsed = normalizeStructuredCognitionOutput(parseJsonObject(result.response.output[0].text));
     if (parsed.mode === "CONVERSATION") {
-      const presentation: SolandraConversationPresentation = "presentation" in parsed
-        ? normalizedConversationPresentation(parsed.presentation)
-        : { opening: parsed.response.trim(), composerBody: null, closing: null };
+      const presentation = normalizedConversationPresentation(parsed.presentation);
       return Object.freeze({
         mode: "CONVERSATION" as const,
         response: conversationPresentationText(presentation),
