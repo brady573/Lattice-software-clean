@@ -31,36 +31,56 @@ const cases = [
 
 const evidence = [];
 for (const entry of cases) {
-  const result = await solandra.cognition.interpret({
-    conversationId: `pr116-live-${entry.id}`,
-    messageId: `pr116-live-${entry.id}-message`,
-    message: entry.message,
-    recentUserMessages: [],
-    recentConversation: [],
-    governedKnowledge: [],
-    governedRecommendations: [],
-  });
+  try {
+    const result = await solandra.cognition.interpret({
+      conversationId: `pr116-live-${entry.id}`,
+      messageId: `pr116-live-${entry.id}-message`,
+      message: entry.message,
+      recentUserMessages: [],
+      recentConversation: [],
+      governedKnowledge: [],
+      governedRecommendations: [],
+    });
 
-  assert.ok(isConversationalCognition(result), `${entry.id} must remain ordinary conversation cognition.`);
-  assert.equal(result.invocationProvenance.actualProvider, 'groq');
-  assert.equal(result.invocationProvenance.actualModel, 'openai/gpt-oss-120b');
-  assert.equal(result.invocationProvenance.routeProvenance, 'COMPLETE');
+    const conversational = isConversationalCognition(result);
+    const provenanceComplete = result.invocationProvenance.actualProvider === 'groq'
+      && result.invocationProvenance.actualModel === 'openai/gpt-oss-120b'
+      && result.invocationProvenance.routeProvenance === 'COMPLETE';
+    const presentation = conversational ? conversationPresentationFor(result) : null;
+    const conversationText = presentation?.conversationText?.trim() ?? '';
+    const composerBody = presentation?.composerBody?.trim() ?? '';
+    const pass = conversational
+      && provenanceComplete
+      && conversationText.length > 0
+      && composerBody.length > 0
+      && conversationText !== composerBody;
 
-  const presentation = conversationPresentationFor(result);
-  assert.ok(presentation.conversationText.trim().length > 0, `${entry.id} requires Conversation content.`);
-  assert.ok((presentation.composerBody?.trim().length ?? 0) > 0, `${entry.id} requires substantive Composer work.`);
-  assert.notEqual(presentation.conversationText.trim(), presentation.composerBody?.trim());
-
-  evidence.push({
-    id: entry.id,
-    mode: result.mode,
-    conversationTextLength: presentation.conversationText.length,
-    composerBodyLength: presentation.composerBody?.length ?? 0,
-    actualProvider: result.invocationProvenance.actualProvider,
-    actualModel: result.invocationProvenance.actualModel,
-    routeProvenance: result.invocationProvenance.routeProvenance,
-  });
+    evidence.push({
+      id: entry.id,
+      pass,
+      mode: result.mode,
+      conversationText,
+      composerBody,
+      conversationTextLength: conversationText.length,
+      composerBodyLength: composerBody.length,
+      actualProvider: result.invocationProvenance.actualProvider,
+      actualModel: result.invocationProvenance.actualModel,
+      routeProvenance: result.invocationProvenance.routeProvenance,
+    });
+  } catch (error) {
+    evidence.push({
+      id: entry.id,
+      pass: false,
+      errorName: error instanceof Error ? error.name : typeof error,
+      errorMessage: error instanceof Error ? error.message : String(error),
+      errorCode: error && typeof error === 'object' && 'code' in error ? String(error.code) : null,
+    });
+  }
 }
 
 console.log(JSON.stringify({ configuredModel: solandra.model, cases: evidence }, null, 2));
+const failed = evidence.filter((entry) => entry.pass !== true);
+if (failed.length > 0) {
+  throw new Error(`PR116 live two-surface composition failed ${failed.length} of ${evidence.length} cases: ${failed.map((entry) => entry.id).join(', ')}`);
+}
 console.log('PR116_LIVE_CONVERSATION_COMPOSITION=PASS');
