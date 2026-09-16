@@ -318,10 +318,7 @@ const directConversationHandling = `        if (body.status === "CONVERSATION_CO
             ? body.presentation.assistantMessage.trim()
             : "";
           if (!assistantMessage) throw new Error("Solandra returned no usable response.");
-          if (body.conversationResponse?.factualAuthority === false) {
-            const authorityContext = document.getElementById("conversationAuthorityContext");
-            if (authorityContext) authorityContext.hidden = false;
-          }
+          setOrdinaryConversationContext(body.conversationResponse?.factualAuthority === false);
           appendSolandraTurn(assistantMessage);
           return;
         }
@@ -393,12 +390,16 @@ export function renderSolandraAuthoritativeConversationPage(): string {
     )
     .replace(legacyPreparedResourceRendering, preparedResourceTrustRendering)
     .replace(
-      '        if (outcome.kind === "KNOWLEDGE") {\n          composer.innerHTML = renderKnowledge(outcome);',
-      '        if (outcome.kind === "KNOWLEDGE") {\n          const authorityContext = document.getElementById("conversationAuthorityContext");\n          if (authorityContext) authorityContext.hidden = true;\n          composer.innerHTML = renderKnowledge(outcome);',
+      '      const renderOutcome = (outcome, presentation, options = {}) => {\n        composerHasProductContent = true;',
+      '      const setOrdinaryConversationContext = (visible) => {\n        const authorityContext = document.getElementById("conversationAuthorityContext");\n        if (authorityContext) authorityContext.hidden = !visible;\n      };\n\n      const renderOutcome = (outcome, presentation, options = {}) => {\n        setOrdinaryConversationContext(false);\n        composerHasProductContent = true;',
     )
     .replace(
       '          renderPreparedResource(outcome.resource.title, options.preparedBody ?? outcome.resource.body);',
       '          renderPreparedResource(outcome.resource, outcome.knowledge, options.preparedBody ?? outcome.resource.body);',
+    )
+    .replace(
+      '      const handleTurnResponse = async (body, record) => {\n',
+      '      const handleTurnResponse = async (body, record) => {\n        setOrdinaryConversationContext(false);\n',
     )
     .replace(
       '        if (!body.runId) throw new Error("I couldn\'t establish the requested work safely.");',
