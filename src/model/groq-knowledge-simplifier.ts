@@ -55,6 +55,19 @@ function optionalFiniteInteger(value: unknown): number | null {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : null;
 }
 
+function structuredResponseFormat(request: CanonicalModelRequest): unknown {
+  const contract = request.structuredOutput;
+  if (contract === undefined) return undefined;
+  return {
+    type: "json_schema",
+    json_schema: {
+      name: contract.name,
+      strict: contract.strict,
+      schema: contract.schema,
+    },
+  };
+}
+
 async function readBoundedText(response: Response, maxBytes: number): Promise<string> {
   if (response.body === null) return "";
   const reader = response.body.getReader();
@@ -89,9 +102,8 @@ async function readBoundedText(response: Response, maxBytes: number): Promise<st
 }
 
 /**
- * Narrow PR #15 provider for one pinned Groq text route used only by Knowledge
- * simplification. It has no tools, routing, fallback, truth authority, or
- * provider selection behavior.
+ * Narrow pinned Groq route. Structured output, when required by the canonical
+ * request, is mapped only as a format constraint; it grants no Product authority.
  */
 export class GroqKnowledgeSimplifierModelProvider implements ModelProvider {
   readonly kind = "groq-knowledge-simplifier";
@@ -124,6 +136,7 @@ export class GroqKnowledgeSimplifierModelProvider implements ModelProvider {
       );
     }
 
+    const responseFormat = structuredResponseFormat(request);
     let response: Response;
     try {
       response = await this.fetchImpl(`${GROQ_KNOWLEDGE_SIMPLIFIER_BASE_URL}/chat/completions`, {
@@ -143,6 +156,7 @@ export class GroqKnowledgeSimplifierModelProvider implements ModelProvider {
             ? {}
             : { max_completion_tokens: request.maxOutputTokens }),
           ...(request.seed === undefined ? {} : { seed: request.seed }),
+          ...(responseFormat === undefined ? {} : { response_format: responseFormat }),
         }),
         signal: context.signal,
       });
@@ -168,6 +182,13 @@ export class GroqKnowledgeSimplifierModelProvider implements ModelProvider {
           "rate_limit",
           "Groq Knowledge simplifier route was rate limited.",
           { retryable: true, statusCode: 429 },
+        );
+      }
+      if (request.structuredOutput !== undefined && response.status === 400) {
+        throw new ModelProviderError(
+          "unsupported_capability",
+          "Groq rejected the required structured-output contract.",
+          { statusCode: 400 },
         );
       }
       throw new ModelProviderError(
@@ -250,6 +271,9 @@ export class GroqKnowledgeSimplifierModelProvider implements ModelProvider {
         promptTokens,
         completionTokens,
         totalTokens,
+        structuredOutputMode: request.structuredOutput === undefined
+          ? null
+          : request.structuredOutput.strict ? "json_schema_strict" : "json_schema",
       },
       route: {
         actualProvider: GROQ_KNOWLEDGE_SIMPLIFIER_PROVIDER,
