@@ -2,6 +2,12 @@ name: Validation — Deployed Solandra Functional
 
 on:
   workflow_dispatch:
+    inputs:
+      heldout_cases_json:
+        description: 'Optional validator-selected black-box case bundle (JSON, version 1)'
+        required: false
+        default: ''
+        type: string
 
 permissions:
   contents: read
@@ -46,6 +52,7 @@ jobs:
           python -m playwright install --with-deps chromium
 
       - name: Run deployed owner-auth functional validation
+        id: owner_auth
         env:
           PYTHONUNBUFFERED: '1'
         run: |
@@ -67,10 +74,33 @@ jobs:
             --screenshot off \
             --video off
 
+      - name: Run validator-selected held-out Product cases
+        if: ${{ always() && !cancelled() && inputs.heldout_cases_json != '' && steps.owner_auth.outcome == 'success' }}
+        env:
+          PYTHONUNBUFFERED: '1'
+          HELDOUT_CASES_JSON: ${{ inputs.heldout_cases_json }}
+          HELDOUT_ARTIFACT_DIR: artifacts/deployed-heldout
+        run: |
+          set -euo pipefail
+          python -m pytest -q -s tools/deployed_heldout_validation.py \
+            --browser chromium \
+            --tracing off \
+            --screenshot off \
+            --video off
+
+      - name: Upload held-out black-box evidence
+        if: ${{ always() && inputs.heldout_cases_json != '' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: deployed-heldout-black-box-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts/deployed-heldout/
+          if-no-files-found: warn
+          retention-days: 7
+
       - name: Record validation scope
         if: always()
         run: |
           echo 'DEPLOYED_TARGET=https://lattice-solandra.onrender.com/'
           echo 'SECRET_OUTPUT=PROHIBITED'
           echo 'PRODUCTION_MUTATION=CONVERSATION_TEST_DATA_ONLY'
-          echo 'VALIDATION_SCOPE=OWNER_AUTH_PLUS_PRODUCT_JOURNEYS'
+          echo 'VALIDATION_SCOPE=OWNER_AUTH_PLUS_PRODUCT_JOURNEYS_PLUS_OPTIONAL_HELDOUT_BLACK_BOX'
