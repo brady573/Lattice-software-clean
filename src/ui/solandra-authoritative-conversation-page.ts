@@ -315,7 +315,10 @@ const directConversationHandling = `        if (body.status === "CONVERSATION_CO
             ? body.presentation.assistantMessage.trim()
             : "";
           if (!assistantMessage) throw new Error("Solandra returned no usable response.");
-          appendSolandraTurn(assistantMessage);
+          const trustCue = body.conversationResponse?.factualAuthority === false
+            ? "\\n\\nGeneral guidance · Not verified against sources"
+            : "";
+          appendSolandraTurn(assistantMessage + trustCue);
           return;
         }
         if (body.status === "COGNITIVE_ASSISTANCE_COMPLETED") {
