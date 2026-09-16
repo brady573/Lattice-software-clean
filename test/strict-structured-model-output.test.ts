@@ -131,7 +131,14 @@ test("Groq adapter sends canonical required output as native strict json_schema"
 test("Groq rejection of a required structural contract is unsupported capability, not fallback", async () => {
   const provider = new GroqKnowledgeSimplifierModelProvider({
     apiKey: "gsk_test_structured_output_key",
-    fetchImpl: async () => new Response(JSON.stringify({ error: { message: "unsupported schema" } }), { status: 400 }),
+    fetchImpl: async () => new Response(JSON.stringify({
+      error: {
+        code: "invalid_request_error",
+        type: "invalid_request_error",
+        param: "response_format",
+        message: "schema must have type 'object' and not have 'oneOf'/'anyOf'/'enum'/'not' at the top level",
+      },
+    }), { status: 400, headers: { "content-type": "application/json" } }),
   });
   await assert.rejects(
     () => new ModelRuntime(provider).call(SIMPLE_REQUEST, { correlationId: "groq-unsupported" }),
