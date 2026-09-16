@@ -1,4 +1,4 @@
-import { ModelProviderError } from "./errors.js";
+import { ModelProviderError, type ModelProviderUpstreamError } from "./errors.js";
 import type { ModelProvider } from "./provider.js";
 import { ModelRuntime } from "./runtime.js";
 import type {
@@ -17,6 +17,13 @@ const LIVE_DIRECT_INVOCATION = Object.freeze({
   executionClass: "LIVE_DIRECT" as const,
   routeMode: "PINNED" as const,
   requestedProvider: GROQ_KNOWLEDGE_SIMPLIFIER_PROVIDER,
+});
+
+const providerErrorLimits = Object.freeze({
+  code: 256,
+  type: 256,
+  param: 512,
+  message: 4 * 1024,
 });
 
 export interface GroqCompletionDiagnostic {
@@ -53,6 +60,36 @@ function requireApiKey(value: string): string {
 
 function optionalFiniteInteger(value: unknown): number | null {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : null;
+}
+
+function sanitizeProviderErrorField(value: unknown, maxChars: number): string | null {
+  if (typeof value !== "string") return null;
+  const sanitized = value
+    .replace(/[\u0000-\u001f\u007f]/gu, " ")
+    .replace(/\s+/gu, " ")
+    .trim();
+  if (!sanitized) return null;
+  return sanitized.slice(0, maxChars);
+}
+
+function parseGroqProviderError(text: string): ModelProviderUpstreamError | null {
+  let body: unknown;
+  try {
+    body = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  const error = asRecord(asRecord(body)?.error);
+  if (error === null) return null;
+  const parsed = Object.freeze({
+    code: sanitizeProviderErrorField(error.code, providerErrorLimits.code),
+    type: sanitizeProviderErrorField(error.type, providerErrorLimits.type),
+    param: sanitizeProviderErrorField(error.param, providerErrorLimits.param),
+    message: sanitizeProviderErrorField(error.message, providerErrorLimits.message),
+  });
+  return parsed.code === null && parsed.type === null && parsed.param === null && parsed.message === null
+    ? null
+    : parsed;
 }
 
 function structuredResponseFormat(request: CanonicalModelRequest): unknown {
@@ -185,10 +222,18 @@ export class GroqKnowledgeSimplifierModelProvider implements ModelProvider {
         );
       }
       if (request.structuredOutput !== undefined && response.status === 400) {
+        const providerError = parseGroqProviderError(text);
+        if (providerError?.code === "json_validate_failed") {
+          throw new ModelProviderError(
+            "invalid_output",
+            "Groq generated output that failed the required structured-output contract.",
+            { statusCode: 400, providerError },
+          );
+        }
         throw new ModelProviderError(
           "unsupported_capability",
           "Groq rejected the required structured-output contract.",
-          { statusCode: 400 },
+          { statusCode: 400, providerError },
         );
       }
       throw new ModelProviderError(
