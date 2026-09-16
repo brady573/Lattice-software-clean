@@ -11,6 +11,7 @@ on:
       - "tools/issue-91-live-solandra-cognition.mjs"
       - "tools/pr116-browser-conversation-composer.mjs"
       - "tools/pr116-live-conversation-composition.mjs"
+      - "tools/groq-strict-composite-diagnostic.mjs"
       - "package.json"
       - "package-lock.json"
       - ".github/workflows/browser-lifecycle-validation.yml"
@@ -26,6 +27,7 @@ on:
       - "tools/issue-91-live-solandra-cognition.mjs"
       - "tools/pr116-browser-conversation-composer.mjs"
       - "tools/pr116-live-conversation-composition.mjs"
+      - "tools/groq-strict-composite-diagnostic.mjs"
       - "package.json"
       - "package-lock.json"
       - ".github/workflows/browser-lifecycle-validation.yml"
@@ -241,3 +243,45 @@ jobs:
           echo "LIVE_SOLANDRA_COGNITION=PASS sha=$SUBJECT_SOURCE_SHA"
           echo 'PRODUCTION_DEPLOYMENT=NOT_PERFORMED'
           echo 'PRODUCTION_DATABASE=NOT_TOUCHED'
+
+  groq-strict-output-diagnostic:
+    name: Groq strict-output provider diagnostic
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact diagnostic source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Provision Node 24
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+
+      - name: Install locked dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Execute bounded provider qualification diagnostic
+        env:
+          SUBJECT_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "${GROQ_API_KEY:-}"
+          test "$(git rev-parse HEAD)" = "$SUBJECT_SOURCE_SHA"
+          node --import tsx tools/groq-strict-composite-diagnostic.mjs
+          git diff --exit-code
+          echo "GROQ_STRICT_OUTPUT_DIAGNOSTIC=COMPLETE sha=$SUBJECT_SOURCE_SHA"
+          echo 'PRODUCTION_DEPLOYMENT=NOT_PERFORMED'
+          echo 'PRODUCTION_DATABASE=NOT_TOUCHED'
+
+      - name: Upload provider diagnostic evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: groq-strict-output-diagnostic-${{ github.event.pull_request.head.sha || github.sha }}
+          path: artifacts/groq-structured-output-diagnostic/
+          if-no-files-found: error
+          retention-days: 7
