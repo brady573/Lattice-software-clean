@@ -61,9 +61,20 @@ export const solandraConversationPresentationSchema = z.object({
 }).strict();
 export type SolandraConversationPresentation = z.infer<typeof solandraConversationPresentationSchema>;
 
+const solandraConversationPresentationOutputSchema = z.object({
+  opening: z.string().min(1).max(4_000),
+  composerBody: z.union([
+    z.string().min(1).max(16_000),
+    z.array(z.string().min(1).max(4_000)).min(1).max(64),
+  ]).nullable(),
+  closing: z.string().min(1).max(4_000).nullable(),
+}).strict();
+
+type SolandraConversationPresentationOutput = z.infer<typeof solandraConversationPresentationOutputSchema>;
+
 const solandraConversationOutputSchema = z.object({
   mode: z.literal("CONVERSATION"),
-  presentation: solandraConversationPresentationSchema,
+  presentation: solandraConversationPresentationOutputSchema,
 }).strict();
 
 /** Compatibility for pre-composition injected/model fixtures; canonical prompting no longer requests this shape. */
@@ -167,6 +178,19 @@ export function conversationPresentationText(presentation: SolandraConversationP
     .join("\n\n");
 }
 
+function normalizedConversationPresentation(
+  presentation: SolandraConversationPresentationOutput,
+): SolandraConversationPresentation {
+  const composerBody = Array.isArray(presentation.composerBody)
+    ? presentation.composerBody.map((part) => part.trim()).filter((part) => part.length > 0).join("\n\n")
+    : presentation.composerBody;
+  return solandraConversationPresentationSchema.parse({
+    opening: presentation.opening,
+    composerBody,
+    closing: presentation.closing,
+  });
+}
+
 function parseJsonObject(text: string): unknown {
   const trimmed = text.trim();
   const unfenced = /^```(?:json)?\s*([\s\S]*?)\s*```$/iu.exec(trimmed)?.[1] ?? trimmed;
@@ -234,7 +258,7 @@ function buildCognitionRequest(model: string, input: SolandraCognitionInput): Ca
     mode: "CONVERSATION",
     presentation: {
       opening: "brief natural conversational framing or the complete short response",
-      composerBody: "substantive structured work when useful, otherwise null",
+      composerBody: "substantive work as one string or an array of text segments when useful, otherwise null",
       closing: "brief natural continuation or closing when useful, otherwise null",
     },
   });
@@ -254,6 +278,7 @@ function buildCognitionRequest(model: string, input: SolandraCognitionInput): Ca
           "Conversation and Composer are simultaneous presentation surfaces. Conversation frames and continues the interaction; Composer can carry substantial ordinary generated work when that makes the response easier to use.",
           "For a short ordinary response that does not warrant a substantive Composer body, put the response in opening, set composerBody to null, and use closing only if it adds a natural continuation.",
           "For an ordinary response with substantial structured work such as a procedure, checklist, plan, detailed explanation, or similar body, keep opening and closing conversational and concise, place the substantive body in composerBody, and do not duplicate that body into opening or closing.",
+          "composerBody may be one string or an array of text segments; both representations mean the same Composer presentation role and are normalized by Lattice without semantic reclassification.",
           "Choose these presentation roles from the meaning and shape of the work itself, not from keywords, punctuation, formatting tokens, or a fixed domain taxonomy.",
           "Composer placement does not grant authority. All CONVERSATION output remains ordinary non-authoritative generated guidance even when part of it is placed in Composer.",
           "A conversational answer may contain ordinary explanatory prose. Do not claim that conversational prose is verified or governed Knowledge. Do not add repetitive authority warnings unless they are useful to the USER's request.",
@@ -392,7 +417,7 @@ export class ModelSolandraCognitiveRuntime implements SolandraCognitiveRuntime {
     const parsed = solandraCognitionOutputSchema.parse(parseJsonObject(result.response.output[0].text));
     if (parsed.mode === "CONVERSATION") {
       const presentation: SolandraConversationPresentation = "presentation" in parsed
-        ? parsed.presentation
+        ? normalizedConversationPresentation(parsed.presentation)
         : { opening: parsed.response.trim(), composerBody: null, closing: null };
       return Object.freeze({
         mode: "CONVERSATION" as const,
