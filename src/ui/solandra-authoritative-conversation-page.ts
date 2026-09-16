@@ -2,6 +2,9 @@ import { renderSolandraConversationPage } from "./solandra-conversation-page.js"
 
 const capabilityStyles = `
     header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .brand-group { display: grid; gap: 4px; }
+    .conversation-authority-context { color: #6b6960; font-size: .75rem; line-height: 1.2; }
+    .conversation-authority-context[hidden] { display: none; }
     .capability-controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
     .capability-button { border: 1px solid #c8c4b8; border-radius: 999px; background: #fffefa; color: #282722; padding: 7px 10px; cursor: pointer; font-size: .8rem; }
     .capability-button[aria-busy="true"] { opacity: .55; cursor: default; }
@@ -315,10 +318,11 @@ const directConversationHandling = `        if (body.status === "CONVERSATION_CO
             ? body.presentation.assistantMessage.trim()
             : "";
           if (!assistantMessage) throw new Error("Solandra returned no usable response.");
-          const trustCue = body.conversationResponse?.factualAuthority === false
-            ? "\\n\\nGeneral guidance · Not verified against sources"
-            : "";
-          appendSolandraTurn(assistantMessage + trustCue);
+          if (body.conversationResponse?.factualAuthority === false) {
+            const authorityContext = document.getElementById("conversationAuthorityContext");
+            if (authorityContext) authorityContext.hidden = false;
+          }
+          appendSolandraTurn(assistantMessage);
           return;
         }
         if (body.status === "COGNITIVE_ASSISTANCE_COMPLETED") {
@@ -381,7 +385,7 @@ export function renderSolandraAuthoritativeConversationPage(): string {
     .replace("</style>", `${capabilityStyles}</style>`)
     .replace(
       '<div class="brand">Solandra</div>',
-      '<div class="brand">Solandra</div><div class="capability-controls"><button id="cognitiveAssistanceButton" class="capability-button" type="button" aria-label="Cognitive assistance: checking"><span id="cognitiveAssistanceDot" class="capability-dot"></span><span id="cognitiveAssistanceLabel">Cognitive assistance · checking</span></button><button id="modelAssistanceButton" class="capability-button" type="button" aria-label="Model assistance"><span id="modelAssistanceDot" class="capability-dot"></span>Model assistance</button></div>',
+      '<div class="brand-group"><div class="brand">Solandra</div><div id="conversationAuthorityContext" class="conversation-authority-context" hidden>General conversation</div></div><div class="capability-controls"><button id="cognitiveAssistanceButton" class="capability-button" type="button" aria-label="Cognitive assistance: checking"><span id="cognitiveAssistanceDot" class="capability-dot"></span><span id="cognitiveAssistanceLabel">Cognitive assistance · checking</span></button><button id="modelAssistanceButton" class="capability-button" type="button" aria-label="Model assistance"><span id="modelAssistanceDot" class="capability-dot"></span>Model assistance</button></div>',
     )
     .replace(
       '      const productFailureMessage = (status, body) => {\n        if (body?.error === "RESOURCE_SCOPE_UNSUPPORTED" && typeof body.message === "string") return body.message;',
