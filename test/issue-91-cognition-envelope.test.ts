@@ -15,7 +15,7 @@ class CapturingProvider implements ModelProvider {
       response: {
         id: "response-91",
         model: request.model,
-        output: [{ type: "text", text: JSON.stringify({ mode: "CONVERSATION", response: "That follows from the earlier analogy." }) }],
+        output: [{ type: "text", text: JSON.stringify({ mode: "CONVERSATION", response: "That follows from the earlier analogy.", projection: null }) }],
         usage: { inputTokens: 1, outputTokens: 1 },
       },
       route: {
