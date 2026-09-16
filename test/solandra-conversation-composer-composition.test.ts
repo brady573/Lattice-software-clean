@@ -98,7 +98,7 @@ test("ordinary cognition carries structural Conversation and Composer roles thro
       mode: "CONVERSATION",
       presentation: {
         opening: "A brief frame for the work.",
-        composerBody: ["Substantive body", "- first item", "- second item"],
+        composerBody: ["Substantive body", "", "  ", "- first item", "", "- second item"],
         closing: "We can refine any part of that next.",
       },
     },
@@ -168,6 +168,28 @@ test("ordinary cognition carries structural Conversation and Composer roles thro
   } finally {
     await app.close();
   }
+});
+
+test("Composer segment normalization rejects an empty normalized body", async () => {
+  const provider = new QueueConversationProvider([
+    {
+      mode: "CONVERSATION",
+      presentation: {
+        opening: "A brief frame.",
+        composerBody: ["", "   ", "\t"],
+        closing: null,
+      },
+    },
+  ]);
+  const cognition = new ModelSolandraCognitiveRuntime(new ModelRuntime(provider), "conversation-composer-model");
+
+  await assert.rejects(cognition.interpret({
+    conversationId: "empty-normalized-composer",
+    messageId: "empty-normalized-composer-turn",
+    message: "Produce substantive work.",
+    recentUserMessages: [],
+    governedKnowledge: [],
+  }));
 });
 
 test("rendered ordinary composition keeps framing in Conversation, work in Composer, and the cue scoped to Conversation", () => {
