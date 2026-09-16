@@ -347,7 +347,6 @@ export class OpenAiCompatibleModelProvider implements ModelProvider {
       metadata: {
         upstreamStatus: response.status,
         upstreamRequestId: upstreamRequestId ?? null,
-        structuredOutputRequired: request.structuredOutput !== undefined,
       },
       route: {
         ...(actualModel === undefined ? {} : { actualModel }),
