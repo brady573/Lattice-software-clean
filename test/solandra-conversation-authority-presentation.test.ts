@@ -36,6 +36,7 @@ function renderedConversationHandler(): (
 function renderedKnowledgeHandler(): (
   outcome: { kind: "KNOWLEDGE" },
   presentation: { assistantMessage?: string },
+  options: { recovered?: boolean },
   composer: { innerHTML: string },
   renderKnowledge: (outcome: { kind: "KNOWLEDGE" }) => string,
   appendSolandraTurn: (text: string) => void,
@@ -47,6 +48,7 @@ function renderedKnowledgeHandler(): (
   return new Function(
     "outcome",
     "presentation",
+    "options",
     "composer",
     "renderKnowledge",
     "appendSolandraTurn",
@@ -55,6 +57,7 @@ function renderedKnowledgeHandler(): (
   ) as (
     outcome: { kind: "KNOWLEDGE" },
     presentation: { assistantMessage?: string },
+    options: { recovered?: boolean },
     composer: { innerHTML: string },
     renderKnowledge: (outcome: { kind: "KNOWLEDGE" }) => string,
     appendSolandraTurn: (text: string) => void,
@@ -87,6 +90,7 @@ function renderKnowledgeOutcome(state: RenderState): RenderState {
   const handler = renderedKnowledgeHandler();
   handler(
     { kind: "KNOWLEDGE" },
+    {},
     {},
     composer,
     () => "<section>Governed Knowledge</section>",
