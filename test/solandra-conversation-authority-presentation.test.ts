@@ -90,11 +90,11 @@ function renderKnowledgeOutcome(state: RenderState): RenderState {
   const handler = renderedKnowledgeHandler();
   handler(
     { kind: "KNOWLEDGE" },
-    {},
+    { assistantMessage: "I established the requested Knowledge and preserved its evidence below." },
     {},
     composer,
     () => "<section>Governed Knowledge</section>",
-    (text) => state.visibleTurns.push(text),
+    () => {},
     document,
   );
   assert.equal(composer.innerHTML, "<section>Governed Knowledge</section>");
