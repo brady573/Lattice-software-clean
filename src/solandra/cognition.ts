@@ -202,6 +202,7 @@ const conversationPresentationOutputJsonSchema: CanonicalModelJsonSchema = Objec
 });
 
 const solandraCognitionStructuredOutputSchema: CanonicalModelJsonSchema = Object.freeze({
+  type: "object",
   anyOf: Object.freeze([
     Object.freeze({
       type: "object" as const,
