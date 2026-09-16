@@ -45,11 +45,15 @@ export {
 export type { ModelProvider } from "./provider.js";
 export { ModelRuntime } from "./runtime.js";
 export type {
+  CanonicalModelJsonPrimitive,
+  CanonicalModelJsonSchema,
+  CanonicalModelJsonSchemaType,
   CanonicalModelMessage,
   CanonicalModelOutput,
   CanonicalModelRequest,
   CanonicalModelResponse,
   CanonicalModelRole,
+  CanonicalModelStructuredOutput,
   CanonicalModelToolDefinition,
   CanonicalModelToolInputSchema,
   CanonicalModelToolProperty,
