@@ -64,6 +64,7 @@ class CognitionProvider implements ModelProvider {
           text: JSON.stringify({
             mode: "CONVERSATION",
             response: "Sorter, TidyNotes, and NoteShelf.",
+            projection: null,
           }),
         }],
       },
