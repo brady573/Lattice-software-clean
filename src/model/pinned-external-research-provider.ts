@@ -110,6 +110,12 @@ export class PinnedExternalResearchModelProvider implements ModelProvider {
   }
 
   async generate(request: CanonicalModelRequest, context: ModelCallContext): Promise<ModelProviderResult> {
+    if (request.structuredOutput !== undefined) {
+      throw new ModelProviderError(
+        "unsupported_capability",
+        "Pinned external research model does not support required structured output.",
+      );
+    }
     if (!request.tools || request.tools.length !== 1) {
       throw new ModelProviderError("unsupported_capability", "Pinned external research model requires exactly one granted tool.");
     }

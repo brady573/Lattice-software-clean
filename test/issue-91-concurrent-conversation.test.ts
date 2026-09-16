@@ -20,7 +20,7 @@ class SingleFlightConversationProvider implements ModelProvider {
         model: request.model,
         output: [{
           type: "text",
-          text: JSON.stringify({ mode: "CONVERSATION", response: "One stable conversational response." }),
+          text: JSON.stringify({ mode: "CONVERSATION", response: "One stable conversational response.", projection: null }),
         }],
       },
       route: {

@@ -1,5 +1,9 @@
 import { createHash } from "node:crypto";
 import { ModelProviderError } from "./errors.js";
+import {
+  validateCanonicalStructuredOutput,
+  validateStructuredOutputText,
+} from "./structured-output.js";
 import type {
   CanonicalModelMessage,
   CanonicalModelOutput,
@@ -325,7 +329,7 @@ export function validateCanonicalModelRequest(value: unknown): CanonicalModelReq
   }
   assertOnlyKeys(
     value,
-    ["model", "messages", "tools", "temperature", "maxOutputTokens", "seed"],
+    ["model", "messages", "tools", "structuredOutput", "temperature", "maxOutputTokens", "seed"],
     "Model request",
   );
 
@@ -349,6 +353,10 @@ export function validateCanonicalModelRequest(value: unknown): CanonicalModelReq
     }
     tools = Object.freeze(parsed);
   }
+
+  const structuredOutput = value.structuredOutput === undefined
+    ? undefined
+    : validateCanonicalStructuredOutput(value.structuredOutput);
 
   let temperature: number | undefined;
   if (value.temperature !== undefined) {
@@ -390,6 +398,7 @@ export function validateCanonicalModelRequest(value: unknown): CanonicalModelReq
     model,
     messages,
     ...(tools === undefined ? {} : { tools }),
+    ...(structuredOutput === undefined ? {} : { structuredOutput }),
     ...(temperature === undefined ? {} : { temperature }),
     ...(maxOutputTokens === undefined ? {} : { maxOutputTokens }),
     ...(seed === undefined ? {} : { seed }),
@@ -486,9 +495,18 @@ function validateOutputItem(
       `output[${index}].text`,
       limits.outputTextChars,
     );
+    if (request.structuredOutput !== undefined) {
+      validateStructuredOutputText(text, request.structuredOutput);
+    }
     return Object.freeze({ type: "text", text });
   }
   if (value.type === "tool_call") {
+    if (request.structuredOutput !== undefined) {
+      throw new ModelProviderError(
+        "invalid_output",
+        "Required structured output must return one schema-conformant text result, not a tool call.",
+      );
+    }
     const id = requireBoundedString(value.id, `output[${index}].id`, limits.toolNameChars);
     const name = requireBoundedString(
       value.name,
@@ -532,6 +550,12 @@ export function validateCanonicalModelResponse(
     throw new ModelProviderError(
       "invalid_output",
       `response.output must contain 1-${limits.outputItems} items.`,
+    );
+  }
+  if (request.structuredOutput !== undefined && value.output.length !== 1) {
+    throw new ModelProviderError(
+      "invalid_output",
+      "Required structured output must contain exactly one canonical output item.",
     );
   }
   const output = Object.freeze(

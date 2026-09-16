@@ -27,7 +27,7 @@ class CapturingCognitionProvider implements ModelProvider {
         model: request.model,
         output: [{
           type: "text",
-          text: JSON.stringify({ mode: "GOVERNED", projection: this.projection }),
+          text: JSON.stringify({ mode: "GOVERNED", response: null, projection: this.projection }),
         }],
       },
       route: {

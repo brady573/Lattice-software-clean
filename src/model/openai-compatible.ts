@@ -45,7 +45,21 @@ function toOpenAiTool(tool: CanonicalModelToolDefinition): unknown {
   };
 }
 
+function structuredResponseFormat(request: CanonicalModelRequest): unknown {
+  const contract = request.structuredOutput;
+  if (contract === undefined) return undefined;
+  return {
+    type: "json_schema",
+    json_schema: {
+      name: contract.name,
+      strict: contract.strict,
+      schema: contract.schema,
+    },
+  };
+}
+
 function toOpenAiRequest(request: CanonicalModelRequest): unknown {
+  const responseFormat = structuredResponseFormat(request);
   return {
     model: request.model,
     messages: request.messages.map((message) => ({
@@ -63,6 +77,7 @@ function toOpenAiRequest(request: CanonicalModelRequest): unknown {
       : { max_tokens: request.maxOutputTokens }),
     chat_template_kwargs: { enable_thinking: false },
     ...(request.seed === undefined ? {} : { seed: request.seed }),
+    ...(responseFormat === undefined ? {} : { response_format: responseFormat }),
   };
 }
 
@@ -287,6 +302,13 @@ export class OpenAiCompatibleModelProvider implements ModelProvider {
           "rate_limit",
           "Model provider rate limited the request.",
           { retryable: true, statusCode: response.status },
+        );
+      }
+      if (request.structuredOutput !== undefined && response.status === 400) {
+        throw new ModelProviderError(
+          "unsupported_capability",
+          "OpenAI-compatible provider rejected the required structured-output contract.",
+          { statusCode: response.status },
         );
       }
       throw new ModelProviderError(
