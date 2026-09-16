@@ -8,75 +8,74 @@ type ConversationBody = {
   conversationResponse?: { factualAuthority?: boolean };
 };
 
-function renderedConversationHandler(): (body: ConversationBody, appendSolandraTurn: (text: string) => void) => Promise<void> {
+type RenderState = {
+  visibleTurns: string[];
+  authorityContextHidden: boolean;
+};
+
+function renderedConversationHandler(): (
+  body: ConversationBody,
+  appendSolandraTurn: (text: string) => void,
+  document: { getElementById(id: string): { hidden: boolean } | null },
+) => Promise<void> {
   const html = renderSolandraAuthoritativeConversationPage();
   const match = /if \(body\.status === "CONVERSATION_COMPLETED"\) \{([\s\S]*?)\n        \}\n        if \(body\.status === "COGNITIVE_ASSISTANCE_COMPLETED"\)/u.exec(html);
   assert.ok(match?.[1], "Canonical rendered page must include direct conversation handling");
   return new Function(
     "body",
     "appendSolandraTurn",
+    "document",
     `return (async () => { if (body.status === "CONVERSATION_COMPLETED") {${match[1]}\n        } })();`,
-  ) as (body: ConversationBody, appendSolandraTurn: (text: string) => void) => Promise<void>;
+  ) as (
+    body: ConversationBody,
+    appendSolandraTurn: (text: string) => void,
+    document: { getElementById(id: string): { hidden: boolean } | null },
+  ) => Promise<void>;
 }
 
-async function renderConversationTurn(body: ConversationBody, visibleTurns: string[] = []): Promise<string[]> {
+async function renderConversationTurn(body: ConversationBody, state?: RenderState): Promise<RenderState> {
+  const current = state ?? { visibleTurns: [], authorityContextHidden: true };
+  const authorityContext = { hidden: current.authorityContextHidden };
+  const document = {
+    getElementById(id: string) {
+      return id === "conversationAuthorityContext" ? authorityContext : null;
+    },
+  };
   const handler = renderedConversationHandler();
-  await handler(body, (text) => visibleTurns.push(text));
-  return visibleTurns;
+  await handler(body, (text) => current.visibleTurns.push(text), document);
+  current.authorityContextHidden = authorityContext.hidden;
+  return current;
 }
 
-test("rendered non-authoritative conversation keeps the answer visible with a plain trust cue", async () => {
-  const turns = await renderConversationTurn({
+test("ordinary factual guidance remains unchanged while general-conversation context becomes visible", async () => {
+  const state = await renderConversationTurn({
     status: "CONVERSATION_COMPLETED",
     presentation: { assistantMessage: "A practical first step is to compare the two options under the conditions you actually expect." },
     conversationResponse: { factualAuthority: false },
   });
 
-  assert.deepEqual(turns, [
-    "A practical first step is to compare the two options under the conditions you actually expect.\n\nGeneral guidance · Not verified against sources",
+  assert.deepEqual(state.visibleTurns, [
+    "A practical first step is to compare the two options under the conditions you actually expect.",
   ]);
-  assert.doesNotMatch(turns[0] ?? "", /NON_AUTHORITATIVE_CONVERSATION|factualAuthority|KnowledgeOutcome|V36|authority enum|governance state/u);
+  assert.equal(state.authorityContextHidden, false);
+  assert.doesNotMatch(state.visibleTurns[0] ?? "", /Not verified against sources|NON_AUTHORITATIVE_CONVERSATION|factualAuthority/u);
+
+  const html = renderSolandraAuthoritativeConversationPage();
+  assert.match(html, /id="conversationAuthorityContext"[^>]*>General conversation<\/div>/u);
 });
 
-test("rendered conversation does not invent an unverified cue without structural factual-authority metadata", async () => {
-  const turns = await renderConversationTurn({
+test("non-factual brainstorming stays natural and does not receive a source-verification warning", async () => {
+  const state = await renderConversationTurn({
     status: "CONVERSATION_COMPLETED",
-    presentation: { assistantMessage: "Conversation stays available." },
-  });
-
-  assert.deepEqual(turns, ["Conversation stays available."]);
-});
-
-test("two ordinary rendered turns remain fluid while preserving the same trust distinction", async () => {
-  const visibleTurns: string[] = [];
-  await renderConversationTurn({
-    status: "CONVERSATION_COMPLETED",
-    presentation: { assistantMessage: "Start with the smaller change and observe the result." },
-    conversationResponse: { factualAuthority: false },
-  }, visibleTurns);
-  await renderConversationTurn({
-    status: "CONVERSATION_COMPLETED",
-    presentation: { assistantMessage: "Given that result, the second option may be worth comparing next." },
-    conversationResponse: { factualAuthority: false },
-  }, visibleTurns);
-
-  assert.equal(visibleTurns.length, 2);
-  assert.match(visibleTurns[0] ?? "", /^Start with the smaller change/u);
-  assert.match(visibleTurns[1] ?? "", /^Given that result/u);
-  assert.ok(visibleTurns.every((turn) => turn.endsWith("General guidance · Not verified against sources")));
-});
-
-test("non-authoritative option comparison remains decision support rather than established Knowledge", async () => {
-  const turns = await renderConversationTurn({
-    status: "CONVERSATION_COMPLETED",
-    presentation: { assistantMessage: "Option A is simpler to try; Option B may offer more control if the extra setup is worthwhile to you." },
+    presentation: { assistantMessage: "Here are three playful names: Lantern Fox, Pebble & Pine, and Juniper Kite." },
     conversationResponse: { factualAuthority: false },
   });
 
-  const visible = turns[0] ?? "";
-  assert.match(visible, /Option A is simpler to try; Option B may offer more control/u);
-  assert.match(visible, /General guidance · Not verified against sources$/u);
-  assert.doesNotMatch(visible, /authorized|accepted choice|established Knowledge/iu);
+  assert.deepEqual(state.visibleTurns, [
+    "Here are three playful names: Lantern Fox, Pebble & Pine, and Juniper Kite.",
+  ]);
+  assert.equal(state.authorityContextHidden, false);
+  assert.doesNotMatch(state.visibleTurns[0] ?? "", /source|verified|warning/iu);
 });
 
 test("governed Knowledge keeps its separate findings, uncertainty, and source presentation path", () => {
@@ -87,5 +86,41 @@ test("governed Knowledge keeps its separate findings, uncertainty, and source pr
   const knowledgeRenderer = html.slice(knowledgeStart, outcomeStart);
   assert.match(knowledgeRenderer, /What remains uncertain/u);
   assert.match(knowledgeRenderer, /Sources/u);
-  assert.doesNotMatch(knowledgeRenderer, /General guidance · Not verified against sources/u);
+  assert.doesNotMatch(knowledgeRenderer, /conversationAuthorityContext|General conversation/u);
+});
+
+test("two-turn ordinary conversation remains fluid without repeated trust-warning text", async () => {
+  const state = await renderConversationTurn({
+    status: "CONVERSATION_COMPLETED",
+    presentation: { assistantMessage: "Start with the smaller change and observe the result." },
+    conversationResponse: { factualAuthority: false },
+  });
+  await renderConversationTurn({
+    status: "CONVERSATION_COMPLETED",
+    presentation: { assistantMessage: "Given that result, the second option may be worth comparing next." },
+    conversationResponse: { factualAuthority: false },
+  }, state);
+
+  assert.deepEqual(state.visibleTurns, [
+    "Start with the smaller change and observe the result.",
+    "Given that result, the second option may be worth comparing next.",
+  ]);
+  assert.equal(state.authorityContextHidden, false);
+  assert.ok(state.visibleTurns.every((turn) => !/verified against sources|general guidance/iu.test(turn)));
+});
+
+test("structural factual-authority metadata controls the context without prose inference or mutation", async () => {
+  const body: ConversationBody = {
+    status: "CONVERSATION_COMPLETED",
+    presentation: { assistantMessage: "This sentence could sound factual, but presentation does not classify its words." },
+  };
+  const before = structuredClone(body);
+  const state = await renderConversationTurn(body);
+
+  assert.equal(state.authorityContextHidden, true);
+  assert.deepEqual(body, before);
+
+  const html = renderSolandraAuthoritativeConversationPage();
+  assert.match(html, /body\.conversationResponse\?\.factualAuthority === false/u);
+  assert.doesNotMatch(html, /General guidance · Not verified against sources/u);
 });
