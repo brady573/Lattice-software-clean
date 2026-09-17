@@ -3,6 +3,10 @@ import test from "node:test";
 import { createRuntimeApp } from "../src/runtime-app.js";
 import { resolveRuntimeConfig } from "../src/runtime-config.js";
 import { ModelProviderError } from "../src/model/errors.js";
+import {
+  GROQ_KNOWLEDGE_SIMPLIFIER_MODEL,
+  GroqKnowledgeSimplifierModelProvider,
+} from "../src/model/groq-knowledge-simplifier.js";
 import type { ModelProvider } from "../src/model/provider.js";
 import { ModelRuntime } from "../src/model/runtime.js";
 import type {
@@ -97,6 +101,39 @@ class DecisionProvider implements ModelProvider {
     };
   }
 }
+
+test("Groq TPM responses preserve the provider-directed retry window without exposing the provider body", async () => {
+  const provider = new GroqKnowledgeSimplifierModelProvider({
+    apiKey: "test-groq-key-1234567890",
+    fetchImpl: async () => new Response(JSON.stringify({
+      error: {
+        code: "rate_limit_exceeded",
+        message: "Rate limit reached on tokens per minute. Please try again in 4.7925s.",
+        param: "",
+        type: "tokens",
+      },
+    }), { status: 429 }),
+  });
+  const controller = new AbortController();
+  await assert.rejects(
+    () => provider.generate({
+      model: GROQ_KNOWLEDGE_SIMPLIFIER_MODEL,
+      messages: [{ role: "user", content: "Classify this ordinary turn." }],
+    }, {
+      correlationId: "issue-91-groq-rate-limit",
+      requestIdentity: "issue-91-groq-rate-limit-request",
+      attempt: 0,
+      signal: controller.signal,
+    }),
+    (error: unknown) =>
+      error instanceof ModelProviderError
+      && error.code === "rate_limit"
+      && error.retryable
+      && error.statusCode === 429
+      && error.retryAfterMs === 4_793
+      && error.message === "Groq Knowledge simplifier route was rate limited.",
+  );
+});
 
 const config = resolveRuntimeConfig({
   LATTICE_DEPLOYMENT_MODE: "development",
