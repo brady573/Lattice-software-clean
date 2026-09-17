@@ -15,9 +15,6 @@ jobs:
     name: Deployed Solandra functional validation
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    env:
-      DEPLOYED_BASE_URL: https://lattice-solandra.onrender.com
-      LATTICE_OWNER_ACCESS_TOKEN: ${{ secrets.LATTICE_OWNER_ACCESS_TOKEN }}
 
     steps:
       - name: Checkout exact workflow revision
@@ -32,6 +29,8 @@ jobs:
 
       - name: Verify owner secret is configured
         shell: bash
+        env:
+          LATTICE_OWNER_ACCESS_TOKEN: ${{ secrets.LATTICE_OWNER_ACCESS_TOKEN }}
         run: |
           set -euo pipefail
           test -n "${LATTICE_OWNER_ACCESS_TOKEN:-}"
@@ -48,6 +47,8 @@ jobs:
       - name: Run deployed owner-auth functional validation
         env:
           PYTHONUNBUFFERED: '1'
+          DEPLOYED_BASE_URL: https://lattice-solandra.onrender.com
+          LATTICE_OWNER_ACCESS_TOKEN: ${{ secrets.LATTICE_OWNER_ACCESS_TOKEN }}
         run: |
           set -euo pipefail
           python -m pytest -q tools/deployed_owner_auth_validation.py \
@@ -59,8 +60,10 @@ jobs:
       - name: Run deployed Product journey validation
         env:
           PYTHONUNBUFFERED: '1'
+          DEPLOYED_BASE_URL: https://lattice-solandra-validation.onrender.com
         run: |
           set -euo pipefail
+          test -z "${LATTICE_OWNER_ACCESS_TOKEN+x}"
           python -m pytest -q -s tools/deployed_product_journey_validation.py \
             --browser chromium \
             --tracing retain-on-failure \
@@ -79,7 +82,8 @@ jobs:
       - name: Record validation scope
         if: always()
         run: |
-          echo 'DEPLOYED_TARGET=https://lattice-solandra.onrender.com/'
+          echo 'OWNER_AUTH_TARGET=https://lattice-solandra.onrender.com/'
+          echo 'PRODUCT_JOURNEY_TARGET=https://lattice-solandra-validation.onrender.com/'
           echo 'SECRET_OUTPUT=PROHIBITED'
-          echo 'PRODUCTION_MUTATION=CONVERSATION_TEST_DATA_ONLY'
+          echo 'OWNER_CREDENTIAL_SCOPE=OWNER_AUTH_ONLY'
           echo 'VALIDATION_SCOPE=OWNER_AUTH_PLUS_PRODUCT_JOURNEYS'

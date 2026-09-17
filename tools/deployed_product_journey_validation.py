@@ -4,14 +4,13 @@ import os
 import re
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
 import pytest
 from playwright.sync_api import Page, TimeoutError as PlaywrightTimeoutError, expect
 
-BASE_URL = os.environ.get("DEPLOYED_BASE_URL", "https://lattice-solandra.onrender.com").rstrip("/")
-OWNER_TOKEN = os.environ.get("LATTICE_OWNER_ACCESS_TOKEN", "")
-STORAGE_KEY = "lattice.solandra.owner-access.v1"
+BASE_URL = os.environ.get("DEPLOYED_BASE_URL", "https://lattice-solandra-validation.onrender.com").rstrip("/")
 
 
 def _probe(path: str) -> int | None:
@@ -46,28 +45,27 @@ def _wake_service() -> None:
 
 @pytest.fixture(scope="session", autouse=True)
 def deployment_ready() -> None:
-    assert OWNER_TOKEN, "LATTICE_OWNER_ACCESS_TOKEN secret is not configured"
+    assert "LATTICE_OWNER_ACCESS_TOKEN" not in os.environ, "Product validation must not receive the Owner credential"
     _wake_service()
     health = _probe("/health")
     assert health is not None and 200 <= health < 300, f"/health expected 2xx after wake, got {health}"
     print(f"DEPLOYMENT_READY health_status={health}")
 
 
-def _authenticate(page: Page) -> None:
-    page.goto(f"{BASE_URL}/", wait_until="domcontentloaded")
-    gate = page.locator("#ownerAccessGate")
-    expect(gate).to_be_visible()
-    page.locator("#ownerAccessInput").fill(OWNER_TOKEN)
-    with page.expect_navigation(wait_until="domcontentloaded"):
-        page.locator("#ownerAccessSubmit").click()
-    expect(gate).to_be_hidden()
-    assert page.evaluate("key => window.sessionStorage.getItem(key)", STORAGE_KEY) == OWNER_TOKEN
-    assert OWNER_TOKEN not in page.url
-    assert OWNER_TOKEN not in page.content()
+def _open_product_surface(page: Page) -> None:
+    response = page.goto(f"{BASE_URL}/", wait_until="domcontentloaded")
+    assert response is not None and 200 <= response.status < 300, "validator Product surface did not return HTTP 2xx"
+    expected = urllib.parse.urlsplit(BASE_URL)
+    actual = urllib.parse.urlsplit(page.url)
+    assert (actual.scheme, actual.netloc) == (expected.scheme, expected.netloc), (
+        f"Product journey reached unexpected origin {actual.scheme}://{actual.netloc}"
+    )
+    expect(page.locator("#ownerAccessGate")).to_be_hidden()
+    print(f"PRODUCT_JOURNEY_ORIGIN={actual.scheme}://{actual.netloc}")
 
 
 def _visible_text(page: Page) -> str:
-    return page.locator("body").inner_text().replace(OWNER_TOKEN, "[REDACTED]")
+    return page.locator("body").inner_text()
 
 
 def _composer(page: Page):
@@ -124,7 +122,6 @@ def _submit_turn(page: Page, prompt: str, label: str) -> str:
         raise
 
     after = _visible_text(page)
-    assert OWNER_TOKEN not in after
     print(f"JOURNEY_{label}_VISIBLE_TEXT_BEGIN")
     print(after[-5000:])
     print(f"JOURNEY_{label}_VISIBLE_TEXT_END")
@@ -176,7 +173,7 @@ def _restore_cognitive_assistance(page: Page, changed: bool) -> None:
 
 def test_deployed_solandra_product_journeys(page: Page) -> None:
     page.set_viewport_size({"width": 1440, "height": 1000})
-    _authenticate(page)
+    _open_product_surface(page)
 
     changed_capability = _connect_cognitive_assistance_if_available(page)
     try:
