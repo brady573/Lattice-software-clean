@@ -1,0 +1,103 @@
+name: Validation — Issue 91 Deployed Governed Knowledge
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "tools/issue-91-deployed-governed-knowledge-validation.py"
+      - ".github/workflows/issue-91-deployed-governed-knowledge-validation.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: issue-91-deployed-governed-knowledge-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  governed-knowledge:
+    name: Deployed governed Knowledge journey
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      DEPLOYED_BASE_URL: https://lattice-solandra-validation.onrender.com
+      LATTICE_OWNER_ACCESS_TOKEN: ${{ secrets.LATTICE_OWNER_ACCESS_TOKEN }}
+      PRODUCT_PARENT_SHA: b2d5ba079224fb194feeea85b2c4728c9041d09d
+      EXPECTED_DEPLOYED_SHA: b2d5ba079224fb194feeea85b2c4728c9041d09d
+      EVIDENCE_DIR: artifacts/issue-91-governed-knowledge
+
+    steps:
+      - name: Checkout exact validation child
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 2
+          persist-credentials: false
+
+      - name: Verify validation-only parent and changed files
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD^)" = "$PRODUCT_PARENT_SHA"
+          mapfile -t changed < <(git diff --name-only "$PRODUCT_PARENT_SHA" HEAD)
+          test "${#changed[@]}" -eq 2
+          for path in "${changed[@]}"; do
+            case "$path" in
+              tools/issue-91-deployed-governed-knowledge-validation.py|.github/workflows/issue-91-deployed-governed-knowledge-validation.yml) ;;
+              *) echo "UNAUTHORIZED_CHANGED_FILE=$path" >&2; exit 1 ;;
+            esac
+          done
+          echo "PRODUCT_PARENT_VERIFIED=$PRODUCT_PARENT_SHA"
+          printf 'VALIDATION_CHANGED_FILE=%s\n' "${changed[@]}"
+          echo 'PRODUCT_SOURCE_CHANGE=NONE'
+
+      - name: Verify existing Owner secret is configured
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${LATTICE_OWNER_ACCESS_TOKEN:-}"
+          echo 'OWNER_ACCESS_SECRET=CONFIGURED'
+
+      - name: Provision Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v6.0.0
+        with:
+          python-version: '3.13'
+
+      - name: Install focused validation dependency
+        run: |
+          python -m pip install --disable-pip-version-check --no-input 'playwright==1.58.0'
+          python -m playwright install --with-deps chromium
+
+      - name: Execute deployed governed Knowledge campaign
+        env:
+          PYTHONUNBUFFERED: '1'
+        run: |
+          set -euo pipefail
+          python tools/issue-91-deployed-governed-knowledge-validation.py
+          test "$(git rev-parse HEAD^)" = "$PRODUCT_PARENT_SHA"
+          git diff --exit-code
+          echo 'HARNESS_EXECUTION=PASS'
+          echo 'PRODUCT_CODE=UNCHANGED_FROM_PARENT'
+          echo 'RENDER_DEPLOYMENT=NOT_TRIGGERED'
+          echo 'PAID_VALIDATION_CAPACITY=NOT_USED'
+
+      - name: Upload governed Knowledge evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: issue-91-governed-knowledge-${{ github.event.pull_request.head.sha || github.sha }}
+          path: artifacts/issue-91-governed-knowledge/
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Record validation scope
+        if: always()
+        run: |
+          echo 'DEPLOYED_TARGET=https://lattice-solandra-validation.onrender.com/'
+          echo "PRODUCT_PARENT_SHA=$PRODUCT_PARENT_SHA"
+          echo "EXPECTED_DEPLOYED_SHA=$EXPECTED_DEPLOYED_SHA"
+          echo 'SECRET_OUTPUT=PROHIBITED'
+          echo 'VALIDATION_SCOPE=ISSUE91_GOVERNED_KNOWLEDGE_ONLY'
+          echo 'PRODUCT_SOURCE_CHANGE=NONE'
+          echo 'PRODUCTION_DEPLOYMENT=NOT_PERFORMED'
+          echo 'RENDER_ENVIRONMENT_MUTATION=NOT_PERFORMED'
