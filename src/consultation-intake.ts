@@ -86,6 +86,7 @@ import {
   type SolandraCognitiveRuntime,
   type SolandraConversationContextTurn,
   type SolandraGovernedCognitionResult,
+  type SolandraPendingIntentProposalContext,
   type SolandraRequestedHelp,
 } from "./solandra/cognition.js";
 import type { SolandraKnowledgePresenter } from "./solandra/knowledge-presenter.js";
@@ -100,6 +101,7 @@ const consultationTurnSchema = z.object({
   message: z.string().min(1).max(8_000).refine((value) => value.trim().length > 0, "message must not be blank"),
   context: z.array(z.string().min(1).max(4_000)).max(32).optional(),
   prepare: z.enum(["CHECKLIST", "PREPARED_MESSAGE"]).optional(),
+  clarificationProposalId: z.string().min(1).max(200).optional(),
 }).strict();
 
 const clarificationTurnSchema = z.object({
@@ -179,11 +181,6 @@ async function recordEstablishedKnowledgeReference(
     targets: [{ kind: "KNOWLEDGE", targetId: established.knowledgeId, relation: "PRODUCED" }],
     createdAt: established.createdAt,
   });
-}
-
-function isConfirmation(message: string): boolean {
-  return /^(?:yes|yes please|yes,? (?:that'?s|that is) (?:right|correct)|confirmed|confirm|that'?s right|that'?s correct|correct|apply it|use that)\.?$/iu
-    .test(message.trim().replace(/\s+/g, " "));
 }
 
 function validateProposedOperations(
@@ -293,6 +290,7 @@ function publicCognition(result: SolandraCognitionResult | undefined): unknown {
     referencedKnowledgeId: result.proposal.referencedKnowledgeId,
     referencedRecommendationId: result.proposal.referencedRecommendationId ?? null,
     referencedOptionId: result.proposal.referencedOptionId ?? null,
+    referencedIntentProposalId: result.proposal.referencedIntentProposalId ?? null,
     proposedNextStep: result.proposal.proposedNextStep,
   };
 }
@@ -516,6 +514,132 @@ async function createPendingClarification(input: {
   });
 }
 
+function pendingIntentProposalContext(proposal: PendingIntentProposal): SolandraPendingIntentProposalContext {
+  return {
+    proposalId: proposal.proposalId,
+    proposalDigest: proposal.proposalDigest,
+    operations: proposal.operations.map((operation) => JSON.stringify(operation)),
+  };
+}
+
+async function confirmPendingClarification(input: {
+  request: FastifyRequest;
+  options: ConsultationIntakeOptions;
+  apiSubjectForRequest: (request: FastifyRequest) => string;
+  conversationId: string;
+  proposal: PendingIntentProposal;
+  sourceMessage: IntentUserMessage;
+  canonicalRoute: string;
+}) {
+  const confirmation = await input.options.intentStore.confirmPendingProposal({
+    transitionId: stableUuid(
+      "consultation-material-confirm",
+      input.conversationId,
+      input.proposal.proposalId,
+      input.sourceMessage.messageId,
+    ),
+    proposalId: input.proposal.proposalId,
+    expectedProposalDigest: input.proposal.proposalDigest,
+    intentScopeId: input.proposal.intentScopeId,
+    baseIntentVersionId: input.proposal.baseIntentVersionId,
+    logicalUserTurnId: input.sourceMessage.logicalUserTurnId,
+    observedMessageHorizon: input.sourceMessage.messageHorizon,
+    sourceMessageId: input.sourceMessage.messageId,
+    sourceDigest: input.sourceMessage.contentDigest,
+  });
+  if (
+    !confirmation.resultingIntentVersionId
+    || (confirmation.disposition !== "COMMITTED" && confirmation.disposition !== "REPLAYED")
+  ) {
+    return {
+      outcome: "rejected" as const,
+      statusCode: 409 as const,
+      body: {
+        error: "CLARIFICATION_CONFIRMATION_REJECTED",
+        disposition: confirmation.disposition,
+      },
+    };
+  }
+  const version = await input.options.intentStore.getVersion(confirmation.resultingIntentVersionId);
+  if (!version) {
+    return {
+      outcome: "rejected" as const,
+      statusCode: 500 as const,
+      body: { error: "CONFIRMED_INTENT_VERSION_MISSING" },
+    };
+  }
+
+  const includesDecisionSemantics = input.proposal.operations.some((operation) =>
+    operation.path.kind === "REQUIREMENT" || operation.path.kind === "PREFERENCE");
+  const qualification = includesDecisionSemantics
+    ? qualifiedDecisionNeed(version, input.options.criterionCatalog)
+    : { decisionNeed: "NONE" as const };
+  const decisionNeed = qualification.decisionNeed;
+  const objectiveField = version.state.objective;
+  if (
+    !objectiveField
+    || objectiveField.value.state !== "VALUE"
+    || typeof objectiveField.value.value !== "string"
+  ) {
+    return {
+      outcome: "rejected" as const,
+      statusCode: 500 as const,
+      body: { error: "CONFIRMED_INTENT_OBJECTIVE_MISSING" },
+    };
+  }
+  const objective = objectiveField.value.value;
+  const requestBody = consultationRequest({
+    objective,
+    context: [],
+    investigationQueries: [],
+    decisionNeed,
+    resourceNeed: "NONE",
+    sourceMessageId: input.sourceMessage.messageId,
+    sourceMessageDigest: input.sourceMessage.contentDigest,
+    intentScopeId: input.proposal.intentScopeId,
+    intentVersion: version,
+    ...(qualification.decisionNeed === "QUALIFIED" ? { decisionInput: qualification.decisionInput } : {}),
+  });
+  const submission = await submitConsultationRun({
+    request: input.request,
+    options: input.options,
+    apiSubjectForRequest: input.apiSubjectForRequest,
+    conversationId: input.conversationId,
+    turnId: input.sourceMessage.logicalUserTurnId,
+    runPurpose: "consultation-clarified-run",
+    requestBody,
+    intentScopeId: input.proposal.intentScopeId,
+    intentVersionId: version.intentVersionId,
+    canonicalRoute: input.canonicalRoute,
+    idempotencyMaterial: {
+      proposalId: input.proposal.proposalId,
+      proposalDigest: input.proposal.proposalDigest,
+      messageId: input.sourceMessage.messageId,
+      contentDigest: input.sourceMessage.contentDigest,
+      decisionNeed,
+    },
+  });
+  if (submission.outcome === "conflict") {
+    return {
+      outcome: "rejected" as const,
+      statusCode: 409 as const,
+      body: { error: "CONSULTATION_CLARIFICATION_IDEMPOTENCY_CONFLICT" },
+    };
+  }
+  return {
+    outcome: "accepted" as const,
+    body: {
+      status: "RUN_ACCEPTED",
+      runId: submission.runId,
+      acceptedUnderstanding: objective,
+      decisionNeed,
+      intentScopeId: input.proposal.intentScopeId,
+      intentVersionId: version.intentVersionId,
+      proposalId: input.proposal.proposalId,
+    },
+  };
+}
+
 export function registerConsultationIntake(app: FastifyInstance, options: ConsultationIntakeOptions): void {
   const interpreter = options.interpreter ?? new ConservativeConsultationInterpreter();
   const configuredApiSubject = options.apiSubject;
@@ -541,9 +665,30 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
       const intentScopeId = `consultation:${conversationId}`;
       const messageId = stableUuid("consultation-message", conversationId, parsed.data.turnId);
       const existing = await options.userMessageStore.get(messageId);
+      const clarificationProposalId = parsed.data.clarificationProposalId?.trim();
+      const clarificationProposal = clarificationProposalId
+        ? await options.intentStore.getPendingProposal(clarificationProposalId)
+        : undefined;
+      if (clarificationProposalId && (!clarificationProposal || clarificationProposal.intentScopeId !== intentScopeId)) {
+        return reply.status(404).send({ error: "CLARIFICATION_NOT_FOUND" });
+      }
+      if (clarificationProposal?.status === "STALE") {
+        return reply.status(409).send({ error: "CLARIFICATION_STALE" });
+      }
+      if (clarificationProposal?.status === "CONFIRMED" && !existing) {
+        return reply.status(409).send({ error: "CLARIFICATION_ALREADY_RESOLVED" });
+      }
+
       const history = await options.userMessageStore.listByConversation(conversationId);
       const messageHorizon = existing?.messageHorizon
         ?? Math.max(0, ...history.map((message) => message.messageHorizon)) + 1;
+      if (
+        clarificationProposal
+        && !existing
+        && messageHorizon !== clarificationProposal.observedMessageHorizon + 1
+      ) {
+        return reply.status(409).send({ error: "CLARIFICATION_STALE" });
+      }
 
       let sourceMessage: IntentUserMessage;
       try {
@@ -558,6 +703,21 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
       } catch (error) {
         const message = error instanceof Error ? error.message : "USER message provenance conflict.";
         return reply.status(409).send({ error: "USER_MESSAGE_PROVENANCE_CONFLICT", message });
+      }
+
+      if (clarificationProposal?.status === "CONFIRMED") {
+        const replay = await confirmPendingClarification({
+          request,
+          options,
+          apiSubjectForRequest,
+          conversationId,
+          proposal: clarificationProposal,
+          sourceMessage,
+          canonicalRoute: `/api/v1/conversations/${encodeURIComponent(conversationId)}/turns`,
+        });
+        return replay.outcome === "accepted"
+          ? reply.status(202).send(replay.body)
+          : reply.status(replay.statusCode).send(replay.body);
       }
 
       const conversationResponses = await options.conversationResponseStore.listByConversation(conversationId);
@@ -611,7 +771,30 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
             recentConversation: boundedConversationContext(history, conversationResponses, sourceMessage),
             governedKnowledge: governed.map(governedKnowledgeContext),
             governedRecommendations: recommendations.slice(-4).map(recommendationContext),
+            ...(clarificationProposal
+              ? { pendingIntentProposal: pendingIntentProposalContext(clarificationProposal) }
+              : {}),
           });
+          if (
+            !isConversationalCognition(cognitionResult)
+            && cognitionResult.proposal.requestedHelp === "CONFIRM_INTENT"
+          ) {
+            if (!clarificationProposal) {
+              return reply.status(409).send({ error: "CLARIFICATION_NOT_FOUND" });
+            }
+            const confirmed = await confirmPendingClarification({
+              request,
+              options,
+              apiSubjectForRequest,
+              conversationId,
+              proposal: clarificationProposal,
+              sourceMessage,
+              canonicalRoute: `/api/v1/conversations/${encodeURIComponent(conversationId)}/turns`,
+            });
+            return confirmed.outcome === "accepted"
+              ? reply.status(202).send(confirmed.body)
+              : reply.status(confirmed.statusCode).send(confirmed.body);
+          }
           if (isConversationalCognition(cognitionResult)) {
             const persisted = await options.conversationResponseStore.putResponse({
               responseId: stableUuid("conversation-response", conversationId, sourceMessage.messageId),
@@ -1237,12 +1420,6 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
         return reply.status(404).send({ error: "CLARIFICATION_NOT_FOUND" });
       }
       if (proposal.status === "STALE") return reply.status(409).send({ error: "CLARIFICATION_STALE" });
-      if (!isConfirmation(clarificationText)) {
-        return reply.status(422).send({
-          error: "CLARIFICATION_NOT_REPRESENTABLE",
-          message: "Explicitly confirm the pending interpretation or submit a new consultation turn; it remains non-authoritative.",
-        });
-      }
 
       const messageId = parsed.data.messageId
         ?? stableUuid("consultation-message", conversationId, parsed.data.turnId);
@@ -1261,92 +1438,18 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
         return reply.status(409).send({ error: "CLARIFICATION_PROVENANCE_CONFLICT", message });
       }
 
-      const confirmation = await options.intentStore.confirmPendingProposal({
-        transitionId: stableUuid(
-          "consultation-material-confirm",
-          conversationId,
-          proposal.proposalId,
-          sourceMessage.messageId,
-        ),
-        proposalId: proposal.proposalId,
-        expectedProposalDigest: proposal.proposalDigest,
-        intentScopeId: proposal.intentScopeId,
-        baseIntentVersionId: proposal.baseIntentVersionId,
-        logicalUserTurnId: sourceMessage.logicalUserTurnId,
-        observedMessageHorizon: sourceMessage.messageHorizon,
-        sourceMessageId: sourceMessage.messageId,
-        sourceDigest: sourceMessage.contentDigest,
-      });
-      if (
-        !confirmation.resultingIntentVersionId
-        || (confirmation.disposition !== "COMMITTED" && confirmation.disposition !== "REPLAYED")
-      ) {
-        return reply.status(409).send({
-          error: "CLARIFICATION_CONFIRMATION_REJECTED",
-          disposition: confirmation.disposition,
-        });
-      }
-      const version = await options.intentStore.getVersion(confirmation.resultingIntentVersionId);
-      if (!version) return reply.status(500).send({ error: "CONFIRMED_INTENT_VERSION_MISSING" });
-
-      const includesDecisionSemantics = proposal.operations.some((operation) =>
-        operation.path.kind === "REQUIREMENT" || operation.path.kind === "PREFERENCE");
-      const qualification = includesDecisionSemantics
-        ? qualifiedDecisionNeed(version, options.criterionCatalog)
-        : { decisionNeed: "NONE" as const };
-      const decisionNeed = qualification.decisionNeed;
-      const objectiveField = version.state.objective;
-      if (
-        !objectiveField
-        || objectiveField.value.state !== "VALUE"
-        || typeof objectiveField.value.value !== "string"
-      ) {
-        return reply.status(500).send({ error: "CONFIRMED_INTENT_OBJECTIVE_MISSING" });
-      }
-      const objective = objectiveField.value.value;
-      const requestBody = consultationRequest({
-        objective,
-        context: [],
-        investigationQueries: [],
-        decisionNeed,
-        resourceNeed: "NONE",
-        sourceMessageId: sourceMessage.messageId,
-        sourceMessageDigest: sourceMessage.contentDigest,
-        intentScopeId: proposal.intentScopeId,
-        intentVersion: version,
-        ...(qualification.decisionNeed === "QUALIFIED" ? { decisionInput: qualification.decisionInput } : {}),
-      });
-      const submission = await submitConsultationRun({
+      const confirmed = await confirmPendingClarification({
         request,
         options,
         apiSubjectForRequest,
         conversationId,
-        turnId: parsed.data.turnId,
-        runPurpose: "consultation-clarified-run",
-        requestBody,
-        intentScopeId: proposal.intentScopeId,
-        intentVersionId: version.intentVersionId,
+        proposal,
+        sourceMessage,
         canonicalRoute: `/api/v1/conversations/${encodeURIComponent(conversationId)}/clarifications/${encodeURIComponent(proposal.proposalId)}/confirm`,
-        idempotencyMaterial: {
-          proposalId: proposal.proposalId,
-          proposalDigest: proposal.proposalDigest,
-          messageId: sourceMessage.messageId,
-          contentDigest: sourceMessage.contentDigest,
-          decisionNeed,
-        },
       });
-      if (submission.outcome === "conflict") {
-        return reply.status(409).send({ error: "CONSULTATION_CLARIFICATION_IDEMPOTENCY_CONFLICT" });
-      }
-      return reply.status(202).send({
-        status: "RUN_ACCEPTED",
-        runId: submission.runId,
-        acceptedUnderstanding: objective,
-        decisionNeed,
-        intentScopeId: proposal.intentScopeId,
-        intentVersionId: version.intentVersionId,
-        proposalId: proposal.proposalId,
-      });
+      return confirmed.outcome === "accepted"
+        ? reply.status(202).send(confirmed.body)
+        : reply.status(confirmed.statusCode).send(confirmed.body);
     },
   );
 

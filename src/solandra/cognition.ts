@@ -14,6 +14,7 @@ export const solandraRequestedHelpSchema = z.enum([
   "SOURCES_RECOMMENDATION",
   "EXPLAIN_OPTION",
   "ACCEPT_CHOICE",
+  "CONFIRM_INTENT",
   "COGNITIVE_ASSISTANCE",
   "RESOURCE",
 ]);
@@ -45,6 +46,7 @@ export const solandraSemanticProposalSchema = z.object({
   referencedKnowledgeId: z.string().min(1).max(128).nullable(),
   referencedRecommendationId: z.string().min(1).max(128).nullable().optional(),
   referencedOptionId: z.string().min(1).max(128).nullable().optional(),
+  referencedIntentProposalId: z.string().min(1).max(200).nullable().optional(),
   /**
    * Compatibility-only inert metadata from early M1 proposals. Product behavior
    * is classified by requestedHelp; this value has no intent, truth, routing,
@@ -91,6 +93,12 @@ export interface SolandraGovernedRecommendationContext {
   readonly options: readonly Readonly<{ optionId: string; position: number; text: string; recommended: boolean }>[];
 }
 
+export interface SolandraPendingIntentProposalContext {
+  readonly proposalId: string;
+  readonly proposalDigest: string;
+  readonly operations: readonly string[];
+}
+
 export interface SolandraConversationContextTurn {
   readonly role: "USER" | "SOLANDRA";
   readonly content: string;
@@ -105,6 +113,7 @@ export interface SolandraCognitionInput {
   readonly recentConversation?: readonly SolandraConversationContextTurn[];
   readonly governedKnowledge: readonly SolandraGovernedKnowledgeContext[];
   readonly governedRecommendations?: readonly SolandraGovernedRecommendationContext[];
+  readonly pendingIntentProposal?: SolandraPendingIntentProposalContext;
 }
 
 export type SolandraConversationCognitionResult = Readonly<{
@@ -177,12 +186,20 @@ function buildCognitionRequest(model: string, input: SolandraCognitionInput): Ca
       `Options: ${item.options.map((option) => `[${option.optionId}] position=${option.position} recommended=${option.recommended}: ${option.text}`).join(" | ") || "none"}`,
     ].join("\n")).join("\n\n");
 
+  const pendingIntentProposal = input.pendingIntentProposal
+    ? [
+      `Proposal ID: ${input.pendingIntentProposal.proposalId}`,
+      `Proposal digest: ${input.pendingIntentProposal.proposalDigest}`,
+      `Exact proposed Intent operations: ${input.pendingIntentProposal.operations.join(" | ")}`,
+    ].join("\n")
+    : "No pending Intent proposal is awaiting USER confirmation.";
+
   const governedShape = JSON.stringify({
     mode: "GOVERNED",
     projection: {
       objectiveRelation: "NEW_OBJECTIVE|CONTINUE|CORRECTION",
       proposedObjective: "string or null",
-      requestedHelp: "KNOWLEDGE|EXPLAIN_REFERENCE|SIMPLIFY_REFERENCE|SOURCES_REFERENCE|FRESH_RESEARCH|DECISION|EXPLAIN_RECOMMENDATION|SOURCES_RECOMMENDATION|EXPLAIN_OPTION|ACCEPT_CHOICE|RESOURCE",
+      requestedHelp: "KNOWLEDGE|EXPLAIN_REFERENCE|SIMPLIFY_REFERENCE|SOURCES_REFERENCE|FRESH_RESEARCH|DECISION|EXPLAIN_RECOMMENDATION|SOURCES_RECOMMENDATION|EXPLAIN_OPTION|ACCEPT_CHOICE|CONFIRM_INTENT|RESOURCE",
       relevantContext: ["string"],
       entities: ["string"],
       referents: ["string"],
@@ -193,6 +210,7 @@ function buildCognitionRequest(model: string, input: SolandraCognitionInput): Ca
       referencedKnowledgeId: "one supplied Knowledge ID or null",
       referencedRecommendationId: "one supplied Recommendation ID or null",
       referencedOptionId: "one supplied option ID or null",
+      referencedIntentProposalId: "the supplied pending Intent proposal ID or null",
     },
   });
 
@@ -209,13 +227,15 @@ function buildCognitionRequest(model: string, input: SolandraCognitionInput): Ca
           "Never present Lattice or Solandra as having started, performed, completed, sent, applied, or verified an external action unless corresponding governed action state is supplied. This does not prevent ordinary discussion of actions the USER says they performed or hypothetical actions.",
           "Use CONVERSATION for ordinary discussion, explanation, brainstorming, transformation of USER material, hypothetical reasoning, or other non-consequential conversation that does not materially require a Lattice trust boundary. Answer the USER directly and naturally in response.",
           "A conversational answer may contain ordinary explanatory prose. Do not claim that conversational prose is verified or governed Knowledge. Do not add repetitive authority warnings unless they are useful to the USER's request.",
-          "Use GOVERNED only when the current request materially requires a framework trust boundary: establishing or refreshing trustworthy external factual Knowledge; exact historical Knowledge provenance or transformation; a durable Recommendation or exact option/choice reference; material meaning that must enter Intent Integrity for downstream governed work; or preparation of a governed resource/action boundary.",
+          "Use GOVERNED only when the current request materially requires a framework trust boundary: establishing or refreshing trustworthy external factual Knowledge; exact historical Knowledge provenance or transformation; a durable Recommendation or exact option/choice reference; confirmation of an exact pending Intent proposal; material meaning that must enter Intent Integrity for downstream governed work; or preparation of a governed resource/action boundary.",
           "Do not route to governed Knowledge merely because an ordinary answer could contain factual language. Use it when factual establishment, freshness, sourcing, or downstream reliance materially matters.",
           "When mode is CONVERSATION, return exactly JSON {\"mode\":\"CONVERSATION\",\"response\":\"natural response\"} and no other fields.",
           "When mode is GOVERNED, do not answer the user's factual question in projection. Project only the minimum structure required by the existing Lattice boundary.",
           "For a governed projection, classify objectiveRelation by comparing the Current USER message with the Current canonical objective. Being in the same Conversation or sharing generic words is not evidence that the USER is continuing the same objective.",
           "Use NEW_OBJECTIVE when governed downstream work would target a materially different question, task, goal, or decision. Use CONTINUE when the current governed request materially depends on the current objective or supplied governed context. Use CORRECTION when the USER revises the meaning of the same governed objective.",
           "For CORRECTION, use the exact Current USER message as proposedObjective when that message itself fully represents the corrected objective. If corrected meaning requires material reconstruction, propose it and let Lattice require USER confirmation.",
+          "When an exact pending Intent proposal is supplied, it remains non-authoritative until the USER confirms it. Use CONFIRM_INTENT only when the Current USER message naturally and unambiguously affirms that exact pending proposal. Set referencedIntentProposalId to the exact supplied Proposal ID. CONFIRM_INTENT is still only a semantic proposal; Lattice decides whether the exact pending proposal may become authoritative.",
+          "If the USER rejects, revises, questions, hedges about, or changes topic away from a pending Intent proposal, do not use CONFIRM_INTENT. Interpret the Current USER message normally. Never infer confirmation merely because a pending proposal exists, and never invent a Proposal ID.",
           "Use materialAmbiguity only when uncertainty could materially change governed downstream work. Ask the minimum question needed; do not treat unfamiliar surface tokens as inherently ambiguous.",
           "Treat every supplied governed Knowledge object as addressable historical state even when it has zero findings, zero admitted sources, unresolved or negative findings, or material uncertainty. Sparse historical Knowledge remains established state and must not be treated as absent merely because it is incomplete.",
           "When the USER is asking about what supplied historical Knowledge established, asking to explain or simplify that prior state, or asking for its sources, support, or provenance, use the matching EXPLAIN_REFERENCE, SIMPLIFY_REFERENCE, or SOURCES_REFERENCE mode and set referencedKnowledgeId to the exact supplied Knowledge ID. If the supplied Knowledge has no admitted source, still use SOURCES_REFERENCE so Lattice can faithfully report that absence. Never invent a Knowledge ID.",
@@ -237,6 +257,9 @@ function buildCognitionRequest(model: string, input: SolandraCognitionInput): Ca
           `Current canonical objective: ${input.currentObjective ?? "none"}`,
           "Bounded conversation context (oldest to newest):",
           conversationContext(input),
+          "",
+          "Pending Intent proposal awaiting USER confirmation:",
+          pendingIntentProposal,
           "",
           "Addressable governed Knowledge:",
           knowledge,
@@ -318,6 +341,27 @@ function validateGovernedProjection(
   if ((proposal.requestedHelp === "EXPLAIN_OPTION" || proposal.requestedHelp === "ACCEPT_CHOICE") && proposal.materialAmbiguity === null) {
     if (referencedRecommendationId === null || referencedOptionId === null) {
       throw new ModelProviderError("invalid_output", "An option reference projection must identify supplied Recommendation and option or surface ambiguity.");
+    }
+  }
+
+  const referencedIntentProposalId = proposal.referencedIntentProposalId ?? null;
+  const pendingIntentProposalId = input.pendingIntentProposal?.proposalId ?? null;
+  if (referencedIntentProposalId !== null && referencedIntentProposalId !== pendingIntentProposalId) {
+    throw new ModelProviderError(
+      "invalid_output",
+      "Solandra cognition referenced an Intent proposal that Lattice did not supply.",
+    );
+  }
+  if (proposal.requestedHelp === "CONFIRM_INTENT") {
+    if (
+      pendingIntentProposalId === null
+      || referencedIntentProposalId !== pendingIntentProposalId
+      || proposal.materialAmbiguity !== null
+    ) {
+      throw new ModelProviderError(
+        "invalid_output",
+        "Intent confirmation must identify the exact supplied pending proposal without material ambiguity.",
+      );
     }
   }
 }

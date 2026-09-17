@@ -44,7 +44,7 @@ test("canonical Solandra recovery keeps browser state non-authoritative and expo
   assert.match(html, /lattice\.solandra\.active-work\.v1/u);
   assert.match(html, /lattice\.solandra\.draft\.v1/u);
   assert.match(html, /storePendingTurn\(record\);[\s\S]*postTurnRecord\(record\)/u);
-  assert.match(html, /body: JSON\.stringify\(\{ turnId: record\.turnId, message: record\.message \}\)/u);
+  assert.match(html, /const payload = \{[\s\S]*turnId: record\.turnId,[\s\S]*message: record\.message,[\s\S]*clarificationProposalId: record\.clarificationProposalId[\s\S]*body: JSON\.stringify\(payload\)/u);
   assert.match(html, /clearDraftIfSame\(record\.message\);[\s\S]*await handleTurnResponse\(body, record\);[\s\S]*clearPendingTurn\(record\.turnId\);/u);
   assert.match(html, /\/continuity/u);
   assert.match(html, /\/presentation\/resources\//u);
