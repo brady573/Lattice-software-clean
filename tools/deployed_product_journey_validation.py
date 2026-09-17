@@ -7,7 +7,7 @@ import urllib.error
 import urllib.request
 
 import pytest
-from playwright.sync_api import Browser, Page, TimeoutError as PlaywrightTimeoutError, expect
+from playwright.sync_api import Page, TimeoutError as PlaywrightTimeoutError, expect
 
 BASE_URL = os.environ.get("DEPLOYED_BASE_URL", "https://lattice-solandra.onrender.com").rstrip("/")
 OWNER_TOKEN = os.environ.get("LATTICE_OWNER_ACCESS_TOKEN", "")
@@ -174,9 +174,8 @@ def _restore_cognitive_assistance(page: Page, changed: bool) -> None:
     dialog.get_by_role("button", name="Close").click()
 
 
-def test_deployed_solandra_product_journeys(browser: Browser) -> None:
-    context = browser.new_context(viewport={"width": 1440, "height": 1000})
-    page = context.new_page()
+def test_deployed_solandra_product_journeys(page: Page) -> None:
+    page.set_viewport_size({"width": 1440, "height": 1000})
     _authenticate(page)
 
     changed_capability = _connect_cognitive_assistance_if_available(page)
@@ -230,6 +229,5 @@ def test_deployed_solandra_product_journeys(browser: Browser) -> None:
         print("JOURNEY_RELOAD_CONTINUITY=PASS")
     finally:
         _restore_cognitive_assistance(page, changed_capability)
-        context.close()
 
     print("DEPLOYED_PRODUCT_JOURNEYS=PASS")
