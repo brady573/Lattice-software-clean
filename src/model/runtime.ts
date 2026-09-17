@@ -260,15 +260,16 @@ async function waitForRetry(delayMs: number | null, signal: AbortSignal): Promis
   const boundedDelayMs = Math.min(delayMs, MAX_PROVIDER_RETRY_DELAY_MS);
   if (signal.aborted) throw signal.reason ?? new Error("Aborted.");
   await new Promise<void>((resolve, reject) => {
-    const timer = setTimeout(() => {
-      signal.removeEventListener("abort", onAbort);
-      resolve();
-    }, boundedDelayMs);
+    let timer: ReturnType<typeof setTimeout>;
     const onAbort = () => {
       clearTimeout(timer);
       signal.removeEventListener("abort", onAbort);
       reject(signal.reason ?? new Error("Aborted."));
     };
+    timer = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, boundedDelayMs);
     signal.addEventListener("abort", onAbort, { once: true });
   });
 }
