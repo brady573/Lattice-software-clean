@@ -36,15 +36,16 @@ test("authoritative Solandra surface is Conversation + free-form input + adaptiv
   assert.match(html, /appendUserTurn\(message\)/);
   assert.match(html, /appendSolandraTurn\(body\.proposalId[\s\S]*\? body\.question/);
   assert.match(html, /appendSolandraTurn\(outcome\.explanation/);
-  assert.match(html, /confirmsPending = clarification && isExplicitConfirmation\(message\)/);
+  assert.match(html, /Reply naturally to confirm that interpretation/);
   assert.ok(
-    html.includes('replace(/\\s+/g, " ")'),
-    "Rendered confirmation classifier must retain its whitespace-regex escape.",
+    html.includes("...(clarification ? { clarificationProposalId: clarification.proposalId } : {})"),
+    "A pending proposal identity must accompany the next natural USER turn without classifying its wording in the browser.",
   );
   assert.ok(
-    html.includes(')\\.?$/iu'),
-    "Rendered confirmation classifier must retain its optional-period escape.",
+    html.includes("...(record.clarificationProposalId ? { clarificationProposalId: record.clarificationProposalId } : {})"),
+    "Pending proposal identity must be forwarded to the canonical turn endpoint for Solandra interpretation.",
   );
+  assert.doesNotMatch(html, /isExplicitConfirmation|confirmsPending|\/clarifications\/.*\/confirm/u);
   assert.doesNotMatch(html, /clear-user-messages|decision-plan|winnerCandidateId|Knowledge Orbit|resourceFocus|newUpdate/i);
   assert.doesNotMatch(html, /Accepted understanding|What you said|Interpreting against|One clarification|Conversation \+ adaptive Composer|Confidence:|<h2>Provenance<\/h2>/i);
   assert.doesNotMatch(html, /Atlas Pro|Nova Air|Forge 15|batteryHours|price\.max\.usd|performance\.relativeToBattery/i);
