@@ -63,9 +63,18 @@ jobs:
           set -euo pipefail
           python -m pytest -q -s tools/deployed_product_journey_validation.py \
             --browser chromium \
-            --tracing off \
-            --screenshot off \
-            --video off
+            --tracing retain-on-failure \
+            --screenshot only-on-failure \
+            --video retain-on-failure
+
+      - name: Upload failed Product journey artifacts
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: deployed-product-journey-${{ github.sha }}
+          path: test-results/
+          if-no-files-found: warn
+          retention-days: 7
 
       - name: Record validation scope
         if: always()
