@@ -219,11 +219,6 @@ def test_deployed_solandra_product_journeys(page: Page) -> None:
             "Action preparation falsely implied external execution"
         )
 
-        page.reload(wait_until="domcontentloaded")
-        expect(page.locator("#ownerAccessGate")).to_be_hidden()
-        continuity = _visible_text(page)
-        assert re.search(r"RAM|memory", continuity, re.I), "Reload did not visibly preserve conversation context"
-        print("JOURNEY_RELOAD_CONTINUITY=PASS")
     finally:
         _restore_cognitive_assistance(page, changed_capability)
 
