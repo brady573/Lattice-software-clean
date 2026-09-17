@@ -30,6 +30,8 @@ export interface GroqCompletionDiagnostic {
 
 export type GroqCompletionDiagnosticSink = (diagnostic: GroqCompletionDiagnostic) => void;
 
+const MAX_GROQ_RETRY_AFTER_MS = 20_000;
+
 export interface GroqKnowledgeSimplifierProviderOptions {
   readonly apiKey: string;
   readonly maxResponseBytes?: number;
@@ -53,6 +55,33 @@ function requireApiKey(value: string): string {
 
 function optionalFiniteInteger(value: unknown): number | null {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : null;
+}
+
+function boundedRetryAfterMs(seconds: number): number | null {
+  if (!Number.isFinite(seconds) || seconds < 0) return null;
+  return Math.min(MAX_GROQ_RETRY_AFTER_MS, Math.ceil(seconds * 1_000));
+}
+
+function groqRetryAfterMs(response: Response, bodyText: string): number | null {
+  const retryAfterHeader = response.headers.get("retry-after")?.trim();
+  if (retryAfterHeader) {
+    const headerSeconds = Number(retryAfterHeader);
+    const headerDelay = boundedRetryAfterMs(headerSeconds);
+    if (headerDelay !== null) return headerDelay;
+  }
+
+  let body: unknown;
+  try {
+    body = JSON.parse(bodyText);
+  } catch {
+    return null;
+  }
+  const root = asRecord(body);
+  const providerError = asRecord(root?.error);
+  const message = typeof providerError?.message === "string" ? providerError.message : "";
+  const match = /please try again in\s+([0-9]+(?:\.[0-9]+)?)s\b/iu.exec(message);
+  if (!match?.[1]) return null;
+  return boundedRetryAfterMs(Number(match[1]));
 }
 
 async function readBoundedText(response: Response, maxBytes: number): Promise<string> {
@@ -167,7 +196,11 @@ export class GroqKnowledgeSimplifierModelProvider implements ModelProvider {
         throw new ModelProviderError(
           "rate_limit",
           "Groq Knowledge simplifier route was rate limited.",
-          { retryable: true, statusCode: 429 },
+          {
+            retryable: true,
+            statusCode: 429,
+            retryAfterMs: groqRetryAfterMs(response, text),
+          },
         );
       }
       throw new ModelProviderError(
