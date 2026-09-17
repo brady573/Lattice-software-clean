@@ -64,11 +64,11 @@ class DecisionProvider implements ModelProvider {
     this.calls.set(context.correlationId, calls);
 
     if (this.rateLimitFirstAttempt && calls === 1) {
-      this.allowedAfter.set(context.correlationId, Date.now() + 10);
+      this.allowedAfter.set(context.correlationId, Date.now() + 100);
       throw new ModelProviderError("rate_limit", "simulated provider TPM limit", {
         retryable: true,
         statusCode: 429,
-        retryAfterMs: 10,
+        retryAfterMs: 100,
       });
     }
     const allowedAfter = this.allowedAfter.get(context.correlationId);
