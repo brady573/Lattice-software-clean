@@ -1,0 +1,115 @@
+name: Validation — PR122 Browser Natural Intent Confirmation
+
+on:
+  pull_request:
+    paths:
+      - "tools/pr122-browser-runtime.mjs"
+      - "tools/pr122-browser-natural-intent-confirmation.mjs"
+      - ".github/workflows/pr122-browser-natural-intent-confirmation-validation.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr122-browser-natural-confirmation-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  browser-natural-intent-confirmation:
+    name: Browser natural Intent confirmation
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout exact validation source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Provision Node 24
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+
+      - name: Validate exact source and browser surface
+        env:
+          SUBJECT_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SUBJECT_SOURCE_SHA"
+          test "$RUNNER_OS" = "Linux"
+          test "$RUNNER_ARCH" = "X64"
+          test "$(node -p "process.versions.node.split('.')[0]")" = "24"
+          browser="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
+          if [ -z "$browser" ]; then
+            echo 'BROWSER_EXECUTION_SURFACE_FAILURE: Chrome/Chromium not found on hosted runner' >&2
+            exit 1
+          fi
+          echo "PR122_BROWSER_EXECUTABLE=$browser" >> "$GITHUB_ENV"
+          echo "BROWSER_EXECUTION_SURFACE_PASS executable=$browser"
+
+      - name: Install locked dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Syntax-check focused validation harness
+        run: |
+          node --check tools/pr122-browser-runtime.mjs
+          node --check tools/pr122-browser-natural-intent-confirmation.mjs
+
+      - name: Build exact Product candidate
+        run: npm run build
+
+      - name: Start bounded cognition-fixture runtime
+        env:
+          LATTICE_DEPLOYMENT_MODE: development
+          LATTICE_TRUTH_MODE: v36-offline
+          LATTICE_AUTHENTICATION_MODE: development-fixture
+          LATTICE_DEVELOPMENT_FIXTURE_SUBJECT_ID: pr122-browser-validation-subject
+          PR122_BROWSER_RUNTIME_PORT: '3117'
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/pr122-browser
+          node tools/pr122-browser-runtime.mjs > artifacts/pr122-browser/runtime.log 2>&1 &
+          echo "PR122_BROWSER_RUNTIME_PID=$!" >> "$GITHUB_ENV"
+          for attempt in $(seq 1 80); do
+            if curl --fail --silent http://127.0.0.1:3117/health >/dev/null; then
+              exit 0
+            fi
+            sleep 0.1
+          done
+          cat artifacts/pr122-browser/runtime.log >&2
+          exit 1
+
+      - name: Execute affected browser confirmation journey
+        env:
+          SUBJECT_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          PR122_BROWSER_BASE_URL: http://127.0.0.1:3117
+          PR122_BROWSER_RUNTIME_LOG: artifacts/pr122-browser/runtime.log
+          PR122_BROWSER_ARTIFACT_DIR: artifacts/pr122-browser
+        run: |
+          set -euo pipefail
+          node tools/pr122-browser-natural-intent-confirmation.mjs
+          test "$(git rev-parse HEAD)" = "$SUBJECT_SOURCE_SHA"
+          git diff --exit-code
+          echo "PR122_BROWSER_CONFIRMATION=PASS sha=$SUBJECT_SOURCE_SHA"
+          echo 'BROWSER_COGNITION_COMPOSITION=BOUNDED_NONCANONICAL_FIXTURE'
+          echo 'PRODUCT_CODE=UNCHANGED_FROM_PR122_F42423D'
+          echo 'PRODUCTION_DEPLOYMENT=NOT_PERFORMED'
+          echo 'PRODUCTION_DATABASE=NOT_TOUCHED'
+
+      - name: Stop bounded cognition-fixture runtime
+        if: always()
+        run: |
+          if [ -n "${PR122_BROWSER_RUNTIME_PID:-}" ]; then
+            kill "$PR122_BROWSER_RUNTIME_PID" 2>/dev/null || true
+          fi
+
+      - name: Upload focused browser evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: pr122-browser-natural-confirmation-${{ github.event.pull_request.head.sha || github.sha }}
+          path: artifacts/pr122-browser/
+          if-no-files-found: warn
+          retention-days: 7
