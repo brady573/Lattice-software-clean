@@ -227,9 +227,6 @@ export function renderSolandraConversationPage(): string {
         composer.setAttribute("aria-busy", String(value));
       };
 
-      const isExplicitConfirmation = (message) => /^(?:yes|yes please|yes,? (?:that'?s|that is) (?:right|correct)|confirmed|confirm|that'?s right|that'?s correct|correct|apply it|use that)\\.?$/iu
-        .test(message.trim().replace(/\\s+/g, " "));
-
       const ensureConversation = async () => {
         if (conversationId) return conversationId;
         const response = await fetch("/api/v1/conversations", { method: "POST" });
@@ -454,7 +451,7 @@ export function renderSolandraConversationPage(): string {
           } : null;
           setClarification(clarification);
           appendSolandraTurn(body.proposalId
-            ? body.question + "\\n\\nReply with “" + body.confirmationExample + "” to confirm, or state a correction normally."
+            ? body.question + "\\n\\nReply naturally to confirm that interpretation, or state a correction normally."
             : body.question);
           return;
         }
@@ -481,15 +478,18 @@ export function renderSolandraConversationPage(): string {
       };
 
       const postTurnRecord = async (record) => {
-        const route = record.clarificationProposalId
-          ? "/api/v1/conversations/" + encodeURIComponent(record.conversationId) + "/clarifications/" + encodeURIComponent(record.clarificationProposalId) + "/confirm"
-          : "/api/v1/conversations/" + encodeURIComponent(record.conversationId) + "/turns";
+        const route = "/api/v1/conversations/" + encodeURIComponent(record.conversationId) + "/turns";
+        const payload = {
+          turnId: record.turnId,
+          message: record.message,
+          ...(record.clarificationProposalId ? { clarificationProposalId: record.clarificationProposalId } : {}),
+        };
         let response;
         try {
           response = await fetch(route, {
             method: "POST",
             headers: { "content-type": "application/json" },
-            body: JSON.stringify({ turnId: record.turnId, message: record.message }),
+            body: JSON.stringify(payload),
           });
         } catch {
           const error = new Error("I couldn't confirm whether that request reached Lattice. I'll check that same request before starting anything new. Your draft is restored.");
@@ -578,9 +578,7 @@ export function renderSolandraConversationPage(): string {
           if (clarification?.conversationId === storedId) {
             pendingClarification = clarification;
             if (typeof clarification.question === "string" && clarification.question.trim()) {
-              appendSolandraTurn(clarification.question + (clarification.confirmationExample
-                ? "\\n\\nReply with “" + clarification.confirmationExample + "” to confirm, or state a correction normally."
-                : ""));
+              appendSolandraTurn(clarification.question + "\\n\\nReply naturally to confirm that interpretation, or state a correction normally.");
             }
           }
 
@@ -665,12 +663,11 @@ export function renderSolandraConversationPage(): string {
         try {
           const id = await ensureConversation();
           const clarification = pendingClarification;
-          const confirmsPending = clarification && isExplicitConfirmation(message);
           const record = {
             conversationId: id,
             turnId: crypto.randomUUID(),
             message,
-            ...(confirmsPending ? { clarificationProposalId: clarification.proposalId } : {}),
+            ...(clarification ? { clarificationProposalId: clarification.proposalId } : {}),
           };
           storePendingTurn(record);
           appendUserTurn(message);
