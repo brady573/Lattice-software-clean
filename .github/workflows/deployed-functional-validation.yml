@@ -2,6 +2,17 @@ name: Validation — Deployed Solandra Functional
 
 on:
   workflow_dispatch:
+    inputs:
+      product_target:
+        description: Approved Render validator Product origin
+        required: true
+        default: https://lattice-solandra-validation.onrender.com
+        type: string
+      run_owner_auth:
+        description: Also run Owner-auth validation against the canonical Owner deployment
+        required: true
+        default: true
+        type: boolean
 
 permissions:
   contents: read
@@ -22,12 +33,32 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Validate approved Product target
+        shell: bash
+        env:
+          REQUESTED_PRODUCT_TARGET: ${{ inputs.product_target }}
+        run: |
+          set -euo pipefail
+          target="${REQUESTED_PRODUCT_TARGET%/}"
+          if [[ "$target" == "https://lattice-solandra-validation.onrender.com" ]]; then
+            kind=canonical-validator
+          elif [[ "$target" =~ ^https://lattice-solandra-validation-pr-[1-9][0-9]*\.onrender\.com$ ]]; then
+            kind=validator-pr-preview
+          else
+            echo 'PRODUCT_TARGET=REJECTED'
+            exit 1
+          fi
+          printf 'PRODUCT_VALIDATION_BASE_URL=%s\n' "$target" >> "$GITHUB_ENV"
+          printf 'PRODUCT_VALIDATION_TARGET_KIND=%s\n' "$kind" >> "$GITHUB_ENV"
+          echo "PRODUCT_TARGET=APPROVED kind=$kind target=$target"
+
       - name: Provision Python
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v6.0.0
         with:
           python-version: '3.13'
 
       - name: Verify owner secret is configured
+        if: ${{ inputs.run_owner_auth }}
         shell: bash
         env:
           LATTICE_OWNER_ACCESS_TOKEN: ${{ secrets.LATTICE_OWNER_ACCESS_TOKEN }}
@@ -45,6 +76,7 @@ jobs:
           python -m playwright install --with-deps chromium
 
       - name: Run deployed owner-auth functional validation
+        if: ${{ inputs.run_owner_auth }}
         env:
           PYTHONUNBUFFERED: '1'
           DEPLOYED_BASE_URL: https://lattice-solandra.onrender.com
@@ -60,7 +92,7 @@ jobs:
       - name: Run deployed Product journey validation
         env:
           PYTHONUNBUFFERED: '1'
-          DEPLOYED_BASE_URL: https://lattice-solandra-validation.onrender.com
+          DEPLOYED_BASE_URL: ${{ env.PRODUCT_VALIDATION_BASE_URL }}
         run: |
           set -euo pipefail
           test -z "${LATTICE_OWNER_ACCESS_TOKEN+x}"
@@ -83,7 +115,9 @@ jobs:
         if: always()
         run: |
           echo 'OWNER_AUTH_TARGET=https://lattice-solandra.onrender.com/'
-          echo 'PRODUCT_JOURNEY_TARGET=https://lattice-solandra-validation.onrender.com/'
+          echo "OWNER_AUTH_ENABLED=${{ inputs.run_owner_auth }}"
+          echo "PRODUCT_JOURNEY_TARGET=${PRODUCT_VALIDATION_BASE_URL}/"
+          echo "PRODUCT_JOURNEY_TARGET_KIND=${PRODUCT_VALIDATION_TARGET_KIND}"
           echo 'SECRET_OUTPUT=PROHIBITED'
           echo 'OWNER_CREDENTIAL_SCOPE=OWNER_AUTH_ONLY'
-          echo 'VALIDATION_SCOPE=OWNER_AUTH_PLUS_PRODUCT_JOURNEYS'
+          echo 'VALIDATION_SCOPE=OPTIONAL_OWNER_AUTH_PLUS_PRODUCT_JOURNEY'
