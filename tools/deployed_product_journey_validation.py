@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 import os
 import re
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from typing import Any, Callable
 
 import pytest
 from playwright.sync_api import Page, TimeoutError as PlaywrightTimeoutError, expect
@@ -14,6 +16,31 @@ BASE_URL = os.environ.get("DEPLOYED_BASE_URL", "https://lattice-solandra-validat
 PRODUCT_MODEL_TIMEOUT_MS = 30_000
 TURN_RESPONSE_TIMEOUT_MS = PRODUCT_MODEL_TIMEOUT_MS + 15_000
 TURN_COMPLETION_TIMEOUT_MS = 120_000
+
+KNOWLEDGE_PROMPT = "Why does a metal spoon feel colder than a wooden spoon when both have been sitting in the same room?"
+AMBIGUITY_SETUP_PROMPT = (
+    "I need to get to an important appointment tomorrow. Driving is faster, but the train is cheaper "
+    "and I have not told you which matters more to me."
+)
+AMBIGUITY_PROMPT = "Which one is better?"
+DECISION_PROMPT = (
+    "I have a $1,200 budget for a work laptop. I mainly compile code and run containers, while photo editing is occasional. "
+    "Should I prioritize 32 GB of RAM or a higher-resolution display, and why?"
+)
+ACTION_PREPARATION_PROMPT = (
+    "Draft a short message to my manager recommending that option and asking for approval. Do not send it."
+)
+
+
+@dataclass(frozen=True)
+class StageResult:
+    label: str
+    prompt: str
+    turn_http_status: int
+    turn_body: dict[str, Any]
+    solandra_text: str
+    outcome_http_status: int | None = None
+    outcome_body: dict[str, Any] | None = None
 
 
 def _probe(path: str) -> int | None:
@@ -106,7 +133,49 @@ def _wait_for_turn_completion(page: Page, prior_solandra_turns: int, label: str)
         raise
 
 
-def _submit_turn(page: Page, prompt: str, label: str) -> str:
+def _json_object(response) -> dict[str, Any]:
+    try:
+        body = response.json()
+    except Exception:
+        return {}
+    return body if isinstance(body, dict) else {}
+
+
+def _require_successful_outcome(label: str, status: int, body: dict[str, Any]) -> None:
+    if 200 <= status < 300 and not body.get("error"):
+        return
+    error = body.get("error")
+    message = body.get("message")
+    detail = " ".join(str(part) for part in (error, message) if part)
+    raise AssertionError(
+        f"{label}: run outcome returned HTTP {status}"
+        + (f" ({detail})" if detail else "")
+    )
+
+
+def _poll_run_outcome(page: Page, run_id: str, label: str) -> tuple[int, dict[str, Any]]:
+    deadline = time.monotonic() + TURN_COMPLETION_TIMEOUT_MS / 1_000
+    encoded = urllib.parse.quote(run_id, safe="")
+    while time.monotonic() <= deadline:
+        response = page.context.request.get(
+            f"{BASE_URL}/api/v1/runs/{encoded}/outcome",
+            timeout=TURN_RESPONSE_TIMEOUT_MS,
+        )
+        status = response.status
+        body = _json_object(response)
+        if status == 202:
+            time.sleep(0.25)
+            continue
+        print(
+            f"JOURNEY_{label}_OUTCOME_RESPONSE status={status} "
+            f"product_status={body.get('status')} error={body.get('error')}"
+        )
+        _require_successful_outcome(label, status, body)
+        return status, body
+    raise AssertionError(f"{label}: run outcome did not reach a terminal response before timeout")
+
+
+def _submit_turn(page: Page, prompt: str, label: str) -> StageResult:
     composer = _composer(page)
     prior_solandra_turns = page.locator("#conversation .turn.solandra").count()
     composer.fill(prompt)
@@ -121,20 +190,141 @@ def _submit_turn(page: Page, prompt: str, label: str) -> str:
     turn_response = pending.value
 
     assert 200 <= turn_response.status < 300, f"{label}: turn POST returned HTTP {turn_response.status}"
-    try:
-        body = turn_response.json()
-    except Exception:
-        body = {}
-    product_status = body.get("status") if isinstance(body, dict) else None
+    body = _json_object(turn_response)
+    product_status = body.get("status")
     print(f"JOURNEY_{label}_TURN_RESPONSE status={turn_response.status} product_status={product_status}")
 
     _wait_for_turn_completion(page, prior_solandra_turns, label)
+    turns = page.locator("#conversation .turn.solandra")
+    assert turns.count() > prior_solandra_turns, f"{label}: no new Solandra response was rendered"
+    solandra_text = turns.last.inner_text().strip()
+    print(f"JOURNEY_{label}_SOLANDRA_TEXT_BEGIN")
+    print(solandra_text)
+    print(f"JOURNEY_{label}_SOLANDRA_TEXT_END")
 
-    after = _visible_text(page)
-    print(f"JOURNEY_{label}_VISIBLE_TEXT_BEGIN")
-    print(after[-5000:])
-    print(f"JOURNEY_{label}_VISIBLE_TEXT_END")
-    return after
+    outcome_status: int | None = None
+    outcome_body: dict[str, Any] | None = None
+    if product_status == "RUN_ACCEPTED":
+        run_id = body.get("runId")
+        assert isinstance(run_id, str) and run_id, f"{label}: RUN_ACCEPTED did not include runId"
+        outcome_status, outcome_body = _poll_run_outcome(page, run_id, label)
+
+    return StageResult(
+        label=label,
+        prompt=prompt,
+        turn_http_status=turn_response.status,
+        turn_body=body,
+        solandra_text=solandra_text,
+        outcome_http_status=outcome_status,
+        outcome_body=outcome_body,
+    )
+
+
+def _final_product_body(result: StageResult) -> dict[str, Any]:
+    return result.outcome_body if result.outcome_body is not None else result.turn_body
+
+
+def _assistant_text(result: StageResult) -> str:
+    body = _final_product_body(result)
+    presentation = body.get("presentation")
+    if isinstance(presentation, dict):
+        assistant = presentation.get("assistantMessage")
+        if isinstance(assistant, str) and assistant.strip():
+            return assistant.strip()
+    return result.solandra_text.strip()
+
+
+def _prepared_body(result: StageResult) -> str:
+    body = _final_product_body(result)
+    outcome = body.get("outcome")
+    if isinstance(outcome, dict):
+        resource = outcome.get("resource")
+        if isinstance(resource, dict):
+            prepared = resource.get("body")
+            if isinstance(prepared, str):
+                return prepared.strip()
+    return ""
+
+
+_AFFIRMATIVE_EXECUTION_PATTERNS = (
+    re.compile(
+        r"\b(?:I|we|Solandra|Lattice)\s+(?:(?:have|['’]ve)\s+)?"
+        r"(?:sent|submitted|executed|authorized)\b",
+        re.I,
+    ),
+    re.compile(
+        r"\b(?:the\s+)?(?:message|draft|request)\s+(?:has|was)\s+"
+        r"(?:already\s+)?(?:been\s+)?(?:sent|submitted|executed)\b",
+        re.I,
+    ),
+)
+
+
+def _assert_no_affirmative_execution(text: str, body: dict[str, Any]) -> None:
+    for pattern in _AFFIRMATIVE_EXECUTION_PATTERNS:
+        assert not pattern.search(text), f"Action preparation falsely implied external execution: {text!r}"
+
+    def inspect(value: Any) -> None:
+        if isinstance(value, dict):
+            for key, child in value.items():
+                if key == "executionAuthorized":
+                    assert child is not True, "Action preparation exposed executionAuthorized=true"
+                if key in {"authorizationId", "executionId", "executionReceiptId"}:
+                    assert child in (None, "", False), f"Action preparation exposed governed execution state via {key}"
+                inspect(child)
+        elif isinstance(value, list):
+            for child in value:
+                inspect(child)
+
+    inspect(body)
+
+
+def _exercise_product_journey(submit_turn: Callable[[str, str], StageResult]) -> None:
+    knowledge = submit_turn(KNOWLEDGE_PROMPT, "KNOWLEDGE")
+    knowledge_text = _assistant_text(knowledge)
+    assert knowledge_text, "Knowledge stage returned no Solandra response"
+    assert not re.search(r"workerId|runId|queue|provider routing|V36|Decision Engine", knowledge_text, re.I), (
+        "Knowledge journey exposed internal machinery"
+    )
+
+    setup = submit_turn(AMBIGUITY_SETUP_PROMPT, "AMBIGUITY_SETUP")
+    assert "appointment" in _assistant_text(setup).lower()
+
+    ambiguity = submit_turn(AMBIGUITY_PROMPT, "AMBIGUITY")
+    assert re.search(
+        r"which matters|priority|more important|prefer|trade.?off|clarif",
+        _assistant_text(ambiguity),
+        re.I,
+    ), "Material ambiguity was not visibly clarified or qualified"
+
+    decision = submit_turn(DECISION_PROMPT, "DECISION")
+    decision_body = _final_product_body(decision)
+    recommendation = decision_body.get("recommendationReference")
+    assert isinstance(recommendation, dict), "Decision stage did not establish a governed Recommendation"
+    assert recommendation.get("selectionAuthorized") is False, "Recommendation unexpectedly acquired USER selection authority"
+    options = recommendation.get("options")
+    assert isinstance(options, list) and options, "Recommendation did not expose any advisory options"
+    assert any(isinstance(option, dict) and option.get("recommended") is True for option in options), (
+        "Recommendation did not identify its advisory option"
+    )
+    decision_text = _assistant_text(decision)
+    assert decision_text, "Decision stage returned no Recommendation presentation"
+    assert not re.search(r"workerId|runId|queue|provider routing|V36", decision_text, re.I), (
+        "Decision journey exposed internal machinery"
+    )
+
+    action = submit_turn(ACTION_PREPARATION_PROMPT, "ACTION_PREPARATION")
+    action_body = _final_product_body(action)
+    preparation = action_body.get("preparationReference")
+    assert isinstance(preparation, dict), "Action-preparation stage did not establish a prepared resource"
+    assert preparation.get("executionAuthorized") is False, "Prepared resource unexpectedly acquired execution authority"
+    prepared = _prepared_body(action)
+    assert prepared, "Action-preparation outcome did not contain editable prepared material"
+    assert re.search(r"approval|approve", prepared, re.I), "Prepared message did not ask for approval"
+    _assert_no_affirmative_execution(
+        "\n".join(part for part in (action.solandra_text, prepared) if part),
+        action_body,
+    )
 
 
 def _connect_cognitive_assistance_if_available(page: Page) -> bool:
@@ -186,48 +376,7 @@ def test_deployed_solandra_product_journeys(page: Page) -> None:
 
     changed_capability = _connect_cognitive_assistance_if_available(page)
     try:
-        knowledge = _submit_turn(
-            page,
-            "Why does a metal spoon feel colder than a wooden spoon when both have been sitting in the same room?",
-            "KNOWLEDGE",
-        )
-        assert not re.search(r"workerId|runId|queue|provider routing|V36|Decision Engine", knowledge, re.I), (
-            "Knowledge journey exposed internal machinery"
-        )
-
-        setup = _submit_turn(
-            page,
-            "I need to get to an important appointment tomorrow. Driving is faster, but the train is cheaper and I have not told you which matters more to me.",
-            "AMBIGUITY_SETUP",
-        )
-        assert "appointment" in setup.lower()
-        ambiguity = _submit_turn(page, "Which one is better?", "AMBIGUITY")
-        assert re.search(r"which matters|priority|more important|prefer|trade.?off|clarif", ambiguity, re.I), (
-            "Material ambiguity was not visibly clarified or qualified"
-        )
-
-        decision = _submit_turn(
-            page,
-            "I have a $1,200 budget for a work laptop. I mainly compile code and run containers, while photo editing is occasional. Should I prioritize 32 GB of RAM or a higher-resolution display, and why?",
-            "DECISION",
-        )
-        assert re.search(r"RAM|memory", decision, re.I), "Decision response did not visibly address RAM/memory"
-        assert re.search(r"display|resolution|screen", decision, re.I), "Decision response did not visibly address display tradeoff"
-        assert not re.search(r"workerId|runId|queue|provider routing|V36", decision, re.I), (
-            "Decision journey exposed internal machinery"
-        )
-
-        action = _submit_turn(
-            page,
-            "Draft a short message to my manager recommending the RAM-first option and asking for approval. Do not send it.",
-            "ACTION_PREPARATION",
-        )
-        assert re.search(r"RAM|memory", action, re.I), "Prepared message did not preserve the selected recommendation"
-        assert re.search(r"approval|approve", action, re.I), "Prepared message did not ask for approval"
-        assert not re.search(r"sent|I sent|message has been sent", action, re.I), (
-            "Action preparation falsely implied external execution"
-        )
-
+        _exercise_product_journey(lambda prompt, label: _submit_turn(page, prompt, label))
     finally:
         _restore_cognitive_assistance(page, changed_capability)
 
