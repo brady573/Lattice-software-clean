@@ -186,7 +186,9 @@ function buildAdvisoryRequest(model: string, input: SolandraAdvisoryInput): Cano
       uncertainties: ["drafting explanation of uncertainty; never factual authority"],
       preservedUncertainties: ["copy each material supplied uncertainty used by the recommendation verbatim"],
       alternatives: ["other concise advisory proposal or option"],
-      userPremiseMessageIds: ["exact supplied USER message IDs materially relied upon, including the current USER message ID"],
+      ...(input.userContextMessages
+        ? { userPremiseMessageIds: ["exact supplied USER message IDs materially relied upon, including the current USER message ID"] }
+        : {}),
     },
     { status: "NEEDS_KNOWLEDGE", knowledgeNeeds: ["external fact needed"], reason: "why it is required" },
     { status: "NEEDS_CLARIFICATION", question: "material USER ambiguity that prevents responsible advice", reason: "why it changes the advice" },
@@ -205,7 +207,7 @@ function buildAdvisoryRequest(model: string, input: SolandraAdvisoryInput): Cano
           "For RECOMMENDATION, recommendation and alternatives are concise advisory proposals. You may originate them when the USER states a decision goal or preferences without already supplying candidate options. Do not return NEEDS_CLARIFICATION merely because the USER did not pre-author the option you would recommend.",
           "Keep recommendation and alternatives as option/proposal text rather than factual support: do not append external factual rationale, source claims, or claims of established performance to those fields. USER-supplied options may be reused naturally when present.",
           "assumptions may contain only exact verbatim excerpts of USER-authored material. Lattice independently rechecks these excerpts and discards anything that is not exact USER material.",
-          "When exact USER context message IDs are supplied, every RECOMMENDATION must return userPremiseMessageIds. Include the current USER message ID and only additional supplied USER message IDs whose exact material the recommendation materially relies upon. Do not invent IDs and do not carry unrelated prior-topic messages into premise authority.",
+          "When exact USER context message IDs are supplied, every RECOMMENDATION must return userPremiseMessageIds. Include the current USER message ID and only additional supplied USER message IDs whose exact material the recommendation materially relies upon. Do not invent IDs and do not carry unrelated prior-topic messages into premise authority. When exact USER context message IDs are not supplied, omit userPremiseMessageIds.",
           "The supplied exact USER context is conversational premise material only. It does not make model reconstruction canonical USER Intent.",
           "Every external factual basis reference must use only supplied Knowledge IDs and claim IDs. Lattice renders factual support later from those exact governed claims; recommendation, alternatives, rationale, tradeoffs, assumptions, and uncertainties never establish factual support or source provenance.",
           "If no external factual premise is needed, a Recommendation may use an empty Knowledge basis and reason only from authoritative USER intent/current USER context. If an external fact is genuinely required but not supplied, return NEEDS_KNOWLEDGE instead of inventing it.",
