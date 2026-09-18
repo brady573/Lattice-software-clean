@@ -72,6 +72,38 @@ def test_failed_decision_outcome_cannot_become_success_from_accumulated_prompt_w
         )
 
 
+def test_contextual_clarification_accepts_semantics_without_favored_phrasing() -> None:
+    validator._assert_contextual_clarification(
+        _stage(
+            "AMBIGUITY",
+            "For driving versus the train, should speed or cost determine the choice?",
+            turn_body={"status": "NEEDS_CLARIFICATION"},
+        )
+    )
+
+
+def test_contextual_clarification_rejects_generic_context_loss() -> None:
+    with pytest.raises(AssertionError, match="did not visibly retain the known comparison alternatives"):
+        validator._assert_contextual_clarification(
+            _stage(
+                "AMBIGUITY",
+                "What specific items, options, or subjects are you asking to compare?",
+                turn_body={"status": "NEEDS_CLARIFICATION"},
+            )
+        )
+
+
+def test_contextual_clarification_requires_product_status() -> None:
+    with pytest.raises(AssertionError, match="expected NEEDS_CLARIFICATION"):
+        validator._assert_contextual_clarification(
+            _stage(
+                "AMBIGUITY",
+                "For driving versus the train, should speed or cost determine the choice?",
+                turn_body={"status": "CONVERSATION_COMPLETED"},
+            )
+        )
+
+
 def test_action_preparation_is_not_submitted_after_decision_failure() -> None:
     labels: list[str] = []
 
@@ -82,7 +114,11 @@ def test_action_preparation_is_not_submitted_after_decision_failure() -> None:
         if label == "AMBIGUITY_SETUP":
             return _stage(label, "Which factor—speed or cost—is more important to you for this trip?")
         if label == "AMBIGUITY":
-            return _stage(label, "Which matters more to you, speed or cost?")
+            return _stage(
+                label,
+                "For driving versus the train, should speed or cost determine the choice?",
+                turn_body={"status": "NEEDS_CLARIFICATION"},
+            )
         if label == "DECISION":
             validator._require_successful_outcome(
                 label,
