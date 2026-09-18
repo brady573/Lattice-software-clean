@@ -1,0 +1,32 @@
+name: Validation — PR126 Inspect Decision Continuity
+
+on:
+  push:
+    branches:
+      - validation/pr126-inspect-decision-continuity
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout validation artifact
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+      - name: Verify exact Product parent
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD^)" = '6e4a9e35d4f8c24acfcd2de8d5f28fc24fed7c7a'
+          test "$(git diff --name-only '6e4a9e35d4f8c24acfcd2de8d5f28fc24fed7c7a' HEAD)" = '.github/workflows/pr126-inspect-decision-continuity.yml'
+      - name: Read existing conversation continuity
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -sS --max-time 30 --fail-with-body \
+            'https://lattice-solandra-validation-pr-126.onrender.com/api/v1/conversations/97c05351-0a04-4163-adab-c37151ebb511/continuity'
