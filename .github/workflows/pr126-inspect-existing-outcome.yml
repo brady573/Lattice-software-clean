@@ -1,0 +1,35 @@
+name: Validation — PR126 Inspect Existing Outcome
+
+on:
+  push:
+    branches:
+      - validation/pr126-inspect-existing-outcome
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout validation artifact
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+      - name: Verify exact Product parent
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD^)" = '6e4a9e35d4f8c24acfcd2de8d5f28fc24fed7c7a'
+          test "$(git diff --name-only '6e4a9e35d4f8c24acfcd2de8d5f28fc24fed7c7a' HEAD)" = '.github/workflows/pr126-inspect-existing-outcome.yml'
+      - name: Read existing deployed outcome
+        shell: bash
+        run: |
+          set -euo pipefail
+          url='https://lattice-solandra-validation-pr-126.onrender.com/api/v1/runs/7b72a9ac-38eb-3692-fe65-52050cf7403f/outcome'
+          code="$(curl -sS --max-time 30 -o /tmp/outcome.json -w '%{http_code}' "$url")"
+          echo "OUTCOME_HTTP_STATUS=$code"
+          cat /tmp/outcome.json
+          test "$code" = '422'
