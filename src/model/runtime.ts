@@ -253,11 +253,8 @@ function classifyAbort(
   return asModelProviderError(cause);
 }
 
-const MAX_PROVIDER_RETRY_DELAY_MS = 20_000;
-
 async function waitForRetry(delayMs: number | null, signal: AbortSignal): Promise<void> {
   if (delayMs === null || delayMs <= 0) return;
-  const boundedDelayMs = Math.min(delayMs, MAX_PROVIDER_RETRY_DELAY_MS);
   if (signal.aborted) throw signal.reason ?? new Error("Aborted.");
   await new Promise<void>((resolve, reject) => {
     let timer: ReturnType<typeof setTimeout>;
@@ -269,7 +266,7 @@ async function waitForRetry(delayMs: number | null, signal: AbortSignal): Promis
     timer = setTimeout(() => {
       signal.removeEventListener("abort", onAbort);
       resolve();
-    }, boundedDelayMs);
+    }, delayMs);
     signal.addEventListener("abort", onAbort, { once: true });
   });
 }
