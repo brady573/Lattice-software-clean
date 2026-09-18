@@ -301,6 +301,20 @@ test("Issue #91: conversational Recommendation fails closed when advisory invent
       }),
       /USER premise lineage referenced material outside supplied exact USER source messages/u,
     );
+
+    const { userPremiseMessageIds: _omitted, ...withoutPremiseLineage } = advisory;
+    await assert.rejects(
+      establishConversationalRecommendation({
+        store,
+        conversationId: sourceMessage.conversationId,
+        intentVersion,
+        sourceMessage,
+        userMessages: [prior, sourceMessage],
+        knowledge: [],
+        advisory: withoutPremiseLineage,
+      }),
+      /multi-message USER context omitted exact USER premise lineage/u,
+    );
   } finally {
     await store.close();
   }

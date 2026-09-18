@@ -242,8 +242,14 @@ export async function establishConversationalRecommendation(input: {
     throw new Error("Conversational Recommendation USER context crossed its exact conversation/Intent scope.");
   }
   const userMessagesById = new Map(input.userMessages.map((message) => [message.messageId, message] as const));
+  if (userMessagesById.size !== input.userMessages.length) {
+    throw new Error("Conversational Recommendation USER context duplicated an exact source-message identity.");
+  }
   if (!userMessagesById.has(input.sourceMessage.messageId)) {
     throw new Error("Conversational Recommendation USER context omitted the current exact source message.");
+  }
+  if (input.userMessages.length > 1 && input.advisory.userPremiseMessageIds === undefined) {
+    throw new Error("Conversational Recommendation with multi-message USER context omitted exact USER premise lineage.");
   }
   const proposedPremiseIds = input.advisory.userPremiseMessageIds ?? [input.sourceMessage.messageId];
   if (
