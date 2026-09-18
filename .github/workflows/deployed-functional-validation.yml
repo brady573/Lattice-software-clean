@@ -75,6 +75,10 @@ jobs:
             'pytest-playwright==0.7.2'
           python -m playwright install --with-deps chromium
 
+      - name: Run deployed Product validator regressions
+        run: |
+          python -m pytest -q tools/test_deployed_product_journey_validation.py
+
       - name: Run deployed owner-auth functional validation
         if: ${{ inputs.run_owner_auth }}
         env:
