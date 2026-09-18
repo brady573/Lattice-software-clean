@@ -53,6 +53,31 @@ function advisoryClarificationOutput(): string {
   });
 }
 
+function groqTextResponse(content: string, requestNumber: number): Response {
+  return new Response(JSON.stringify({
+    id: `groq-rate-limit-${requestNumber}`,
+    model: GROQ_KNOWLEDGE_SIMPLIFIER_MODEL,
+    choices: [{
+      message: { content },
+      finish_reason: "stop",
+    }],
+    usage: { prompt_tokens: 20, completion_tokens: 10, total_tokens: 30 },
+  }), { status: 200 });
+}
+
+function correlationIdFromFetch(init: RequestInit | undefined): string {
+  return new Headers(init?.headers).get("x-lattice-correlation-id") ?? "";
+}
+
+function currentUserMessageFromFetch(init: RequestInit | undefined): string {
+  if (typeof init?.body !== "string") return "";
+  const payload = JSON.parse(init.body) as {
+    messages?: Array<{ role?: string; content?: string }>;
+  };
+  const content = payload.messages?.at(-1)?.content ?? "";
+  return /Current USER message: ([\s\S]*)$/u.exec(content)?.[1]?.trim() ?? "";
+}
+
 class DecisionProvider implements ModelProvider {
   readonly kind = "issue-91-rate-limit-fixture";
   readonly calls = new Map<string, number>();
@@ -139,15 +164,20 @@ test("Groq TPM responses preserve the provider-directed retry window without exp
   );
 });
 
-test("Groq token reset coordinates distinct calls without delaying the current logical retry", async () => {
+test("Groq token reset gates both the current retry and distinct calls without double waiting", async () => {
   let requests = 0;
   const requestTimes: number[] = [];
+  let firstRateLimitSeen!: () => void;
+  const firstRateLimit = new Promise<void>((resolve) => {
+    firstRateLimitSeen = resolve;
+  });
   const provider = new GroqKnowledgeSimplifierModelProvider({
     apiKey: "test-groq-key-1234567890",
     fetchImpl: async () => {
       requests += 1;
       requestTimes.push(Date.now());
       if (requests === 1) {
+        firstRateLimitSeen();
         return new Response(JSON.stringify({
           error: {
             code: "rate_limit_exceeded",
@@ -162,58 +192,157 @@ test("Groq token reset coordinates distinct calls without delaying the current l
           },
         });
       }
-      return new Response(JSON.stringify({
-        id: `groq-shared-recovery-${requests}`,
-        model: GROQ_KNOWLEDGE_SIMPLIFIER_MODEL,
-        choices: [{
-          message: { content: "{\\\"mode\\\":\\\"CONVERSATION\\\",\\\"response\\\":\\\"Recovered.\\\"}" },
-          finish_reason: "stop",
-        }],
-        usage: { prompt_tokens: 20, completion_tokens: 10, total_tokens: 30 },
-      }), { status: 200 });
+      return groqTextResponse(
+        "{\\\"mode\\\":\\\"CONVERSATION\\\",\\\"response\\\":\\\"Recovered.\\\"}",
+        requests,
+      );
     },
   });
+  const runtime = new ModelRuntime(provider, { timeoutMs: 500 });
   const request: CanonicalModelRequest = {
     model: GROQ_KNOWLEDGE_SIMPLIFIER_MODEL,
     messages: [{ role: "user", content: "Continue the ordinary conversation." }],
   };
-  const controller = new AbortController();
-  const ownerRequestIdentity = "issue-91-shared-gate-first-request";
 
-  await assert.rejects(
-    () => provider.generate(request, {
-      correlationId: "issue-91-shared-gate-first",
-      requestIdentity: ownerRequestIdentity,
-      attempt: 0,
-      signal: controller.signal,
-    }),
-    (error: unknown) =>
-      error instanceof ModelProviderError
-      && error.code === "rate_limit"
-      && error.retryAfterMs === 5,
-  );
-
-  const ownerStarted = Date.now();
-  await provider.generate(request, {
+  const owner = runtime.call(request, {
     correlationId: "issue-91-shared-gate-first",
-    requestIdentity: ownerRequestIdentity,
-    attempt: 1,
-    signal: controller.signal,
+    maxAttempts: 2,
   });
-  assert.ok(Date.now() - ownerStarted < 40, "current logical retry was forced to wait for the full shared reset");
-
-  const distinctStarted = Date.now();
-  await provider.generate(request, {
+  await firstRateLimit;
+  const distinct = runtime.call(request, {
     correlationId: "issue-91-shared-gate-second",
-    requestIdentity: "issue-91-shared-gate-second-request",
-    attempt: 0,
-    signal: controller.signal,
+    maxAttempts: 1,
   });
-  const distinctElapsed = Date.now() - distinctStarted;
+
+  await Promise.all([owner, distinct]);
 
   assert.equal(requests, 3);
-  assert.ok(distinctElapsed >= 30, `distinct call bypassed provider token-reset gate after only ${distinctElapsed}ms`);
-  assert.ok((requestTimes[2] ?? 0) - (requestTimes[0] ?? 0) >= 60);
+  const firstRequestAt = requestTimes[0] ?? 0;
+  const recoveryRequests = requestTimes.slice(1);
+  assert.equal(recoveryRequests.length, 2);
+  for (const recoveryRequestAt of recoveryRequests) {
+    const elapsed = recoveryRequestAt - firstRequestAt;
+    assert.ok(elapsed >= 60, `request bypassed the provider token-reset gate after only ${elapsed}ms`);
+    assert.ok(elapsed < 180, `request appears to have waited the recovery window twice (${elapsed}ms)`);
+  }
+});
+
+test("Groq provider-gate recovery remains caller-cancellable", async () => {
+  let requests = 0;
+  const provider = new GroqKnowledgeSimplifierModelProvider({
+    apiKey: "test-groq-key-1234567890",
+    fetchImpl: async () => {
+      requests += 1;
+      if (requests === 1) {
+        return new Response(JSON.stringify({
+          error: {
+            code: "rate_limit_exceeded",
+            message: "Rate limit reached. Please try again in 0.005s.",
+            type: "tokens",
+          },
+        }), {
+          status: 429,
+          headers: {
+            "retry-after": "0.005",
+            "x-ratelimit-reset-tokens": "0.2s",
+          },
+        });
+      }
+      return groqTextResponse("Recovered.", requests);
+    },
+  });
+  const request: CanonicalModelRequest = {
+    model: GROQ_KNOWLEDGE_SIMPLIFIER_MODEL,
+    messages: [{ role: "user", content: "Cancel this recovery wait." }],
+  };
+  const firstController = new AbortController();
+  await assert.rejects(
+    () => provider.generate(request, {
+      correlationId: "issue-91-cancel-gate-first",
+      requestIdentity: "issue-91-cancel-gate-first",
+      attempt: 0,
+      signal: firstController.signal,
+    }),
+    (error: unknown) => error instanceof ModelProviderError && error.code === "rate_limit",
+  );
+
+  const secondController = new AbortController();
+  setTimeout(() => secondController.abort(new Error("caller left")), 20);
+  const started = Date.now();
+  await assert.rejects(
+    () => provider.generate(request, {
+      correlationId: "issue-91-cancel-gate-second",
+      requestIdentity: "issue-91-cancel-gate-second",
+      attempt: 0,
+      signal: secondController.signal,
+    }),
+    (error: unknown) => error instanceof ModelProviderError && error.code === "cancelled",
+  );
+  assert.ok(Date.now() - started < 150, "provider recovery wait ignored caller cancellation");
+  assert.equal(requests, 1);
+});
+
+test("ModelRuntime timeout still bounds a Groq token-reset recovery wait", async () => {
+  let requests = 0;
+  const provider = new GroqKnowledgeSimplifierModelProvider({
+    apiKey: "test-groq-key-1234567890",
+    fetchImpl: async () => {
+      requests += 1;
+      if (requests === 1) {
+        return new Response(JSON.stringify({
+          error: {
+            code: "rate_limit_exceeded",
+            message: "Rate limit reached. Please try again in 0.005s.",
+            type: "tokens",
+          },
+        }), {
+          status: 429,
+          headers: {
+            "retry-after": "0.005",
+            "x-ratelimit-reset-tokens": "0.2s",
+          },
+        });
+      }
+      return groqTextResponse("Recovered.", requests);
+    },
+  });
+  const runtime = new ModelRuntime(provider, { timeoutMs: 40 });
+
+  await assert.rejects(
+    () => runtime.call({
+      model: GROQ_KNOWLEDGE_SIMPLIFIER_MODEL,
+      messages: [{ role: "user", content: "Respect the bounded timeout." }],
+    }, {
+      correlationId: "issue-91-rate-limit-timeout",
+      maxAttempts: 2,
+    }),
+    (error: unknown) => error instanceof ModelProviderError && error.code === "timeout",
+  );
+  assert.equal(requests, 1);
+});
+
+test("non-retryable model failures are never repeated even when attempts remain", async () => {
+  let calls = 0;
+  const provider: ModelProvider = {
+    kind: "issue-91-non-retryable",
+    async generate(): Promise<ModelProviderResult> {
+      calls += 1;
+      throw new ModelProviderError("invalid_output", "non-retryable fixture failure");
+    },
+  };
+  const runtime = new ModelRuntime(provider, { timeoutMs: 500 });
+
+  await assert.rejects(
+    () => runtime.call({
+      model: MODEL,
+      messages: [{ role: "user", content: "Do not retry this invalid output." }],
+    }, {
+      correlationId: "issue-91-non-retryable",
+      maxAttempts: 3,
+    }),
+    (error: unknown) => error instanceof ModelProviderError && error.code === "invalid_output",
+  );
+  assert.equal(calls, 1);
 });
 
 const config = resolveRuntimeConfig({
@@ -264,6 +393,129 @@ test("one provider-directed TPM wait no longer turns an ordinary decision into f
   assert.equal(response.json().status, "NEEDS_CLARIFICATION");
   assert.notEqual(response.json().error, "CONSULTATION_INTERPRETATION_FAILED");
   assert.deepEqual([...provider.calls.values()].sort(), [2, 2]);
+});
+
+test("multi-turn Product pressure survives a shorter Retry-After than the shared Groq token reset", async () => {
+  let requests = 0;
+  const requestTimes: number[] = [];
+  const correlations: string[] = [];
+  let recoveryDeadline = 0;
+  const provider = new GroqKnowledgeSimplifierModelProvider({
+    apiKey: "test-groq-key-1234567890",
+    fetchImpl: async (_input, init) => {
+      requests += 1;
+      const now = Date.now();
+      requestTimes.push(now);
+      const correlationId = correlationIdFromFetch(init);
+      correlations.push(correlationId);
+
+      if (requests === 5) {
+        recoveryDeadline = now + 100;
+        return new Response(JSON.stringify({
+          error: {
+            code: "rate_limit_exceeded",
+            message: "Rate limit reached on tokens per minute. Please try again in 0.005s.",
+            type: "tokens",
+          },
+        }), {
+          status: 429,
+          headers: {
+            "retry-after": "0.005",
+            "x-ratelimit-reset-tokens": "0.1s",
+          },
+        });
+      }
+      if (requests === 6 && now < recoveryDeadline) {
+        return new Response(JSON.stringify({
+          error: {
+            code: "rate_limit_exceeded",
+            message: "Retry arrived before the token window recovered.",
+            type: "tokens",
+          },
+        }), { status: 429 });
+      }
+
+      if (correlationId.startsWith("solandra-cognition:")) {
+        const message = currentUserMessageFromFetch(init);
+        const content = message.startsWith("Why does a projector image")
+          ? JSON.stringify({
+            mode: "CONVERSATION",
+            response: "A darker room reduces competing ambient light, so the projected image has more visible contrast.",
+          })
+          : cognitionOutput(message);
+        return groqTextResponse(content, requests);
+      }
+      if (correlationId.startsWith("solandra-advisory:")) {
+        return groqTextResponse(advisoryClarificationOutput(), requests);
+      }
+      throw new Error(`Unexpected Product-path model correlation: ${correlationId}`);
+    },
+  });
+  const runtime = new ModelRuntime(provider, { timeoutMs: 2_000 });
+  const app = await createRuntimeApp(config, {
+    memoryDispatchDelayMs: 1,
+    solandraCognition: new ModelSolandraCognitiveRuntime(runtime, GROQ_KNOWLEDGE_SIMPLIFIER_MODEL),
+    solandraAdvisory: new ModelSolandraAdvisoryRuntime(runtime, GROQ_KNOWLEDGE_SIMPLIFIER_MODEL),
+  });
+
+  try {
+    const created = await app.inject({ method: "POST", url: "/api/v1/conversations" });
+    assert.equal(created.statusCode, 201, created.body);
+    const conversationId = created.json().conversation.id as string;
+
+    const knowledge = await app.inject({
+      method: "POST",
+      url: `/api/v1/conversations/${conversationId}/turns`,
+      payload: {
+        turnId: "pressure-knowledge",
+        message: "Why does a projector image look easier to see in a darker room?",
+      },
+    });
+    assert.equal(knowledge.statusCode, 200, knowledge.body);
+    assert.equal(knowledge.json().status, "CONVERSATION_COMPLETED");
+
+    const setup = await app.inject({
+      method: "POST",
+      url: `/api/v1/conversations/${conversationId}/turns`,
+      payload: {
+        turnId: "pressure-setup",
+        message: "I can carry workshop supplies in a folding cart or a shoulder bag. The cart is easier on my back, but the bag is faster on stairs, and I have not said which matters more.",
+      },
+    });
+    assert.equal(setup.statusCode, 202, setup.body);
+    assert.equal(setup.json().status, "NEEDS_CLARIFICATION");
+
+    const followup = await app.inject({
+      method: "POST",
+      url: `/api/v1/conversations/${conversationId}/turns`,
+      payload: {
+        turnId: "pressure-followup",
+        message: "Which one is better?",
+      },
+    });
+    assert.equal(followup.statusCode, 202, followup.body);
+    assert.equal(followup.json().status, "NEEDS_CLARIFICATION");
+    assert.notEqual(followup.json().error, "CONSULTATION_INTERPRETATION_FAILED");
+    assert.notEqual(followup.json().error, "SOLANDRA_ADVISORY_FAILED");
+
+    assert.equal(requests, 6);
+    assert.deepEqual(
+      correlations.map((value) => value.split(":")[0]),
+      [
+        "solandra-cognition",
+        "solandra-cognition",
+        "solandra-advisory",
+        "solandra-cognition",
+        "solandra-advisory",
+        "solandra-advisory",
+      ],
+    );
+    const retryElapsed = (requestTimes[5] ?? 0) - (requestTimes[4] ?? 0);
+    assert.ok(retryElapsed >= 75, `Product-path advisory retry bypassed token recovery after only ${retryElapsed}ms`);
+    assert.ok(retryElapsed < 220, `Product-path advisory retry appears to have double-waited (${retryElapsed}ms)`);
+  } finally {
+    await app.close();
+  }
 });
 
 

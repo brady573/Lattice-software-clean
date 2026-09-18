@@ -156,7 +156,6 @@ export class GroqKnowledgeSimplifierModelProvider implements ModelProvider {
   private readonly fetchImpl: typeof fetch;
   private readonly diagnosticSink: GroqCompletionDiagnosticSink | undefined;
   private rateLimitBlockedUntilMs = 0;
-  private rateLimitOwnerRequestIdentity: string | null = null;
 
   constructor(options: GroqKnowledgeSimplifierProviderOptions) {
     this.apiKey = requireApiKey(options.apiKey);
@@ -169,10 +168,7 @@ export class GroqKnowledgeSimplifierModelProvider implements ModelProvider {
   }
 
   async generate(request: CanonicalModelRequest, context: ModelCallContext): Promise<ModelProviderResult> {
-    while (
-      this.rateLimitBlockedUntilMs > Date.now()
-      && this.rateLimitOwnerRequestIdentity !== context.requestIdentity
-    ) {
+    while (this.rateLimitBlockedUntilMs > Date.now()) {
       try {
         await waitForProviderGate(this.rateLimitBlockedUntilMs, context.signal);
       } catch (error) {
@@ -252,7 +248,6 @@ export class GroqKnowledgeSimplifierModelProvider implements ModelProvider {
             this.rateLimitBlockedUntilMs,
             Date.now() + sharedRecoveryMs,
           );
-          this.rateLimitOwnerRequestIdentity = context.requestIdentity;
         }
         throw new ModelProviderError(
           "rate_limit",
