@@ -206,3 +206,25 @@ test("Groq simplifier route preserves bounded failure and cancellation behavior"
     return true;
   });
 });
+
+
+test("Groq rate-limit errors preserve the provider retry-after interval", async () => {
+  const runtime = new GroqKnowledgeSimplifierModelRuntime(
+    new GroqKnowledgeSimplifierModelProvider({
+      apiKey: API_KEY,
+      fetchImpl: async () => new Response("rate", {
+        status: 429,
+        headers: { "retry-after": "0.025" },
+      }),
+    }),
+  );
+
+  await assert.rejects(runtime.call(request(), {
+    correlationId: "rate-limit-retry-after",
+    maxAttempts: 1,
+  }), (error: unknown) => {
+    assert.equal((error as { code?: string }).code, "rate_limit");
+    assert.equal((error as { retryAfterMs?: number | null }).retryAfterMs, 25);
+    return true;
+  });
+});
