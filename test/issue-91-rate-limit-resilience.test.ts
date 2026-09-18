@@ -50,7 +50,7 @@ class RateLimitedDecisionCognitionProvider implements ModelProvider {
       throw new ModelProviderError("rate_limit", "fixture rate limit", {
         retryable: true,
         statusCode: 429,
-        retryAfterMs: 0,
+        retryAfterMs: 5,
       });
     }
     return modelResult(request, JSON.stringify({
