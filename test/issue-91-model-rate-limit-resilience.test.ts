@@ -164,20 +164,15 @@ test("Groq TPM responses preserve the provider-directed retry window without exp
   );
 });
 
-test("Groq token reset gates both the current retry and distinct calls without double waiting", async () => {
+test("Groq token reset gates the current logical retry without double waiting", async () => {
   let requests = 0;
   const requestTimes: number[] = [];
-  let firstRateLimitSeen!: () => void;
-  const firstRateLimit = new Promise<void>((resolve) => {
-    firstRateLimitSeen = resolve;
-  });
   const provider = new GroqKnowledgeSimplifierModelProvider({
     apiKey: "test-groq-key-1234567890",
     fetchImpl: async () => {
       requests += 1;
       requestTimes.push(Date.now());
       if (requests === 1) {
-        firstRateLimitSeen();
         return new Response(JSON.stringify({
           error: {
             code: "rate_limit_exceeded",
@@ -199,32 +194,74 @@ test("Groq token reset gates both the current retry and distinct calls without d
     },
   });
   const runtime = new ModelRuntime(provider, { timeoutMs: 500 });
-  const request: CanonicalModelRequest = {
+  const result = await runtime.call({
     model: GROQ_KNOWLEDGE_SIMPLIFIER_MODEL,
     messages: [{ role: "user", content: "Continue the ordinary conversation." }],
-  };
-
-  const owner = runtime.call(request, {
-    correlationId: "issue-91-shared-gate-first",
+  }, {
+    correlationId: "issue-91-shared-gate-owner",
     maxAttempts: 2,
   });
-  await firstRateLimit;
-  const distinct = runtime.call(request, {
-    correlationId: "issue-91-shared-gate-second",
-    maxAttempts: 1,
+
+  assert.equal(result.response.output[0]?.type, "text");
+  assert.equal(requests, 2);
+  const retryElapsed = (requestTimes[1] ?? 0) - (requestTimes[0] ?? 0);
+  assert.ok(retryElapsed >= 60, `current logical retry bypassed the token-reset gate after only ${retryElapsed}ms`);
+  assert.ok(retryElapsed < 180, `current logical retry appears to have waited the recovery window twice (${retryElapsed}ms)`);
+});
+
+test("Groq token reset coordinates distinct calls through the shared provider gate", async () => {
+  let requests = 0;
+  const requestTimes: number[] = [];
+  const provider = new GroqKnowledgeSimplifierModelProvider({
+    apiKey: "test-groq-key-1234567890",
+    fetchImpl: async () => {
+      requests += 1;
+      requestTimes.push(Date.now());
+      if (requests === 1) {
+        return new Response(JSON.stringify({
+          error: {
+            code: "rate_limit_exceeded",
+            message: "Rate limit reached. Please try again in 0.005s.",
+            type: "tokens",
+          },
+        }), {
+          status: 429,
+          headers: {
+            "retry-after": "0.005",
+            "x-ratelimit-reset-tokens": "0.08s",
+          },
+        });
+      }
+      return groqTextResponse("Recovered.", requests);
+    },
+  });
+  const request: CanonicalModelRequest = {
+    model: GROQ_KNOWLEDGE_SIMPLIFIER_MODEL,
+    messages: [{ role: "user", content: "A distinct request must respect the same token window." }],
+  };
+  const controller = new AbortController();
+
+  await assert.rejects(
+    () => provider.generate(request, {
+      correlationId: "issue-91-distinct-gate-first",
+      requestIdentity: "issue-91-distinct-gate-first",
+      attempt: 0,
+      signal: controller.signal,
+    }),
+    (error: unknown) => error instanceof ModelProviderError && error.code === "rate_limit",
+  );
+
+  await provider.generate(request, {
+    correlationId: "issue-91-distinct-gate-second",
+    requestIdentity: "issue-91-distinct-gate-second",
+    attempt: 0,
+    signal: controller.signal,
   });
 
-  await Promise.all([owner, distinct]);
-
-  assert.equal(requests, 3);
-  const firstRequestAt = requestTimes[0] ?? 0;
-  const recoveryRequests = requestTimes.slice(1);
-  assert.equal(recoveryRequests.length, 2);
-  for (const recoveryRequestAt of recoveryRequests) {
-    const elapsed = recoveryRequestAt - firstRequestAt;
-    assert.ok(elapsed >= 60, `request bypassed the provider token-reset gate after only ${elapsed}ms`);
-    assert.ok(elapsed < 180, `request appears to have waited the recovery window twice (${elapsed}ms)`);
-  }
+  assert.equal(requests, 2);
+  const distinctElapsed = (requestTimes[1] ?? 0) - (requestTimes[0] ?? 0);
+  assert.ok(distinctElapsed >= 60, `distinct call bypassed the provider token-reset gate after only ${distinctElapsed}ms`);
+  assert.ok(distinctElapsed < 180, `distinct call appears to have waited the recovery window twice (${distinctElapsed}ms)`);
 });
 
 test("Groq provider-gate recovery remains caller-cancellable", async () => {
