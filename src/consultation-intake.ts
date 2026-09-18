@@ -295,17 +295,17 @@ function publicCognition(result: SolandraCognitionResult | undefined): unknown {
   };
 }
 
-function isReferenceHelp(help: SolandraRequestedHelp): boolean {
+function isReferenceHelp(help: SolandraRequestedHelp | null): boolean {
   return help === "SOURCES_REFERENCE"
     || help === "EXPLAIN_REFERENCE"
     || help === "SIMPLIFY_REFERENCE";
 }
 
-function isRecommendationReferenceHelp(help: SolandraRequestedHelp): boolean {
+function isRecommendationReferenceHelp(help: SolandraRequestedHelp | null): boolean {
   return help === "EXPLAIN_RECOMMENDATION" || help === "SOURCES_RECOMMENDATION";
 }
 
-function isOptionReferenceHelp(help: SolandraRequestedHelp): boolean {
+function isOptionReferenceHelp(help: SolandraRequestedHelp | null): boolean {
   return help === "EXPLAIN_OPTION" || help === "ACCEPT_CHOICE";
 }
 
