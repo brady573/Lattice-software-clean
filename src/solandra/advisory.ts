@@ -357,7 +357,7 @@ export class ModelSolandraAdvisoryRuntime implements SolandraAdvisoryRuntime {
     const response = await this.runtime.call(buildAdvisoryRequest(this.model, input), {
       correlationId: `solandra-advisory:${input.conversationId}:${input.userMessageId}`,
       idempotencyKey: `advise:${input.userMessageId}:${basisDigest}`,
-      maxAttempts: 1,
+      maxAttempts: 2,
     });
     if (response.response.output.length !== 1 || response.response.output[0]?.type !== "text") {
       throw new ModelProviderError("invalid_output", "Solandra advisory reasoning requires exactly one text output.");
@@ -373,7 +373,7 @@ export class ModelSolandraAdvisoryRuntime implements SolandraAdvisoryRuntime {
       {
         correlationId: `solandra-advisory-grounding:${input.conversationId}:${input.userMessageId}`,
         idempotencyKey: `grounding:${input.userMessageId}:${basisDigest}`,
-        maxAttempts: 1,
+        maxAttempts: 2,
       },
     );
     if (auditResponse.response.output.length !== 1 || auditResponse.response.output[0]?.type !== "text") {
