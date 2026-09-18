@@ -11,6 +11,9 @@ import pytest
 from playwright.sync_api import Page, TimeoutError as PlaywrightTimeoutError, expect
 
 BASE_URL = os.environ.get("DEPLOYED_BASE_URL", "https://lattice-solandra-validation.onrender.com").rstrip("/")
+PRODUCT_MODEL_TIMEOUT_MS = 30_000
+TURN_RESPONSE_TIMEOUT_MS = PRODUCT_MODEL_TIMEOUT_MS + 15_000
+TURN_COMPLETION_TIMEOUT_MS = 120_000
 
 
 def _probe(path: str) -> int | None:
@@ -75,44 +78,25 @@ def _composer(page: Page):
     return candidates.first
 
 
-def _submit_turn(page: Page, prompt: str, label: str) -> str:
-    composer = _composer(page)
-    before = _visible_text(page)
-    composer.fill(prompt)
-
-    turn_response = None
-    try:
-        with page.expect_response(
-            lambda response: "/api/v1/conversations/" in response.url
-            and "/turns" in response.url
-            and response.request.method == "POST",
-            timeout=20_000,
-        ) as pending:
-            composer.press("Enter")
-        turn_response = pending.value
-    except Exception:
-        button = composer.locator("xpath=ancestor::form[1]//button[@type='submit'] | ancestor::*[contains(@class,'composer')][1]//button").last
-        expect(button).to_be_visible(timeout=5_000)
-        with page.expect_response(
-            lambda response: "/api/v1/conversations/" in response.url
-            and "/turns" in response.url
-            and response.request.method == "POST",
-            timeout=20_000,
-        ) as pending:
-            button.click()
-        turn_response = pending.value
-
-    assert turn_response is not None
-    assert 200 <= turn_response.status < 300, f"{label}: turn POST returned HTTP {turn_response.status}"
-
+def _wait_for_turn_completion(page: Page, prior_solandra_turns: int, label: str) -> None:
     try:
         page.wait_for_function(
-            """prior => {
-                const text = document.body.innerText;
-                return text !== prior && Math.abs(text.length - prior.length) > 20;
+            """priorSolandraTurns => {
+                const composer = document.getElementById("composer");
+                const input = document.getElementById("conversationInput");
+                const send = document.getElementById("sendButton");
+                const solandraTurns = document.querySelectorAll("#conversation .turn.solandra");
+                const hasNewSolandraResult = solandraTurns.length > priorSolandraTurns
+                    && String(solandraTurns[solandraTurns.length - 1]?.textContent || "").trim().length > 0;
+                const ready = composer?.getAttribute("aria-busy") === "false"
+                    && input instanceof HTMLTextAreaElement
+                    && input.disabled === false
+                    && send instanceof HTMLButtonElement
+                    && send.disabled === false;
+                return hasNewSolandraResult && ready;
             }""",
-            arg=before,
-            timeout=60_000,
+            arg=prior_solandra_turns,
+            timeout=TURN_COMPLETION_TIMEOUT_MS,
         )
     except PlaywrightTimeoutError:
         snapshot = _visible_text(page)
@@ -120,6 +104,31 @@ def _submit_turn(page: Page, prompt: str, label: str) -> str:
         print(snapshot[-5000:])
         print(f"JOURNEY_{label}_TIMEOUT_VISIBLE_TEXT_END")
         raise
+
+
+def _submit_turn(page: Page, prompt: str, label: str) -> str:
+    composer = _composer(page)
+    prior_solandra_turns = page.locator("#conversation .turn.solandra").count()
+    composer.fill(prompt)
+
+    with page.expect_response(
+        lambda response: "/api/v1/conversations/" in response.url
+        and "/turns" in response.url
+        and response.request.method == "POST",
+        timeout=TURN_RESPONSE_TIMEOUT_MS,
+    ) as pending:
+        composer.press("Enter")
+    turn_response = pending.value
+
+    assert 200 <= turn_response.status < 300, f"{label}: turn POST returned HTTP {turn_response.status}"
+    try:
+        body = turn_response.json()
+    except Exception:
+        body = {}
+    product_status = body.get("status") if isinstance(body, dict) else None
+    print(f"JOURNEY_{label}_TURN_RESPONSE status={turn_response.status} product_status={product_status}")
+
+    _wait_for_turn_completion(page, prior_solandra_turns, label)
 
     after = _visible_text(page)
     print(f"JOURNEY_{label}_VISIBLE_TEXT_BEGIN")
