@@ -55,6 +55,15 @@ function optionalFiniteInteger(value: unknown): number | null {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : null;
 }
 
+function retryAfterMs(response: Response): number | null {
+  const raw = response.headers.get("retry-after");
+  if (raw === null) return null;
+  const seconds = Number(raw);
+  if (!Number.isFinite(seconds) || seconds < 0) return null;
+  const milliseconds = Math.ceil(seconds * 1_000);
+  return Number.isSafeInteger(milliseconds) ? milliseconds : null;
+}
+
 async function readBoundedText(response: Response, maxBytes: number): Promise<string> {
   if (response.body === null) return "";
   const reader = response.body.getReader();
@@ -89,9 +98,9 @@ async function readBoundedText(response: Response, maxBytes: number): Promise<st
 }
 
 /**
- * Narrow PR #15 provider for one pinned Groq text route used only by Knowledge
- * simplification. It has no tools, routing, fallback, truth authority, or
- * provider selection behavior.
+ * Pinned Groq text provider shared by configured Solandra model roles. It has
+ * no tools, routing, semantic fallback, truth authority, or provider selection
+ * behavior.
  */
 export class GroqKnowledgeSimplifierModelProvider implements ModelProvider {
   readonly kind = "groq-knowledge-simplifier";
@@ -167,7 +176,7 @@ export class GroqKnowledgeSimplifierModelProvider implements ModelProvider {
         throw new ModelProviderError(
           "rate_limit",
           "Groq Knowledge simplifier route was rate limited.",
-          { retryable: true, statusCode: 429 },
+          { retryable: true, statusCode: 429, retryAfterMs: retryAfterMs(response) },
         );
       }
       throw new ModelProviderError(
