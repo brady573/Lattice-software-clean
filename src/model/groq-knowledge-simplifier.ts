@@ -72,30 +72,24 @@ function groqDurationMs(value: string | null): number | null {
 }
 
 function groqRetryAfterMs(response: Response, bodyText: string): number | null {
-  let retryDelay: number | null = null;
   const retryAfterHeader = response.headers.get("retry-after")?.trim();
   if (retryAfterHeader) {
-    retryDelay = retryAfterMilliseconds(Number(retryAfterHeader));
+    const headerDelay = retryAfterMilliseconds(Number(retryAfterHeader));
+    if (headerDelay !== null) return headerDelay;
   }
 
-  if (retryDelay === null) {
-    let body: unknown;
-    try {
-      body = JSON.parse(bodyText);
-    } catch {
-      body = null;
-    }
-    const root = asRecord(body);
-    const providerError = asRecord(root?.error);
-    const message = typeof providerError?.message === "string" ? providerError.message : "";
-    const match = /please try again in\s+([0-9]+(?:\.[0-9]+)?)s\b/iu.exec(message);
-    if (match?.[1]) retryDelay = retryAfterMilliseconds(Number(match[1]));
+  let body: unknown;
+  try {
+    body = JSON.parse(bodyText);
+  } catch {
+    body = null;
   }
-
-  const tokenResetDelay = groqDurationMs(response.headers.get("x-ratelimit-reset-tokens"));
-  if (retryDelay === null) return tokenResetDelay;
-  if (tokenResetDelay === null) return retryDelay;
-  return Math.max(retryDelay, tokenResetDelay);
+  const root = asRecord(body);
+  const providerError = asRecord(root?.error);
+  const message = typeof providerError?.message === "string" ? providerError.message : "";
+  const match = /please try again in\s+([0-9]+(?:\.[0-9]+)?)s\b/iu.exec(message);
+  if (!match?.[1]) return null;
+  return retryAfterMilliseconds(Number(match[1]));
 }
 
 async function waitForProviderGate(blockedUntilMs: number, signal: AbortSignal): Promise<void> {
@@ -162,6 +156,7 @@ export class GroqKnowledgeSimplifierModelProvider implements ModelProvider {
   private readonly fetchImpl: typeof fetch;
   private readonly diagnosticSink: GroqCompletionDiagnosticSink | undefined;
   private rateLimitBlockedUntilMs = 0;
+  private rateLimitOwnerRequestIdentity: string | null = null;
 
   constructor(options: GroqKnowledgeSimplifierProviderOptions) {
     this.apiKey = requireApiKey(options.apiKey);
@@ -174,7 +169,10 @@ export class GroqKnowledgeSimplifierModelProvider implements ModelProvider {
   }
 
   async generate(request: CanonicalModelRequest, context: ModelCallContext): Promise<ModelProviderResult> {
-    while (this.rateLimitBlockedUntilMs > Date.now()) {
+    while (
+      this.rateLimitBlockedUntilMs > Date.now()
+      && this.rateLimitOwnerRequestIdentity !== context.requestIdentity
+    ) {
       try {
         await waitForProviderGate(this.rateLimitBlockedUntilMs, context.signal);
       } catch (error) {
@@ -242,12 +240,19 @@ export class GroqKnowledgeSimplifierModelProvider implements ModelProvider {
     const text = await readBoundedText(response, this.maxResponseBytes);
     if (!response.ok) {
       if (response.status === 429) {
-        const retryAfterMs = groqRetryAfterMs(response, text);
-        if (retryAfterMs !== null) {
+        const tokenResetMs = groqDurationMs(response.headers.get("x-ratelimit-reset-tokens"));
+        const retryAfterMs = groqRetryAfterMs(response, text) ?? tokenResetMs;
+        const sharedRecoveryMs = tokenResetMs === null
+          ? retryAfterMs
+          : retryAfterMs === null
+            ? tokenResetMs
+            : Math.max(tokenResetMs, retryAfterMs);
+        if (sharedRecoveryMs !== null) {
           this.rateLimitBlockedUntilMs = Math.max(
             this.rateLimitBlockedUntilMs,
-            Date.now() + retryAfterMs,
+            Date.now() + sharedRecoveryMs,
           );
+          this.rateLimitOwnerRequestIdentity = context.requestIdentity;
         }
         throw new ModelProviderError(
           "rate_limit",
