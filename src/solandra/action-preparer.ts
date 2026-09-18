@@ -224,7 +224,7 @@ export class ModelSolandraActionPreparer implements SolandraActionPreparer {
     const generated = await this.runtime.call(generationRequest(this.model, input), {
       correlationId: `solandra-action-prepare:${input.runId}:${input.userMessageId}`,
       idempotencyKey: `PREPARED_MESSAGE:${input.intentVersionId}:${input.userMessageId}`,
-      maxAttempts: 1,
+      maxAttempts: 2,
     });
     const generationProvenance = generated.audit.invocationProvenance;
     if (generated.response.output.length !== 1 || generated.response.output[0]?.type !== "text") {
@@ -263,7 +263,7 @@ export class ModelSolandraActionPreparer implements SolandraActionPreparer {
       {
         correlationId: `solandra-action-ground:${input.runId}:${input.userMessageId}`,
         idempotencyKey: `PREPARED_MESSAGE_GROUND:${input.intentVersionId}:${input.userMessageId}`,
-        maxAttempts: 1,
+        maxAttempts: 2,
       },
     );
     const groundingProvenance = grounded.audit.invocationProvenance;
