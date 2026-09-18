@@ -139,7 +139,7 @@ test("Groq TPM responses preserve the provider-directed retry window without exp
   );
 });
 
-test("Groq token reset coordinates distinct calls after rate pressure is observed", async () => {
+test("Groq token reset coordinates distinct calls without delaying the current logical retry", async () => {
   let requests = 0;
   const requestTimes: number[] = [];
   const provider = new GroqKnowledgeSimplifierModelProvider({
@@ -158,7 +158,7 @@ test("Groq token reset coordinates distinct calls after rate pressure is observe
           status: 429,
           headers: {
             "retry-after": "0.005",
-            "x-ratelimit-reset-tokens": "0.03s",
+            "x-ratelimit-reset-tokens": "0.08s",
           },
         });
       }
@@ -178,32 +178,42 @@ test("Groq token reset coordinates distinct calls after rate pressure is observe
     messages: [{ role: "user", content: "Continue the ordinary conversation." }],
   };
   const controller = new AbortController();
+  const ownerRequestIdentity = "issue-91-shared-gate-first-request";
 
   await assert.rejects(
     () => provider.generate(request, {
       correlationId: "issue-91-shared-gate-first",
-      requestIdentity: "issue-91-shared-gate-first-request",
+      requestIdentity: ownerRequestIdentity,
       attempt: 0,
       signal: controller.signal,
     }),
     (error: unknown) =>
       error instanceof ModelProviderError
       && error.code === "rate_limit"
-      && error.retryAfterMs === 30,
+      && error.retryAfterMs === 5,
   );
 
-  const started = Date.now();
+  const ownerStarted = Date.now();
+  await provider.generate(request, {
+    correlationId: "issue-91-shared-gate-first",
+    requestIdentity: ownerRequestIdentity,
+    attempt: 1,
+    signal: controller.signal,
+  });
+  assert.ok(Date.now() - ownerStarted < 40, "current logical retry was forced to wait for the full shared reset");
+
+  const distinctStarted = Date.now();
   await provider.generate(request, {
     correlationId: "issue-91-shared-gate-second",
     requestIdentity: "issue-91-shared-gate-second-request",
     attempt: 0,
     signal: controller.signal,
   });
-  const elapsed = Date.now() - started;
+  const distinctElapsed = Date.now() - distinctStarted;
 
-  assert.equal(requests, 2);
-  assert.ok(elapsed >= 20, `distinct call bypassed provider token-reset gate after only ${elapsed}ms`);
-  assert.ok((requestTimes[1] ?? 0) - (requestTimes[0] ?? 0) >= 20);
+  assert.equal(requests, 3);
+  assert.ok(distinctElapsed >= 30, `distinct call bypassed provider token-reset gate after only ${distinctElapsed}ms`);
+  assert.ok((requestTimes[2] ?? 0) - (requestTimes[0] ?? 0) >= 60);
 });
 
 const config = resolveRuntimeConfig({
