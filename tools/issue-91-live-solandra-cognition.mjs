@@ -120,6 +120,61 @@ if (cameraCorrection.mode !== 'CONVERSATION') {
   assert.notEqual(cameraCorrection.proposal.requestedHelp, 'CONFIRM_INTENT');
 }
 
+const contextualMessages = [
+  {
+    messageId: 'issue91-live-context-option-message',
+    content: 'For my reading nook, Birch folds flat while Moss stays assembled.',
+  },
+  {
+    messageId: 'issue91-live-context-priority-message',
+    content: 'I care most about being able to tuck it behind the closet door after reading.',
+  },
+  {
+    messageId: 'issue91-live-context-followup-message',
+    content: 'Which one better matches that priority?',
+  },
+];
+const contextualIntent = {
+  intentScopeId: 'consultation:issue91-live-context-advisory',
+  intentVersionId: 'issue91-live-context-advisory-v1',
+  version: 1,
+  predecessorIntentVersionId: null,
+  transitionId: 'issue91-live-context-advisory-transition',
+  lineageKind: 'INITIAL',
+  lineageTargetIntentVersionId: null,
+  state: {
+    objective: {
+      value: { state: 'VALUE', value: contextualMessages[2].content },
+      provenance: {
+        kind: 'EXPLICIT_USER',
+        logicalUserTurnId: 'issue91-live-context-followup-turn',
+        sourceMessageId: contextualMessages[2].messageId,
+        sourceDigest: 'b'.repeat(64),
+      },
+    },
+    requirements: {},
+    preferences: {},
+  },
+  createdAt: '2026-09-18T00:00:00.000Z',
+};
+const contextualAdvisory = await solandra.advisory.advise({
+  conversationId: 'issue91-live-context-advisory',
+  userMessageId: contextualMessages[2].messageId,
+  authoritativeIntent: contextualIntent,
+  authoritativeObjective: contextualMessages[2].content,
+  userContext: contextualMessages.map((message) => message.content),
+  userContextMessages: contextualMessages,
+  knowledge: [],
+});
+assertLiveProvenance(contextualAdvisory);
+assert.equal(contextualAdvisory.result.status, 'RECOMMENDATION');
+assert.ok(contextualAdvisory.result.userPremiseMessageIds.includes(contextualMessages[2].messageId));
+assert.ok(
+  contextualAdvisory.result.userPremiseMessageIds.some((messageId) =>
+    messageId === contextualMessages[0].messageId || messageId === contextualMessages[1].messageId),
+  'live advisory did not retain any prior exact USER source needed to resolve the contextual follow-up',
+);
+
 console.log(JSON.stringify({
   configuredModel: solandra.model,
   cases: [
@@ -146,6 +201,13 @@ console.log(JSON.stringify({
       id: 'natural-correction-not-confirmation',
       mode: cameraCorrection.mode ?? 'GOVERNED',
       requestedHelp: cameraCorrection.mode === 'CONVERSATION' ? null : cameraCorrection.proposal.requestedHelp,
+    },
+    {
+      id: 'contextual-advisory-handoff',
+      status: contextualAdvisory.result.status,
+      userPremiseMessageIds: contextualAdvisory.result.status === 'RECOMMENDATION'
+        ? contextualAdvisory.result.userPremiseMessageIds
+        : [],
     },
   ],
 }, null, 2));

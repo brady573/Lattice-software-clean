@@ -372,6 +372,27 @@ function boundedConversationContext(
   return turns.slice(-MAX_COGNITIVE_HISTORY_ITEMS);
 }
 
+function boundedAdvisoryUserMessages(
+  userMessages: readonly IntentUserMessage[],
+  sourceMessage: IntentUserMessage,
+  priorIntentVersion: IntentVersion | undefined,
+  cognition: SolandraGovernedCognitionResult,
+): IntentUserMessage[] {
+  const messages = [...userMessages];
+  if (!messages.some((message) => message.messageId === sourceMessage.messageId)) messages.push(sourceMessage);
+  const bounded = messages
+    .filter((message) =>
+      message.conversationId === sourceMessage.conversationId
+      && message.intentScopeId === sourceMessage.intentScopeId
+      && message.messageHorizon <= sourceMessage.messageHorizon)
+    .sort((left, right) => left.messageHorizon - right.messageHorizon || left.createdAt.localeCompare(right.createdAt));
+
+  if (priorIntentVersion && cognition.proposal.objectiveRelation === "NEW_OBJECTIVE") {
+    return [sourceMessage];
+  }
+  return bounded.slice(-MAX_COGNITIVE_HISTORY_ITEMS);
+}
+
 function conversationResponsePayload(response: ConversationResponse): Record<string, unknown> {
   return {
     responseId: response.responseId,
@@ -1253,6 +1274,12 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
             4,
           )
           : [];
+        const advisoryUserMessages = boundedAdvisoryUserMessages(
+          history,
+          sourceMessage,
+          currentVersion,
+          cognition,
+        );
         let advisory;
         try {
           advisory = await options.solandraAdvisory.advise({
@@ -1260,7 +1287,11 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
             userMessageId: sourceMessage.messageId,
             authoritativeIntent: version,
             authoritativeObjective: authoritativeObjective(version),
-            userContext: [sourceMessage.content],
+            userContext: advisoryUserMessages.map((message) => message.content),
+            userContextMessages: advisoryUserMessages.map((message) => ({
+              messageId: message.messageId,
+              content: message.content,
+            })),
             knowledge: governed.map(advisoryKnowledge),
           });
         } catch (error) {
@@ -1273,6 +1304,7 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
             conversationId,
             intentVersion: version,
             sourceMessage,
+            userMessages: advisoryUserMessages,
             knowledge: governed,
             advisory: advisory.result,
           });
