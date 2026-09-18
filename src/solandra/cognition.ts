@@ -379,7 +379,7 @@ export class ModelSolandraCognitiveRuntime implements SolandraCognitiveRuntime {
     const result = await this.runtime.call(request, {
       correlationId: `solandra-cognition:${input.conversationId}:${input.messageId}`,
       idempotencyKey: input.messageId,
-      maxAttempts: 1,
+      maxAttempts: 2,
     });
     if (result.response.output.length !== 1 || result.response.output[0]?.type !== "text") {
       throw new ModelProviderError("invalid_output", "Solandra cognition requires exactly one text output.");
