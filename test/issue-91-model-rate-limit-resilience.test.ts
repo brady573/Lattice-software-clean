@@ -15,6 +15,10 @@ import type {
   ModelProviderResult,
 } from "../src/model/types.js";
 import { ModelSolandraAdvisoryRuntime } from "../src/solandra/advisory.js";
+import {
+  ModelSolandraActionPreparer,
+  type SolandraActionPreparationInput,
+} from "../src/solandra/action-preparer.js";
 import { ModelSolandraCognitiveRuntime } from "../src/solandra/cognition.js";
 
 const MODEL = "issue-91-resilience-model";
@@ -108,7 +112,7 @@ test("Groq TPM responses preserve the provider-directed retry window without exp
     fetchImpl: async () => new Response(JSON.stringify({
       error: {
         code: "rate_limit_exceeded",
-        message: "Rate limit reached on tokens per minute. Please try again in 4.7925s.",
+        message: "Rate limit reached on tokens per minute. Please try again in 24.7925s.",
         param: "",
         type: "tokens",
       },
@@ -130,7 +134,7 @@ test("Groq TPM responses preserve the provider-directed retry window without exp
       && error.code === "rate_limit"
       && error.retryable
       && error.statusCode === 429
-      && error.retryAfterMs === 4_793
+      && error.retryAfterMs === 24_793
       && error.message === "Groq Knowledge simplifier route was rate limited.",
   );
 });
@@ -182,5 +186,84 @@ test("one provider-directed TPM wait no longer turns an ordinary decision into f
   assert.equal(response.statusCode, 202, response.body);
   assert.equal(response.json().status, "NEEDS_CLARIFICATION");
   assert.notEqual(response.json().error, "CONSULTATION_INTERPRETATION_FAILED");
+  assert.deepEqual([...provider.calls.values()].sort(), [2, 2]);
+});
+
+
+class ActionPreparationProvider implements ModelProvider {
+  readonly kind = "issue-91-action-rate-limit-fixture";
+  readonly calls = new Map<string, number>();
+  private readonly allowedAfter = new Map<string, number>();
+
+  async generate(
+    request: CanonicalModelRequest,
+    context: ModelCallContext,
+  ): Promise<ModelProviderResult> {
+    const calls = (this.calls.get(context.correlationId) ?? 0) + 1;
+    this.calls.set(context.correlationId, calls);
+    if (calls === 1) {
+      this.allowedAfter.set(context.correlationId, Date.now() + 25);
+      throw new ModelProviderError("rate_limit", "simulated action-preparation TPM limit", {
+        retryable: true,
+        statusCode: 429,
+        retryAfterMs: 25,
+      });
+    }
+    const allowedAfter = this.allowedAfter.get(context.correlationId);
+    if (allowedAfter !== undefined && Date.now() < allowedAfter) {
+      throw new ModelProviderError("rate_limit", "action-preparation retry occurred before provider wait elapsed", {
+        retryable: true,
+        statusCode: 429,
+      });
+    }
+
+    const text = context.correlationId.startsWith("solandra-action-prepare:")
+      ? JSON.stringify({
+        status: "PREPARED",
+        body: "Hello, I recommend the RAM-first option. Please approve it if you agree.",
+        basis: [],
+      })
+      : context.correlationId.startsWith("solandra-action-ground:")
+        ? JSON.stringify({
+          status: "GROUNDED",
+          unsupportedExternalPremises: [],
+          materialUncertaintyPreserved: true,
+          authorityBoundaryPreserved: true,
+        })
+        : (() => { throw new Error(`Unexpected action-preparation model call: ${context.correlationId}`); })();
+
+    return {
+      response: {
+        id: `action-response-${context.correlationId}-${calls}`,
+        model: request.model,
+        output: [{ type: "text", text }],
+      },
+      route: {
+        actualProvider: this.kind,
+        actualModel: request.model,
+      },
+    };
+  }
+}
+
+const actionInput: SolandraActionPreparationInput = {
+  conversationId: "issue-91-action-resilience",
+  runId: "11111111-1111-4111-8111-111111111111",
+  intentVersionId: "issue-91-action-intent",
+  userMessageId: "issue-91-action-message",
+  userMessage: "Draft a short message recommending the RAM-first option and asking for approval. Do not send it.",
+  authoritativeObjective: "Choose the better work setup for the USER's stated priorities.",
+  knowledge: [],
+};
+
+test("action preparation generation and grounding use the same bounded retry resilience", async () => {
+  const provider = new ActionPreparationProvider();
+  const preparer = new ModelSolandraActionPreparer(
+    new ModelRuntime(provider, { timeoutMs: 2_000 }),
+    MODEL,
+  );
+  const result = await preparer.prepare(actionInput);
+
+  assert.equal(result.result.status, "PREPARED");
   assert.deepEqual([...provider.calls.values()].sort(), [2, 2]);
 });
