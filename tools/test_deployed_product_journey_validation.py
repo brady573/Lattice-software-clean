@@ -80,7 +80,7 @@ def test_action_preparation_is_not_submitted_after_decision_failure() -> None:
         if label == "KNOWLEDGE":
             return _stage(label, "Metal transfers heat quickly; wood transfers it more slowly.")
         if label == "AMBIGUITY_SETUP":
-            return _stage(label, "For the appointment, which matters more: speed or cost?")
+            return _stage(label, "Which factor—speed or cost—is more important to you for this trip?")
         if label == "AMBIGUITY":
             return _stage(label, "Which matters more to you, speed or cost?")
         if label == "DECISION":
