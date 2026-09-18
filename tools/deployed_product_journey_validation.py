@@ -246,6 +246,28 @@ def _prepared_body(result: StageResult) -> str:
     return ""
 
 
+def _assert_contextual_clarification(result: StageResult) -> None:
+    body = _final_product_body(result)
+    assert body.get("status") == "NEEDS_CLARIFICATION", (
+        f"Material ambiguity expected NEEDS_CLARIFICATION, got {body.get('status')!r}"
+    )
+
+    visible = _assistant_text(result)
+    assert visible, "Material ambiguity returned no visible clarification"
+    visible_words = set(re.findall(r"[a-z0-9]+", visible.casefold()))
+
+    required_context = {
+        "comparison alternatives": {"driving", "train"},
+        "decision criteria": {"speed", "cost"},
+    }
+    for label, required_words in required_context.items():
+        missing = sorted(required_words - visible_words)
+        assert not missing, (
+            f"Material ambiguity did not visibly retain the known {label}: missing {missing!r}; "
+            f"visible response was {visible!r}"
+        )
+
+
 _AFFIRMATIVE_EXECUTION_PATTERNS = (
     re.compile(
         r"\b(?:I|we|Solandra|Lattice)\s+(?:(?:have|['’]ve)\s+)?"
@@ -295,11 +317,7 @@ def _exercise_product_journey(submit_turn: Callable[[str, str], StageResult]) ->
     )
 
     ambiguity = submit_turn(AMBIGUITY_PROMPT, "AMBIGUITY")
-    assert re.search(
-        r"which matters|priority|more important|prefer|trade.?off|clarif",
-        _assistant_text(ambiguity),
-        re.I,
-    ), "Material ambiguity was not visibly clarified or qualified"
+    _assert_contextual_clarification(ambiguity)
 
     decision = submit_turn(DECISION_PROMPT, "DECISION")
     decision_body = _final_product_body(decision)
