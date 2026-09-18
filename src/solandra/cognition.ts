@@ -20,6 +20,15 @@ export const solandraRequestedHelpSchema = z.enum([
 ]);
 export type SolandraRequestedHelp = z.infer<typeof solandraRequestedHelpSchema>;
 
+const projectedRequestedHelpSchema = z
+  .union([z.string().min(1).max(100), z.null()])
+  .optional()
+  .transform((value): SolandraRequestedHelp | null => {
+    if (value === undefined || value === null) return null;
+    const parsed = solandraRequestedHelpSchema.safeParse(value);
+    return parsed.success ? parsed.data : null;
+  });
+
 export const solandraObjectiveRelationSchema = z.enum([
   "NEW_OBJECTIVE",
   "CONTINUE",
@@ -35,7 +44,7 @@ const materialAmbiguitySchema = z.object({
 export const solandraSemanticProposalSchema = z.object({
   objectiveRelation: solandraObjectiveRelationSchema,
   proposedObjective: z.string().min(1).max(8_000).nullable(),
-  requestedHelp: solandraRequestedHelpSchema,
+  requestedHelp: projectedRequestedHelpSchema,
   relevantContext: z.array(z.string().min(1).max(1_000)).max(16),
   entities: z.array(z.string().min(1).max(300)).max(24),
   referents: z.array(z.string().min(1).max(300)).max(16),
@@ -48,9 +57,10 @@ export const solandraSemanticProposalSchema = z.object({
   referencedOptionId: z.string().min(1).max(128).nullable().optional(),
   referencedIntentProposalId: z.string().min(1).max(200).nullable().optional(),
   /**
-   * Compatibility-only inert metadata from early M1 proposals. Product behavior
-   * is classified by requestedHelp; this value has no intent, truth, routing,
-   * decision, or authorization authority and is no longer requested from models.
+   * Compatibility-only inert metadata from early M1 proposals. Exact governed
+   * capability selection may use requestedHelp; this value has no intent, truth,
+   * routing, decision, or authorization authority and is no longer requested
+   * from models.
    */
   proposedNextStep: z.string().min(1).max(100).optional(),
 }).strict();
@@ -199,7 +209,7 @@ function buildCognitionRequest(model: string, input: SolandraCognitionInput): Ca
     projection: {
       objectiveRelation: "NEW_OBJECTIVE|CONTINUE|CORRECTION",
       proposedObjective: "string or null",
-      requestedHelp: "KNOWLEDGE|EXPLAIN_REFERENCE|SIMPLIFY_REFERENCE|SOURCES_REFERENCE|FRESH_RESEARCH|DECISION|EXPLAIN_RECOMMENDATION|SOURCES_RECOMMENDATION|EXPLAIN_OPTION|ACCEPT_CHOICE|CONFIRM_INTENT|RESOURCE",
+      requestedHelp: "KNOWLEDGE|EXPLAIN_REFERENCE|SIMPLIFY_REFERENCE|SOURCES_REFERENCE|FRESH_RESEARCH|DECISION|EXPLAIN_RECOMMENDATION|SOURCES_RECOMMENDATION|EXPLAIN_OPTION|ACCEPT_CHOICE|CONFIRM_INTENT|RESOURCE|null",
       relevantContext: ["string"],
       entities: ["string"],
       referents: ["string"],
@@ -231,6 +241,7 @@ function buildCognitionRequest(model: string, input: SolandraCognitionInput): Ca
           "Do not route to governed Knowledge merely because an ordinary answer could contain factual language. Use it when factual establishment, freshness, sourcing, or downstream reliance materially matters.",
           "When mode is CONVERSATION, return exactly JSON {\"mode\":\"CONVERSATION\",\"response\":\"natural response\"} and no other fields.",
           "When mode is GOVERNED, do not answer the user's factual question in projection. Project only the minimum structure required by the existing Lattice boundary.",
+          "requestedHelp is an exact governed-capability selection, not a universal semantic taxonomy. Use one of the documented exact values only when that downstream capability is materially required. Use null when a GOVERNED projection is needed only for material ambiguity or Intent meaning and no exact governed capability applies. Do not invent additional requestedHelp categories.",
           "For a governed projection, classify objectiveRelation by comparing the Current USER message with the Current canonical objective. Being in the same Conversation or sharing generic words is not evidence that the USER is continuing the same objective.",
           "Use NEW_OBJECTIVE when governed downstream work would target a materially different question, task, goal, or decision. Use CONTINUE when the current governed request materially depends on the current objective or supplied governed context. Use CORRECTION when the USER revises the meaning of the same governed objective.",
           "For CORRECTION, use the exact Current USER message as proposedObjective when that message itself fully represents the corrected objective. If corrected meaning requires material reconstruction, propose it and let Lattice require USER confirmation.",
@@ -277,13 +288,13 @@ function buildCognitionRequest(model: string, input: SolandraCognitionInput): Ca
   };
 }
 
-function referenceHelp(help: SolandraRequestedHelp): boolean {
+function referenceHelp(help: SolandraRequestedHelp | null): boolean {
   return help === "SOURCES_REFERENCE"
     || help === "EXPLAIN_REFERENCE"
     || help === "SIMPLIFY_REFERENCE";
 }
 
-function recommendationReferenceHelp(help: SolandraRequestedHelp): boolean {
+function recommendationReferenceHelp(help: SolandraRequestedHelp | null): boolean {
   return help === "EXPLAIN_RECOMMENDATION" || help === "SOURCES_RECOMMENDATION";
 }
 
@@ -379,7 +390,7 @@ export class ModelSolandraCognitiveRuntime implements SolandraCognitiveRuntime {
     const result = await this.runtime.call(request, {
       correlationId: `solandra-cognition:${input.conversationId}:${input.messageId}`,
       idempotencyKey: input.messageId,
-      maxAttempts: 1,
+      maxAttempts: 2,
     });
     if (result.response.output.length !== 1 || result.response.output[0]?.type !== "text") {
       throw new ModelProviderError("invalid_output", "Solandra cognition requires exactly one text output.");
