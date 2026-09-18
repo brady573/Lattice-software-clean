@@ -31,7 +31,7 @@ const contextualMessages = [
   },
   {
     messageId: 'issue91-live-context-followup-message',
-    content: 'Make a recommendation I can come back to later. Which would you pick?',
+    content: 'Which one fits what I care about better?',
   },
 ];
 
@@ -53,14 +53,21 @@ assert.equal(contextualCognition.proposal.requestedHelp, 'DECISION');
 assert.equal(contextualCognition.proposal.materialAmbiguity, null);
 assert.deepEqual(contextualCognition.proposal.knowledgeNeeds, []);
 const transientCognition = projectAdvisoryTransientCognition(contextualCognition.proposal);
-assert.ok(
-  transientCognition.proposedObjective
-  || transientCognition.relevantContext.length > 0
-  || transientCognition.entities.length > 0
-  || transientCognition.referents.length > 0
-  || transientCognition.preferences.length > 0
-  || transientCognition.constraints.length > 0,
-  'live cognition did not produce any transient semantic context for advisory handoff',
+const transientText = JSON.stringify(transientCognition).toLowerCase();
+assert.match(
+  transientText,
+  /drawer/u,
+  'live cognition did not retain the drawer-insert side of the comparison in transient meaning',
+);
+assert.match(
+  transientText,
+  /pouch/u,
+  'live cognition did not retain the hanging-pouch side of the comparison in transient meaning',
+);
+assert.match(
+  transientText,
+  /wall/u,
+  'live cognition did not retain the USER wall-clear preference in transient meaning',
 );
 
 const contextualIntent = {
