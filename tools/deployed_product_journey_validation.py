@@ -288,7 +288,11 @@ def _exercise_product_journey(submit_turn: Callable[[str, str], StageResult]) ->
     )
 
     setup = submit_turn(AMBIGUITY_SETUP_PROMPT, "AMBIGUITY_SETUP")
-    assert "appointment" in _assistant_text(setup).lower()
+    setup_text = _assistant_text(setup)
+    assert setup_text, "Ambiguity setup returned no Solandra response"
+    assert not re.search(r"workerId|runId|queue|provider routing|V36|Decision Engine", setup_text, re.I), (
+        "Ambiguity setup exposed internal machinery"
+    )
 
     ambiguity = submit_turn(AMBIGUITY_PROMPT, "AMBIGUITY")
     assert re.search(
