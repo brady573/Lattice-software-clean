@@ -139,6 +139,73 @@ test("Groq TPM responses preserve the provider-directed retry window without exp
   );
 });
 
+test("Groq token reset coordinates distinct calls after rate pressure is observed", async () => {
+  let requests = 0;
+  const requestTimes: number[] = [];
+  const provider = new GroqKnowledgeSimplifierModelProvider({
+    apiKey: "test-groq-key-1234567890",
+    fetchImpl: async () => {
+      requests += 1;
+      requestTimes.push(Date.now());
+      if (requests === 1) {
+        return new Response(JSON.stringify({
+          error: {
+            code: "rate_limit_exceeded",
+            message: "Rate limit reached. Please try again in 0.005s.",
+            type: "tokens",
+          },
+        }), {
+          status: 429,
+          headers: {
+            "retry-after": "0.005",
+            "x-ratelimit-reset-tokens": "0.03s",
+          },
+        });
+      }
+      return new Response(JSON.stringify({
+        id: `groq-shared-recovery-${requests}`,
+        model: GROQ_KNOWLEDGE_SIMPLIFIER_MODEL,
+        choices: [{
+          message: { content: "{\\\"mode\\\":\\\"CONVERSATION\\\",\\\"response\\\":\\\"Recovered.\\\"}" },
+          finish_reason: "stop",
+        }],
+        usage: { prompt_tokens: 20, completion_tokens: 10, total_tokens: 30 },
+      }), { status: 200 });
+    },
+  });
+  const request: CanonicalModelRequest = {
+    model: GROQ_KNOWLEDGE_SIMPLIFIER_MODEL,
+    messages: [{ role: "user", content: "Continue the ordinary conversation." }],
+  };
+  const controller = new AbortController();
+
+  await assert.rejects(
+    () => provider.generate(request, {
+      correlationId: "issue-91-shared-gate-first",
+      requestIdentity: "issue-91-shared-gate-first-request",
+      attempt: 0,
+      signal: controller.signal,
+    }),
+    (error: unknown) =>
+      error instanceof ModelProviderError
+      && error.code === "rate_limit"
+      && error.retryAfterMs === 30,
+  );
+
+  const started = Date.now();
+  await provider.generate(request, {
+    correlationId: "issue-91-shared-gate-second",
+    requestIdentity: "issue-91-shared-gate-second-request",
+    attempt: 0,
+    signal: controller.signal,
+  });
+  const elapsed = Date.now() - started;
+
+  assert.equal(requests, 2);
+  assert.ok(elapsed >= 20, `distinct call bypassed provider token-reset gate after only ${elapsed}ms`);
+  assert.ok((requestTimes[1] ?? 0) - (requestTimes[0] ?? 0) >= 20);
+});
+
 const config = resolveRuntimeConfig({
   LATTICE_DEPLOYMENT_MODE: "development",
   LATTICE_TRUTH_MODE: "v36-offline",
