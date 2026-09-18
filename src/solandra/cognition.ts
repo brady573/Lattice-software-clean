@@ -209,7 +209,7 @@ function buildCognitionRequest(model: string, input: SolandraCognitionInput): Ca
     projection: {
       objectiveRelation: "NEW_OBJECTIVE|CONTINUE|CORRECTION",
       proposedObjective: "string or null",
-      requestedHelp: "exact governed capability value or null",
+      requestedHelp: "KNOWLEDGE|EXPLAIN_REFERENCE|SIMPLIFY_REFERENCE|SOURCES_REFERENCE|FRESH_RESEARCH|DECISION|EXPLAIN_RECOMMENDATION|SOURCES_RECOMMENDATION|EXPLAIN_OPTION|ACCEPT_CHOICE|CONFIRM_INTENT|COGNITIVE_ASSISTANCE|RESOURCE|null",
       relevantContext: ["string"],
       entities: ["string"],
       referents: ["string"],
