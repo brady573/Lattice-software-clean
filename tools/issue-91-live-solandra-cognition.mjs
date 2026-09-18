@@ -31,7 +31,7 @@ const contextualMessages = [
   },
   {
     messageId: 'issue91-live-context-followup-message',
-    content: 'Which would you pick?',
+    content: 'Make a recommendation I can come back to later. Which would you pick?',
   },
 ];
 
