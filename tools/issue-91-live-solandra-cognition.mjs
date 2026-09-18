@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { resolveRuntimeConfig } from '../src/runtime-config.ts';
+import { projectAdvisoryTransientCognition } from '../src/solandra/advisory.ts';
 import { requireConfiguredSolandraCognition } from '../src/solandra/cognition-composition.ts';
 
 const config = resolveRuntimeConfig({
@@ -22,15 +23,15 @@ function assertLiveProvenance(result) {
 const contextualMessages = [
   {
     messageId: 'issue91-live-context-option-message',
-    content: 'I am choosing between Alder and Brook storage bins. Alder is the one I can stack; Brook is the one I cannot stack.',
+    content: 'For spare cables I can use a shallow drawer insert or a hanging pouch. The insert uses drawer space; the pouch uses wall space.',
   },
   {
     messageId: 'issue91-live-context-priority-message',
-    content: 'My only priority is stackability; I do not care about color or price.',
+    content: 'I care most about keeping the wall clear. Using drawer space is fine.',
   },
   {
     messageId: 'issue91-live-context-followup-message',
-    content: 'I need to decide now. Which option best fits that priority?',
+    content: 'Which would you pick?',
   },
 ];
 
@@ -51,6 +52,16 @@ assert.notEqual(contextualCognition.mode, 'CONVERSATION');
 assert.equal(contextualCognition.proposal.requestedHelp, 'DECISION');
 assert.equal(contextualCognition.proposal.materialAmbiguity, null);
 assert.deepEqual(contextualCognition.proposal.knowledgeNeeds, []);
+const transientCognition = projectAdvisoryTransientCognition(contextualCognition.proposal);
+assert.ok(
+  transientCognition.proposedObjective
+  || transientCognition.relevantContext.length > 0
+  || transientCognition.entities.length > 0
+  || transientCognition.referents.length > 0
+  || transientCognition.preferences.length > 0
+  || transientCognition.constraints.length > 0,
+  'live cognition did not produce any transient semantic context for advisory handoff',
+);
 
 const contextualIntent = {
   intentScopeId: 'consultation:issue91-live-context-advisory',
@@ -83,6 +94,7 @@ const contextualAdvisory = await solandra.advisory.advise({
   authoritativeObjective: contextualMessages[2].content,
   userContext: contextualMessages.map((message) => message.content),
   userContextMessages: contextualMessages,
+  transientCognition,
   knowledge: [],
 });
 assertLiveProvenance(contextualAdvisory);
@@ -101,6 +113,7 @@ console.log(JSON.stringify({
     requestedHelp: contextualCognition.mode === 'CONVERSATION'
       ? null
       : contextualCognition.proposal.requestedHelp,
+    transientCognition,
   },
   advisory: {
     status: contextualAdvisory.result.status,

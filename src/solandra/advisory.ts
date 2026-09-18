@@ -4,6 +4,7 @@ import type { IntentVersion } from "../intent/types.js";
 import { ModelProviderError } from "../model/errors.js";
 import { ModelRuntime } from "../model/runtime.js";
 import type { CanonicalModelRequest, ModelInvocationProvenance } from "../model/types.js";
+import type { SolandraSemanticProposal } from "./cognition.js";
 
 const advisoryBasisSchema = z.object({
   knowledgeId: z.string().min(1).max(128),
@@ -92,6 +93,35 @@ export interface SolandraAdvisoryUserContextMessage {
   readonly content: string;
 }
 
+/**
+ * Bounded current-turn cognition supplied only as a reasoning aid.
+ * It deliberately excludes governed object references, capability selection,
+ * ambiguity/Knowledge routing, and every durable authority field.
+ */
+export type SolandraAdvisoryTransientCognition = Readonly<{
+  objectiveRelation: SolandraSemanticProposal["objectiveRelation"];
+  proposedObjective: SolandraSemanticProposal["proposedObjective"];
+  relevantContext: readonly string[];
+  entities: readonly string[];
+  referents: readonly string[];
+  constraints: readonly string[];
+  preferences: readonly string[];
+}>;
+
+export function projectAdvisoryTransientCognition(
+  proposal: SolandraSemanticProposal,
+): SolandraAdvisoryTransientCognition {
+  return Object.freeze({
+    objectiveRelation: proposal.objectiveRelation,
+    proposedObjective: proposal.proposedObjective,
+    relevantContext: Object.freeze([...proposal.relevantContext]),
+    entities: Object.freeze([...proposal.entities]),
+    referents: Object.freeze([...proposal.referents]),
+    constraints: Object.freeze([...proposal.constraints]),
+    preferences: Object.freeze([...proposal.preferences]),
+  });
+}
+
 export interface SolandraAdvisoryInput {
   readonly conversationId: string;
   readonly userMessageId: string;
@@ -103,6 +133,12 @@ export interface SolandraAdvisoryInput {
    * These are context, not reconstructed canonical Intent.
    */
   readonly userContextMessages?: readonly SolandraAdvisoryUserContextMessage[];
+  /**
+   * Non-authoritative interpretation already produced by Solandra cognition
+   * for this exact turn. This helps advisory avoid repeating ordinary language
+   * reconstruction and never becomes USER premise or governed authority.
+   */
+  readonly transientCognition?: SolandraAdvisoryTransientCognition;
   readonly knowledge: readonly SolandraAdvisoryKnowledge[];
 }
 
@@ -209,6 +245,9 @@ function buildAdvisoryRequest(model: string, input: SolandraAdvisoryInput): Cano
           "assumptions may contain only exact verbatim excerpts of USER-authored material. Lattice independently rechecks these excerpts and discards anything that is not exact USER material.",
           "When exact USER context message IDs are supplied, every RECOMMENDATION must return userPremiseMessageIds. Include the current USER message ID and only additional supplied USER message IDs whose exact material the recommendation materially relies upon. Do not invent IDs and do not carry unrelated prior-topic messages into premise authority. When exact USER context message IDs are not supplied, omit userPremiseMessageIds.",
           "The supplied exact USER context is conversational premise material only. It does not make model reconstruction canonical USER Intent.",
+          "Transient Solandra cognition, when supplied, is the already-produced current-turn interpretation of ordinary conversational meaning. Use it as a reasoning aid for reference, coreference, ellipsis, shorthand, and contextual preferences instead of rediscovering that meaning from raw transcript alone.",
+          "Transient Solandra cognition is explicitly non-authoritative and may not establish or modify canonical USER Intent, USER premise authority, Knowledge, governed object identity, USER choice, authorization, execution, verification, or factual provenance. Durable USER premises must still come only from exact supplied USER message IDs and verbatim USER material.",
+          "If transient cognition conflicts with exact USER-authored context or authoritative Intent state, do not promote the transient interpretation into authority.",
           "Every external factual basis reference must use only supplied Knowledge IDs and claim IDs. Lattice renders factual support later from those exact governed claims; recommendation, alternatives, rationale, tradeoffs, assumptions, and uncertainties never establish factual support or source provenance.",
           "If no external factual premise is needed, a Recommendation may use an empty Knowledge basis and reason only from authoritative USER intent/current USER context. If an external fact is genuinely required but not supplied, return NEEDS_KNOWLEDGE instead of inventing it.",
           "Use NEEDS_CLARIFICATION only for genuine USER ambiguity that materially prevents responsible advice, not for missing pre-authored candidate options.",
@@ -230,6 +269,7 @@ function buildAdvisoryRequest(model: string, input: SolandraAdvisoryInput): Cano
           `Authoritative intent state: ${JSON.stringify(input.authoritativeIntent.state)}`,
           `Current USER message ID: ${input.userMessageId}`,
           `Exact USER-authored context messages (oldest to newest): ${input.userContextMessages ? JSON.stringify(input.userContextMessages) : JSON.stringify(input.userContext)}`,
+          `Transient non-authoritative Solandra cognition for this turn: ${JSON.stringify(input.transientCognition ?? null)}`,
           "Governed Knowledge:",
           knowledge,
         ].join("\n"),
@@ -393,6 +433,7 @@ function advisoryBasisDigest(input: SolandraAdvisoryInput): string {
     .update([
       input.authoritativeIntent.intentVersionId,
       ...userContextIdentity,
+      JSON.stringify(input.transientCognition ?? null),
       ...input.knowledge.map((item) => item.knowledgeId).sort(),
     ].join("\u001f"))
     .digest("hex")

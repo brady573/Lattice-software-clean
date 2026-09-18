@@ -78,7 +78,10 @@ import { recommendationOption, recommendationOptions } from "./recommendation/re
 import type { RecommendationStore } from "./recommendation/recommendation-store.js";
 import { createPendingRun } from "./run-execution.js";
 import type { RunStore } from "./run-store.js";
-import type { SolandraAdvisoryRuntime } from "./solandra/advisory.js";
+import {
+  projectAdvisoryTransientCognition,
+  type SolandraAdvisoryRuntime,
+} from "./solandra/advisory.js";
 import type { SolandraActionPreparer } from "./solandra/action-preparer.js";
 import {
   isConversationalCognition,
@@ -1292,6 +1295,7 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
               messageId: message.messageId,
               content: message.content,
             })),
+            transientCognition: projectAdvisoryTransientCognition(cognition.proposal),
             knowledge: governed.map(advisoryKnowledge),
           });
         } catch (error) {
