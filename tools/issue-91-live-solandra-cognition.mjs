@@ -31,7 +31,7 @@ const contextualMessages = [
   },
   {
     messageId: 'issue91-live-context-followup-message',
-    content: 'Which one fits what I care about better?',
+    content: 'Which one is better?',
   },
 ];
 
@@ -40,10 +40,19 @@ const contextualCognition = await solandra.cognition.interpret({
   messageId: contextualMessages[2].messageId,
   message: contextualMessages[2].content,
   recentUserMessages: contextualMessages.map((message) => message.content),
-  recentConversation: contextualMessages.map((message) => ({
-    role: 'USER',
-    content: message.content,
-  })),
+  recentConversation: [
+    { role: 'USER', content: contextualMessages[0].content },
+    {
+      role: 'SOLANDRA',
+      content: 'You are comparing a shallow drawer insert with a hanging pouch: the insert uses drawer space, while the pouch uses wall space.',
+    },
+    { role: 'USER', content: contextualMessages[1].content },
+    {
+      role: 'SOLANDRA',
+      content: 'Keeping the wall clear is the priority you have stated, and drawer space is acceptable.',
+    },
+    { role: 'USER', content: contextualMessages[2].content },
+  ],
   governedKnowledge: [],
   governedRecommendations: [],
 });
