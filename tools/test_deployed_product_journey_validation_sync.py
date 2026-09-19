@@ -16,10 +16,10 @@ class _Request:
 class _Response:
     url = "https://example.invalid/api/v1/conversations/conversation-1/turns"
     request = _Request()
-    status = 202
+    status = 200
 
     def json(self) -> dict[str, str]:
-        return {"status": "RUN_ACCEPTED"}
+        return {"status": "CONVERSATION_COMPLETED"}
 
 
 class _Pending:
@@ -49,8 +49,18 @@ class _Composer:
 
 
 class _TurnLocator:
+    def __init__(self, page: "_Page") -> None:
+        self._page = page
+
     def count(self) -> int:
-        return 4
+        return self._page.solandra_turns
+
+    @property
+    def last(self) -> "_TurnLocator":
+        return self
+
+    def inner_text(self) -> str:
+        return self._page.last_solandra_text
 
 
 class _Page:
@@ -58,10 +68,12 @@ class _Page:
         self.exit_error = exit_error
         self.expect_calls: list[int] = []
         self.wait_calls: list[tuple[str, int, int]] = []
+        self.solandra_turns = 4
+        self.last_solandra_text = "visible Solandra result"
 
     def locator(self, selector: str) -> _TurnLocator:
         assert selector == "#conversation .turn.solandra"
-        return _TurnLocator()
+        return _TurnLocator(self)
 
     def expect_response(self, predicate, *, timeout: int) -> _Pending:
         response = _Response()
@@ -78,22 +90,24 @@ def test_submit_turn_dispatches_once_and_waits_beyond_product_model_timeout(monk
     composer = _Composer()
     completion_calls: list[tuple[int, str]] = []
 
+    def complete(_page: _Page, prior: int, label: str) -> None:
+        completion_calls.append((prior, label))
+        page.solandra_turns = prior + 1
+
     monkeypatch.setattr(validator, "_composer", lambda _: composer)
-    monkeypatch.setattr(validator, "_visible_text", lambda _: "visible Solandra result")
-    monkeypatch.setattr(
-        validator,
-        "_wait_for_turn_completion",
-        lambda _page, prior, label: completion_calls.append((prior, label)),
-    )
+    monkeypatch.setattr(validator, "_wait_for_turn_completion", complete)
 
     result = validator._submit_turn(page, "ordinary request", "DECISION")
 
-    assert result == "visible Solandra result"
+    assert result.solandra_text == "visible Solandra result"
+    assert result.turn_http_status == 200
+    assert result.turn_body == {"status": "CONVERSATION_COMPLETED"}
     assert composer.filled == ["ordinary request"]
     assert composer.pressed == ["Enter"]
     assert page.expect_calls == [validator.TURN_RESPONSE_TIMEOUT_MS]
     assert validator.TURN_RESPONSE_TIMEOUT_MS > validator.PRODUCT_MODEL_TIMEOUT_MS
     assert completion_calls == [(4, "DECISION")]
+    assert page.solandra_turns == 5
 
 
 def test_submit_turn_does_not_resubmit_when_response_wait_fails(monkeypatch: pytest.MonkeyPatch) -> None:

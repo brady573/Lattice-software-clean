@@ -25,6 +25,24 @@ def _stage(
     )
 
 
+def _clarification_body() -> dict[str, Any]:
+    return {
+        "status": "NEEDS_CLARIFICATION",
+        "interpretation": {
+            "authority": "NON_AUTHORITATIVE_PROPOSAL",
+            "entities": ["option-a", "option-b"],
+            "referents": [],
+            "constraints": [],
+            "preferences": [],
+            "knowledgeNeeds": ["USER priority between the alternatives"],
+            "materialAmbiguity": {
+                "question": "Which tradeoff matters more here?",
+                "couldChangeObjective": True,
+            },
+        },
+    }
+
+
 def test_truthful_not_sent_statement_is_not_an_execution_claim() -> None:
     validator._assert_no_affirmative_execution(
         "I prepared editable material in the Composer. Nothing has been sent or executed.",
@@ -72,34 +90,80 @@ def test_failed_decision_outcome_cannot_become_success_from_accumulated_prompt_w
         )
 
 
-def test_contextual_clarification_accepts_semantics_without_favored_phrasing() -> None:
+def test_contextual_clarification_accepts_visible_paraphrase_without_surface_word_matching() -> None:
     validator._assert_contextual_clarification(
         _stage(
             "AMBIGUITY",
-            "For driving versus the train, should speed or cost determine the choice?",
-            turn_body={"status": "NEEDS_CLARIFICATION"},
+            "Could you tell me which tradeoff matters more here?",
+            turn_body=_clarification_body(),
         )
     )
 
 
-def test_contextual_clarification_rejects_generic_context_loss() -> None:
-    with pytest.raises(AssertionError, match="did not visibly retain the known comparison alternatives"):
+def test_contextual_clarification_requires_visible_text() -> None:
+    with pytest.raises(AssertionError, match="no visible clarification"):
         validator._assert_contextual_clarification(
             _stage(
                 "AMBIGUITY",
-                "What specific items, options, or subjects are you asking to compare?",
-                turn_body={"status": "NEEDS_CLARIFICATION"},
+                "   ",
+                turn_body=_clarification_body(),
+            )
+        )
+
+
+def test_contextual_clarification_rejects_machinery_exposure() -> None:
+    with pytest.raises(AssertionError, match="exposed internal machinery"):
+        validator._assert_contextual_clarification(
+            _stage(
+                "AMBIGUITY",
+                "I need the runId before I can clarify this.",
+                turn_body=_clarification_body(),
+            )
+        )
+
+
+def test_contextual_clarification_requires_structural_context() -> None:
+    body = _clarification_body()
+    interpretation = body["interpretation"]
+    assert isinstance(interpretation, dict)
+    for field in ("entities", "referents", "constraints", "preferences", "knowledgeNeeds"):
+        interpretation[field] = []
+
+    with pytest.raises(AssertionError, match="exposed no structural context"):
+        validator._assert_contextual_clarification(
+            _stage(
+                "AMBIGUITY",
+                "Which tradeoff matters more here?",
+                turn_body=body,
+            )
+        )
+
+
+def test_contextual_clarification_requires_non_authoritative_interpretation() -> None:
+    body = _clarification_body()
+    interpretation = body["interpretation"]
+    assert isinstance(interpretation, dict)
+    interpretation["authority"] = "USER"
+
+    with pytest.raises(AssertionError, match="non-authoritative proposal framing"):
+        validator._assert_contextual_clarification(
+            _stage(
+                "AMBIGUITY",
+                "Which tradeoff matters more here?",
+                turn_body=body,
             )
         )
 
 
 def test_contextual_clarification_requires_product_status() -> None:
+    body = _clarification_body()
+    body["status"] = "CONVERSATION_COMPLETED"
     with pytest.raises(AssertionError, match="expected NEEDS_CLARIFICATION"):
         validator._assert_contextual_clarification(
             _stage(
                 "AMBIGUITY",
-                "For driving versus the train, should speed or cost determine the choice?",
-                turn_body={"status": "CONVERSATION_COMPLETED"},
+                "Which tradeoff matters more here?",
+                turn_body=body,
             )
         )
 

@@ -247,6 +247,8 @@ def _prepared_body(result: StageResult) -> str:
 
 
 def _assert_contextual_clarification(result: StageResult) -> None:
+    # Regression canary only: establish Product state, visible clarification, trust framing,
+    # and structural context. Do not deterministically judge acceptable English paraphrases.
     body = _final_product_body(result)
     assert body.get("status") == "NEEDS_CLARIFICATION", (
         f"Material ambiguity expected NEEDS_CLARIFICATION, got {body.get('status')!r}"
@@ -254,18 +256,36 @@ def _assert_contextual_clarification(result: StageResult) -> None:
 
     visible = _assistant_text(result)
     assert visible, "Material ambiguity returned no visible clarification"
-    visible_words = set(re.findall(r"[a-z0-9]+", visible.casefold()))
+    assert not re.search(r"workerId|runId|queue|provider routing|V36|Decision Engine", visible, re.I), (
+        "Material ambiguity exposed internal machinery"
+    )
 
-    required_context = {
-        "comparison alternatives": {"driving", "train"},
-        "decision criteria": {"speed", "cost"},
-    }
-    for label, required_words in required_context.items():
-        missing = sorted(required_words - visible_words)
-        assert not missing, (
-            f"Material ambiguity did not visibly retain the known {label}: missing {missing!r}; "
-            f"visible response was {visible!r}"
+    interpretation = body.get("interpretation")
+    assert isinstance(interpretation, dict), "Material ambiguity returned no structural cognition evidence"
+    assert interpretation.get("authority") == "NON_AUTHORITATIVE_PROPOSAL", (
+        "Material ambiguity interpretation did not preserve non-authoritative proposal framing"
+    )
+
+    material_ambiguity = interpretation.get("materialAmbiguity")
+    assert isinstance(material_ambiguity, dict), "Material ambiguity interpretation omitted materialAmbiguity structure"
+    question = material_ambiguity.get("question")
+    assert isinstance(question, str) and question.strip(), "Material ambiguity structure omitted a clarification question"
+    if "couldChangeObjective" in material_ambiguity:
+        assert isinstance(material_ambiguity.get("couldChangeObjective"), bool), (
+            "Material ambiguity couldChangeObjective must remain structural boolean evidence"
         )
+
+    context_present = False
+    for field in ("entities", "referents", "constraints", "preferences", "knowledgeNeeds"):
+        value = interpretation.get(field)
+        if value is None:
+            continue
+        assert isinstance(value, list), f"Material ambiguity interpretation field {field} must be a list when present"
+        assert all(isinstance(item, str) and item.strip() for item in value), (
+            f"Material ambiguity interpretation field {field} must contain non-empty strings"
+        )
+        context_present = context_present or bool(value)
+    assert context_present, "Material ambiguity interpretation exposed no structural context"
 
 
 _AFFIRMATIVE_EXECUTION_PATTERNS = (
