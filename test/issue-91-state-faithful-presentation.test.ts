@@ -246,6 +246,7 @@ class CaptureProvider implements ModelProvider {
           type: "text",
           text: JSON.stringify({
             mode: "GOVERNED",
+            response: null,
             projection: proposal({
               requestedHelp: "ACCEPT_CHOICE",
               referencedRecommendationId: "recommendation-state-1",

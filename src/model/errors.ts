@@ -9,10 +9,18 @@ export type ModelErrorCode =
   | "unsupported_capability"
   | "fixture_not_found";
 
+export interface ModelProviderUpstreamError {
+  readonly code: string | null;
+  readonly type: string | null;
+  readonly param: string | null;
+  readonly message: string | null;
+}
+
 export class ModelProviderError extends Error {
   readonly code: ModelErrorCode;
   readonly retryable: boolean;
   readonly statusCode: number | null;
+  readonly providerError: ModelProviderUpstreamError | null;
 
   constructor(
     code: ModelErrorCode,
@@ -20,6 +28,7 @@ export class ModelProviderError extends Error {
     options: {
       readonly retryable?: boolean;
       readonly statusCode?: number | null;
+      readonly providerError?: ModelProviderUpstreamError | null;
       readonly cause?: unknown;
     } = {},
   ) {
@@ -28,6 +37,9 @@ export class ModelProviderError extends Error {
     this.code = code;
     this.retryable = options.retryable ?? false;
     this.statusCode = options.statusCode ?? null;
+    this.providerError = options.providerError === undefined || options.providerError === null
+      ? null
+      : Object.freeze({ ...options.providerError });
   }
 }
 

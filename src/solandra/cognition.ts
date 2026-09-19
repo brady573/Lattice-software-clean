@@ -1,7 +1,11 @@
 import { z } from "zod";
 import { ModelProviderError } from "../model/errors.js";
 import { ModelRuntime } from "../model/runtime.js";
-import type { CanonicalModelRequest, ModelInvocationProvenance } from "../model/types.js";
+import type {
+  CanonicalModelJsonSchema,
+  CanonicalModelRequest,
+  ModelInvocationProvenance,
+} from "../model/types.js";
 
 export const solandraRequestedHelpSchema = z.enum([
   "KNOWLEDGE",
@@ -70,6 +74,112 @@ const solandraCognitionOutputSchema = z.discriminatedUnion("mode", [
   solandraConversationOutputSchema,
   solandraGovernedOutputSchema,
 ]);
+
+const solandraStructuredEnvelopeSchema = z.object({
+  mode: z.enum(["CONVERSATION", "GOVERNED"]),
+  response: z.string().min(1).max(16_000).nullable(),
+  projection: solandraSemanticProposalSchema.nullable(),
+}).strict();
+
+const nullableStringSchema: CanonicalModelJsonSchema = Object.freeze({
+  anyOf: Object.freeze([
+    Object.freeze({ type: "string" as const }),
+    Object.freeze({ type: "null" as const }),
+  ]),
+});
+
+const stringArraySchema: CanonicalModelJsonSchema = Object.freeze({
+  type: "array",
+  items: Object.freeze({ type: "string" as const }),
+});
+
+const materialAmbiguityOutputSchema: CanonicalModelJsonSchema = Object.freeze({
+  anyOf: Object.freeze([
+    Object.freeze({
+      type: "object" as const,
+      properties: Object.freeze({
+        question: Object.freeze({ type: "string" as const }),
+        couldChangeObjective: Object.freeze({ type: "boolean" as const }),
+      }),
+      required: Object.freeze(["question", "couldChangeObjective"]),
+      additionalProperties: false as const,
+    }),
+    Object.freeze({ type: "null" as const }),
+  ]),
+});
+
+const semanticProposalOutputSchema: CanonicalModelJsonSchema = Object.freeze({
+  type: "object",
+  properties: Object.freeze({
+    objectiveRelation: Object.freeze({
+      type: "string" as const,
+      enum: Object.freeze(["NEW_OBJECTIVE", "CONTINUE", "CORRECTION"]),
+    }),
+    proposedObjective: nullableStringSchema,
+    requestedHelp: Object.freeze({
+      type: "string" as const,
+      enum: Object.freeze([
+        "KNOWLEDGE",
+        "EXPLAIN_REFERENCE",
+        "SIMPLIFY_REFERENCE",
+        "SOURCES_REFERENCE",
+        "FRESH_RESEARCH",
+        "DECISION",
+        "EXPLAIN_RECOMMENDATION",
+        "SOURCES_RECOMMENDATION",
+        "EXPLAIN_OPTION",
+        "ACCEPT_CHOICE",
+        "COGNITIVE_ASSISTANCE",
+        "RESOURCE",
+      ]),
+    }),
+    relevantContext: stringArraySchema,
+    entities: stringArraySchema,
+    referents: stringArraySchema,
+    constraints: stringArraySchema,
+    preferences: stringArraySchema,
+    knowledgeNeeds: stringArraySchema,
+    materialAmbiguity: materialAmbiguityOutputSchema,
+    referencedKnowledgeId: nullableStringSchema,
+    referencedRecommendationId: nullableStringSchema,
+    referencedOptionId: nullableStringSchema,
+  }),
+  required: Object.freeze([
+    "objectiveRelation",
+    "proposedObjective",
+    "requestedHelp",
+    "relevantContext",
+    "entities",
+    "referents",
+    "constraints",
+    "preferences",
+    "knowledgeNeeds",
+    "materialAmbiguity",
+    "referencedKnowledgeId",
+    "referencedRecommendationId",
+    "referencedOptionId",
+  ]),
+  additionalProperties: false,
+});
+
+const solandraCognitionStructuredOutputSchema: CanonicalModelJsonSchema = Object.freeze({
+  type: "object",
+  properties: Object.freeze({
+    mode: Object.freeze({
+      type: "string" as const,
+      enum: Object.freeze(["CONVERSATION", "GOVERNED"]),
+    }),
+    response: nullableStringSchema,
+    projection: Object.freeze({
+      anyOf: Object.freeze([
+        semanticProposalOutputSchema,
+        Object.freeze({ type: "null" as const }),
+      ]),
+    }),
+  }),
+  required: Object.freeze(["mode", "response", "projection"]),
+  additionalProperties: false,
+});
 
 export interface SolandraGovernedKnowledgeContext {
   readonly knowledgeId: string;
@@ -142,10 +252,8 @@ export function isConversationalCognition(
 }
 
 function parseJsonObject(text: string): unknown {
-  const trimmed = text.trim();
-  const unfenced = /^```(?:json)?\s*([\s\S]*?)\s*```$/iu.exec(trimmed)?.[1] ?? trimmed;
   try {
-    return JSON.parse(unfenced);
+    return JSON.parse(text.trim());
   } catch (error) {
     throw new ModelProviderError(
       "invalid_output",
@@ -153,6 +261,32 @@ function parseJsonObject(text: string): unknown {
       { cause: error },
     );
   }
+}
+
+function normalizeStructuredCognitionOutput(value: unknown): z.infer<typeof solandraCognitionOutputSchema> {
+  const envelope = solandraStructuredEnvelopeSchema.parse(value);
+  if (envelope.mode === "CONVERSATION") {
+    if (envelope.response === null || envelope.projection !== null) {
+      throw new ModelProviderError(
+        "invalid_output",
+        "Conversation cognition must provide response and no governed projection.",
+      );
+    }
+    return solandraCognitionOutputSchema.parse({
+      mode: "CONVERSATION",
+      response: envelope.response,
+    });
+  }
+  if (envelope.response !== null || envelope.projection === null) {
+    throw new ModelProviderError(
+      "invalid_output",
+      "Governed cognition must provide projection and no conversational response.",
+    );
+  }
+  return solandraCognitionOutputSchema.parse({
+    mode: "GOVERNED",
+    projection: envelope.projection,
+  });
 }
 
 function conversationContext(input: SolandraCognitionInput): string {
@@ -196,6 +330,7 @@ function buildCognitionRequest(model: string, input: SolandraCognitionInput): Ca
 
   const governedShape = JSON.stringify({
     mode: "GOVERNED",
+    response: null,
     projection: {
       objectiveRelation: "NEW_OBJECTIVE|CONTINUE|CORRECTION",
       proposedObjective: "string or null",
@@ -229,8 +364,8 @@ function buildCognitionRequest(model: string, input: SolandraCognitionInput): Ca
           "A conversational answer may contain ordinary explanatory prose. Do not claim that conversational prose is verified or governed Knowledge. Do not add repetitive authority warnings unless they are useful to the USER's request.",
           "Use GOVERNED only when the current request materially requires a framework trust boundary: establishing or refreshing trustworthy external factual Knowledge; exact historical Knowledge provenance or transformation; a durable Recommendation or exact option/choice reference; confirmation of an exact pending Intent proposal; material meaning that must enter Intent Integrity for downstream governed work; or preparation of a governed resource/action boundary.",
           "Do not route to governed Knowledge merely because an ordinary answer could contain factual language. Use it when factual establishment, freshness, sourcing, or downstream reliance materially matters.",
-          "When mode is CONVERSATION, return exactly JSON {\"mode\":\"CONVERSATION\",\"response\":\"natural response\"} and no other fields.",
-          "When mode is GOVERNED, do not answer the user's factual question in projection. Project only the minimum structure required by the existing Lattice boundary.",
+          "For CONVERSATION set mode to CONVERSATION, put the natural response in response, and set projection to null.",
+          "When mode is GOVERNED, set response to null and project only the minimum structure required by the existing Lattice boundary.",
           "For a governed projection, classify objectiveRelation by comparing the Current USER message with the Current canonical objective. Being in the same Conversation or sharing generic words is not evidence that the USER is continuing the same objective.",
           "Use NEW_OBJECTIVE when governed downstream work would target a materially different question, task, goal, or decision. Use CONTINUE when the current governed request materially depends on the current objective or supplied governed context. Use CORRECTION when the USER revises the meaning of the same governed objective.",
           "For CORRECTION, use the exact Current USER message as proposedObjective when that message itself fully represents the corrected objective. If corrected meaning requires material reconstruction, propose it and let Lattice require USER confirmation.",
@@ -244,8 +379,8 @@ function buildCognitionRequest(model: string, input: SolandraCognitionInput): Ca
           "Use EXPLAIN_RECOMMENDATION or SOURCES_RECOMMENDATION only for a supplied historical Recommendation. Use EXPLAIN_OPTION or ACCEPT_CHOICE only when an exact supplied option identity matters. Never invent object IDs.",
           "When the USER selects, adopts, or asks to use an exact supplied Recommendation option, use GOVERNED ACCEPT_CHOICE with the exact supplied Recommendation and option IDs. ACCEPT_CHOICE records the USER's choice only; it does not authorize or execute the option.",
           "Use RESOURCE only when the request needs the existing governed preparation boundary. Ordinary rewriting or drafting from USER material can remain conversational when no governed resource/action boundary is needed.",
-          "Return exactly one JSON object and no prose outside it.",
-          "The GOVERNED shape is:",
+          "The provider enforces the machine-readable result shape. You own the semantic values placed into that shape.",
+          "The GOVERNED semantic shape is:",
           governedShape,
           "When materialAmbiguity is absent, return null. Use empty arrays for empty lists and null for absent references.",
         ].join("\n"),
@@ -271,6 +406,13 @@ function buildCognitionRequest(model: string, input: SolandraCognitionInput): Ca
         ].join("\n"),
       },
     ],
+    structuredOutput: {
+      requirement: "REQUIRED",
+      format: "JSON_SCHEMA",
+      name: "solandra_cognition_result",
+      strict: true,
+      schema: solandraCognitionStructuredOutputSchema,
+    },
     temperature: 0.2,
     maxOutputTokens: 1_600,
     seed: 0,
@@ -384,7 +526,7 @@ export class ModelSolandraCognitiveRuntime implements SolandraCognitiveRuntime {
     if (result.response.output.length !== 1 || result.response.output[0]?.type !== "text") {
       throw new ModelProviderError("invalid_output", "Solandra cognition requires exactly one text output.");
     }
-    const parsed = solandraCognitionOutputSchema.parse(parseJsonObject(result.response.output[0].text));
+    const parsed = normalizeStructuredCognitionOutput(parseJsonObject(result.response.output[0].text));
     if (parsed.mode === "CONVERSATION") {
       return Object.freeze({
         mode: "CONVERSATION" as const,

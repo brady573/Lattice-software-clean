@@ -22,6 +22,7 @@ class SemanticProposalProvider implements ModelProvider {
           type: "text",
           text: JSON.stringify({
             mode: "GOVERNED",
+            response: null,
             projection: {
               objectiveRelation: this.objectiveRelation,
               proposedObjective: this.proposedObjective,
