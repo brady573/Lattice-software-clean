@@ -587,14 +587,7 @@ class UnsupportedFactAdvisoryProvider implements ModelProvider {
 
   async generate(request: CanonicalModelRequest, _context: ModelCallContext): Promise<ModelProviderResult> {
     this.calls += 1;
-    const system = request.messages[0]?.content ?? "";
-    const text = system.includes("bounded grounding verifier")
-      ? JSON.stringify({
-        status: "NEEDS_KNOWLEDGE",
-        unsupportedExternalPremises: ["The option guarantees a 99% reduction in operating cost."],
-        knowledgeNeeds: ["governed evidence about operating-cost reduction"],
-      })
-      : JSON.stringify({
+    const text = JSON.stringify({
         status: "RECOMMENDATION",
         recommendation: "Prefer this option because it guarantees a 99% reduction in operating cost.",
         basis: [{ knowledgeId: "knowledge-supplied", claimIds: ["claim-supplied"] }],
@@ -603,7 +596,7 @@ class UnsupportedFactAdvisoryProvider implements ModelProvider {
         assumptions: [],
         uncertainties: ["Material uncertainty remains."],
         alternatives: [],
-      });
+      }]);
     return {
       response: { id: `m2-unsupported-${this.calls}`, model: request.model, output: [{ type: "text", text }] },
       route: { actualProvider: this.kind, actualModel: request.model, upstreamRequestId: `m2-unsupported-${this.calls}` },
@@ -618,14 +611,9 @@ class GroundedInferenceAdvisoryProvider implements ModelProvider {
   async generate(request: CanonicalModelRequest, _context: ModelCallContext): Promise<ModelProviderResult> {
     this.calls += 1;
     const system = request.messages[0]?.content ?? "";
-    const isGroundingAudit = system.includes("bounded grounding verifier");
-    if (!isGroundingAudit) {
-      assert.match(system, /top-level object itself must contain status/iu);
-      assert.match(system, /Do not wrap the result in a named property/iu);
-    }
-    const text = isGroundingAudit
-      ? JSON.stringify({ status: "GROUNDED", unsupportedExternalPremises: [], knowledgeNeeds: [] })
-      : JSON.stringify({
+    assert.match(system, /top-level object itself must contain status/iu);
+    assert.match(system, /Do not wrap the result in a named property/iu);
+    const text = JSON.stringify({
         status: "RECOMMENDATION",
         recommendation: "Prefer the approach that best aligns with the USER's stated maintenance preference.",
         basis: [{ knowledgeId: "knowledge-supplied", claimIds: ["claim-supplied"] }],
@@ -713,22 +701,24 @@ function contractAdvisoryInput(): SolandraAdvisoryInput {
   };
 }
 
-test("ModelSolandraAdvisoryRuntime turns an unsupported external factual premise into NEEDS_KNOWLEDGE despite valid basis IDs", async () => {
+test("ModelSolandraAdvisoryRuntime does not use a second model pass to police proposal wording", async () => {
   const provider = new UnsupportedFactAdvisoryProvider();
-  const runtime = new ModelSolandraAdvisoryRuntime(new ModelRuntime(provider), "m2-grounding-model");
+  const runtime = new ModelSolandraAdvisoryRuntime(new ModelRuntime(provider), "m2-single-pass-model");
   const result = await runtime.advise(contractAdvisoryInput());
-  assert.equal(provider.calls, 2);
-  assert.equal(result.result.status, "NEEDS_KNOWLEDGE");
-  if (result.result.status !== "NEEDS_KNOWLEDGE") return;
-  assert.deepEqual(result.result.knowledgeNeeds, ["governed evidence about operating-cost reduction"]);
-  assert.match(result.result.reason, /not established by governed Knowledge/iu);
+  assert.equal(provider.calls, 1);
+  assert.equal(result.result.status, "RECOMMENDATION");
+  if (result.result.status !== "RECOMMENDATION") return;
+  assert.deepEqual(result.result.basis, [{
+    knowledgeId: "knowledge-supplied",
+    claimIds: ["claim-supplied"],
+  }]);
 });
 
 test("ModelSolandraAdvisoryRuntime preserves preference-sensitive advisory inference when its external premises are grounded", async () => {
   const provider = new GroundedInferenceAdvisoryProvider();
   const runtime = new ModelSolandraAdvisoryRuntime(new ModelRuntime(provider), "m2-grounding-model");
   const result = await runtime.advise(contractAdvisoryInput());
-  assert.equal(provider.calls, 2);
+  assert.equal(provider.calls, 1);
   assert.equal(result.result.status, "RECOMMENDATION");
   if (result.result.status !== "RECOMMENDATION") return;
   assert.match(result.result.recommendation, /USER's stated maintenance preference/iu);
@@ -746,16 +736,27 @@ test("ModelSolandraAdvisoryRuntime rejects fabricated Knowledge/claim references
   );
 });
 
-class SingleObjectArrayGroundingProvider implements ModelProvider {
-  readonly kind = "m4-single-object-array-grounding-provider";
+class SingleObjectArrayAdvisoryProvider implements ModelProvider {
+  readonly kind = "m4-single-object-array-advisory-provider";
   calls = 0;
 
   async generate(request: CanonicalModelRequest, _context: ModelCallContext): Promise<ModelProviderResult> {
     this.calls += 1;
-    const system = request.messages[0]?.content ?? "";
-    const text = system.includes("bounded grounding verifier")
-      ? JSON.stringify([{ status: "GROUNDED", unsupportedExternalPremises: [], knowledgeNeeds: [] }])
-      : JSON.stringify({
+    const text = JSON.stringify([{
+    return {
+      response: { id: `m4-array-${this.calls}`, model: request.model, output: [{ type: "text", text }] },
+      route: { actualProvider: this.kind, actualModel: request.model, upstreamRequestId: `m4-array-${this.calls}` },
+    };
+  }
+}
+
+class MultipleObjectArrayAdvisoryProvider implements ModelProvider {
+  readonly kind = "m4-multiple-object-array-advisory-provider";
+  calls = 0;
+
+  async generate(request: CanonicalModelRequest, _context: ModelCallContext): Promise<ModelProviderResult> {
+    this.calls += 1;
+    const recommendation = {
         status: "RECOMMENDATION",
         recommendation: "Prefer the approach that best fits the USER's stated maintenance preference.",
         basis: [{ knowledgeId: "knowledge-supplied", claimIds: ["claim-supplied"] }],
@@ -764,27 +765,8 @@ class SingleObjectArrayGroundingProvider implements ModelProvider {
         assumptions: ["The USER's stated preference remains controlling."],
         uncertainties: ["Material uncertainty remains."],
         alternatives: [],
-      });
-    return {
-      response: { id: `m4-array-${this.calls}`, model: request.model, output: [{ type: "text", text }] },
-      route: { actualProvider: this.kind, actualModel: request.model, upstreamRequestId: `m4-array-${this.calls}` },
-    };
-  }
-}
-
-class MultipleObjectArrayGroundingProvider implements ModelProvider {
-  readonly kind = "m4-multiple-object-array-grounding-provider";
-  calls = 0;
-
-  async generate(request: CanonicalModelRequest, _context: ModelCallContext): Promise<ModelProviderResult> {
-    this.calls += 1;
-    const system = request.messages[0]?.content ?? "";
-    const text = system.includes("bounded grounding verifier")
-      ? JSON.stringify([
-        { status: "GROUNDED", unsupportedExternalPremises: [], knowledgeNeeds: [] },
-        { status: "GROUNDED", unsupportedExternalPremises: [], knowledgeNeeds: [] },
-      ])
-      : JSON.stringify({
+      };
+    const text = JSON.stringify([recommendation, recommendation]);
         status: "RECOMMENDATION",
         recommendation: "Prefer the approach that best fits the USER's stated maintenance preference.",
         basis: [{ knowledgeId: "knowledge-supplied", claimIds: ["claim-supplied"] }],
@@ -801,16 +783,16 @@ class MultipleObjectArrayGroundingProvider implements ModelProvider {
   }
 }
 
-test("ModelSolandraAdvisoryRuntime tolerates one-object JSON array framing while preserving strict grounding schema", async () => {
-  const provider = new SingleObjectArrayGroundingProvider();
+test("ModelSolandraAdvisoryRuntime tolerates one-object JSON array framing for advisory output", async () => {
+  const provider = new SingleObjectArrayAdvisoryProvider();
   const runtime = new ModelSolandraAdvisoryRuntime(new ModelRuntime(provider), "m4-grounding-framing-model");
   const result = await runtime.advise(contractAdvisoryInput());
-  assert.equal(provider.calls, 2);
+  assert.equal(provider.calls, 1);
   assert.equal(result.result.status, "RECOMMENDATION");
 });
 
 test("ModelSolandraAdvisoryRuntime rejects multi-object JSON array framing", async () => {
-  const provider = new MultipleObjectArrayGroundingProvider();
+  const provider = new MultipleObjectArrayAdvisoryProvider();
   const runtime = new ModelSolandraAdvisoryRuntime(new ModelRuntime(provider), "m4-grounding-framing-model");
   await assert.rejects(
     runtime.advise(contractAdvisoryInput()),
