@@ -264,16 +264,13 @@ function advisory(overrides: Partial<SolandraRecommendationResult> = {}): Soland
   };
 }
 
-class GroundedButUnsupportedProposalProvider implements ModelProvider {
-  readonly kind = "issue-45-grounded-unsupported-proposal";
+class UnsupportedProposalProvider implements ModelProvider {
+  readonly kind = "issue-45-unsupported-proposal";
   calls = 0;
 
   async generate(request: CanonicalModelRequest, _context: ModelCallContext): Promise<ModelProviderResult> {
     this.calls += 1;
-    const grounding = (request.messages[0]?.content ?? "").includes("bounded grounding verifier");
-    const text = grounding
-      ? JSON.stringify({ status: "GROUNDED", unsupportedExternalPremises: [], knowledgeNeeds: [] })
-      : JSON.stringify({
+    const text = JSON.stringify({
         status: "RECOMMENDATION",
         recommendation: UNSUPPORTED_PROPOSAL,
         basis: [{ knowledgeId: "knowledge-issue-45", claimIds: ["claim-declared-a"] }],
@@ -285,14 +282,14 @@ class GroundedButUnsupportedProposalProvider implements ModelProvider {
       });
     return {
       response: {
-        id: `issue-45-grounded-${this.calls}`,
+        id: `issue-45-single-pass-${this.calls}`,
         model: request.model,
         output: [{ type: "text", text }],
       },
       route: {
         actualProvider: this.kind,
         actualModel: request.model,
-        upstreamRequestId: `issue-45-grounded-${this.calls}`,
+        upstreamRequestId: `issue-45-single-pass-${this.calls}`,
       },
     };
   }
@@ -321,11 +318,11 @@ function groundingInput(): SolandraAdvisoryInput {
   };
 }
 
-test("Issue #45: false-positive GROUNDED cannot give a proposal-embedded external premise governed factual authority", async () => {
-  const provider = new GroundedButUnsupportedProposalProvider();
+test("Issue #45: single-pass proposal wording cannot enlarge governed factual authority", async () => {
+  const provider = new UnsupportedProposalProvider();
   const runtime = new ModelSolandraAdvisoryRuntime(new ModelRuntime(provider), "issue-45-model");
   const generated = await runtime.advise(groundingInput());
-  assert.equal(provider.calls, 2);
+  assert.equal(provider.calls, 1);
   assert.equal(generated.result.status, "RECOMMENDATION");
   if (generated.result.status !== "RECOMMENDATION") return;
 
