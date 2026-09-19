@@ -28,6 +28,7 @@ def _stage(
 def _clarification_body() -> dict[str, Any]:
     return {
         "status": "NEEDS_CLARIFICATION",
+        "question": "Which tradeoff matters more here?",
         "interpretation": {
             "authority": "NON_AUTHORITATIVE_PROPOSAL",
             "entities": ["option-a", "option-b"],
@@ -96,6 +97,21 @@ def test_contextual_clarification_accepts_visible_paraphrase_without_surface_wor
             "AMBIGUITY",
             "Could you tell me which tradeoff matters more here?",
             turn_body=_clarification_body(),
+        )
+    )
+
+
+def test_contextual_clarification_accepts_null_material_ambiguity_with_structural_context() -> None:
+    body = _clarification_body()
+    interpretation = body["interpretation"]
+    assert isinstance(interpretation, dict)
+    interpretation["materialAmbiguity"] = None
+
+    validator._assert_contextual_clarification(
+        _stage(
+            "AMBIGUITY",
+            "Could you tell me which tradeoff matters more here?",
+            turn_body=body,
         )
     )
 
