@@ -456,11 +456,7 @@ export class ModelRuntime {
             );
           }
 
-          const attemptsRemaining = maxAttempts - logicalAttempt;
-          const attemptTimeoutMs = Math.max(
-            1,
-            Math.floor(remainingLogicalMs / attemptsRemaining),
-          );
+          const attemptTimeoutMs = Math.max(1, remainingLogicalMs);
           const attemptTimeoutController = new AbortController();
           const attemptTimer = setTimeout(
             () => attemptTimeoutController.abort(new Error("Model attempt timeout.")),
