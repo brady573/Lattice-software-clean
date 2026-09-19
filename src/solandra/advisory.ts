@@ -51,29 +51,6 @@ export const solandraAdvisoryResultSchema = z.discriminatedUnion("status", [
 export type SolandraAdvisoryResult = z.infer<typeof solandraAdvisoryResultSchema>;
 export type SolandraRecommendationResult = Extract<SolandraAdvisoryResult, { status: "RECOMMENDATION" }>;
 
-const groundingAuditSchema = z.object({
-  status: z.enum(["GROUNDED", "NEEDS_KNOWLEDGE"]),
-  unsupportedExternalPremises: z.array(z.string().min(1).max(1_000)).max(16),
-  knowledgeNeeds: z.array(z.string().min(1).max(1_000)).max(16),
-}).strict().superRefine((value, context) => {
-  if (value.status === "GROUNDED" && (value.unsupportedExternalPremises.length > 0 || value.knowledgeNeeds.length > 0)) {
-    context.addIssue({ code: "custom", message: "A grounded advisory audit cannot report unsupported external premises." });
-  }
-  if (value.status === "NEEDS_KNOWLEDGE" && value.knowledgeNeeds.length === 0) {
-    context.addIssue({ code: "custom", path: ["knowledgeNeeds"], message: "Unsupported factual premises require a concrete Knowledge need." });
-  }
-});
-
-type GroundingAudit = z.infer<typeof groundingAuditSchema>;
-
-type GroundingFinding = Readonly<{
-  knowledgeId: string;
-  claimId: string;
-  text: string;
-  status: string;
-  confidence: string;
-}>;
-
 export interface SolandraAdvisoryKnowledge {
   readonly knowledgeId: string;
   readonly objective: string;
@@ -283,61 +260,14 @@ function buildAdvisoryRequest(model: string, input: SolandraAdvisoryInput): Cano
   };
 }
 
-function buildGroundingAuditRequest(
-  model: string,
-  input: SolandraAdvisoryInput,
-  recommendation: SolandraRecommendationResult,
-  governedFindings: readonly GroundingFinding[],
-): CanonicalModelRequest {
-  return {
-    model,
-    messages: [
-      {
-        role: "system",
-        content: [
-          "You are a bounded grounding verifier for Solandra advisory output. Do not redo the recommendation and do not expose hidden reasoning.",
-          "Distinguish externally factual premises from advisory judgment, comparison, preference-sensitive inference, conditional advice, generated option proposals, and explicit USER-authored context.",
-          "An externally factual premise is permitted only when it is materially supported by the supplied governed findings. USER objectives/preferences are authoritative USER context, not external factual Knowledge.",
-          "If any advisory field introduces an externally factual premise that is not materially supported by the supplied governed findings, return NEEDS_KNOWLEDGE and identify the missing factual information needed. Do not repair or rewrite the advisory text.",
-          "If every externally factual premise is grounded, return GROUNDED. Advisory inference and option formulation do not need to be literal restatements of findings or USER wording.",
-          "This audit is only a drafting guardrail. GROUNDED does not grant factual authority. Lattice independently constructs durable factual support from exact governed Knowledge/claim basis. Recommendation and alternative proposal text may persist only as non-authoritative advisory judgment and never becomes source-backed factual support.",
-          "Return exactly JSON with keys status, unsupportedExternalPremises, knowledgeNeeds and no prose.",
-        ].join("\n"),
-      },
-      {
-        role: "user",
-        content: JSON.stringify({
-          authoritativeObjective: input.authoritativeObjective,
-          authoritativeIntent: input.authoritativeIntent.state,
-          userContext: input.userContextMessages ?? input.userContext,
-          governedFindings,
-          advisory: {
-            recommendation: recommendation.recommendation,
-            rationale: recommendation.rationale,
-            tradeoffs: recommendation.tradeoffs,
-            assumptions: recommendation.assumptions,
-            uncertainties: recommendation.uncertainties,
-            alternatives: recommendation.alternatives,
-          },
-        }),
-      },
-    ],
-    temperature: 0,
-    maxOutputTokens: 1_200,
-    seed: 0,
-  };
-}
-
-function validateAndProjectRecommendationBasis(
+function validateRecommendationBasis(
   input: SolandraAdvisoryInput,
   result: SolandraRecommendationResult,
-): GroundingFinding[] {
+): void {
   const supplied = new Map(input.knowledge.map((knowledge) => [
     knowledge.knowledgeId,
     new Map(knowledge.findings.map((finding) => [finding.claimId, finding])),
   ]));
-  const governedFindings: GroundingFinding[] = [];
-
   for (const basis of result.basis) {
     const knowledge = supplied.get(basis.knowledgeId);
     if (!knowledge) {
@@ -348,17 +278,9 @@ function validateAndProjectRecommendationBasis(
       if (!finding) {
         throw new ModelProviderError("invalid_output", "Solandra advisory reasoning referenced a claim that is not part of the supplied Knowledge.");
       }
-      governedFindings.push({
-        knowledgeId: basis.knowledgeId,
-        claimId: finding.claimId,
-        text: finding.text,
-        status: finding.status,
-        confidence: finding.confidence,
-      });
     }
   }
 
-  return governedFindings;
 }
 
 function validateRecommendationUserPremises(
@@ -425,21 +347,6 @@ function advisoryBasisDigest(input: SolandraAdvisoryInput): string {
     .slice(0, 24);
 }
 
-function needsKnowledgeFromAudit(audit: GroundingAudit): Extract<SolandraAdvisoryResult, { status: "NEEDS_KNOWLEDGE" }> | undefined {
-  if (audit.status === "GROUNDED") return undefined;
-  const knowledgeNeeds = [...new Set(audit.knowledgeNeeds.map((item) => item.trim()).filter(Boolean))];
-  if (knowledgeNeeds.length === 0) {
-    throw new ModelProviderError("invalid_output", "Advisory grounding audit reported unsupported factual premises without a Knowledge need.");
-  }
-  return {
-    status: "NEEDS_KNOWLEDGE",
-    knowledgeNeeds,
-    reason: audit.unsupportedExternalPremises.length > 0
-      ? `The draft recommendation relied on external factual premises that are not established by governed Knowledge: ${audit.unsupportedExternalPremises.join("; ")}`
-      : "The draft recommendation requires additional governed factual Knowledge before it can be presented responsibly.",
-  };
-}
-
 export class ModelSolandraAdvisoryRuntime implements SolandraAdvisoryRuntime {
   constructor(
     private readonly runtime: ModelRuntime,
@@ -464,25 +371,9 @@ export class ModelSolandraAdvisoryRuntime implements SolandraAdvisoryRuntime {
     }
 
     validateRecommendationUserPremises(input, result);
-    const governedFindings = validateAndProjectRecommendationBasis(input, result);
-    const auditResponse = await this.runtime.call(
-      buildGroundingAuditRequest(this.model, input, result, governedFindings),
-      {
-        correlationId: `solandra-advisory-grounding:${input.conversationId}:${input.userMessageId}`,
-        idempotencyKey: `grounding:${input.userMessageId}:${basisDigest}`,
-        maxAttempts: 2,
-      },
-    );
-    if (auditResponse.response.output.length !== 1 || auditResponse.response.output[0]?.type !== "text") {
-      throw new ModelProviderError("invalid_output", "Solandra advisory grounding verification requires exactly one text output.");
-    }
-    const audit = groundingAuditSchema.parse(parseJsonObject(
-      auditResponse.response.output[0].text,
-      "Solandra advisory grounding verification",
-    ));
-    const needsKnowledge = needsKnowledgeFromAudit(audit);
+    validateRecommendationBasis(input, result);
     return Object.freeze({
-      result: needsKnowledge ?? result,
+      result,
       invocationProvenance: response.audit.invocationProvenance,
     });
   }
