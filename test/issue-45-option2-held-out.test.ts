@@ -101,7 +101,6 @@ class EveningTaskAdvisory implements SolandraAdvisoryRuntime {
         tradeoffs: ["A larger task can wait for a less constrained evening."],
         assumptions: [],
         uncertainties: [],
-        preservedUncertainties: [],
         alternatives: [
           "Pick whichever task has been waiting longest.",
           "Rotate through rooms on different evenings.",
@@ -241,7 +240,6 @@ class BicycleAdvisory implements SolandraAdvisoryRuntime {
         tradeoffs: ["Wall storage requires a suitable mounting location."],
         assumptions: ["keeping the hallway clear"],
         uncertainties: [...knowledge.uncertainties],
-        preservedUncertainties: [...knowledge.uncertainties],
         alternatives: ["Use a compact floor stand in a low-traffic corner."],
       },
       invocationProvenance: PROVENANCE,
@@ -351,7 +349,6 @@ const mailAdvisory: SolandraAdvisoryRuntime = {
         tradeoffs: [],
         assumptions: [],
         uncertainties: [],
-        preservedUncertainties: [],
         alternatives: ["Use one inbox and process everything at the end of the week."],
       },
       invocationProvenance: PROVENANCE,

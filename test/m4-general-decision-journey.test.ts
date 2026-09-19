@@ -42,7 +42,7 @@ class UserMaterialAdvisory implements SolandraAdvisoryRuntime {
       result: {
         status: "RECOMMENDATION", recommendation: "Use a lightweight weekly review.", basis: [],
         rationale: ["It directly matches the USER preference for lower upkeep."], tradeoffs: ["Less structure may mean occasional manual cleanup."],
-        assumptions: ["keeping upkeep light"], uncertainties: [], preservedUncertainties: [],
+        assumptions: ["keeping upkeep light"], uncertainties: [],
         alternatives: ["Keep the current ad-hoc approach.", "Use a structured daily review."],
       },
       invocationProvenance: PROVENANCE,

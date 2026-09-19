@@ -55,6 +55,62 @@ function optionalFiniteInteger(value: unknown): number | null {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : null;
 }
 
+function retryAfterMilliseconds(seconds: number): number | null {
+  if (!Number.isFinite(seconds) || seconds < 0) return null;
+  const milliseconds = Math.ceil(seconds * 1_000);
+  return Number.isSafeInteger(milliseconds) ? milliseconds : null;
+}
+
+function groqDurationMs(value: string | null): number | null {
+  const text = value?.trim() ?? "";
+  if (!text) return null;
+  const match = /^(?:(\d+(?:\.\d+)?)m)?(?:(\d+(?:\.\d+)?)s)?$/iu.exec(text);
+  if (!match || (!match[1] && !match[2])) return null;
+  const minutes = Number(match[1] ?? "0");
+  const seconds = Number(match[2] ?? "0");
+  return retryAfterMilliseconds(minutes * 60 + seconds);
+}
+
+function groqRetryAfterMs(response: Response, bodyText: string): number | null {
+  const retryAfterHeader = response.headers.get("retry-after")?.trim();
+  if (retryAfterHeader) {
+    const headerDelay = retryAfterMilliseconds(Number(retryAfterHeader));
+    if (headerDelay !== null) return headerDelay;
+  }
+
+  let body: unknown;
+  try {
+    body = JSON.parse(bodyText);
+  } catch {
+    body = null;
+  }
+  const root = asRecord(body);
+  const providerError = asRecord(root?.error);
+  const message = typeof providerError?.message === "string" ? providerError.message : "";
+  const match = /please try again in\s+([0-9]+(?:\.[0-9]+)?)s\b/iu.exec(message);
+  if (!match?.[1]) return null;
+  return retryAfterMilliseconds(Number(match[1]));
+}
+
+async function waitForProviderGate(blockedUntilMs: number, signal: AbortSignal): Promise<void> {
+  const delayMs = blockedUntilMs - Date.now();
+  if (delayMs <= 0) return;
+  if (signal.aborted) throw signal.reason ?? new Error("Aborted.");
+  await new Promise<void>((resolve, reject) => {
+    let timer: ReturnType<typeof setTimeout>;
+    const onAbort = () => {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", onAbort);
+      reject(signal.reason ?? new Error("Aborted."));
+    };
+    timer = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, delayMs);
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
 async function readBoundedText(response: Response, maxBytes: number): Promise<string> {
   if (response.body === null) return "";
   const reader = response.body.getReader();
@@ -99,6 +155,7 @@ export class GroqKnowledgeSimplifierModelProvider implements ModelProvider {
   private readonly maxResponseBytes: number;
   private readonly fetchImpl: typeof fetch;
   private readonly diagnosticSink: GroqCompletionDiagnosticSink | undefined;
+  private rateLimitBlockedUntilMs = 0;
 
   constructor(options: GroqKnowledgeSimplifierProviderOptions) {
     this.apiKey = requireApiKey(options.apiKey);
@@ -111,6 +168,21 @@ export class GroqKnowledgeSimplifierModelProvider implements ModelProvider {
   }
 
   async generate(request: CanonicalModelRequest, context: ModelCallContext): Promise<ModelProviderResult> {
+    while (this.rateLimitBlockedUntilMs > Date.now()) {
+      try {
+        await waitForProviderGate(this.rateLimitBlockedUntilMs, context.signal);
+      } catch (error) {
+        if (context.signal.aborted) {
+          throw new ModelProviderError(
+            "cancelled",
+            "Groq Knowledge simplifier request was cancelled while waiting for provider rate-limit recovery.",
+            { cause: error },
+          );
+        }
+        throw error;
+      }
+    }
+
     if (request.model !== GROQ_KNOWLEDGE_SIMPLIFIER_MODEL) {
       throw new ModelProviderError(
         "unsupported_capability",
@@ -164,10 +236,27 @@ export class GroqKnowledgeSimplifierModelProvider implements ModelProvider {
     const text = await readBoundedText(response, this.maxResponseBytes);
     if (!response.ok) {
       if (response.status === 429) {
+        const tokenResetMs = groqDurationMs(response.headers.get("x-ratelimit-reset-tokens"));
+        const retryAfterMs = groqRetryAfterMs(response, text) ?? tokenResetMs;
+        const sharedRecoveryMs = tokenResetMs === null
+          ? retryAfterMs
+          : retryAfterMs === null
+            ? tokenResetMs
+            : Math.max(tokenResetMs, retryAfterMs);
+        if (sharedRecoveryMs !== null) {
+          this.rateLimitBlockedUntilMs = Math.max(
+            this.rateLimitBlockedUntilMs,
+            Date.now() + sharedRecoveryMs,
+          );
+        }
         throw new ModelProviderError(
           "rate_limit",
           "Groq Knowledge simplifier route was rate limited.",
-          { retryable: true, statusCode: 429 },
+          {
+            retryable: true,
+            statusCode: 429,
+            retryAfterMs,
+          },
         );
       }
       throw new ModelProviderError(

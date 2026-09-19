@@ -50,7 +50,6 @@ function advisoryObject(overrides: Readonly<Record<string, unknown>> = {}): Reco
     tradeoffs: [],
     assumptions: ["The stated preference remains controlling."],
     uncertainties: [],
-    preservedUncertainties: [],
     alternatives: ["Workbench"],
     ...overrides,
   };

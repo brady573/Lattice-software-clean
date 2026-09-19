@@ -177,7 +177,6 @@ class RecordingAdvisory implements SolandraAdvisoryRuntime {
         tradeoffs: ["The preferred approach may sacrifice benefits that were not established by the supplied Knowledge."],
         assumptions: [changed ? "easiest to reverse later" : "maintenance burden low"],
         uncertainties: [...knowledge.uncertainties],
-        preservedUncertainties: [...knowledge.uncertainties],
         alternatives: [changed ? "Approach Atlas" : "Approach Birch"],
       },
       invocationProvenance: PROVENANCE,
@@ -498,7 +497,6 @@ class NeedsKnowledgeThenRecommendationAdvisory implements SolandraAdvisoryRuntim
         tradeoffs: ["The recommendation is conditional on the USER's stated objective."],
         assumptions: ["maintenance burden low"],
         uncertainties: [...preserved],
-        preservedUncertainties: [...preserved],
         alternatives: ["Approach Birch"],
       },
       invocationProvenance: PROVENANCE,
@@ -604,7 +602,6 @@ class UnsupportedFactAdvisoryProvider implements ModelProvider {
         tradeoffs: [],
         assumptions: [],
         uncertainties: ["Material uncertainty remains."],
-        preservedUncertainties: ["Material uncertainty remains."],
         alternatives: [],
       });
     return {
@@ -636,7 +633,6 @@ class GroundedInferenceAdvisoryProvider implements ModelProvider {
         tradeoffs: ["That judgment is preference-sensitive rather than an additional factual claim."],
         assumptions: ["The USER's stated maintenance preference remains controlling."],
         uncertainties: ["Material uncertainty remains."],
-        preservedUncertainties: ["Material uncertainty remains."],
         alternatives: [],
       });
     return {
@@ -663,7 +659,6 @@ class FabricatedBasisProvider implements ModelProvider {
             tradeoffs: [],
             assumptions: [],
             uncertainties: [],
-            preservedUncertainties: [],
             alternatives: [],
           }),
         }],
@@ -768,7 +763,6 @@ class SingleObjectArrayGroundingProvider implements ModelProvider {
         tradeoffs: [],
         assumptions: ["The USER's stated preference remains controlling."],
         uncertainties: ["Material uncertainty remains."],
-        preservedUncertainties: ["Material uncertainty remains."],
         alternatives: [],
       });
     return {
@@ -798,7 +792,6 @@ class MultipleObjectArrayGroundingProvider implements ModelProvider {
         tradeoffs: [],
         assumptions: ["The USER's stated preference remains controlling."],
         uncertainties: ["Material uncertainty remains."],
-        preservedUncertainties: ["Material uncertainty remains."],
         alternatives: [],
       });
     return {

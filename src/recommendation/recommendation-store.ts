@@ -132,17 +132,27 @@ function recommendationPremiseAuthority(
   intentVersionId: string,
   sourceMessageId: string,
 ): RecommendationPremiseAuthority {
-  const hasIntentVersion = userMaterialBasis.includes(intentVersionId);
-  const hasSourceMessage = userMaterialBasis.includes(sourceMessageId);
-  if (userMaterialBasis.length > 0 && (!hasIntentVersion || !hasSourceMessage)) {
-    throw new Error("Recommendation USER-material basis must retain IntentVersion and source-message identity together.");
+  const material = unique(userMaterialBasis);
+  const hasIntentVersion = material.includes(intentVersionId);
+  const hasSourceMessage = material.includes(sourceMessageId);
+  if (material.length > 0 && (!hasIntentVersion || !hasSourceMessage)) {
+    throw new Error("Recommendation USER-material basis must retain IntentVersion and current source-message identity together.");
+  }
+  const sourceMessageIds = material.length === 0
+    ? [sourceMessageId]
+    : material.filter((item) => item !== intentVersionId);
+  if (sourceMessageIds.length === 0 || !sourceMessageIds.includes(sourceMessageId)) {
+    throw new Error("Recommendation USER premise authority requires exact current source-message lineage.");
   }
   return Object.freeze({
     knowledge: basis.map((entry) => ({
       knowledgeId: entry.knowledgeId,
       claimIds: [...entry.claimIds],
     })),
-    user: [{ intentVersionId, sourceMessageId }],
+    user: sourceMessageIds.map((premiseSourceMessageId) => ({
+      intentVersionId,
+      sourceMessageId: premiseSourceMessageId,
+    })),
   });
 }
 

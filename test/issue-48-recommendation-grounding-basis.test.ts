@@ -89,7 +89,6 @@ class ExactBasisGroundingProvider implements ModelProvider {
         tradeoffs: [],
         assumptions: [],
         uncertainties: ["The maintenance comparison is based on the currently governed evidence."],
-        preservedUncertainties: ["The maintenance comparison is based on the currently governed evidence."],
         alternatives: [],
       });
     return {

@@ -144,16 +144,6 @@ function projectGovernedRecommendationMaterial(
   return { rationale, uncertainties };
 }
 
-function assertPreservedGovernedUncertainty(
-  advisory: SolandraRecommendationResult,
-  governedUncertainties: readonly string[],
-): void {
-  const preserved = [...new Set(advisory.preservedUncertainties)];
-  if (!equalSet(preserved, governedUncertainties)) {
-    throw new Error("Solandra advisory reasoning dropped or invented material governed uncertainty from its Recommendation basis.");
-  }
-}
-
 function runUserMaterial(run: LatticeRun): string[] {
   if (!isConsultationRunRequest(run.request)) return [];
   return [run.request.objective, ...run.request.context].map((item) => item.trim()).filter(Boolean);
@@ -191,7 +181,6 @@ export async function establishRecommendation(input: {
     claimIds: [...item.claimIds],
   }));
   const governed = projectGovernedRecommendationMaterial(input.knowledge, basis, input.run.conversationId);
-  assertPreservedGovernedUncertainty(input.advisory, governed.uncertainties);
   const proposal = advisoryProjection(input.advisory, runUserMaterial(input.run));
 
   const draft = buildRecommendationRecord({
@@ -228,19 +217,47 @@ export async function establishConversationalRecommendation(input: {
   conversationId: string;
   intentVersion: IntentVersion;
   sourceMessage: IntentUserMessage;
+  userMessages: readonly IntentUserMessage[];
   knowledge: LoadedKnowledge[];
   advisory: SolandraRecommendationResult;
 }): Promise<RecommendationRecord> {
   if (input.sourceMessage.conversationId !== input.conversationId) {
     throw new Error("Conversational Recommendation USER source binding changed.");
   }
+  if (input.userMessages.some((message) =>
+    message.conversationId !== input.conversationId
+    || message.intentScopeId !== input.intentVersion.intentScopeId
+  )) {
+    throw new Error("Conversational Recommendation USER context crossed its exact conversation/Intent scope.");
+  }
+  const userMessagesById = new Map(input.userMessages.map((message) => [message.messageId, message] as const));
+  if (userMessagesById.size !== input.userMessages.length) {
+    throw new Error("Conversational Recommendation USER context duplicated an exact source-message identity.");
+  }
+  if (!userMessagesById.has(input.sourceMessage.messageId)) {
+    throw new Error("Conversational Recommendation USER context omitted the current exact source message.");
+  }
+  if (input.userMessages.length > 1 && input.advisory.userPremiseMessageIds === undefined) {
+    throw new Error("Conversational Recommendation with multi-message USER context omitted exact USER premise lineage.");
+  }
+  const proposedPremiseIds = input.advisory.userPremiseMessageIds ?? [input.sourceMessage.messageId];
+  if (
+    proposedPremiseIds.length === 0
+    || new Set(proposedPremiseIds).size !== proposedPremiseIds.length
+    || !proposedPremiseIds.includes(input.sourceMessage.messageId)
+  ) {
+    throw new Error("Conversational Recommendation USER premise lineage must retain the current exact source message.");
+  }
+  if (proposedPremiseIds.some((messageId) => !userMessagesById.has(messageId))) {
+    throw new Error("Conversational Recommendation USER premise lineage referenced material outside supplied exact USER source messages.");
+  }
+  const premiseMessages = proposedPremiseIds.map((messageId) => userMessagesById.get(messageId)!);
   const basis: RecommendationBasis[] = input.advisory.basis.map((item) => ({
     knowledgeId: item.knowledgeId,
     claimIds: [...item.claimIds],
   }));
   const governed = projectGovernedRecommendationMaterial(input.knowledge, basis, input.conversationId);
-  assertPreservedGovernedUncertainty(input.advisory, governed.uncertainties);
-  const proposal = advisoryProjection(input.advisory, [input.sourceMessage.content]);
+  const proposal = advisoryProjection(input.advisory, premiseMessages.map((message) => message.content));
 
   const draft = buildRecommendationRecord({
     conversationId: input.conversationId,
@@ -249,7 +266,7 @@ export async function establishConversationalRecommendation(input: {
     intentVersionId: input.intentVersion.intentVersionId,
     sourceMessageId: input.sourceMessage.messageId,
     basis,
-    userMaterialBasis: [input.intentVersion.intentVersionId, input.sourceMessage.messageId],
+    userMaterialBasis: [input.intentVersion.intentVersionId, ...proposedPremiseIds],
     recommendedProposal: proposal.recommendedProposal,
     alternativeProposals: proposal.alternativeProposals,
     rationale: governed.rationale,
@@ -274,10 +291,20 @@ export async function loadRecommendation(
   if (JSON.stringify(authoritativeKnowledgeBasis) !== JSON.stringify(record.basis)) {
     throw new Error("Recommendation factual premise authority no longer matches its exact Knowledge/claim basis.");
   }
-  const expectedUserPremises = [{
+  const material = [...new Set(record.userMaterialBasis.map((item) => item.trim()).filter(Boolean))].sort();
+  const premiseSourceMessageIds = material.length === 0
+    ? [record.sourceMessageId]
+    : material.filter((item) => item !== record.intentVersionId);
+  if (
+    material.length > 0
+    && (!material.includes(record.intentVersionId) || !material.includes(record.sourceMessageId))
+  ) {
+    throw new Error("Recommendation USER material no longer retains its Intent/current-source binding.");
+  }
+  const expectedUserPremises = premiseSourceMessageIds.map((sourceMessageId) => ({
     intentVersionId: record.intentVersionId,
-    sourceMessageId: record.sourceMessageId,
-  }];
+    sourceMessageId,
+  }));
   if (JSON.stringify(record.premiseAuthority.user) !== JSON.stringify(expectedUserPremises)) {
     throw new Error("Recommendation USER premise authority no longer matches its exact USER-material lineage.");
   }

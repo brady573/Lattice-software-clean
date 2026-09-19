@@ -23,6 +23,7 @@ import type {
 } from "./types.js";
 
 interface ModelRuntimeOptions {
+  /** Total wall-clock budget for one logical call, including queueing, retries, and retry waits. */
   readonly timeoutMs?: number;
   readonly maxRequestBytes?: number;
   readonly maxResponseBytes?: number;
@@ -238,19 +239,38 @@ function buildInvocationProvenance(
 
 function classifyAbort(
   callerSignal: AbortSignal | undefined,
-  timeoutSignal: AbortSignal,
+  logicalTimeoutSignal: AbortSignal,
+  attemptTimeoutSignal: AbortSignal | undefined,
   cause: unknown,
 ): ModelProviderError {
   if (callerSignal?.aborted === true) {
     return new ModelProviderError("cancelled", "Model call was cancelled by caller.", { cause });
   }
-  if (timeoutSignal.aborted) {
+  if (logicalTimeoutSignal.aborted || attemptTimeoutSignal?.aborted === true) {
     return new ModelProviderError("timeout", "Model call exceeded its timeout.", {
       retryable: true,
       cause,
     });
   }
   return asModelProviderError(cause);
+}
+
+async function waitForRetry(delayMs: number | null, signal: AbortSignal): Promise<void> {
+  if (delayMs === null || delayMs <= 0) return;
+  if (signal.aborted) throw signal.reason ?? new Error("Aborted.");
+  await new Promise<void>((resolve, reject) => {
+    let timer: ReturnType<typeof setTimeout>;
+    const onAbort = () => {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", onAbort);
+      reject(signal.reason ?? new Error("Aborted."));
+    };
+    timer = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, delayMs);
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
 }
 
 async function raceWithAbort<T>(
@@ -403,28 +423,65 @@ export class ModelRuntime {
     maxAttempts: number,
     callerSignal: AbortSignal | undefined,
   ): Promise<ModelRuntimeResult> {
-    const timeoutController = new AbortController();
-    const timer = setTimeout(
-      () => timeoutController.abort(new Error("Model call timeout.")),
+    const logicalTimeoutController = new AbortController();
+    const logicalDeadline = performance.now() + this.timeoutMs;
+    const logicalTimer = setTimeout(
+      () => logicalTimeoutController.abort(new Error("Model call timeout.")),
       this.timeoutMs,
     );
-    const signal = callerSignal === undefined
-      ? timeoutController.signal
-      : AbortSignal.any([callerSignal, timeoutController.signal]);
+    const logicalSignal = callerSignal === undefined
+      ? logicalTimeoutController.signal
+      : AbortSignal.any([callerSignal, logicalTimeoutController.signal]);
 
     try {
-      return await this.lock.run(logicalKey, signal, async () => {
+      return await this.lock.run(logicalKey, logicalSignal, async () => {
         for (let logicalAttempt = 0; logicalAttempt < maxAttempts; logicalAttempt += 1) {
+          if (logicalSignal.aborted) {
+            throw classifyAbort(
+              callerSignal,
+              logicalTimeoutController.signal,
+              undefined,
+              logicalSignal.reason,
+            );
+          }
+
+          const remainingLogicalMs = Math.ceil(logicalDeadline - performance.now());
+          if (remainingLogicalMs <= 0) {
+            logicalTimeoutController.abort(new Error("Model call timeout."));
+            throw classifyAbort(
+              callerSignal,
+              logicalTimeoutController.signal,
+              undefined,
+              logicalTimeoutController.signal.reason,
+            );
+          }
+
+          const attemptsRemaining = maxAttempts - logicalAttempt;
+          const attemptTimeoutMs = Math.max(
+            1,
+            Math.floor(remainingLogicalMs / attemptsRemaining),
+          );
+          const attemptTimeoutController = new AbortController();
+          const attemptTimer = setTimeout(
+            () => attemptTimeoutController.abort(new Error("Model attempt timeout.")),
+            attemptTimeoutMs,
+          );
+          const attemptSignal = AbortSignal.any([
+            logicalSignal,
+            attemptTimeoutController.signal,
+          ]);
           const attempt = this.attempts.next(logicalKey);
           const started = performance.now();
+          let failure: ModelProviderError | null = null;
+
           try {
             const operation = this.provider.generate(request, {
               correlationId,
               requestIdentity,
               attempt,
-              signal,
+              signal: attemptSignal,
             });
-            const providerResult = await raceWithAbort(operation, signal);
+            const providerResult = await raceWithAbort(operation, attemptSignal);
             const response = validateCanonicalModelResponse(providerResult.response, request);
             const responseBytes = Buffer.byteLength(stableModelJson(response), "utf8");
             if (responseBytes > this.maxResponseBytes) {
@@ -451,21 +508,37 @@ export class ModelRuntime {
               }),
             });
           } catch (error) {
-            const classified = signal.aborted
-              ? classifyAbort(callerSignal, timeoutController.signal, error)
+            failure = attemptSignal.aborted
+              ? classifyAbort(
+                callerSignal,
+                logicalTimeoutController.signal,
+                attemptTimeoutController.signal,
+                error,
+              )
               : asModelProviderError(error);
-            if (!classified.retryable || logicalAttempt + 1 >= maxAttempts) {
-              throw classified;
-            }
+          } finally {
+            clearTimeout(attemptTimer);
           }
+
+          if (!failure.retryable || logicalAttempt + 1 >= maxAttempts || logicalSignal.aborted) {
+            throw failure;
+          }
+          await waitForRetry(failure.retryAfterMs, logicalSignal);
         }
         throw new ModelProviderError("unavailable", "Model call exhausted its attempts.");
       });
     } catch (error) {
-      if (signal.aborted) throw classifyAbort(callerSignal, timeoutController.signal, error);
+      if (logicalSignal.aborted) {
+        throw classifyAbort(
+          callerSignal,
+          logicalTimeoutController.signal,
+          undefined,
+          error,
+        );
+      }
       throw asModelProviderError(error);
     } finally {
-      clearTimeout(timer);
+      clearTimeout(logicalTimer);
     }
   }
 }
