@@ -144,16 +144,6 @@ function projectGovernedRecommendationMaterial(
   return { rationale, uncertainties };
 }
 
-function assertPreservedGovernedUncertainty(
-  advisory: SolandraRecommendationResult,
-  governedUncertainties: readonly string[],
-): void {
-  const preserved = [...new Set(advisory.preservedUncertainties)];
-  if (!equalSet(preserved, governedUncertainties)) {
-    throw new Error("Solandra advisory reasoning dropped or invented material governed uncertainty from its Recommendation basis.");
-  }
-}
-
 function runUserMaterial(run: LatticeRun): string[] {
   if (!isConsultationRunRequest(run.request)) return [];
   return [run.request.objective, ...run.request.context].map((item) => item.trim()).filter(Boolean);
@@ -191,7 +181,6 @@ export async function establishRecommendation(input: {
     claimIds: [...item.claimIds],
   }));
   const governed = projectGovernedRecommendationMaterial(input.knowledge, basis, input.run.conversationId);
-  assertPreservedGovernedUncertainty(input.advisory, governed.uncertainties);
   const proposal = advisoryProjection(input.advisory, runUserMaterial(input.run));
 
   const draft = buildRecommendationRecord({
@@ -268,7 +257,6 @@ export async function establishConversationalRecommendation(input: {
     claimIds: [...item.claimIds],
   }));
   const governed = projectGovernedRecommendationMaterial(input.knowledge, basis, input.conversationId);
-  assertPreservedGovernedUncertainty(input.advisory, governed.uncertainties);
   const proposal = advisoryProjection(input.advisory, premiseMessages.map((message) => message.content));
 
   const draft = buildRecommendationRecord({

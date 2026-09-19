@@ -105,7 +105,6 @@ class StateDrivenAdvisory implements SolandraAdvisoryRuntime {
         tradeoffs: [],
         assumptions: [],
         uncertainties: [],
-        preservedUncertainties: [],
         alternatives: ["Fold the clean laundry first."],
       },
       invocationProvenance: PROVENANCE,

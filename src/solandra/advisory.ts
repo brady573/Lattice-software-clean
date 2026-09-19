@@ -20,7 +20,6 @@ const recommendationSchema = z.object({
   tradeoffs: z.array(z.string().min(1).max(2_000)).max(16),
   assumptions: z.array(z.string().min(1).max(2_000)).max(16),
   uncertainties: z.array(z.string().min(1).max(2_000)).max(16),
-  preservedUncertainties: z.array(z.string().min(1).max(2_000)).max(32),
   alternatives: z.array(z.string().min(1).max(2_000)).max(16),
   userPremiseMessageIds: z.array(z.string().min(1).max(200)).min(1).max(12).optional(),
 }).strict();
@@ -220,7 +219,6 @@ function buildAdvisoryRequest(model: string, input: SolandraAdvisoryInput): Cano
       tradeoffs: ["advisory tradeoff only; never durable factual support"],
       assumptions: ["exact verbatim USER-supplied premise excerpt, if useful"],
       uncertainties: ["drafting explanation of uncertainty; never factual authority"],
-      preservedUncertainties: ["copy each material supplied uncertainty used by the recommendation verbatim"],
       alternatives: ["other concise advisory proposal or option"],
       ...(input.userContextMessages
         ? { userPremiseMessageIds: ["exact supplied USER message IDs materially relied upon, including the current USER message ID"] }
@@ -253,7 +251,7 @@ function buildAdvisoryRequest(model: string, input: SolandraAdvisoryInput): Cano
           "Every external factual basis reference must use only supplied Knowledge IDs and claim IDs. Lattice renders factual support later from those exact governed claims; recommendation, alternatives, rationale, tradeoffs, assumptions, and uncertainties never establish factual support or source provenance.",
           "If no external factual premise is needed, a Recommendation may use an empty Knowledge basis and reason only from authoritative USER intent/current USER context. If an external fact is genuinely required but not supplied, return NEEDS_KNOWLEDGE instead of inventing it.",
           "Use NEEDS_CLARIFICATION only for genuine USER ambiguity that materially prevents responsible advice, not for missing pre-authored candidate options.",
-          "Do not make supplied uncertainty disappear. For RECOMMENDATION, copy every material supplied uncertainty that affects the recommendation verbatim into preservedUncertainties. Any natural-language uncertainty explanation is drafting material only; Lattice persists governed uncertainty, not generated uncertainty prose.",
+          "Use uncertainties for ordinary non-authoritative uncertainty explanation when useful. Lattice derives durable governed uncertainty directly from the validated Knowledge/claim basis; generated uncertainty prose cannot add to, erase, or replace that governed uncertainty.",
           "rationale and tradeoffs are transient drafting/advisory judgment only. They are not durable Recommendation factual support.",
           "Return exactly one top-level JSON object and no prose.",
           "The top-level object itself must contain status with exactly one of: RECOMMENDATION, NEEDS_KNOWLEDGE, NEEDS_CLARIFICATION, INSUFFICIENT_BASIS.",
@@ -336,12 +334,8 @@ function validateAndProjectRecommendationBasis(
 ): GroundingFinding[] {
   const supplied = new Map(input.knowledge.map((knowledge) => [
     knowledge.knowledgeId,
-    {
-      findings: new Map(knowledge.findings.map((finding) => [finding.claimId, finding])),
-      uncertainties: new Set(knowledge.uncertainties),
-    },
+    new Map(knowledge.findings.map((finding) => [finding.claimId, finding])),
   ]));
-  const usedUncertainties = new Set<string>();
   const governedFindings: GroundingFinding[] = [];
 
   for (const basis of result.basis) {
@@ -350,7 +344,7 @@ function validateAndProjectRecommendationBasis(
       throw new ModelProviderError("invalid_output", "Solandra advisory reasoning referenced Knowledge that Lattice did not supply.");
     }
     for (const claimId of basis.claimIds) {
-      const finding = knowledge.findings.get(claimId);
+      const finding = knowledge.get(claimId);
       if (!finding) {
         throw new ModelProviderError("invalid_output", "Solandra advisory reasoning referenced a claim that is not part of the supplied Knowledge.");
       }
@@ -361,19 +355,6 @@ function validateAndProjectRecommendationBasis(
         status: finding.status,
         confidence: finding.confidence,
       });
-    }
-    for (const uncertainty of knowledge.uncertainties) usedUncertainties.add(uncertainty);
-  }
-
-  const preserved = new Set(result.preservedUncertainties);
-  for (const uncertainty of preserved) {
-    if (!usedUncertainties.has(uncertainty)) {
-      throw new ModelProviderError("invalid_output", "Solandra advisory reasoning invented an uncertainty reference that was not supplied by Lattice.");
-    }
-  }
-  for (const uncertainty of usedUncertainties) {
-    if (!preserved.has(uncertainty)) {
-      throw new ModelProviderError("invalid_output", "Solandra advisory reasoning dropped material governed uncertainty from its recommendation basis.");
     }
   }
 

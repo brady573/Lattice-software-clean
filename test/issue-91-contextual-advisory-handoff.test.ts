@@ -112,7 +112,6 @@ class ExactContextAdvisory implements SolandraAdvisoryRuntime {
         tradeoffs: [],
         assumptions: [],
         uncertainties: [],
-        preservedUncertainties: [],
         alternatives: ["Keep both options open until the USER wants to choose."],
         userPremiseMessageIds: premiseIds,
       },
@@ -289,7 +288,6 @@ test("Issue #91: conversational Recommendation fails closed when advisory invent
     tradeoffs: [],
     assumptions: [],
     uncertainties: [],
-    preservedUncertainties: [],
     alternatives: ["Keep both available."],
     userPremiseMessageIds: [prior.messageId, "invented-message-id", sourceMessage.messageId],
   };

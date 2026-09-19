@@ -36,6 +36,8 @@ const SECOND_DECLARED_FACT = "Option A has a documented rollback procedure.";
 const SIBLING_FACT = "Option B had lower measured downtime last quarter.";
 const UNSUPPORTED_FACT = "its vendor guarantees zero outages forever";
 const GENERATED_PROPOSAL = "Use a staged canary rollout.";
+const ALTERNATE_FACT = "Option B can be reversed without replacing the storage format.";
+const ALTERNATE_UNCERTAINTY = "The reversal time for the current environment has not been measured.";
 const UNSUPPORTED_PROPOSAL = `Use option A because ${UNSUPPORTED_FACT}.`;
 
 const INTENT: IntentVersion = {
@@ -215,6 +217,39 @@ function governedKnowledge(): LoadedKnowledge {
   };
 }
 
+function alternateGovernedKnowledge(): LoadedKnowledge {
+  const base = governedKnowledge();
+  return {
+    ...base,
+    record: {
+      ...base.record,
+      knowledgeId: "knowledge-issue-45-alternate",
+      runId: "run-issue-45-alternate-knowledge",
+      claimIds: ["claim-alternate"],
+      sourceIds: [],
+      evidenceIds: [],
+      uncertainties: [ALTERNATE_UNCERTAINTY],
+    },
+    run: { ...base.run, id: "run-issue-45-alternate-knowledge" },
+    knowledge: {
+      ...base.knowledge,
+      findings: [{
+        claimId: "claim-alternate",
+        text: ALTERNATE_FACT,
+        status: "SUPPORTED",
+        confidence: "HIGH",
+        evidenceIds: [],
+        contradictoryEvidenceIds: [],
+        temporalQualifiers: { effectiveAt: null, period: null },
+        basis: "CLAIM",
+      }],
+      uncertainties: [ALTERNATE_UNCERTAINTY],
+      provenance: [],
+      evidence: [],
+    },
+  };
+}
+
 function advisory(overrides: Partial<SolandraRecommendationResult> = {}): SolandraRecommendationResult {
   return {
     status: "RECOMMENDATION",
@@ -224,7 +259,6 @@ function advisory(overrides: Partial<SolandraRecommendationResult> = {}): Soland
     tradeoffs: ["Generated drafting tradeoff that must not become durable."],
     assumptions: ["My deployment window is flexible."],
     uncertainties: ["Generated uncertainty explanation that must not become durable."],
-    preservedUncertainties: [],
     alternatives: ["option B"],
     ...overrides,
   };
@@ -247,7 +281,6 @@ class GroundedButUnsupportedProposalProvider implements ModelProvider {
         tradeoffs: ["This is advisory judgment."],
         assumptions: ["My deployment window is flexible."],
         uncertainties: [GOVERNED_UNCERTAINTY],
-        preservedUncertainties: [GOVERNED_UNCERTAINTY],
         alternatives: ["Keep a reversible manual fallback."],
       });
     return {
@@ -366,7 +399,6 @@ test("Issue #45: governed factual support is rendered from exact declared claim 
       advisory: advisory({
         basis: [{ knowledgeId: "knowledge-issue-45", claimIds: ["claim-declared-a"] }],
         rationale: [`Use option A because ${UNSUPPORTED_FACT}.`],
-        preservedUncertainties: [GOVERNED_UNCERTAINTY],
       }),
     });
 
@@ -452,7 +484,6 @@ test("Issue #45: multiple exact governed claims support one Recommendation witho
           knowledgeId: "knowledge-issue-45",
           claimIds: ["claim-declared-b", "claim-declared-a"],
         }],
-        preservedUncertainties: [GOVERNED_UNCERTAINTY],
       }),
     });
 
@@ -468,22 +499,45 @@ test("Issue #45: multiple exact governed claims support one Recommendation witho
   }
 });
 
-test("Issue #45: governed uncertainty cannot be dropped during Recommendation establishment", async () => {
+test("Issue #91: generated uncertainty prose cannot erase, replace, or enlarge governed Recommendation uncertainty", async () => {
   const store = new MemoryRecommendationStore();
   try {
-    await assert.rejects(
-      establishRecommendation({
-        store,
-        run: completedAdvisoryRun(),
-        intentVersion: INTENT,
-        knowledge: [governedKnowledge()],
-        advisory: advisory({
-          basis: [{ knowledgeId: "knowledge-issue-45", claimIds: ["claim-declared-a"] }],
-          preservedUncertainties: [],
-        }),
+    const generatedUncertainty = "The advisory model thinks implementation timing could matter.";
+    const record = await establishRecommendation({
+      store,
+      run: completedAdvisoryRun(),
+      intentVersion: INTENT,
+      knowledge: [governedKnowledge()],
+      advisory: advisory({
+        basis: [{ knowledgeId: "knowledge-issue-45", claimIds: ["claim-declared-a"] }],
+        uncertainties: [generatedUncertainty],
       }),
-      /dropped or invented material governed uncertainty/iu,
-    );
+    });
+    assert.deepEqual(record.uncertainties, [GOVERNED_UNCERTAINTY]);
+    assert.doesNotMatch(record.uncertainties.join("\n"), /implementation timing/iu);
+  } finally {
+    await store.close();
+  }
+});
+
+test("Issue #91: governed uncertainty follows only the exact selected Knowledge basis", async () => {
+  const store = new MemoryRecommendationStore();
+  try {
+    const record = await establishRecommendation({
+      store,
+      run: completedAdvisoryRun(),
+      intentVersion: INTENT,
+      knowledge: [governedKnowledge(), alternateGovernedKnowledge()],
+      advisory: advisory({
+        basis: [{ knowledgeId: "knowledge-issue-45-alternate", claimIds: ["claim-alternate"] }],
+        uncertainties: ["A model-authored caveat that is not governed Knowledge."],
+      }),
+    });
+    assert.deepEqual(record.knowledgeIds, ["knowledge-issue-45-alternate"]);
+    assert.deepEqual(record.claimIds, ["claim-alternate"]);
+    assert.deepEqual(record.rationale, [ALTERNATE_FACT]);
+    assert.deepEqual(record.uncertainties, [ALTERNATE_UNCERTAINTY]);
+    assert.doesNotMatch(record.uncertainties.join("\n"), new RegExp(GOVERNED_UNCERTAINTY, "u"));
   } finally {
     await store.close();
   }
@@ -502,6 +556,7 @@ test("Issue #45: USER-only Recommendation establishes without external Knowledge
     assert.deepEqual(record.basis, []);
     assert.deepEqual(record.knowledgeIds, []);
     assert.deepEqual(record.claimIds, []);
+    assert.deepEqual(record.uncertainties, []);
     assert.equal(record.representationKind, "STRUCTURAL_PROPOSAL_V2");
     assert.equal(record.createdAt, FIXED_TIME);
   } finally {
