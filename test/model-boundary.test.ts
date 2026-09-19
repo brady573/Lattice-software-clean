@@ -440,28 +440,42 @@ test("timeout and caller cancellation are distinct", async () => {
   );
 });
 
-test("retryable attempt timeout receives a fresh signal and the next bounded attempt can succeed", async () => {
-  const provider = new TimeoutRetryProvider(1);
+test("configured retries do not pre-reserve half the logical budget from a viable first attempt", async () => {
+  const provider = new TrackingProvider(55);
+  const runtime = new ModelRuntime(provider, { timeoutMs: 80 });
+  const started = performance.now();
+  const result = await runtime.call(fixtureRequest, {
+    correlationId: "full-first-attempt-budget",
+    maxAttempts: 2,
+  });
+
+  assert.equal(result.response.output[0]?.type, "text");
+  assert.deepEqual(provider.attempts, [0]);
+  assert.equal(result.audit.attempt, 0);
+  assert.ok(performance.now() - started >= 50);
+});
+
+test("an early retryable failure can still retry within the remaining logical budget", async () => {
+  const provider = new TrackingProvider(15, true);
   const runtime = new ModelRuntime(provider, { timeoutMs: 80 });
   const result = await runtime.call(fixtureRequest, {
-    correlationId: "timeout-retry-success",
+    correlationId: "early-retry-with-budget",
     maxAttempts: 2,
   });
 
   assert.equal(result.response.output[0]?.type, "text");
   assert.deepEqual(provider.attempts, [0, 1]);
-  assert.equal(provider.aborts, 1);
   assert.equal(result.audit.attempt, 1);
 });
 
-test("repeated attempt timeouts exhaust attempts within one logical-call timeout budget", async () => {
-  const provider = new TimeoutRetryProvider(2);
+test("a provider attempt that consumes the logical deadline does not manufacture a retry slot", async () => {
+  const provider = new TimeoutRetryProvider(1);
   const runtime = new ModelRuntime(provider, { timeoutMs: 80 });
   const started = performance.now();
 
   await assert.rejects(
     () => runtime.call(fixtureRequest, {
-      correlationId: "timeout-retry-exhausted",
+      correlationId: "timeout-no-reserved-retry",
       maxAttempts: 2,
     }),
     (error: unknown) =>
@@ -469,9 +483,9 @@ test("repeated attempt timeouts exhaust attempts within one logical-call timeout
       && error.code === "timeout",
   );
 
-  assert.deepEqual(provider.attempts, [0, 1]);
-  assert.equal(provider.aborts, 2);
-  assert.ok(performance.now() - started < 250, "retry attempts exceeded the bounded logical-call budget");
+  assert.deepEqual(provider.attempts, [0]);
+  assert.equal(provider.aborts, 1);
+  assert.ok(performance.now() - started < 250, "logical timeout exceeded the bounded call budget");
 });
 
 test("caller cancellation during a timed attempt remains terminal and does not retry", async () => {
@@ -519,24 +533,29 @@ test("caller cancellation during retry wait prevents the next provider attempt",
   assert.deepEqual(provider.attempts, [0]);
 });
 
-test("duplicate idempotent callers share one timeout-retrying logical operation", async () => {
+test("duplicate idempotent callers share one bounded operation when its first attempt reaches the deadline", async () => {
   const provider = new TimeoutRetryProvider(1);
   const runtime = new ModelRuntime(provider, { timeoutMs: 80 });
   const options = {
-    correlationId: "timeout-shared-retry",
-    idempotencyKey: "delivery-timeout-retry",
+    correlationId: "timeout-shared-deadline",
+    idempotencyKey: "delivery-timeout-deadline",
     maxAttempts: 2,
   } as const;
 
-  const [first, duplicate] = await Promise.all([
+  const [first, duplicate] = await Promise.allSettled([
     runtime.call(fixtureRequest, options),
     runtime.call(fixtureRequest, options),
   ]);
 
-  assert.deepEqual(provider.attempts, [0, 1]);
-  assert.equal(provider.calls, 2);
+  for (const outcome of [first, duplicate]) {
+    assert.equal(outcome.status, "rejected");
+    if (outcome.status !== "rejected") throw new Error("Expected shared timeout rejection.");
+    assert.ok(outcome.reason instanceof ModelProviderError);
+    assert.equal(outcome.reason.code, "timeout");
+  }
+  assert.deepEqual(provider.attempts, [0]);
+  assert.equal(provider.calls, 1);
   assert.equal(provider.aborts, 1);
-  assert.deepEqual(first.response, duplicate.response);
 });
 
 test("OpenAI-compatible adapter rejects remote endpoints in the first offline boundary", () => {
