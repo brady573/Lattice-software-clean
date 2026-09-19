@@ -92,6 +92,88 @@ class TrackingProvider implements ModelProvider {
   }
 }
 
+class TimeoutRetryProvider implements ModelProvider {
+  readonly kind = "timeout-retry";
+  calls = 0;
+  aborts = 0;
+  readonly attempts: number[] = [];
+  readonly firstStarted: Promise<void>;
+  private resolveFirstStarted!: () => void;
+
+  constructor(private readonly succeedAfterTimeouts: number) {
+    this.firstStarted = new Promise<void>((resolve) => {
+      this.resolveFirstStarted = resolve;
+    });
+  }
+
+  async generate(
+    request: CanonicalModelRequest,
+    context: ModelCallContext,
+  ): Promise<ModelProviderResult> {
+    this.calls += 1;
+    this.attempts.push(context.attempt);
+    if (this.calls === 1) this.resolveFirstStarted();
+
+    if (this.calls <= this.succeedAfterTimeouts) {
+      await new Promise<never>((_, reject) => {
+        const onAbort = () => {
+          this.aborts += 1;
+          reject(context.signal.reason ?? new Error("provider aborted"));
+        };
+        if (context.signal.aborted) {
+          onAbort();
+          return;
+        }
+        context.signal.addEventListener("abort", onAbort, { once: true });
+      });
+    }
+
+    return {
+      response: {
+        id: `timeout-retry-${context.attempt}`,
+        model: request.model,
+        output: [{ type: "text", text: `attempt:${context.attempt}` }],
+      },
+    };
+  }
+}
+
+class RetryWaitCancellationProvider implements ModelProvider {
+  readonly kind = "retry-wait-cancellation";
+  calls = 0;
+  readonly attempts: number[] = [];
+  readonly firstFailure: Promise<void>;
+  private resolveFirstFailure!: () => void;
+
+  constructor() {
+    this.firstFailure = new Promise<void>((resolve) => {
+      this.resolveFirstFailure = resolve;
+    });
+  }
+
+  async generate(
+    request: CanonicalModelRequest,
+    context: ModelCallContext,
+  ): Promise<ModelProviderResult> {
+    this.calls += 1;
+    this.attempts.push(context.attempt);
+    if (this.calls === 1) {
+      this.resolveFirstFailure();
+      throw new ModelProviderError("rate_limit", "retry after a bounded wait", {
+        retryable: true,
+        retryAfterMs: 1_000,
+      });
+    }
+    return {
+      response: {
+        id: `retry-wait-${context.attempt}`,
+        model: request.model,
+        output: [{ type: "text", text: "unexpected retry" }],
+      },
+    };
+  }
+}
+
 async function withUpstream(
   handler: http.RequestListener,
   fn: (baseUrl: string) => Promise<void>,
@@ -356,6 +438,105 @@ test("timeout and caller cancellation are distinct", async () => {
       error instanceof ModelProviderError
       && error.code === "cancelled",
   );
+});
+
+test("retryable attempt timeout receives a fresh signal and the next bounded attempt can succeed", async () => {
+  const provider = new TimeoutRetryProvider(1);
+  const runtime = new ModelRuntime(provider, { timeoutMs: 80 });
+  const result = await runtime.call(fixtureRequest, {
+    correlationId: "timeout-retry-success",
+    maxAttempts: 2,
+  });
+
+  assert.equal(result.response.output[0]?.type, "text");
+  assert.deepEqual(provider.attempts, [0, 1]);
+  assert.equal(provider.aborts, 1);
+  assert.equal(result.audit.attempt, 1);
+});
+
+test("repeated attempt timeouts exhaust attempts within one logical-call timeout budget", async () => {
+  const provider = new TimeoutRetryProvider(2);
+  const runtime = new ModelRuntime(provider, { timeoutMs: 80 });
+  const started = performance.now();
+
+  await assert.rejects(
+    () => runtime.call(fixtureRequest, {
+      correlationId: "timeout-retry-exhausted",
+      maxAttempts: 2,
+    }),
+    (error: unknown) =>
+      error instanceof ModelProviderError
+      && error.code === "timeout",
+  );
+
+  assert.deepEqual(provider.attempts, [0, 1]);
+  assert.equal(provider.aborts, 2);
+  assert.ok(performance.now() - started < 250, "retry attempts exceeded the bounded logical-call budget");
+});
+
+test("caller cancellation during a timed attempt remains terminal and does not retry", async () => {
+  const provider = new TimeoutRetryProvider(1);
+  const runtime = new ModelRuntime(provider, { timeoutMs: 500 });
+  const controller = new AbortController();
+  const pending = runtime.call(fixtureRequest, {
+    correlationId: "timeout-caller-cancel",
+    maxAttempts: 2,
+    signal: controller.signal,
+  });
+
+  await provider.firstStarted;
+  controller.abort(new Error("caller cancelled current attempt"));
+
+  await assert.rejects(
+    () => pending,
+    (error: unknown) =>
+      error instanceof ModelProviderError
+      && error.code === "cancelled",
+  );
+  assert.deepEqual(provider.attempts, [0]);
+});
+
+test("caller cancellation during retry wait prevents the next provider attempt", async () => {
+  const provider = new RetryWaitCancellationProvider();
+  const runtime = new ModelRuntime(provider, { timeoutMs: 500 });
+  const controller = new AbortController();
+  const pending = runtime.call(fixtureRequest, {
+    correlationId: "retry-wait-caller-cancel",
+    maxAttempts: 2,
+    signal: controller.signal,
+  });
+
+  await provider.firstFailure;
+  controller.abort(new Error("caller cancelled retry wait"));
+
+  await assert.rejects(
+    () => pending,
+    (error: unknown) =>
+      error instanceof ModelProviderError
+      && error.code === "cancelled",
+  );
+  assert.equal(provider.calls, 1);
+  assert.deepEqual(provider.attempts, [0]);
+});
+
+test("duplicate idempotent callers share one timeout-retrying logical operation", async () => {
+  const provider = new TimeoutRetryProvider(1);
+  const runtime = new ModelRuntime(provider, { timeoutMs: 80 });
+  const options = {
+    correlationId: "timeout-shared-retry",
+    idempotencyKey: "delivery-timeout-retry",
+    maxAttempts: 2,
+  } as const;
+
+  const [first, duplicate] = await Promise.all([
+    runtime.call(fixtureRequest, options),
+    runtime.call(fixtureRequest, options),
+  ]);
+
+  assert.deepEqual(provider.attempts, [0, 1]);
+  assert.equal(provider.calls, 2);
+  assert.equal(provider.aborts, 1);
+  assert.deepEqual(first.response, duplicate.response);
 });
 
 test("OpenAI-compatible adapter rejects remote endpoints in the first offline boundary", () => {
