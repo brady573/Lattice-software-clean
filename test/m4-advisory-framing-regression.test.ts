@@ -74,10 +74,7 @@ class RawAdvisoryProvider implements ModelProvider {
 
   async generate(request: CanonicalModelRequest, _context: ModelCallContext): Promise<ModelProviderResult> {
     this.calls += 1;
-    const grounding = (request.messages[0]?.content ?? "").includes("bounded grounding verifier");
-    const text = grounding
-      ? JSON.stringify({ status: "GROUNDED", unsupportedExternalPremises: [], knowledgeNeeds: [] })
-      : this.advisoryText;
+    const text = this.advisoryText;
     return {
       response: {
         id: `m4-framing-${this.calls}`,
@@ -98,7 +95,7 @@ async function expectAccepted(advisoryText: string): Promise<void> {
   const runtime = new ModelSolandraAdvisoryRuntime(new ModelRuntime(provider), MODEL);
   const result = await runtime.advise(advisoryInput());
   assert.equal(result.result.status, "RECOMMENDATION");
-  assert.equal(provider.calls, 2);
+  assert.equal(provider.calls, 1);
 }
 
 async function expectRejected(advisoryText: string): Promise<void> {
