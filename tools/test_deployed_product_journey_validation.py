@@ -180,8 +180,8 @@ def test_action_preparation_is_not_submitted_after_decision_failure() -> None:
         if label == "AMBIGUITY":
             return _stage(
                 label,
-                "For driving versus the train, should speed or cost determine the choice?",
-                turn_body={"status": "NEEDS_CLARIFICATION"},
+                "Which tradeoff matters more here?",
+                turn_body=_clarification_body(),
             )
         if label == "DECISION":
             validator._require_successful_outcome(
