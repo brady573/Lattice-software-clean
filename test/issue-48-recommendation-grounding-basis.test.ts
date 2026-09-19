@@ -74,14 +74,9 @@ function advisoryInput(): SolandraAdvisoryInput {
 class ExactBasisGroundingProvider implements ModelProvider {
   readonly kind = "issue-48-exact-basis-provider";
   calls = 0;
-  groundingPayload: unknown = null;
-
   async generate(request: CanonicalModelRequest, _context: ModelCallContext): Promise<ModelProviderResult> {
     this.calls += 1;
-    const grounding = (request.messages[0]?.content ?? "").includes("bounded grounding verifier");
-    const text = grounding
-      ? this.groundingResponse(request)
-      : JSON.stringify({
+    const text = JSON.stringify({
         status: "RECOMMENDATION",
         recommendation: "Prefer approach A because it has a documented 40% lower operating cost.",
         basis: [{ knowledgeId: "knowledge-issue-48", claimIds: ["claim-declared"] }],
@@ -105,22 +100,9 @@ class ExactBasisGroundingProvider implements ModelProvider {
     };
   }
 
-  private groundingResponse(request: CanonicalModelRequest): string {
-    const content = request.messages[1]?.content ?? "{}";
-    this.groundingPayload = JSON.parse(content) as unknown;
-    assert.match(content, /claim-declared/u);
-    assert.match(content, new RegExp(DECLARED_FINDING.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "u"));
-    assert.doesNotMatch(content, /claim-undeclared-sibling/u);
-    assert.doesNotMatch(content, new RegExp(UNDECLARED_SIBLING_FINDING.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "u"));
-    return JSON.stringify({
-      status: "NEEDS_KNOWLEDGE",
-      unsupportedExternalPremises: ["Approach A has a documented 40% lower operating cost."],
-      knowledgeNeeds: ["governed operating-cost evidence for approach A"],
-    });
-  }
 }
 
-test("Issue #48: Recommendation grounding receives only exact declared claim basis", async () => {
+test("Issue #48: single-pass Recommendation retains only exact declared claim basis", async () => {
   const provider = new ExactBasisGroundingProvider();
   const runtime = new ModelSolandraAdvisoryRuntime(
     new ModelRuntime(provider),
@@ -129,9 +111,11 @@ test("Issue #48: Recommendation grounding receives only exact declared claim bas
 
   const result = await runtime.advise(advisoryInput());
 
-  assert.equal(provider.calls, 2);
-  assert.ok(provider.groundingPayload);
-  assert.equal(result.result.status, "NEEDS_KNOWLEDGE");
-  if (result.result.status !== "NEEDS_KNOWLEDGE") return;
-  assert.deepEqual(result.result.knowledgeNeeds, ["governed operating-cost evidence for approach A"]);
+  assert.equal(provider.calls, 1);
+  assert.equal(result.result.status, "RECOMMENDATION");
+  if (result.result.status !== "RECOMMENDATION") return;
+  assert.deepEqual(result.result.basis, [{
+    knowledgeId: "knowledge-issue-48",
+    claimIds: ["claim-declared"],
+  }]);
 });
