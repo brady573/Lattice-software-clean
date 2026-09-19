@@ -9,6 +9,8 @@ on:
       - "tools/issue-46-browser-prepared-message.mjs"
       - "tools/issue-91-browser-runtime.mjs"
       - "tools/issue-91-live-solandra-cognition.mjs"
+      - "tools/pr116-browser-conversation-composer.mjs"
+      - "tools/pr116-live-conversation-composition.mjs"
       - "package.json"
       - "package-lock.json"
       - ".github/workflows/browser-lifecycle-validation.yml"
@@ -22,6 +24,8 @@ on:
       - "tools/issue-46-browser-prepared-message.mjs"
       - "tools/issue-91-browser-runtime.mjs"
       - "tools/issue-91-live-solandra-cognition.mjs"
+      - "tools/pr116-browser-conversation-composer.mjs"
+      - "tools/pr116-live-conversation-composition.mjs"
       - "package.json"
       - "package-lock.json"
       - ".github/workflows/browser-lifecycle-validation.yml"
@@ -96,6 +100,8 @@ jobs:
           node --check tools/issue-46-browser-prepared-message.mjs
           node --check tools/issue-91-browser-runtime.mjs
           node --check tools/issue-91-live-solandra-cognition.mjs
+          node --check tools/pr116-browser-conversation-composer.mjs
+          node --check tools/pr116-live-conversation-composition.mjs
 
       - name: Build browser validation subject
         run: npm run build
@@ -176,10 +182,11 @@ jobs:
               exit "$issue46_status"
             fi
           fi
+          node tools/pr116-browser-conversation-composer.mjs
           test "$(git rev-parse HEAD)" = "$SUBJECT_SOURCE_SHA"
           git diff --exit-code
           echo "BROWSER_LIFECYCLE=PASS sha=$SUBJECT_SOURCE_SHA"
-          echo 'BROWSER_COGNITION_COMPOSITION=EXPLICIT_NONCANONICAL_INTERPRETER'
+          echo 'BROWSER_COGNITION_COMPOSITION=EXPLICIT_NONCANONICAL_INTERPRETER_PLUS_CANONICAL_LOCAL_MODEL_PRODUCT_PATH'
           echo 'PRODUCTION_DEPLOYMENT=NOT_PERFORMED'
           echo 'PRODUCTION_DATABASE=NOT_TOUCHED'
 
@@ -195,7 +202,9 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: browser-lifecycle-${{ github.event.pull_request.head.sha || github.sha }}
-          path: artifacts/browser-lifecycle/
+          path: |
+            artifacts/browser-lifecycle/
+            artifacts/pr116-browser-composition/
           if-no-files-found: warn
           retention-days: 7
 
@@ -227,6 +236,7 @@ jobs:
           test -n "${GROQ_API_KEY:-}"
           test "$(git rev-parse HEAD)" = "$SUBJECT_SOURCE_SHA"
           node --import tsx tools/issue-91-live-solandra-cognition.mjs
+          node --import tsx tools/pr116-live-conversation-composition.mjs
           git diff --exit-code
           echo "LIVE_SOLANDRA_COGNITION=PASS sha=$SUBJECT_SOURCE_SHA"
           echo 'PRODUCTION_DEPLOYMENT=NOT_PERFORMED'

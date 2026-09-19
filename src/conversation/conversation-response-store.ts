@@ -2,15 +2,28 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { Pool } from "pg";
 
-const migration = "039_conversation_responses.sql";
+const migrations = [
+  "039_conversation_responses.sql",
+  "042_conversation_response_presentation.sql",
+] as const;
 const MAX_ID_CHARS = 256;
 const MAX_CONTENT_CHARS = 32_000;
+const MAX_CONVERSATION_CHARS = 8_000;
+const MAX_COMPOSER_CHARS = 24_000;
+
+export interface ConversationResponsePresentation {
+  conversationText: string;
+  composerBody: string | null;
+}
 
 export interface ConversationResponse {
   responseId: string;
   conversationId: string;
   sourceMessageId: string;
+  /** Full ordinary response text retained for bounded cognition continuity. */
   content: string;
+  /** Two-surface ordinary presentation. Older rows may legitimately omit this field. */
+  presentation?: ConversationResponsePresentation;
   origin: "SOLANDRA";
   authority: "NON_AUTHORITATIVE_CONVERSATION";
   factualAuthority: false;
@@ -31,9 +44,38 @@ function boundedId(value: string, name: string): string {
   return normalized;
 }
 
+function boundedText(value: string, name: string, max: number): string {
+  const normalized = value.trim();
+  if (!normalized || normalized.length > max) throw new Error(`${name} is invalid.`);
+  return normalized;
+}
+
+function normalizeNullableText(value: string | null, name: string, max: number): string | null {
+  if (value === null) return null;
+  return boundedText(value, name, max);
+}
+
+function normalizedPresentation(value: ConversationResponsePresentation): ConversationResponsePresentation {
+  return {
+    conversationText: boundedText(value.conversationText, "Conversation text", MAX_CONVERSATION_CHARS),
+    composerBody: normalizeNullableText(value.composerBody, "Conversation Composer body", MAX_COMPOSER_CHARS),
+  };
+}
+
+function presentationText(value: ConversationResponsePresentation): string {
+  return [value.conversationText, value.composerBody]
+    .filter((part): part is string => part !== null)
+    .join("\n\n");
+}
+
 function normalizedResponse(response: ConversationResponse): ConversationResponse {
-  const content = response.content.trim();
-  if (!content || content.length > MAX_CONTENT_CHARS) throw new Error("Conversation response content is invalid.");
+  const content = boundedText(response.content, "Conversation response content", MAX_CONTENT_CHARS);
+  const presentation = response.presentation === undefined
+    ? undefined
+    : normalizedPresentation(response.presentation);
+  if (presentation && presentationText(presentation) !== content) {
+    throw new Error("Conversation response presentation must faithfully compose the persisted response content.");
+  }
   if (response.origin !== "SOLANDRA") throw new Error("Conversation response origin must be SOLANDRA.");
   if (response.authority !== "NON_AUTHORITATIVE_CONVERSATION" || response.factualAuthority !== false) {
     throw new Error("Conversation response cannot carry Product factual authority.");
@@ -45,6 +87,7 @@ function normalizedResponse(response: ConversationResponse): ConversationRespons
     conversationId: boundedId(response.conversationId, "Conversation id"),
     sourceMessageId: boundedId(response.sourceMessageId, "Conversation response source message id"),
     content,
+    ...(presentation ? { presentation } : {}),
     origin: "SOLANDRA",
     authority: "NON_AUTHORITATIVE_CONVERSATION",
     factualAuthority: false,
@@ -98,22 +141,43 @@ type ConversationResponseRow = {
   conversation_id: string;
   source_message_id: string;
   content: string;
+  presentation: unknown | null;
   origin: string;
   authority: string;
   factual_authority: boolean;
   created_at: Date | string;
 };
 
+function presentationFromRow(value: unknown): ConversationResponsePresentation | undefined {
+  if (value === null || value === undefined) return undefined;
+  if (typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Persisted conversation response presentation is invalid.");
+  }
+  const record = value as Record<string, unknown>;
+  if (
+    typeof record.conversationText !== "string"
+    || !(typeof record.composerBody === "string" || record.composerBody === null)
+  ) {
+    throw new Error("Persisted conversation response presentation is invalid.");
+  }
+  return normalizedPresentation({
+    conversationText: record.conversationText,
+    composerBody: record.composerBody,
+  });
+}
+
 function fromRow(row: ConversationResponseRow): ConversationResponse {
   if (row.origin !== "SOLANDRA") throw new Error("Persisted conversation response origin is invalid.");
   if (row.authority !== "NON_AUTHORITATIVE_CONVERSATION" || row.factual_authority !== false) {
     throw new Error("Persisted conversation response authority is invalid.");
   }
+  const presentation = presentationFromRow(row.presentation);
   return normalizedResponse({
     responseId: row.response_id,
     conversationId: row.conversation_id,
     sourceMessageId: row.source_message_id,
     content: row.content,
+    ...(presentation ? { presentation } : {}),
     origin: row.origin,
     authority: row.authority,
     factualAuthority: row.factual_authority,
@@ -129,29 +193,36 @@ export class PostgresConversationResponseStore implements ConversationResponseSt
     const pool = new Pool({ connectionString: databaseUrl });
     try {
       await pool.query("CREATE TABLE IF NOT EXISTS schema_migrations (name text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())");
-      const existing = await pool.query<{ name: string }>("SELECT name FROM schema_migrations WHERE name=$1", [migration]);
-      if ((existing.rowCount ?? 0) > 0) return;
-      const sql = await readFile(resolve(process.cwd(), "migrations", migration), "utf8");
-      const client = await pool.connect();
-      try {
-        await client.query("BEGIN");
-        await client.query(sql);
-        await client.query("INSERT INTO schema_migrations(name) VALUES ($1)", [migration]);
-        await client.query("COMMIT");
-      } catch (error) {
-        await client.query("ROLLBACK");
-        throw error;
-      } finally { client.release(); }
+      for (const migration of migrations) {
+        const existing = await pool.query<{ name: string }>("SELECT name FROM schema_migrations WHERE name=$1", [migration]);
+        if ((existing.rowCount ?? 0) > 0) continue;
+        const sql = await readFile(resolve(process.cwd(), "migrations", migration), "utf8");
+        const client = await pool.connect();
+        try {
+          await client.query("BEGIN");
+          await client.query(sql);
+          await client.query("INSERT INTO schema_migrations(name) VALUES ($1)", [migration]);
+          await client.query("COMMIT");
+        } catch (error) {
+          await client.query("ROLLBACK");
+          throw error;
+        } finally { client.release(); }
+      }
     } finally { await pool.end(); }
   }
 
   static async connect(databaseUrl: string, options: { migrate?: boolean } = {}): Promise<PostgresConversationResponseStore> {
     if (options.migrate) await PostgresConversationResponseStore.migrate(databaseUrl);
     const pool = new Pool({ connectionString: databaseUrl });
-    const ready = await pool.query<{ count: string }>("SELECT count(*)::text AS count FROM schema_migrations WHERE name=$1", [migration]);
-    if (ready.rows[0]?.count !== "1") {
+    const ready = await pool.query<{ name: string }>(
+      "SELECT name FROM schema_migrations WHERE name = ANY($1::text[])",
+      [migrations],
+    );
+    const applied = new Set(ready.rows.map((row) => row.name));
+    const missing = migrations.find((migration) => !applied.has(migration));
+    if (missing) {
       await pool.end();
-      throw new Error(`Conversation response schema is not ready; required migration ${migration} is missing.`);
+      throw new Error(`Conversation response schema is not ready; required migration ${missing} is missing.`);
     }
     return new PostgresConversationResponseStore(pool);
   }
@@ -160,15 +231,16 @@ export class PostgresConversationResponseStore implements ConversationResponseSt
     const normalized = normalizedResponse(response);
     const inserted = await this.pool.query<ConversationResponseRow>(
       `INSERT INTO conversation_responses(
-         response_id, conversation_id, source_message_id, content, origin, authority, factual_authority, created_at
-       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+         response_id, conversation_id, source_message_id, content, presentation, origin, authority, factual_authority, created_at
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
        ON CONFLICT (response_id) DO NOTHING
-       RETURNING response_id, conversation_id, source_message_id, content, origin, authority, factual_authority, created_at`,
+       RETURNING response_id, conversation_id, source_message_id, content, presentation, origin, authority, factual_authority, created_at`,
       [
         normalized.responseId,
         normalized.conversationId,
         normalized.sourceMessageId,
         normalized.content,
+        normalized.presentation === undefined ? null : normalized.presentation,
         normalized.origin,
         normalized.authority,
         normalized.factualAuthority,
@@ -179,7 +251,7 @@ export class PostgresConversationResponseStore implements ConversationResponseSt
     const existing = await this.getResponse(normalized.responseId);
     if (existing && sameResponse(existing, normalized)) return existing;
     const sameTurn = await this.pool.query<ConversationResponseRow>(
-      `SELECT response_id, conversation_id, source_message_id, content, origin, authority, factual_authority, created_at
+      `SELECT response_id, conversation_id, source_message_id, content, presentation, origin, authority, factual_authority, created_at
        FROM conversation_responses WHERE conversation_id=$1 AND source_message_id=$2`,
       [normalized.conversationId, normalized.sourceMessageId],
     );
@@ -190,7 +262,7 @@ export class PostgresConversationResponseStore implements ConversationResponseSt
 
   async getResponse(responseId: string): Promise<ConversationResponse | undefined> {
     const result = await this.pool.query<ConversationResponseRow>(
-      `SELECT response_id, conversation_id, source_message_id, content, origin, authority, factual_authority, created_at
+      `SELECT response_id, conversation_id, source_message_id, content, presentation, origin, authority, factual_authority, created_at
        FROM conversation_responses WHERE response_id=$1`,
       [boundedId(responseId, "Conversation response id")],
     );
@@ -199,7 +271,7 @@ export class PostgresConversationResponseStore implements ConversationResponseSt
 
   async listByConversation(conversationId: string): Promise<ConversationResponse[]> {
     const result = await this.pool.query<ConversationResponseRow>(
-      `SELECT response_id, conversation_id, source_message_id, content, origin, authority, factual_authority, created_at
+      `SELECT response_id, conversation_id, source_message_id, content, presentation, origin, authority, factual_authority, created_at
        FROM conversation_responses
        WHERE conversation_id=$1
        ORDER BY created_at ASC, response_id ASC`,

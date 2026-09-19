@@ -2,6 +2,10 @@ import { renderSolandraConversationPage } from "./solandra-conversation-page.js"
 
 const capabilityStyles = `
     header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .brand-group { display: grid; gap: 4px; }
+    .conversation-authority-context { color: #6b6960; font-size: .75rem; line-height: 1.2; }
+    .conversation-authority-context[hidden] { display: none; }
+    .conversation-composer-body { white-space: pre-wrap; line-height: 1.58; }
     .capability-controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
     .capability-button { border: 1px solid #c8c4b8; border-radius: 999px; background: #fffefa; color: #282722; padding: 7px 10px; cursor: pointer; font-size: .8rem; }
     .capability-button[aria-busy="true"] { opacity: .55; cursor: default; }
@@ -311,11 +315,19 @@ const capabilityScript = `
   </script>`;
 
 const directConversationHandling = `        if (body.status === "CONVERSATION_COMPLETED") {
-          const assistantMessage = typeof body.presentation?.assistantMessage === "string"
-            ? body.presentation.assistantMessage.trim()
+          const conversationText = typeof body.presentation?.conversationText === "string"
+            ? body.presentation.conversationText.trim()
             : "";
-          if (!assistantMessage) throw new Error("Solandra returned no usable response.");
-          appendSolandraTurn(assistantMessage);
+          if (!conversationText) throw new Error("Solandra returned no usable response.");
+          setOrdinaryConversationContext(body.conversationResponse?.factualAuthority === false);
+          appendSolandraTurn(conversationText);
+          const composerBody = typeof body.presentation?.composerBody === "string"
+            ? body.presentation.composerBody.trim()
+            : "";
+          if (composerBody) {
+            composerHasProductContent = true;
+            composer.innerHTML = '<div class="conversation-composer-body" data-presentation-role="ordinary-generated-work">' + escapeHtml(composerBody) + '</div>';
+          }
           return;
         }
         if (body.status === "COGNITIVE_ASSISTANCE_COMPLETED") {
@@ -378,7 +390,7 @@ export function renderSolandraAuthoritativeConversationPage(): string {
     .replace("</style>", `${capabilityStyles}</style>`)
     .replace(
       '<div class="brand">Solandra</div>',
-      '<div class="brand">Solandra</div><div class="capability-controls"><button id="cognitiveAssistanceButton" class="capability-button" type="button" aria-label="Cognitive assistance: checking"><span id="cognitiveAssistanceDot" class="capability-dot"></span><span id="cognitiveAssistanceLabel">Cognitive assistance · checking</span></button><button id="modelAssistanceButton" class="capability-button" type="button" aria-label="Model assistance"><span id="modelAssistanceDot" class="capability-dot"></span>Model assistance</button></div>',
+      '<div class="brand-group"><div class="brand">Solandra</div><div id="conversationAuthorityContext" class="conversation-authority-context" hidden>General conversation</div></div><div class="capability-controls"><button id="cognitiveAssistanceButton" class="capability-button" type="button" aria-label="Cognitive assistance: checking"><span id="cognitiveAssistanceDot" class="capability-dot"></span><span id="cognitiveAssistanceLabel">Cognitive assistance · checking</span></button><button id="modelAssistanceButton" class="capability-button" type="button" aria-label="Model assistance"><span id="modelAssistanceDot" class="capability-dot"></span>Model assistance</button></div>',
     )
     .replace(
       '      const productFailureMessage = (status, body) => {\n        if (body?.error === "RESOURCE_SCOPE_UNSUPPORTED" && typeof body.message === "string") return body.message;',
@@ -386,8 +398,16 @@ export function renderSolandraAuthoritativeConversationPage(): string {
     )
     .replace(legacyPreparedResourceRendering, preparedResourceTrustRendering)
     .replace(
+      '      const renderOutcome = (outcome, presentation, options = {}) => {\n        composerHasProductContent = true;',
+      '      const setOrdinaryConversationContext = (visible) => {\n        const authorityContext = document.getElementById("conversationAuthorityContext");\n        if (authorityContext) authorityContext.hidden = !visible;\n      };\n\n      const renderOutcome = (outcome, presentation, options = {}) => {\n        setOrdinaryConversationContext(false);\n        composerHasProductContent = true;',
+    )
+    .replace(
       '          renderPreparedResource(outcome.resource.title, options.preparedBody ?? outcome.resource.body);',
       '          renderPreparedResource(outcome.resource, outcome.knowledge, options.preparedBody ?? outcome.resource.body);',
+    )
+    .replace(
+      '      const handleTurnResponse = async (body, record) => {\n',
+      '      const handleTurnResponse = async (body, record) => {\n        setOrdinaryConversationContext(false);\n',
     )
     .replace(
       '        if (!body.runId) throw new Error("I couldn\'t establish the requested work safely.");',

@@ -81,6 +81,8 @@ import type { RunStore } from "./run-store.js";
 import type { SolandraAdvisoryRuntime } from "./solandra/advisory.js";
 import type { SolandraActionPreparer } from "./solandra/action-preparer.js";
 import {
+  conversationPresentationFor,
+  conversationPresentationText,
   isConversationalCognition,
   type SolandraCognitionResult,
   type SolandraCognitiveRuntime,
@@ -380,6 +382,17 @@ function conversationResponsePayload(response: ConversationResponse): Record<str
     authority: response.authority,
     factualAuthority: response.factualAuthority,
     createdAt: response.createdAt,
+  };
+}
+
+function conversationPresentationPayload(response: ConversationResponse): Record<string, unknown> {
+  const composition = response.presentation ?? {
+    conversationText: response.content,
+    composerBody: null,
+  };
+  return {
+    conversationText: composition.conversationText,
+    composerBody: composition.composerBody,
   };
 }
 
@@ -725,7 +738,7 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
       if (replayedConversationResponse) {
         return reply.status(200).send({
           status: "CONVERSATION_COMPLETED",
-          presentation: { assistantMessage: replayedConversationResponse.content },
+          presentation: conversationPresentationPayload(replayedConversationResponse),
           interpretation: {
             authority: replayedConversationResponse.authority,
             factualAuthority: replayedConversationResponse.factualAuthority,
@@ -796,11 +809,13 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
               : reply.status(confirmed.statusCode).send(confirmed.body);
           }
           if (isConversationalCognition(cognitionResult)) {
+            const presentation = conversationPresentationFor(cognitionResult);
             const persisted = await options.conversationResponseStore.putResponse({
               responseId: stableUuid("conversation-response", conversationId, sourceMessage.messageId),
               conversationId,
               sourceMessageId: sourceMessage.messageId,
-              content: cognitionResult.response,
+              content: conversationPresentationText(presentation),
+              presentation,
               origin: "SOLANDRA",
               authority: "NON_AUTHORITATIVE_CONVERSATION",
               factualAuthority: false,
@@ -808,7 +823,7 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
             });
             return reply.status(200).send({
               status: "CONVERSATION_COMPLETED",
-              presentation: { assistantMessage: persisted.content },
+              presentation: conversationPresentationPayload(persisted),
               interpretation: publicCognition(cognitionResult),
               conversationResponse: conversationResponsePayload(persisted),
             });

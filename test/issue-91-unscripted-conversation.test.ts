@@ -76,10 +76,10 @@ test("Issue #91 ordinary conversation uses prior Solandra context without creati
     assert.equal(second.statusCode, 200);
     const secondBody = second.json();
     assert.equal(secondBody.status, "CONVERSATION_COMPLETED");
-    assert.match(secondBody.presentation.assistantMessage, /Juniper feels memorable/u);
+    assert.match(secondBody.presentation.conversationText, /Juniper feels memorable/u);
     assert.equal(cognition.inputs.length, 2);
     assert.deepEqual(cognition.inputs[1]?.recentConversation?.map((turn) => turn.role), ["USER", "SOLANDRA", "USER"]);
-    assert.equal(cognition.inputs[1]?.recentConversation?.[1]?.content, firstBody.presentation.assistantMessage);
+    assert.equal(cognition.inputs[1]?.recentConversation?.[1]?.content, firstBody.presentation.conversationText);
 
     const replay = await app.inject({
       method: "POST",
@@ -87,7 +87,7 @@ test("Issue #91 ordinary conversation uses prior Solandra context without creati
       payload: { turnId: "turn-2", message: "Why that one? Keep it to one sentence." },
     });
     assert.equal(replay.statusCode, 200);
-    assert.equal(replay.json().presentation.assistantMessage, secondBody.presentation.assistantMessage);
+    assert.equal(replay.json().presentation.conversationText, secondBody.presentation.conversationText);
     assert.equal(cognition.inputs.length, 2, "exact replay must reuse the persisted conversational response");
 
     const continuity = await app.inject({
