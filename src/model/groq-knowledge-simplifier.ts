@@ -151,6 +151,7 @@ async function readBoundedText(response: Response, maxBytes: number): Promise<st
  */
 export class GroqKnowledgeSimplifierModelProvider implements ModelProvider {
   readonly kind = "groq-knowledge-simplifier";
+  readonly structuredOutputCapability = "json_schema" as const;
   private readonly apiKey: string;
   private readonly maxResponseBytes: number;
   private readonly fetchImpl: typeof fetch;
@@ -214,6 +215,18 @@ export class GroqKnowledgeSimplifierModelProvider implements ModelProvider {
           ...(request.maxOutputTokens === undefined
             ? {}
             : { max_completion_tokens: request.maxOutputTokens }),
+          ...(request.structuredOutput === undefined
+            ? {}
+            : {
+                response_format: {
+                  type: "json_schema",
+                  json_schema: {
+                    name: "lattice_structured_output",
+                    strict: true,
+                    schema: request.structuredOutput.schema,
+                  },
+                },
+              }),
           ...(request.seed === undefined ? {} : { seed: request.seed }),
         }),
         signal: context.signal,
