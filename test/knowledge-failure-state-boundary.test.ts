@@ -50,7 +50,7 @@ function run(id: string, request: LatticeRunRequest = baseRequest): LatticeRun {
 }
 
 function answerableResult(
-  completion: KnowledgeAcquisitionResult["completion"] = { status: "COMPLETE" },
+  completion: NonNullable<KnowledgeAcquisitionResult["completion"]> = { status: "COMPLETE" },
 ): KnowledgeAcquisitionResult {
   const text = "A lunar eclipse occurs when Earth passes between the Sun and the Moon, placing the Moon in Earth's shadow.";
   return {
