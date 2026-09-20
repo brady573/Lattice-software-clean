@@ -3,6 +3,7 @@ import {
   GroqKnowledgeSimplifierModelProvider,
   GroqKnowledgeSimplifierModelRuntime,
 } from "../model/groq-knowledge-simplifier.js";
+import type { GroqRateLimitCoordinator } from "../model/groq-rate-limit-coordinator.js";
 import type { RuntimeConfig } from "../runtime-config.js";
 import {
   MemoryCapabilityAuthorizationStore,
@@ -23,6 +24,7 @@ export interface CapabilityBrokerComposition {
  */
 export async function createConfiguredCapabilityBroker(
   config: RuntimeConfig,
+  rateLimitCoordinator?: GroqRateLimitCoordinator,
 ): Promise<CapabilityBrokerComposition> {
   const store = config.databaseUrl === undefined
     ? new MemoryCapabilityAuthorizationStore()
@@ -35,7 +37,10 @@ export async function createConfiguredCapabilityBroker(
   if (config.solandraCognitionRoute === "groq-gpt-oss-120b") {
     if (!config.solandraCognitionApiKey) throw new Error("Configured Solandra provider machinery is missing its runtime credential.");
     const runtime = new GroqKnowledgeSimplifierModelRuntime(
-      new GroqKnowledgeSimplifierModelProvider({ apiKey: config.solandraCognitionApiKey }),
+      new GroqKnowledgeSimplifierModelProvider({
+        apiKey: config.solandraCognitionApiKey,
+        ...(rateLimitCoordinator ? { rateLimitCoordinator } : {}),
+      }),
     );
     broker.register(new UserAuthorizedModelCapability(runtime, GROQ_KNOWLEDGE_SIMPLIFIER_MODEL));
     return Object.freeze({ broker, userModelConfigured: true });
