@@ -1,6 +1,7 @@
 import type { QualifiedCriterionCatalog } from "../decision/criterion-catalog.js";
 import {
   buildDecisionInputSnapshot,
+  DecisionQualificationUnresolvedError,
   type DecisionInputSnapshot,
   type ExactDecisionIntentSemantics,
 } from "../decision/decision-input-snapshot.js";
@@ -31,7 +32,7 @@ export function buildDecisionInputFromGeneralizedIntent(
       continue;
     }
     if (field.value.state === "NO_PREFERENCE") continue;
-    throw new Error(
+    throw new DecisionQualificationUnresolvedError(
       `Cannot build DecisionInput while priority ${criterionId} is ${field.value.state}; exact Decision Engine semantics are unresolved.`,
     );
   }
@@ -47,7 +48,7 @@ export function buildDecisionInputFromGeneralizedIntent(
       continue;
     }
     if (field.value.state === "NO_PREFERENCE") continue;
-    throw new Error(
+    throw new DecisionQualificationUnresolvedError(
       `Cannot build DecisionInput while tolerance ${criterionId} is ${field.value.state}; exact Decision Engine semantics are unresolved.`,
     );
   }

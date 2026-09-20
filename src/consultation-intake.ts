@@ -28,7 +28,10 @@ import type { ConversationResponse, ConversationResponseStore } from "./conversa
 import type { ConversationStore } from "./conversation/conversation-store.js";
 import { buildAcceptedChoiceRecord, type AcceptedChoiceStore } from "./intent/accepted-choice-store.js";
 import type { QualifiedCriterionCatalog } from "./decision/criterion-catalog.js";
-import type { DecisionInputSnapshot } from "./decision/decision-input-snapshot.js";
+import {
+  DecisionQualificationUnresolvedError,
+  type DecisionInputSnapshot,
+} from "./decision/decision-input-snapshot.js";
 import {
   consultationRunRequestSchema,
   isConsultationRunRequest,
@@ -208,7 +211,7 @@ function validateProposedOperations(
   return validated as CreatePendingIntentProposalInput["operations"];
 }
 
-function qualifiedDecisionNeed(
+export function qualifiedDecisionNeed(
   version: IntentVersion,
   criterionCatalog: QualifiedCriterionCatalog | undefined,
 ): { decisionNeed: "UNRESOLVED" } | { decisionNeed: "QUALIFIED"; decisionInput: DecisionInputSnapshot } {
@@ -224,8 +227,11 @@ function qualifiedDecisionNeed(
       return { decisionNeed: "UNRESOLVED" };
     }
     return { decisionNeed: "QUALIFIED", decisionInput };
-  } catch {
-    return { decisionNeed: "UNRESOLVED" };
+  } catch (error) {
+    if (error instanceof DecisionQualificationUnresolvedError) {
+      return { decisionNeed: "UNRESOLVED" };
+    }
+    throw error;
   }
 }
 

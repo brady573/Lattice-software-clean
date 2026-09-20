@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type { LatticeRunRequest } from "../domain.js";
+import type { TruthMode } from "../runtime-config.js";
 import type { FixtureDataset } from "./fixture-dataset.js";
 import type { V36ResearchCheckpoint } from "./continuation.js";
 import {
@@ -55,6 +56,17 @@ export interface TruthExecutionPipeline {
     results: readonly V36RuntimeExecutionResult[],
   ): Promise<TruthDurableValidationStep>;
   execute(runId: string, request?: LatticeRunRequest): Promise<TruthPipelineExecution>;
+}
+
+export function composedTruthMode(
+  pipeline: Pick<TruthExecutionPipeline, "mode">,
+): TruthMode {
+  switch (pipeline.mode) {
+    case "v36-offline-fixture":
+      return "v36-offline";
+    case "v36-live-knowledge":
+      return "v36-live";
+  }
 }
 
 function initialSerialRounds(snapshot: TruthSnapshot): number {
