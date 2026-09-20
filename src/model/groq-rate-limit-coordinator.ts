@@ -10,8 +10,8 @@ export type GroqRateLimitWait = (delayMs: number, signal: AbortSignal) => Promis
 
 export interface GroqRateLimitCoordinator {
   readonly kind: "memory" | "postgres";
-  blockedUntil(scopeId: string): Promise<number>;
-  extendBlockedUntil(scopeId: string, blockedUntilMs: number): Promise<number>;
+  blockedUntil(scopeId: string, signal?: AbortSignal): Promise<number>;
+  extendBlockedUntil(scopeId: string, blockedUntilMs: number, signal?: AbortSignal): Promise<number>;
   waitUntilReady(scopeId: string, signal: AbortSignal): Promise<void>;
   close(): Promise<void>;
 }
@@ -58,6 +58,21 @@ const sleep: GroqRateLimitWait = async (delayMs, signal) => {
   });
 };
 
+async function abortable<T>(operation: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
+  if (signal === undefined) return await operation;
+  if (signal.aborted) throw signal.reason ?? new Error("Aborted.");
+  let onAbort!: () => void;
+  const aborted = new Promise<never>((_resolve, reject) => {
+    onAbort = () => reject(signal.reason ?? new Error("Aborted."));
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+  try {
+    return await Promise.race([operation, aborted]);
+  } finally {
+    signal.removeEventListener("abort", onAbort);
+  }
+}
+
 async function waitReady(
   read: () => Promise<number>,
   signal: AbortSignal,
@@ -79,10 +94,12 @@ export class MemoryGroqRateLimitCoordinator implements GroqRateLimitCoordinator 
     private readonly now: () => number = Date.now,
     private readonly wait: GroqRateLimitWait = sleep,
   ) {}
-  async blockedUntil(scopeId: string): Promise<number> {
+  async blockedUntil(scopeId: string, signal?: AbortSignal): Promise<number> {
+    if (signal?.aborted) throw signal.reason ?? new Error("Aborted.");
     return this.state.get(boundedScope(scopeId)) ?? 0;
   }
-  async extendBlockedUntil(scopeId: string, blockedUntilMs: number): Promise<number> {
+  async extendBlockedUntil(scopeId: string, blockedUntilMs: number, signal?: AbortSignal): Promise<number> {
+    if (signal?.aborted) throw signal.reason ?? new Error("Aborted.");
     const key = boundedScope(scopeId);
     const next = Math.max(this.state.get(key) ?? 0, boundedTime(blockedUntilMs));
     this.state.set(key, next);
@@ -90,7 +107,7 @@ export class MemoryGroqRateLimitCoordinator implements GroqRateLimitCoordinator 
   }
   async waitUntilReady(scopeId: string, signal: AbortSignal): Promise<void> {
     const key = boundedScope(scopeId);
-    await waitReady(() => this.blockedUntil(key), signal, this.now, this.wait);
+    await waitReady(() => this.blockedUntil(key, signal), signal, this.now, this.wait);
   }
   async close(): Promise<void> {
     this.state.clear();
@@ -155,15 +172,15 @@ export class PostgresGroqRateLimitCoordinator implements GroqRateLimitCoordinato
       throw error;
     }
   }
-  async blockedUntil(scopeId: string): Promise<number> {
-    const result = await this.pool.query<{ blocked_until_ms: string }>(
+  async blockedUntil(scopeId: string, signal?: AbortSignal): Promise<number> {
+    const result = await abortable(this.pool.query<{ blocked_until_ms: string }>(
       "SELECT floor(extract(epoch FROM blocked_until) * 1000)::bigint::text AS blocked_until_ms FROM groq_rate_limit_recovery WHERE scope_id=$1",
       [boundedScope(scopeId)],
-    );
+    ), signal);
     return result.rows[0] ? Number(result.rows[0].blocked_until_ms) : 0;
   }
-  async extendBlockedUntil(scopeId: string, blockedUntilMs: number): Promise<number> {
-    const result = await this.pool.query<{ blocked_until_ms: string }>(
+  async extendBlockedUntil(scopeId: string, blockedUntilMs: number, signal?: AbortSignal): Promise<number> {
+    const result = await abortable(this.pool.query<{ blocked_until_ms: string }>(
       `INSERT INTO groq_rate_limit_recovery(scope_id,blocked_until,updated_at)
        VALUES ($1,to_timestamp($2::double precision / 1000.0),now())
        ON CONFLICT(scope_id) DO UPDATE SET
@@ -171,14 +188,14 @@ export class PostgresGroqRateLimitCoordinator implements GroqRateLimitCoordinato
          updated_at=CASE WHEN EXCLUDED.blocked_until > groq_rate_limit_recovery.blocked_until THEN now() ELSE groq_rate_limit_recovery.updated_at END
        RETURNING floor(extract(epoch FROM blocked_until) * 1000)::bigint::text AS blocked_until_ms`,
       [boundedScope(scopeId), boundedTime(blockedUntilMs)],
-    );
+    ), signal);
     const row = result.rows[0];
     if (!row) throw new Error("Groq rate-limit recovery update returned no state.");
     return Number(row.blocked_until_ms);
   }
   async waitUntilReady(scopeId: string, signal: AbortSignal): Promise<void> {
     const key = boundedScope(scopeId);
-    await waitReady(() => this.blockedUntil(key), signal, this.now, this.wait);
+    await waitReady(() => this.blockedUntil(key, signal), signal, this.now, this.wait);
   }
   async close(): Promise<void> {
     await this.pool.end();
