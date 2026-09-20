@@ -113,7 +113,8 @@ test("Groq adapter maps provider-neutral structured output to strict native JSON
     },
   });
   assert.equal(result.response.output[0]?.type, "text");
-  assert.deepEqual(result.response.usage, { inputTokens: 10, outputTokens: 8 });
+  assert.equal(result.audit.providerMetadata.promptTokens, 10);
+  assert.equal(result.audit.providerMetadata.completionTokens, 8);
 });
 
 test("ordinary unstructured Groq calls do not send response_format", async () => {
