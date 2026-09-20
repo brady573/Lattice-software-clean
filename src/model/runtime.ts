@@ -253,6 +253,24 @@ function classifyAbort(
   return asModelProviderError(cause);
 }
 
+async function waitForRetry(delayMs: number | null, signal: AbortSignal): Promise<void> {
+  if (delayMs === null || delayMs <= 0) return;
+  if (signal.aborted) throw signal.reason ?? new Error("Aborted.");
+  await new Promise<void>((resolve, reject) => {
+    let timer: ReturnType<typeof setTimeout>;
+    const onAbort = () => {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", onAbort);
+      reject(signal.reason ?? new Error("Aborted."));
+    };
+    timer = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, delayMs);
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
 async function raceWithAbort<T>(
   operation: Promise<T>,
   signal: AbortSignal,
@@ -457,6 +475,7 @@ export class ModelRuntime {
             if (!classified.retryable || logicalAttempt + 1 >= maxAttempts) {
               throw classified;
             }
+            await waitForRetry(classified.retryAfterMs, signal);
           }
         }
         throw new ModelProviderError("unavailable", "Model call exhausted its attempts.");

@@ -55,6 +55,34 @@ function optionalFiniteInteger(value: unknown): number | null {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : null;
 }
 
+function retryAfterMilliseconds(seconds: number): number | null {
+  if (!Number.isFinite(seconds) || seconds < 0) return null;
+  const milliseconds = Math.ceil(seconds * 1_000);
+  return Number.isSafeInteger(milliseconds) ? milliseconds : null;
+}
+
+function groqRetryAfterMs(response: Response, bodyText: string): number | null {
+  const retryAfterHeader = response.headers.get("retry-after")?.trim();
+  if (retryAfterHeader) {
+    const headerSeconds = Number(retryAfterHeader);
+    const headerDelay = retryAfterMilliseconds(headerSeconds);
+    if (headerDelay !== null) return headerDelay;
+  }
+
+  let body: unknown;
+  try {
+    body = JSON.parse(bodyText);
+  } catch {
+    return null;
+  }
+  const root = asRecord(body);
+  const providerError = asRecord(root?.error);
+  const message = typeof providerError?.message === "string" ? providerError.message : "";
+  const match = /please try again in\s+([0-9]+(?:\.[0-9]+)?)s\b/iu.exec(message);
+  if (!match?.[1]) return null;
+  return retryAfterMilliseconds(Number(match[1]));
+}
+
 async function readBoundedText(response: Response, maxBytes: number): Promise<string> {
   if (response.body === null) return "";
   const reader = response.body.getReader();
@@ -167,7 +195,11 @@ export class GroqKnowledgeSimplifierModelProvider implements ModelProvider {
         throw new ModelProviderError(
           "rate_limit",
           "Groq Knowledge simplifier route was rate limited.",
-          { retryable: true, statusCode: 429 },
+          {
+            retryable: true,
+            statusCode: 429,
+            retryAfterMs: groqRetryAfterMs(response, text),
+          },
         );
       }
       throw new ModelProviderError(
