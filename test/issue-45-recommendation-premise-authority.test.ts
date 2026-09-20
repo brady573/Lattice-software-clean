@@ -266,6 +266,7 @@ function advisory(overrides: Partial<SolandraRecommendationResult> = {}): Soland
 
 class UnsupportedProposalProvider implements ModelProvider {
   readonly kind = "issue-45-unsupported-proposal";
+  readonly structuredOutputCapability = "json_schema" as const;
   calls = 0;
 
   async generate(request: CanonicalModelRequest, _context: ModelCallContext): Promise<ModelProviderResult> {
