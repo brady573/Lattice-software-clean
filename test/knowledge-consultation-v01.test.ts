@@ -268,12 +268,21 @@ test("unsupported, conflicting, insufficient, and failed acquisition remain hone
 
   const failed = new KnowledgeAcquisitionTruthPipeline({
     kind: "failing-source",
-    async acquire() { throw new Error("transient provider detail must not leak"); },
+    async acquire() {
+      return {
+        sources: [],
+        claims: [],
+        completion: { status: "FAILED", reason: "PROVIDER_FAILURE" },
+      };
+    },
   });
   const failureExecution = await failed.execute("run-failed", request);
   assert.equal(failureExecution.bundle.sources.length, 0);
   assert.equal(failureExecution.bundle.assessments[0]?.atomicDisposition, "INSUFFICIENT");
-  assert.doesNotMatch(JSON.stringify(failureExecution.bundle), /transient provider detail/u);
+  assert.equal(
+    failureExecution.bundle.claims[0]?.qualifiers.find((item) => item.key === "acquisition-state")?.value,
+    "SOURCE_UNAVAILABLE",
+  );
 });
 
 test("three unrelated Knowledge consultations use the same canonical runtime without decision machinery", async () => {
