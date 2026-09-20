@@ -135,7 +135,61 @@ test("revocation during an in-flight invocation suppresses the completed result"
   await service.disconnect("subject-a");
   release(Object.freeze({ status: "SIMPLIFIED", text: SIMPLIFIED, invocationProvenance: PROVENANCE }));
   assert.equal((await pending).status, "CAPABILITY_REVOKED");
-  assert.equal((await service.stateFor("subject-a")).lastInvocation?.outcome, "REVOKED");
+  const revokedState = await service.stateFor("subject-a");
+  assert.equal(revokedState.status, "DISCONNECTED");
+  assert.equal(revokedState.lastInvocation, null, "A stale authorization epoch must not write invocation evidence.");
+  await service.close();
+});
+
+test("disconnect and reconnect cannot let a late old authorization overwrite newer invocation evidence", async () => {
+  let oldRelease!: (value: KnowledgeSimplificationAttempt) => void;
+  let oldStarted!: () => void;
+  const oldStartedPromise = new Promise<void>((resolve) => { oldStarted = resolve; });
+  let calls = 0;
+  const delegate: KnowledgeSimplifier = {
+    async simplifyWithAudit() {
+      calls += 1;
+      if (calls === 1) {
+        oldStarted();
+        return await new Promise<KnowledgeSimplificationAttempt>((resolve) => { oldRelease = resolve; });
+      }
+      return Object.freeze({ status: "SIMPLIFIED", text: SIMPLIFIED, invocationProvenance: PROVENANCE });
+    },
+    async simplify(input) {
+      const result = await this.simplifyWithAudit!(input);
+      return result.status === "SIMPLIFIED" ? result.text : null;
+    },
+  };
+  const service = new ModelAssistanceCapabilityService(
+    new MemoryModelAssistanceAuthorizationStore(),
+    delegate,
+  );
+  const simplifier = service.simplifierFor("subject-a");
+
+  const firstConnected = await service.connect("subject-a");
+  assert.equal(firstConnected.version, 1);
+  const oldPending = simplifier.simplifyWithAudit!({ runId: "run-old-epoch", finding });
+  await oldStartedPromise;
+
+  const disconnected = await service.disconnect("subject-a");
+  assert.equal(disconnected.version, 2);
+  const reconnected = await service.connect("subject-a");
+  assert.equal(reconnected.version, 3);
+
+  const current = await simplifier.simplifyWithAudit!({ runId: "run-current-epoch", finding });
+  assert.equal(current.status, "SIMPLIFIED");
+  const currentState = await service.stateFor("subject-a");
+  assert.equal(currentState.status, "CONNECTED");
+  assert.equal(currentState.version, 3);
+  assert.equal(currentState.lastInvocation?.runId, "run-current-epoch");
+  assert.equal(currentState.lastInvocation?.outcome, "SUCCEEDED");
+
+  oldRelease(Object.freeze({ status: "SIMPLIFIED", text: SIMPLIFIED, invocationProvenance: PROVENANCE }));
+  assert.equal((await oldPending).status, "CAPABILITY_REVOKED");
+  const afterLateOldCompletion = await service.stateFor("subject-a");
+  assert.equal(afterLateOldCompletion.version, 3);
+  assert.equal(afterLateOldCompletion.lastInvocation?.runId, "run-current-epoch");
+  assert.equal(afterLateOldCompletion.lastInvocation?.outcome, "SUCCEEDED");
   await service.close();
 });
 
