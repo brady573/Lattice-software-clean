@@ -110,7 +110,7 @@ class ForcedStaleRenewalStore extends PersistenceCountingStore {
 async function scheduleOne(
   runStore: MemoryRunStore,
   store: MemoryOrchestrationStore,
-  runId: string,
+  runId: Parameters<typeof createPendingRun>[2],
   maxAttempts = 1,
 ) {
   const run = createPendingRun(`lease-renewal-${runId}`, request, runId);

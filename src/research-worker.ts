@@ -158,8 +158,10 @@ async function executeWithLeaseRenewal(input: {
   const intervalMs = leaseRenewalIntervalMs(input.leaseMs);
   const executionController = new AbortController();
   const heartbeatController = new AbortController();
-  let leaseState: "owned" | "stale" | "error" = "owned";
-  let renewalError: unknown;
+  const leaseState: {
+    state: "owned" | "stale" | "error";
+    error?: unknown;
+  } = { state: "owned" };
   let resolveLeaseEvent!: () => void;
   const leaseEvent = new Promise<void>((resolve) => {
     resolveLeaseEvent = resolve;
@@ -178,26 +180,26 @@ async function executeWithLeaseRenewal(input: {
           leaseMs: input.leaseMs,
         });
         if (renewal.outcome === "stale") {
-          leaseState = "stale";
+          leaseState.state = "stale";
           executionController.abort(new Error("Research task attempt ownership was lost."));
           resolveLeaseEvent();
           return;
         }
       }
     } catch (error) {
-      leaseState = "error";
-      renewalError = error;
+      leaseState.state = "error";
+      leaseState.error = error;
       executionController.abort(error);
       resolveLeaseEvent();
     }
   })();
 
-  const execution = input.executor.execute({
+  const execution: Promise<OwnedResearchExecutionOutcome> = input.executor.execute({
     task: input.task,
     signal: executionController.signal,
-  }).then<OwnedResearchExecutionOutcome>(
-    (result) => ({ kind: "result", result }),
-    (error: unknown) => ({ kind: "error", error }),
+  }).then(
+    (result): OwnedResearchExecutionOutcome => ({ kind: "result", result }),
+    (error: unknown): OwnedResearchExecutionOutcome => ({ kind: "error", error }),
   );
 
   await Promise.race([
@@ -207,8 +209,10 @@ async function executeWithLeaseRenewal(input: {
   heartbeatController.abort();
   await heartbeat;
 
-  if (leaseState === "stale") return { kind: "stale" };
-  if (leaseState === "error") throw renewalError ?? new Error("Research lease renewal failed.");
+  if (leaseState.state === "stale") return { kind: "stale" };
+  if (leaseState.state === "error") {
+    throw leaseState.error ?? new Error("Research lease renewal failed.");
+  }
   return await execution;
 }
 
