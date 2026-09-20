@@ -11,6 +11,9 @@ import {
   type KnowledgeInvestigator,
 } from "../src/knowledge/investigation.js";
 import { buildKnowledgeOutcome } from "../src/outcome.js";
+import type { ModelProvider } from "../src/model/provider.js";
+import { ModelRuntime } from "../src/model/runtime.js";
+import { ModelSolandraKnowledgeInvestigator } from "../src/solandra/knowledge-investigator.js";
 import { renderKnowledgeResponseForRun } from "../src/presentation/solandra/knowledge-response.js";
 import {
   KnowledgeAcquisitionTruthPipeline,
@@ -123,6 +126,30 @@ test("investigation cognition failure remains a capability failure instead of no
   assert.match(message, /couldn't complete the external investigation/iu);
   assert.doesNotMatch(message, /couldn't establish enough relevant evidence/iu);
   assert.doesNotMatch(JSON.stringify(execution.bundle), /injected model runtime failure/iu);
+});
+
+test("actual model-investigator provider failure crosses as investigation-unavailable", async () => {
+  const failingModel: ModelProvider = {
+    kind: "knowledge-boundary-failing-model",
+    async generate() {
+      throw new Error("injected model transport failure");
+    },
+  };
+  const modelInvestigator = new ModelSolandraKnowledgeInvestigator(
+    new ModelRuntime(failingModel),
+    "knowledge-boundary-model",
+  );
+  const pipeline = new KnowledgeAcquisitionTruthPipeline(new RelevantKnowledgeAcquisitionProvider(
+    new FixedProvider(answerableResult()),
+    modelInvestigator,
+  ));
+
+  const execution = await pipeline.execute("knowledge-model-investigation-failure", baseRequest);
+  const knowledge = buildKnowledgeOutcome(run("knowledge-model-investigation-failure"), execution.bundle);
+
+  assert.equal(knowledge.availability, "INVESTIGATION_UNAVAILABLE");
+  assert.deepEqual(knowledge.findings, []);
+  assert.doesNotMatch(JSON.stringify(execution.bundle), /injected model transport failure/iu);
 });
 
 test("raw source acquisition failure remains distinct from completed search insufficiency", async () => {
