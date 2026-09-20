@@ -72,7 +72,16 @@ export type KnowledgeAcquisitionCompletion =
   | {
       readonly status: "PARTIAL";
       readonly reason: KnowledgeAcquisitionPartialReason;
+    }
+  | {
+      readonly status: "FAILED";
+      readonly reason: KnowledgeAcquisitionPartialReason;
     };
+
+export type KnowledgeAcquisitionDisposition =
+  | "RESPONSIVE"
+  | "NO_CANDIDATES"
+  | "NO_RESPONSIVE";
 
 export interface KnowledgeAcquisitionResult {
   readonly sources: readonly RetrievedKnowledgeSource[];
@@ -83,6 +92,11 @@ export interface KnowledgeAcquisitionResult {
    * It never admits evidence or establishes truth.
    */
   readonly completion?: KnowledgeAcquisitionCompletion;
+  /**
+   * Operational result of semantic candidate selection. This does not establish
+   * relevance as truth, admit evidence, or alter USER intent.
+   */
+  readonly disposition?: KnowledgeAcquisitionDisposition;
 }
 
 /**
