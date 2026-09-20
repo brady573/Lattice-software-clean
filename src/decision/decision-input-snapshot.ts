@@ -68,6 +68,13 @@ export const decisionInputSnapshotSchema = z.object({
 export type ExactDecisionIntentSemantics = z.infer<typeof exactDecisionIntentSemanticsSchema>;
 export type DecisionInputSnapshot = Readonly<z.infer<typeof decisionInputSnapshotSchema>>;
 
+export class DecisionQualificationUnresolvedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "DecisionQualificationUnresolvedError";
+  }
+}
+
 function assertExpectedType(definition: CriterionDefinition, expected: string | number | boolean): void {
   const actual = typeof expected;
   const valid = definition.valueType === "NUMBER"
@@ -76,7 +83,7 @@ function assertExpectedType(definition: CriterionDefinition, expected: string | 
       ? actual === "string"
       : actual === "boolean";
   if (!valid) {
-    throw new Error(
+    throw new DecisionQualificationUnresolvedError(
       `Hard requirement value type does not match qualified CriterionDefinition ${definition.criterionId}@${definition.version}.`,
     );
   }
@@ -85,7 +92,9 @@ function assertExpectedType(definition: CriterionDefinition, expected: string | 
 function requireLatest(catalog: QualifiedCriterionCatalog, criterionId: string): CriterionDefinition {
   const definition = catalog.getLatest(criterionId);
   if (!definition) {
-    throw new Error(`No qualified CriterionDefinition exists for ${criterionId} in catalog ${catalog.catalogVersion}.`);
+    throw new DecisionQualificationUnresolvedError(
+      `No qualified CriterionDefinition exists for ${criterionId} in catalog ${catalog.catalogVersion}.`,
+    );
   }
   return definition;
 }
@@ -147,7 +156,9 @@ export function buildDecisionInputSnapshot(
   const tolerances = intent.tolerances.map((entry) => {
     const definition = resolve(entry.criterionId);
     if (definition.valueType !== "NUMBER" || definition.preferenceDirection === "MATCH_ONLY") {
-      throw new Error(`USER tolerance requires a comparable numeric CriterionDefinition: ${definition.criterionId}@${definition.version}.`);
+      throw new DecisionQualificationUnresolvedError(
+        `USER tolerance requires a comparable numeric CriterionDefinition: ${definition.criterionId}@${definition.version}.`,
+      );
     }
     return {
       intentScopeId: intent.intentScopeId,
