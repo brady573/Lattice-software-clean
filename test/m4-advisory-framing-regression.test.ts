@@ -68,6 +68,7 @@ function advisoryInput(): SolandraAdvisoryInput {
 
 class RawAdvisoryProvider implements ModelProvider {
   readonly kind = "m4-raw-advisory-provider";
+  readonly structuredOutputCapability = "json_schema" as const;
   calls = 0;
 
   constructor(private readonly advisoryText: string) {}
