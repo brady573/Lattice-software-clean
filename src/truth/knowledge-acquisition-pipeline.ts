@@ -3,12 +3,14 @@ import { isConsultationRunRequest, type LatticeRunRequest } from "../domain.js";
 import type {
   KnowledgeAcquisitionProvider,
   KnowledgeAcquisitionCompletion,
+  KnowledgeAcquisitionDisposition,
   KnowledgeAcquisitionPartialReason,
   KnowledgeAcquisitionResult,
   RetrievedKnowledgeClaim,
   RetrievedKnowledgeEvidence,
   RetrievedKnowledgeSource,
 } from "../knowledge/acquisition.js";
+import { KnowledgeInvestigationOperationalError } from "../knowledge/investigation.js";
 import { adjudicateClaim } from "./adjudication.js";
 import { compileClaim } from "./claim-compiler.js";
 import type { V36ResearchCheckpoint } from "./continuation.js";
@@ -123,7 +125,15 @@ type SanitizedAcquisition = {
   sources: RetrievedKnowledgeSource[];
   claims: RetrievedKnowledgeClaim[];
   completion: KnowledgeAcquisitionCompletion;
+  disposition: KnowledgeAcquisitionDisposition | undefined;
 };
+
+type KnowledgeAcquisitionState =
+  | "PARTIAL"
+  | "INVESTIGATION_UNAVAILABLE"
+  | "SOURCE_UNAVAILABLE"
+  | "COMPLETE_NO_CANDIDATES"
+  | "COMPLETE_NO_RESPONSIVE";
 
 function nonBlank(value: unknown, label: string, max: number): string {
   if (typeof value !== "string" || !value.trim() || value.length > max) {
@@ -231,12 +241,20 @@ function sanitizeCompletion(
 ): KnowledgeAcquisitionCompletion {
   if (value === undefined || value.status === "COMPLETE") return { status: "COMPLETE" };
   if (
-    value.status === "PARTIAL"
+    (value.status === "PARTIAL" || value.status === "FAILED")
     && (value.reason === "RATE_LIMITED" || value.reason === "TIMED_OUT" || value.reason === "PROVIDER_FAILURE")
   ) {
-    return { status: "PARTIAL", reason: value.reason };
+    return { status: value.status, reason: value.reason };
   }
   throw new Error("Knowledge acquisition completion state is invalid.");
+}
+
+function sanitizeDisposition(
+  value: KnowledgeAcquisitionResult["disposition"],
+): KnowledgeAcquisitionDisposition | undefined {
+  if (value === undefined) return undefined;
+  if (value === "RESPONSIVE" || value === "NO_CANDIDATES" || value === "NO_RESPONSIVE") return value;
+  throw new Error("Knowledge acquisition disposition is invalid.");
 }
 
 function sanitizeAcquisition(value: KnowledgeAcquisitionResult): SanitizedAcquisition {
@@ -259,7 +277,15 @@ function sanitizeAcquisition(value: KnowledgeAcquisitionResult): SanitizedAcquis
       }
     }
   }
-  return { sources, claims, completion: sanitizeCompletion(value.completion) };
+  const completion = sanitizeCompletion(value.completion);
+  const disposition = sanitizeDisposition(value.disposition);
+  if (completion.status === "FAILED" && (sources.length > 0 || claims.length > 0)) {
+    throw new Error("Failed Knowledge acquisition cannot contain candidate material.");
+  }
+  if (disposition === "RESPONSIVE" && (sources.length === 0 || claims.length === 0)) {
+    throw new Error("Responsive Knowledge acquisition must contain source-bound claims.");
+  }
+  return { sources, claims, completion, disposition };
 }
 
 function researchQuery(request: Extract<LatticeRunRequest, { kind: "consultation" }>): string {
@@ -284,20 +310,32 @@ function emptyAssessment(
 function unavailableBundle(
   runId: string,
   query: string,
-  partialReason?: KnowledgeAcquisitionPartialReason,
+  state: KnowledgeAcquisitionState,
+  reason?: KnowledgeAcquisitionPartialReason,
 ): TruthBundle {
-  const partial = partialReason !== undefined;
-  const sourceClaimId = partial ? "acquisition-partial" : "acquisition-unavailable";
+  const sourceClaimId = `acquisition-${state.toLowerCase().replaceAll("_", "-")}`;
+  const text = (() => {
+    switch (state) {
+      case "PARTIAL":
+        return "External information retrieval was incomplete for this consultation.";
+      case "INVESTIGATION_UNAVAILABLE":
+        return "External Knowledge investigation cognition could not complete for this consultation.";
+      case "SOURCE_UNAVAILABLE":
+        return "External source acquisition could not complete for this consultation.";
+      case "COMPLETE_NO_CANDIDATES":
+        return "External source acquisition completed without candidate material for this consultation.";
+      case "COMPLETE_NO_RESPONSIVE":
+        return "External source acquisition completed, but no acquired candidate was semantically responsive to this consultation.";
+    }
+  })();
   const compilation = compileClaim({
     runId,
     sourceClaimId,
-    text: partial
-      ? "External information retrieval was incomplete for this consultation."
-      : "External information could not be established for this consultation.",
+    text,
     claimType: "INTERPRETIVE",
     qualifiers: [
-      { key: "acquisition-state", value: partial ? "PARTIAL" : "UNAVAILABLE_OR_INSUFFICIENT" },
-      ...(partialReason === undefined ? [] : [{ key: "acquisition-reason", value: partialReason }]),
+      { key: "acquisition-state", value: state },
+      ...(reason === undefined ? [] : [{ key: "acquisition-reason", value: reason }]),
     ],
   });
   const obligations = compilation.requiredProofKinds.map<ProofObligation>((kind) => ({
@@ -314,9 +352,11 @@ function unavailableBundle(
     kind: obligation.kind,
     status: "UNRESOLVED",
     evidenceIds: [],
-    explanation: partial
+    explanation: state === "PARTIAL"
       ? "Acquisition was incomplete before this proof obligation could be fully investigated."
-      : "No source-bound evidence was available for this proof obligation.",
+      : state === "COMPLETE_NO_CANDIDATES" || state === "COMPLETE_NO_RESPONSIVE"
+        ? "Acquisition completed without responsive source-bound evidence for this proof obligation."
+        : "A required operational Knowledge capability did not complete this proof obligation.",
   }));
   return {
     runId,
@@ -346,7 +386,7 @@ function appendPartialAcquisitionLimitation(
   query: string,
   reason: KnowledgeAcquisitionPartialReason,
 ): TruthBundle {
-  const limitation = unavailableBundle(runId, query, reason);
+  const limitation = unavailableBundle(runId, query, "PARTIAL", reason);
   return {
     ...bundle,
     researchQuestions: [...bundle.researchQuestions, ...limitation.researchQuestions],
@@ -362,11 +402,24 @@ function investigatedBundle(
   request: Extract<LatticeRunRequest, { kind: "consultation" }>,
   acquired: SanitizedAcquisition,
 ): TruthBundle {
-  if (acquired.sources.length === 0 || acquired.claims.length === 0) {
+  if (acquired.completion.status === "FAILED") {
     return unavailableBundle(
       runId,
       researchQuery(request),
-      acquired.completion.status === "PARTIAL" ? acquired.completion.reason : undefined,
+      "SOURCE_UNAVAILABLE",
+      acquired.completion.reason,
+    );
+  }
+  if (acquired.sources.length === 0 || acquired.claims.length === 0) {
+    if (acquired.completion.status === "PARTIAL") {
+      return unavailableBundle(runId, researchQuery(request), "PARTIAL", acquired.completion.reason);
+    }
+    return unavailableBundle(
+      runId,
+      researchQuery(request),
+      acquired.disposition === "NO_RESPONSIVE"
+        ? "COMPLETE_NO_RESPONSIVE"
+        : "COMPLETE_NO_CANDIDATES",
     );
   }
   const sourceByExternalId = new Map<string, SourceArtifact>();
@@ -650,10 +703,9 @@ export class KnowledgeAcquisitionTruthPipeline implements TruthExecutionPipeline
         investigationQueries: request.investigationQueries,
       }));
       bundle = investigatedBundle(runId, request, acquired);
-    } catch {
-      // Acquisition failure is an epistemic limitation, not permission to
-      // manufacture an answer or leak provider/transport diagnostics.
-      bundle = unavailableBundle(runId, query);
+    } catch (error) {
+      if (!(error instanceof KnowledgeInvestigationOperationalError)) throw error;
+      bundle = unavailableBundle(runId, query, "INVESTIGATION_UNAVAILABLE");
     }
     return {
       snapshot: createTruthSnapshot("INVESTIGATED", this.executionContractId, bundle),

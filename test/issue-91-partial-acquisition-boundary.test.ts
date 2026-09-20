@@ -155,12 +155,16 @@ test("Issue #91: zero-source partial acquisition is distinct from complete no-re
   const completeExecution = await completePipeline.execute("issue-91-empty-complete", request);
   const completeKnowledge = buildKnowledgeOutcome(run("issue-91-empty-complete"), completeExecution.bundle);
   assert.deepEqual(completeKnowledge.findings, []);
+  assert.equal(completeKnowledge.availability, "NO_CANDIDATES");
   assert.deepEqual(completeKnowledge.uncertainties, [
-    "No validated external findings are sufficiently relevant to this objective.",
+    "I was able to check the available external source, but it returned no candidate material for this request.",
   ]);
   const completeMessage = await renderKnowledgeResponseForRun(
     completeKnowledge,
     run("issue-91-empty-complete"),
   );
-  assert.equal(completeMessage, "I couldn't establish enough relevant evidence to answer that reliably.");
+  assert.equal(
+    completeMessage,
+    "I was able to check the available external source, but it returned no candidate material for this request.",
+  );
 });

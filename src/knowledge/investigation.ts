@@ -50,6 +50,16 @@ export interface KnowledgeInvestigator {
   selectResponsive(input: KnowledgeResponsivenessInput): Promise<KnowledgeResponsivenessResult>;
 }
 
+export class KnowledgeInvestigationOperationalError extends Error {
+  constructor(
+    message: string,
+    options?: ErrorOptions,
+  ) {
+    super(message, options);
+    this.name = "KnowledgeInvestigationOperationalError";
+  }
+}
+
 function uniqueNonBlank(values: readonly string[]): string[] {
   return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
 }
@@ -89,15 +99,25 @@ export class RelevantKnowledgeAcquisitionProvider implements KnowledgeAcquisitio
 
   async acquire(request: KnowledgeAcquisitionRequest): Promise<KnowledgeAcquisitionResult> {
     const knowledgeNeeds = uniqueNonBlank(request.investigationQueries ?? []);
-    const plan = await this.investigator.plan({
-      runId: request.runId,
-      objective: request.objective,
-      context: request.context,
-      knowledgeNeeds,
-    });
+    let plan: KnowledgeInvestigationPlan;
+    try {
+      plan = await this.investigator.plan({
+        runId: request.runId,
+        objective: request.objective,
+        context: request.context,
+        knowledgeNeeds,
+      });
+    } catch (error) {
+      throw new KnowledgeInvestigationOperationalError(
+        "Knowledge investigation cognition could not complete planning.",
+        { cause: error },
+      );
+    }
     const retrievalQueries = uniqueNonBlank(plan.retrievalQueries);
     if (retrievalQueries.length === 0) {
-      throw new Error("Solandra investigation produced no provider-ready retrieval work.");
+      throw new KnowledgeInvestigationOperationalError(
+        "Knowledge investigation cognition produced no provider-ready retrieval work.",
+      );
     }
 
     const acquired = await this.provider.acquire({
@@ -105,15 +125,39 @@ export class RelevantKnowledgeAcquisitionProvider implements KnowledgeAcquisitio
       investigationQueries: retrievalQueries,
     });
     assertUniqueAcquiredIdentities(acquired);
-    const selected = await this.investigator.selectResponsive({
-      runId: request.runId,
-      objective: request.objective,
-      context: request.context,
-      knowledgeNeeds,
-      retrievalQueries,
-      sources: acquired.sources,
-      claims: acquired.claims,
-    });
+    if (acquired.completion?.status === "FAILED") {
+      return {
+        sources: acquired.sources,
+        claims: acquired.claims,
+        completion: acquired.completion,
+      };
+    }
+    if (acquired.sources.length === 0 || acquired.claims.length === 0) {
+      return {
+        sources: acquired.sources,
+        claims: acquired.claims,
+        ...(acquired.completion === undefined ? {} : { completion: acquired.completion }),
+        disposition: "NO_CANDIDATES",
+      };
+    }
+
+    let selected: KnowledgeResponsivenessResult;
+    try {
+      selected = await this.investigator.selectResponsive({
+        runId: request.runId,
+        objective: request.objective,
+        context: request.context,
+        knowledgeNeeds,
+        retrievalQueries,
+        sources: acquired.sources,
+        claims: acquired.claims,
+      });
+    } catch (error) {
+      throw new KnowledgeInvestigationOperationalError(
+        "Knowledge investigation cognition could not complete semantic responsiveness selection.",
+        { cause: error },
+      );
+    }
 
     const sourceById = new Map(acquired.sources.map((source) => [source.sourceId, source]));
     const claimById = new Map(acquired.claims.map((claim) => [claim.claimId, claim]));
@@ -123,21 +167,29 @@ export class RelevantKnowledgeAcquisitionProvider implements KnowledgeAcquisitio
 
     for (const selection of selected.selections) {
       if (seenClaimIds.has(selection.claimId)) {
-        throw new Error(`Solandra responsiveness selection duplicated claim ${selection.claimId}.`);
+        throw new KnowledgeInvestigationOperationalError(
+          `Solandra responsiveness selection duplicated claim ${selection.claimId}.`,
+        );
       }
       seenClaimIds.add(selection.claimId);
       const claim = claimById.get(selection.claimId);
       if (!claim) {
-        throw new Error(`Solandra responsiveness selection referenced unknown claim ${selection.claimId}.`);
+        throw new KnowledgeInvestigationOperationalError(
+          `Solandra responsiveness selection referenced unknown claim ${selection.claimId}.`,
+        );
       }
       const requestedSourceIds = new Set(uniqueNonBlank(selection.sourceIds));
       if (requestedSourceIds.size === 0) {
-        throw new Error(`Solandra responsiveness selection for ${selection.claimId} requires acquired source identity.`);
+        throw new KnowledgeInvestigationOperationalError(
+          `Solandra responsiveness selection for ${selection.claimId} requires acquired source identity.`,
+        );
       }
 
       for (const sourceId of requestedSourceIds) {
         if (!sourceById.has(sourceId)) {
-          throw new Error(`Solandra responsiveness selection referenced unknown source ${sourceId}.`);
+          throw new KnowledgeInvestigationOperationalError(
+            `Solandra responsiveness selection referenced unknown source ${sourceId}.`,
+          );
         }
       }
 
@@ -145,7 +197,9 @@ export class RelevantKnowledgeAcquisitionProvider implements KnowledgeAcquisitio
       const evidencedSourceIds = new Set(evidence.map((item) => item.sourceId));
       for (const sourceId of requestedSourceIds) {
         if (!evidencedSourceIds.has(sourceId)) {
-          throw new Error(`Solandra responsiveness selection referenced a source not bound to claim ${selection.claimId}.`);
+          throw new KnowledgeInvestigationOperationalError(
+            `Solandra responsiveness selection referenced a source not bound to claim ${selection.claimId}.`,
+          );
         }
       }
       for (const item of evidence) selectedSourceIds.add(item.sourceId);
@@ -156,6 +210,7 @@ export class RelevantKnowledgeAcquisitionProvider implements KnowledgeAcquisitio
       sources: acquired.sources.filter((source) => selectedSourceIds.has(source.sourceId)),
       claims,
       ...(acquired.completion === undefined ? {} : { completion: acquired.completion }),
+      disposition: claims.length === 0 ? "NO_RESPONSIVE" : "RESPONSIVE",
     };
   }
 }
