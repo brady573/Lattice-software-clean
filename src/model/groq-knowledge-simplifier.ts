@@ -92,6 +92,51 @@ function groqRetryAfterMs(response: Response, bodyText: string): number | null {
   return retryAfterMilliseconds(Number(match[1]));
 }
 
+function groqStructuredWireSchema(schema: Readonly<Record<string, unknown>>): unknown {
+  return {
+    type: "object",
+    properties: {
+      value: schema,
+    },
+    required: ["value"],
+    additionalProperties: false,
+  };
+}
+
+function unwrapGroqStructuredContent(content: string): string {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(content);
+  } catch (error) {
+    throw new ModelProviderError(
+      "invalid_output",
+      "Groq structured output was not valid JSON.",
+      { statusCode: 502, cause: error },
+    );
+  }
+  const envelope = asRecord(parsed);
+  if (
+    envelope === null
+    || Object.keys(envelope).length !== 1
+    || !Object.prototype.hasOwnProperty.call(envelope, "value")
+  ) {
+    throw new ModelProviderError(
+      "invalid_output",
+      "Groq structured output did not match its canonical wire envelope.",
+      { statusCode: 502 },
+    );
+  }
+  const serialized = JSON.stringify(envelope.value);
+  if (serialized === undefined) {
+    throw new ModelProviderError(
+      "invalid_output",
+      "Groq structured output omitted its canonical value.",
+      { statusCode: 502 },
+    );
+  }
+  return serialized;
+}
+
 async function waitForProviderGate(blockedUntilMs: number, signal: AbortSignal): Promise<void> {
   const delayMs = blockedUntilMs - Date.now();
   if (delayMs <= 0) return;
@@ -223,7 +268,7 @@ export class GroqKnowledgeSimplifierModelProvider implements ModelProvider {
                   json_schema: {
                     name: "lattice_structured_output",
                     strict: true,
-                    schema: request.structuredOutput.schema,
+                    schema: groqStructuredWireSchema(request.structuredOutput.schema),
                   },
                 },
               }),
@@ -310,14 +355,17 @@ export class GroqKnowledgeSimplifierModelProvider implements ModelProvider {
     }
     const choice = asRecord(choices[0]);
     const message = choice === null ? null : asRecord(choice.message);
-    const content = typeof message?.content === "string" ? message.content.trim() : "";
-    if (!content) {
+    const rawContent = typeof message?.content === "string" ? message.content.trim() : "";
+    if (!rawContent) {
       throw new ModelProviderError(
         "invalid_output",
         "Groq Knowledge simplifier returned no plain-text content.",
         { statusCode: 502 },
       );
     }
+    const content = request.structuredOutput === undefined
+      ? rawContent
+      : unwrapGroqStructuredContent(rawContent);
 
     const upstreamRequestId = typeof root?.id === "string" && root.id.trim()
       ? root.id.trim()
