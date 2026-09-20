@@ -46,6 +46,26 @@ function parseBoolean(value: string | undefined, fallback: boolean): boolean {
   throw new Error(`Expected boolean environment value, received: ${value}`);
 }
 
+function parseInteger(
+  value: string | undefined,
+  fallback: number,
+  name: string,
+  minimum: number,
+  maximum: number,
+): number {
+  const raw = value ?? String(fallback);
+  const parsed = Number.parseInt(raw, 10);
+  if (
+    !Number.isSafeInteger(parsed)
+    || String(parsed) !== raw.trim()
+    || parsed < minimum
+    || parsed > maximum
+  ) {
+    throw new Error(`${name} must be an integer between ${minimum} and ${maximum}.`);
+  }
+  return parsed;
+}
+
 function parseLocalModelProviderBaseUrl(value: string | undefined): string | undefined {
   if (value === undefined || value.trim().length === 0) return undefined;
   const normalized = value.trim();
@@ -133,6 +153,9 @@ function resolveGroqApiKey(
       `${role} requires GROQ_API_KEY containing between 16 and 512 characters.`,
     );
   }
+  if (value !== value.trim()) {
+    throw new Error(`${role} requires GROQ_API_KEY without leading or trailing whitespace.`);
+  }
   return value;
 }
 
@@ -141,6 +164,9 @@ function parseAndroidRelayToken(value: string | undefined): string | undefined {
   if (value.trim().length === 0) {
     throw new Error("LATTICE_ANDROID_MODEL_RELAY_TOKEN must not be blank.");
   }
+  if (value !== value.trim()) {
+    throw new Error("LATTICE_ANDROID_MODEL_RELAY_TOKEN must not contain leading or trailing whitespace.");
+  }
   if (value.length < 32 || value.length > 512) {
     throw new Error("LATTICE_ANDROID_MODEL_RELAY_TOKEN must contain between 32 and 512 characters.");
   }
@@ -148,11 +174,13 @@ function parseAndroidRelayToken(value: string | undefined): string | undefined {
 }
 
 function parseAndroidRelayTimeout(value: string | undefined): number {
-  const timeoutMs = Number.parseInt(value ?? "45000", 10);
-  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1_000 || timeoutMs > 115_000) {
-    throw new Error("LATTICE_ANDROID_MODEL_RELAY_TIMEOUT_MS must be an integer between 1000 and 115000.");
-  }
-  return timeoutMs;
+  return parseInteger(
+    value,
+    45_000,
+    "LATTICE_ANDROID_MODEL_RELAY_TIMEOUT_MS",
+    1_000,
+    115_000,
+  );
 }
 
 function parseAuthenticationMode(
@@ -190,10 +218,7 @@ function parseDevelopmentFixtureSubjectId(
 export function resolveRuntimeConfig(
   env: NodeJS.ProcessEnv = process.env,
 ): RuntimeConfig {
-  const port = Number.parseInt(env.PORT ?? "3000", 10);
-  if (!Number.isInteger(port) || port <= 0 || port > 65535) {
-    throw new Error(`Invalid PORT: ${env.PORT ?? "3000"}`);
-  }
+  const port = parseInteger(env.PORT, 3_000, "PORT", 1, 65_535);
 
   const deploymentMode = (env.LATTICE_DEPLOYMENT_MODE ?? "development") as DeploymentMode;
   if (deploymentMode !== "development" && deploymentMode !== "durable") {
@@ -206,7 +231,7 @@ export function resolveRuntimeConfig(
   }
 
   const validatorDeployment = parseBoolean(env.LATTICE_VALIDATOR_DEPLOYMENT, false);
-  const databaseUrl = env.DATABASE_URL;
+  const databaseUrl = env.DATABASE_URL?.trim() || undefined;
   if (deploymentMode === "durable" && !databaseUrl) {
     throw new Error("Durable deployment requires DATABASE_URL; refusing to fall back to in-memory state.");
   }
