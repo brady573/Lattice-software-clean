@@ -130,7 +130,6 @@ export class RelevantKnowledgeAcquisitionProvider implements KnowledgeAcquisitio
         sources: acquired.sources,
         claims: acquired.claims,
         completion: acquired.completion,
-        disposition: "NO_CANDIDATES",
       };
     }
     if (acquired.sources.length === 0 || acquired.claims.length === 0) {
