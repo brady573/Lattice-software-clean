@@ -3,7 +3,13 @@ import { z } from "zod";
 import type { IntentVersion } from "../intent/types.js";
 import { ModelProviderError } from "../model/errors.js";
 import { ModelRuntime } from "../model/runtime.js";
-import type { CanonicalModelRequest, ModelInvocationProvenance } from "../model/types.js";
+import type {
+  CanonicalJsonObject,
+  CanonicalJsonValue,
+  CanonicalModelRequest,
+  CanonicalModelStructuredOutput,
+  ModelInvocationProvenance,
+} from "../model/types.js";
 import type { SolandraSemanticProposal } from "./cognition.js";
 
 const advisoryBasisSchema = z.object({
@@ -176,6 +182,72 @@ function parseJsonObject(text: string, label = "Solandra advisory reasoning"): u
   );
 }
 
+function stringArrayWireSchema(): CanonicalJsonObject {
+  return Object.freeze({
+    type: "array",
+    items: Object.freeze({ type: "string" }),
+  });
+}
+
+function strictWireObject(
+  properties: Readonly<Record<string, CanonicalJsonValue>>,
+): CanonicalJsonObject {
+  return Object.freeze({
+    type: "object",
+    properties: Object.freeze({ ...properties }),
+    required: Object.freeze(Object.keys(properties)),
+    additionalProperties: false,
+  });
+}
+
+function buildAdvisoryStructuredOutput(
+  input: SolandraAdvisoryInput,
+): CanonicalModelStructuredOutput {
+  const basisItem = strictWireObject({
+    knowledgeId: Object.freeze({ type: "string" }),
+    claimIds: stringArrayWireSchema(),
+  });
+  const recommendationProperties: Record<string, CanonicalJsonValue> = {
+    status: Object.freeze({ type: "string", enum: Object.freeze(["RECOMMENDATION"]) }),
+    recommendation: Object.freeze({ type: "string" }),
+    basis: Object.freeze({ type: "array", items: basisItem }),
+    rationale: stringArrayWireSchema(),
+    tradeoffs: stringArrayWireSchema(),
+    assumptions: stringArrayWireSchema(),
+    uncertainties: stringArrayWireSchema(),
+    alternatives: stringArrayWireSchema(),
+  };
+  if (input.userContextMessages !== undefined) {
+    recommendationProperties.userPremiseMessageIds = stringArrayWireSchema();
+  }
+
+  const schema = Object.freeze({
+    anyOf: Object.freeze([
+      strictWireObject(recommendationProperties),
+      strictWireObject({
+        status: Object.freeze({ type: "string", enum: Object.freeze(["NEEDS_KNOWLEDGE"]) }),
+        knowledgeNeeds: stringArrayWireSchema(),
+        reason: Object.freeze({ type: "string" }),
+      }),
+      strictWireObject({
+        status: Object.freeze({ type: "string", enum: Object.freeze(["NEEDS_CLARIFICATION"]) }),
+        question: Object.freeze({ type: "string" }),
+        reason: Object.freeze({ type: "string" }),
+      }),
+      strictWireObject({
+        status: Object.freeze({ type: "string", enum: Object.freeze(["INSUFFICIENT_BASIS"]) }),
+        reason: Object.freeze({ type: "string" }),
+        uncertainties: stringArrayWireSchema(),
+      }),
+    ]),
+  });
+
+  return Object.freeze({
+    type: "json_schema",
+    schema,
+  });
+}
+
 function buildAdvisoryRequest(model: string, input: SolandraAdvisoryInput): CanonicalModelRequest {
   const knowledge = input.knowledge.length === 0
     ? "No governed Knowledge was supplied."
@@ -254,6 +326,7 @@ function buildAdvisoryRequest(model: string, input: SolandraAdvisoryInput): Cano
         ].join("\n"),
       },
     ],
+    structuredOutput: buildAdvisoryStructuredOutput(input),
     temperature: 0,
     maxOutputTokens: 2_000,
     seed: 0,
