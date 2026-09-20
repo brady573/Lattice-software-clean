@@ -13,6 +13,7 @@ import {
   GroqKnowledgeSimplifierModelRuntime,
 } from "../model/groq-knowledge-simplifier.js";
 import { validateCanonicalModelRequest } from "../model/canonical.js";
+import type { GroqRateLimitCoordinator } from "../model/groq-rate-limit-coordinator.js";
 import { LocalOfflineModelRuntime } from "../model/local-offline-runtime.js";
 import { ModelProviderError } from "../model/errors.js";
 import { OpenAiCompatibleModelProvider } from "../model/openai-compatible.js";
@@ -220,7 +221,7 @@ export class ModelSolandraKnowledgeInvestigator implements KnowledgeInvestigator
     const result = await this.runtime.call(planningRequest(this.model, input), {
       correlationId: `solandra-investigation-plan:${input.runId}`,
       idempotencyKey: `${input.runId}:investigation-plan`,
-      maxAttempts: 1,
+      maxAttempts: 2,
     });
     return investigationPlanSchema.parse(parseJsonObject(
       singleTextOutput(result, "Knowledge investigation planning"),
@@ -237,7 +238,7 @@ export class ModelSolandraKnowledgeInvestigator implements KnowledgeInvestigator
       const result = await this.runtime.call(batch.request, {
         correlationId: `solandra-responsiveness:${input.runId}:batch:${batchNumber}`,
         idempotencyKey: `${input.runId}:responsiveness:batch:${batchNumber}`,
-        maxAttempts: 1,
+        maxAttempts: 2,
       });
       const parsed = responsivenessSchema.parse(parseJsonObject(
         singleTextOutput(result, "Knowledge responsiveness"),
@@ -252,13 +253,17 @@ export class ModelSolandraKnowledgeInvestigator implements KnowledgeInvestigator
 
 export function createConfiguredSolandraKnowledgeInvestigator(
   config: RuntimeConfig,
+  rateLimitCoordinator?: GroqRateLimitCoordinator,
 ): ModelSolandraKnowledgeInvestigator | undefined {
   if (config.solandraCognitionRoute === "groq-gpt-oss-120b") {
     if (!config.solandraCognitionApiKey) {
       throw new Error("Configured Solandra Knowledge investigation route is missing its runtime credential.");
     }
     const runtime = new GroqKnowledgeSimplifierModelRuntime(
-      new GroqKnowledgeSimplifierModelProvider({ apiKey: config.solandraCognitionApiKey }),
+      new GroqKnowledgeSimplifierModelProvider({
+        apiKey: config.solandraCognitionApiKey,
+        ...(rateLimitCoordinator ? { rateLimitCoordinator } : {}),
+      }),
     );
     return new ModelSolandraKnowledgeInvestigator(runtime, GROQ_KNOWLEDGE_SIMPLIFIER_MODEL);
   }
