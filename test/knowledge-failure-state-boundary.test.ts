@@ -10,6 +10,7 @@ import {
   RelevantKnowledgeAcquisitionProvider,
   type KnowledgeInvestigator,
 } from "../src/knowledge/investigation.js";
+import { WikimediaKnowledgeAcquisitionProvider } from "../src/knowledge/wikimedia-acquisition.js";
 import { buildKnowledgeOutcome } from "../src/outcome.js";
 import type { ModelProvider } from "../src/model/provider.js";
 import { ModelRuntime } from "../src/model/runtime.js";
@@ -169,6 +170,25 @@ test("raw source acquisition failure remains distinct from completed search insu
   const message = await renderKnowledgeResponseForRun(knowledge, run("knowledge-source-failure"));
   assert.match(message, /couldn't reach the external information source/iu);
   assert.doesNotMatch(message, /couldn't establish enough relevant evidence/iu);
+});
+
+test("actual Wikimedia source failure crosses as source-unavailable", async () => {
+  const wikimedia = new WikimediaKnowledgeAcquisitionProvider({
+    timeoutMs: 2_000,
+    fetchImpl: async () => new Response("source unavailable", { status: 503 }),
+  });
+  const pipeline = new KnowledgeAcquisitionTruthPipeline(new RelevantKnowledgeAcquisitionProvider(
+    wikimedia,
+    investigator(),
+  ));
+
+  const execution = await pipeline.execute("knowledge-wikimedia-source-failure", baseRequest);
+  const knowledge = buildKnowledgeOutcome(run("knowledge-wikimedia-source-failure"), execution.bundle);
+
+  assert.equal(knowledge.availability, "SOURCE_UNAVAILABLE");
+  assert.deepEqual(knowledge.findings, []);
+  assert.match(knowledge.uncertainties[0] ?? "", /couldn't reach the external information source/iu);
+  assert.doesNotMatch(JSON.stringify(execution.bundle), /HTTP 503|source unavailable/iu);
 });
 
 test("unexpected raw provider exceptions propagate instead of becoming epistemic insufficiency", async () => {
