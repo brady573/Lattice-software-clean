@@ -127,7 +127,11 @@ test("investigation cognition failure remains a capability failure instead of no
 
 test("raw source acquisition failure remains distinct from completed search insufficiency", async () => {
   const pipeline = new KnowledgeAcquisitionTruthPipeline(new RelevantKnowledgeAcquisitionProvider(
-    new FixedProvider(new Error("injected source outage")),
+    new FixedProvider({
+      sources: [],
+      claims: [],
+      completion: { status: "FAILED", reason: "PROVIDER_FAILURE" },
+    }),
     investigator(),
   ));
   const execution = await pipeline.execute("knowledge-source-failure", baseRequest);
@@ -138,7 +142,20 @@ test("raw source acquisition failure remains distinct from completed search insu
   const message = await renderKnowledgeResponseForRun(knowledge, run("knowledge-source-failure"));
   assert.match(message, /couldn't reach the external information source/iu);
   assert.doesNotMatch(message, /couldn't establish enough relevant evidence/iu);
-  assert.doesNotMatch(JSON.stringify(execution.bundle), /injected source outage/iu);
+});
+
+test("unexpected raw provider exceptions propagate instead of becoming epistemic insufficiency", async () => {
+  const pipeline = new KnowledgeAcquisitionTruthPipeline({
+    kind: "unexpected-provider-failure",
+    async acquire() {
+      throw new Error("injected unexpected provider programming failure");
+    },
+  });
+
+  await assert.rejects(
+    pipeline.execute("knowledge-unexpected-provider-failure", baseRequest),
+    /injected unexpected provider programming failure/iu,
+  );
 });
 
 test("complete acquisition with zero candidates remains honest completed-search insufficiency", async () => {
