@@ -90,6 +90,7 @@ import {
   type RecommendationStore,
 } from "./recommendation/recommendation-store.js";
 import { PostgresModelAssistanceAuthorizationStore } from "./model-assistance-store.js";
+import { PostgresGroqRateLimitCoordinator } from "./model/groq-rate-limit-coordinator.js";
 import { LocalOfflineModelRuntime } from "./model/local-offline-runtime.js";
 import { OpenAiCompatibleModelProvider } from "./model/openai-compatible.js";
 import { PostgresApiRunControlStore } from "./postgres-api-control-store.js";
@@ -277,6 +278,7 @@ export async function migrateRuntimeDatabase(databaseUrl: string): Promise<void>
   await PostgresDecisionPlanStore.migrate(databaseUrl);
   await PostgresUserPreferenceStore.migrate(databaseUrl);
   await PostgresModelAssistanceAuthorizationStore.migrate(databaseUrl);
+  await PostgresGroqRateLimitCoordinator.migrate(databaseUrl);
   await PostgresKnowledgeRecordStore.migrate(databaseUrl);
   await backfillLegacyConversationKnowledgeReferences(databaseUrl);
   await PostgresRecommendationStore.migrate(databaseUrl);
