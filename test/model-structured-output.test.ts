@@ -93,7 +93,7 @@ test("Groq adapter maps provider-neutral structured output to strict native JSON
       return new Response(JSON.stringify({
         id: "structured-1",
         model: GROQ_KNOWLEDGE_SIMPLIFIER_MODEL,
-        choices: [{ finish_reason: "stop", message: { content: '{"answer":"ok","details":[]}' } }],
+        choices: [{ finish_reason: "stop", message: { content: '{"value":{"answer":"ok","details":[]}}' } }],
         usage: { prompt_tokens: 10, completion_tokens: 8, total_tokens: 18 },
       }), { status: 200 });
     },
@@ -109,10 +109,18 @@ test("Groq adapter maps provider-neutral structured output to strict native JSON
     json_schema: {
       name: "lattice_structured_output",
       strict: true,
-      schema,
+      schema: {
+        type: "object",
+        properties: { value: schema },
+        required: ["value"],
+        additionalProperties: false,
+      },
     },
   });
-  assert.equal(result.response.output[0]?.type, "text");
+  assert.deepEqual(result.response.output[0], {
+    type: "text",
+    text: '{"answer":"ok","details":[]}',
+  });
   assert.equal(result.audit.providerMetadata.promptTokens, 10);
   assert.equal(result.audit.providerMetadata.completionTokens, 8);
 });
