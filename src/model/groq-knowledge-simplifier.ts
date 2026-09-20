@@ -134,9 +134,9 @@ async function readBoundedText(response: Response, maxBytes: number): Promise<st
 }
 
 /**
- * Narrow PR #15 provider for one pinned Groq text route used only by Knowledge
- * simplification. It has no tools, routing, fallback, truth authority, or
- * provider selection behavior.
+ * Pinned Groq text provider reused beneath bounded model-only Product surfaces.
+ * It has no tools, routing, fallback, truth authority, USER authority,
+ * authorization, execution, verification, or provider-selection behavior.
  */
 export class GroqKnowledgeSimplifierModelProvider implements ModelProvider {
   readonly kind = "groq-knowledge-simplifier";
