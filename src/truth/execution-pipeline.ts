@@ -61,7 +61,12 @@ export interface TruthExecutionPipeline {
 export function composedTruthMode(
   pipeline: Pick<TruthExecutionPipeline, "mode">,
 ): TruthMode {
-  return pipeline.mode === "v36-live-knowledge" ? "v36-live" : "v36-offline";
+  switch (pipeline.mode) {
+    case "v36-offline-fixture":
+      return "v36-offline";
+    case "v36-live-knowledge":
+      return "v36-live";
+  }
 }
 
 function initialSerialRounds(snapshot: TruthSnapshot): number {
