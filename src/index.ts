@@ -4,12 +4,14 @@ import { createConfiguredCapabilityBroker } from "./capabilities/composition.js"
 import { createAlphaDecisionRuntimeComposition } from "./decision/alpha-decision-composition.js";
 import { registerModelAssistanceApi } from "./model-assistance-api.js";
 import { createConfiguredModelAssistanceCapability } from "./model-assistance-composition.js";
-import { createGroqRateLimitCoordinator } from "./model/groq-rate-limit-coordinator.js";
+import { createGroqRateLimitCoordinator, type GroqRateLimitCoordinator } from "./model/groq-rate-limit-coordinator.js";
 import { createRuntimeApp } from "./runtime-app.js";
 import { resolveRuntimeConfig } from "./runtime-config.js";
 import { assertDurableProcessSchemaReady } from "./runtime-schema-readiness.js";
 import { requireConfiguredSolandraCognition } from "./solandra/cognition-composition.js";
 import { createConfiguredTruthPipeline } from "./truth/configured-pipeline.js";
+
+let startupGroqRateLimitCoordinator: GroqRateLimitCoordinator | undefined;
 
 try {
   const config = resolveRuntimeConfig();
@@ -23,6 +25,7 @@ try {
   }
 
   const groqRateLimitCoordinator = await createGroqRateLimitCoordinator(config.databaseUrl);
+  startupGroqRateLimitCoordinator = groqRateLimitCoordinator;
   const solandra = requireConfiguredSolandraCognition(config, groqRateLimitCoordinator);
   const modelAssistance = await createConfiguredModelAssistanceCapability(config, groqRateLimitCoordinator);
   const capabilityComposition = await createConfiguredCapabilityBroker(config, groqRateLimitCoordinator);
@@ -48,7 +51,7 @@ try {
       solandraKnowledgePresenter: solandra.knowledgePresenter,
     });
   } catch (error) {
-    await Promise.allSettled([modelAssistance.close(), capabilityComposition.broker.close(), groqRateLimitCoordinator.close()]);
+    await Promise.allSettled([modelAssistance.close(), capabilityComposition.broker.close()]);
     throw error;
   }
   registerModelAssistanceApi(app, modelAssistance);
@@ -56,6 +59,7 @@ try {
   app.addHook("onClose", async () => {
     await Promise.allSettled([modelAssistance.close(), capabilityComposition.broker.close(), groqRateLimitCoordinator.close()]);
   });
+  startupGroqRateLimitCoordinator = undefined;
 
   try {
     await app.listen({ port: config.port, host: config.host });
@@ -65,6 +69,9 @@ try {
     process.exitCode = 1;
   }
 } catch (error) {
+  if (startupGroqRateLimitCoordinator) {
+    await startupGroqRateLimitCoordinator.close().catch(() => undefined);
+  }
   console.error("LATTICE_API_START_FAILED", error);
   process.exitCode = 1;
 }
