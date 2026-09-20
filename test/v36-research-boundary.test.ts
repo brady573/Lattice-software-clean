@@ -4,6 +4,7 @@ import {
   OfflineFixtureResearchAdmissionPolicy,
   OfflineFixtureResearchProvider,
   researchWithAdmission,
+  validateResearchResult,
   type ResearchEvidenceCandidate,
   type ResearchRequest,
   type ResearchResult,
@@ -121,4 +122,155 @@ test("explicit truth-layer fixture admission policy can authorize deterministic 
   assert.equal(evidence.provenanceConfidence, "HIGH");
   assert.equal(evidence.authoritativePrimary, true);
   assert.equal(evidence.researchQuestionId, request.id);
+});
+
+
+function validArtifact(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    id: "artifact-structural",
+    runId,
+    canonicalUri: "fixture://artifact-structural",
+    artifactHash: "hash-artifact-structural",
+    publisher: "Fixture publisher",
+    originKey: "fixture-origin",
+    provenanceComponentKey: null,
+    provenanceConfidence: "MODERATE",
+    authoritativePrimary: false,
+    retrievedAt: "2026-09-20T00:00:00.000Z",
+    publishedAt: null,
+    effectiveFrom: null,
+    effectiveTo: null,
+    contentType: "text/plain",
+    metadata: { nested: { preserved: true } },
+    untrusted: true,
+    ...overrides,
+  };
+}
+
+function validEdge(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    id: "edge-structural",
+    runId,
+    fromArtifactId: "artifact-structural",
+    toArtifactId: "artifact-other",
+    edgeType: "CITES",
+    confidence: 0.75,
+    contentSimilarity: null,
+    ...overrides,
+  };
+}
+
+test("validateResearchResult structurally establishes SourceArtifact fields before construction", () => {
+  const artifact = validArtifact();
+  const validated = validateResearchResult(request, {
+    artifacts: [artifact],
+    edges: [],
+    evidence: [],
+  });
+  assert.deepEqual(validated.artifacts, [artifact]);
+
+  const malformed: Array<(value: Record<string, unknown>) => void> = [
+    (value) => { delete value.id; },
+    (value) => { value.canonicalUri = 42; },
+    (value) => { value.publisher = 42; },
+    (value) => { value.provenanceConfidence = "CERTAIN"; },
+    (value) => { value.authoritativePrimary = "false"; },
+    (value) => { value.untrusted = false; },
+    (value) => { delete value.untrusted; },
+    (value) => { value.metadata = null; },
+    (value) => { value.metadata = []; },
+    (value) => { value.runId = "different-run"; },
+  ];
+
+  for (const mutate of malformed) {
+    const value = validArtifact();
+    mutate(value);
+    assert.throws(() => validateResearchResult(request, {
+      artifacts: [value],
+      edges: [],
+      evidence: [],
+    }));
+  }
+});
+
+test("validateResearchResult structurally establishes SourceEdge fields before construction", () => {
+  const edge = validEdge();
+  const validated = validateResearchResult(request, {
+    artifacts: [],
+    edges: [edge],
+    evidence: [],
+  });
+  assert.deepEqual(validated.edges, [edge]);
+
+  const malformed: Array<(value: Record<string, unknown>) => void> = [
+    (value) => { delete value.id; },
+    (value) => { value.fromArtifactId = false; },
+    (value) => { value.edgeType = "LINKS"; },
+    (value) => { value.confidence = "0.75"; },
+    (value) => { value.confidence = Number.NaN; },
+    (value) => { value.confidence = Number.POSITIVE_INFINITY; },
+    (value) => { value.contentSimilarity = "0.5"; },
+    (value) => { value.contentSimilarity = Number.NEGATIVE_INFINITY; },
+    (value) => { value.runId = "different-run"; },
+  ];
+
+  for (const mutate of malformed) {
+    const value = validEdge();
+    mutate(value);
+    assert.throws(() => validateResearchResult(request, {
+      artifacts: [],
+      edges: [value],
+      evidence: [],
+    }));
+  }
+});
+
+test("validateResearchResult establishes observation-only evidence and rejects invalid candidate structure", () => {
+  const authorityShaped = {
+    artifactId: "artifact-provider",
+    externalEvidenceId: "provider-evidence-direct",
+    relation: "CONTRADICTS",
+    specificEvidence: "Provider observation only.",
+    admitted: true,
+    verification: "VERIFIED",
+    provenanceComponentKey: "fabricated-origin",
+    provenanceConfidence: "HIGH",
+    authoritativePrimary: true,
+    rejectionReason: null,
+  };
+  const validated = validateResearchResult(request, {
+    artifacts: [],
+    edges: [],
+    evidence: [authorityShaped],
+  });
+  const observation = validated.evidence[0] as ResearchEvidenceCandidate & Record<string, unknown>;
+  assert.ok(observation);
+  assert.deepEqual(Object.keys(observation).sort(), [
+    "artifactId",
+    "externalEvidenceId",
+    "relation",
+    "specificEvidence",
+  ]);
+  assert.equal("admitted" in observation, false);
+  assert.equal("verification" in observation, false);
+  assert.equal("authoritativePrimary" in observation, false);
+
+  const malformed = [
+    { ...candidate, artifactId: 42 },
+    { ...candidate, artifactId: " " },
+    { ...candidate, externalEvidenceId: "" },
+    { ...candidate, specificEvidence: "   " },
+    { ...candidate, relation: "CONTEXT" },
+    { ...candidate, relation: "NEUTRAL" },
+    { ...candidate, relation: "INVALID" },
+    { ...candidate, runId: "different-run" },
+    { ...candidate, claimId: "different-claim" },
+  ];
+  for (const value of malformed) {
+    assert.throws(() => validateResearchResult(request, {
+      artifacts: [],
+      edges: [],
+      evidence: [value],
+    }));
+  }
 });
