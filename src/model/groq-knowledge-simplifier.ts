@@ -55,6 +55,107 @@ function optionalFiniteInteger(value: unknown): number | null {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : null;
 }
 
+function retryAfterMilliseconds(seconds: number): number | null {
+  if (!Number.isFinite(seconds) || seconds < 0) return null;
+  const milliseconds = Math.ceil(seconds * 1_000);
+  return Number.isSafeInteger(milliseconds) ? milliseconds : null;
+}
+
+function groqDurationMs(value: string | null): number | null {
+  const text = value?.trim() ?? "";
+  if (!text) return null;
+  const match = /^(?:(\d+(?:\.\d+)?)m)?(?:(\d+(?:\.\d+)?)s)?$/iu.exec(text);
+  if (!match || (!match[1] && !match[2])) return null;
+  const minutes = Number(match[1] ?? "0");
+  const seconds = Number(match[2] ?? "0");
+  return retryAfterMilliseconds(minutes * 60 + seconds);
+}
+
+function groqRetryAfterMs(response: Response, bodyText: string): number | null {
+  const retryAfterHeader = response.headers.get("retry-after")?.trim();
+  if (retryAfterHeader) {
+    const headerDelay = retryAfterMilliseconds(Number(retryAfterHeader));
+    if (headerDelay !== null) return headerDelay;
+  }
+
+  let body: unknown;
+  try {
+    body = JSON.parse(bodyText);
+  } catch {
+    body = null;
+  }
+  const root = asRecord(body);
+  const providerError = asRecord(root?.error);
+  const message = typeof providerError?.message === "string" ? providerError.message : "";
+  const match = /please try again in\s+([0-9]+(?:\.[0-9]+)?)s\b/iu.exec(message);
+  if (!match?.[1]) return null;
+  return retryAfterMilliseconds(Number(match[1]));
+}
+
+function groqStructuredWireSchema(schema: Readonly<Record<string, unknown>>): unknown {
+  return {
+    type: "object",
+    properties: {
+      value: schema,
+    },
+    required: ["value"],
+    additionalProperties: false,
+  };
+}
+
+function unwrapGroqStructuredContent(content: string): string {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(content);
+  } catch (error) {
+    throw new ModelProviderError(
+      "invalid_output",
+      "Groq structured output was not valid JSON.",
+      { statusCode: 502, cause: error },
+    );
+  }
+  const envelope = asRecord(parsed);
+  if (
+    envelope === null
+    || Object.keys(envelope).length !== 1
+    || !Object.prototype.hasOwnProperty.call(envelope, "value")
+  ) {
+    throw new ModelProviderError(
+      "invalid_output",
+      "Groq structured output did not match its canonical wire envelope.",
+      { statusCode: 502 },
+    );
+  }
+  const serialized = JSON.stringify(envelope.value);
+  if (serialized === undefined) {
+    throw new ModelProviderError(
+      "invalid_output",
+      "Groq structured output omitted its canonical value.",
+      { statusCode: 502 },
+    );
+  }
+  return serialized;
+}
+
+async function waitForProviderGate(blockedUntilMs: number, signal: AbortSignal): Promise<void> {
+  const delayMs = blockedUntilMs - Date.now();
+  if (delayMs <= 0) return;
+  if (signal.aborted) throw signal.reason ?? new Error("Aborted.");
+  await new Promise<void>((resolve, reject) => {
+    let timer: ReturnType<typeof setTimeout>;
+    const onAbort = () => {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", onAbort);
+      reject(signal.reason ?? new Error("Aborted."));
+    };
+    timer = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, delayMs);
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
 async function readBoundedText(response: Response, maxBytes: number): Promise<string> {
   if (response.body === null) return "";
   const reader = response.body.getReader();
@@ -95,10 +196,12 @@ async function readBoundedText(response: Response, maxBytes: number): Promise<st
  */
 export class GroqKnowledgeSimplifierModelProvider implements ModelProvider {
   readonly kind = "groq-knowledge-simplifier";
+  readonly structuredOutputCapability = "json_schema" as const;
   private readonly apiKey: string;
   private readonly maxResponseBytes: number;
   private readonly fetchImpl: typeof fetch;
   private readonly diagnosticSink: GroqCompletionDiagnosticSink | undefined;
+  private rateLimitBlockedUntilMs = 0;
 
   constructor(options: GroqKnowledgeSimplifierProviderOptions) {
     this.apiKey = requireApiKey(options.apiKey);
@@ -111,6 +214,21 @@ export class GroqKnowledgeSimplifierModelProvider implements ModelProvider {
   }
 
   async generate(request: CanonicalModelRequest, context: ModelCallContext): Promise<ModelProviderResult> {
+    while (this.rateLimitBlockedUntilMs > Date.now()) {
+      try {
+        await waitForProviderGate(this.rateLimitBlockedUntilMs, context.signal);
+      } catch (error) {
+        if (context.signal.aborted) {
+          throw new ModelProviderError(
+            "cancelled",
+            "Groq Knowledge simplifier request was cancelled while waiting for provider rate-limit recovery.",
+            { cause: error },
+          );
+        }
+        throw error;
+      }
+    }
+
     if (request.model !== GROQ_KNOWLEDGE_SIMPLIFIER_MODEL) {
       throw new ModelProviderError(
         "unsupported_capability",
@@ -142,6 +260,18 @@ export class GroqKnowledgeSimplifierModelProvider implements ModelProvider {
           ...(request.maxOutputTokens === undefined
             ? {}
             : { max_completion_tokens: request.maxOutputTokens }),
+          ...(request.structuredOutput === undefined
+            ? {}
+            : {
+                response_format: {
+                  type: "json_schema",
+                  json_schema: {
+                    name: "lattice_structured_output",
+                    strict: true,
+                    schema: groqStructuredWireSchema(request.structuredOutput.schema),
+                  },
+                },
+              }),
           ...(request.seed === undefined ? {} : { seed: request.seed }),
         }),
         signal: context.signal,
@@ -164,10 +294,27 @@ export class GroqKnowledgeSimplifierModelProvider implements ModelProvider {
     const text = await readBoundedText(response, this.maxResponseBytes);
     if (!response.ok) {
       if (response.status === 429) {
+        const tokenResetMs = groqDurationMs(response.headers.get("x-ratelimit-reset-tokens"));
+        const retryAfterMs = groqRetryAfterMs(response, text) ?? tokenResetMs;
+        const sharedRecoveryMs = tokenResetMs === null
+          ? retryAfterMs
+          : retryAfterMs === null
+            ? tokenResetMs
+            : Math.max(tokenResetMs, retryAfterMs);
+        if (sharedRecoveryMs !== null) {
+          this.rateLimitBlockedUntilMs = Math.max(
+            this.rateLimitBlockedUntilMs,
+            Date.now() + sharedRecoveryMs,
+          );
+        }
         throw new ModelProviderError(
           "rate_limit",
           "Groq Knowledge simplifier route was rate limited.",
-          { retryable: true, statusCode: 429 },
+          {
+            retryable: true,
+            statusCode: 429,
+            retryAfterMs,
+          },
         );
       }
       throw new ModelProviderError(
@@ -208,14 +355,17 @@ export class GroqKnowledgeSimplifierModelProvider implements ModelProvider {
     }
     const choice = asRecord(choices[0]);
     const message = choice === null ? null : asRecord(choice.message);
-    const content = typeof message?.content === "string" ? message.content.trim() : "";
-    if (!content) {
+    const rawContent = typeof message?.content === "string" ? message.content.trim() : "";
+    if (!rawContent) {
       throw new ModelProviderError(
         "invalid_output",
         "Groq Knowledge simplifier returned no plain-text content.",
         { statusCode: 502 },
       );
     }
+    const content = request.structuredOutput === undefined
+      ? rawContent
+      : unwrapGroqStructuredContent(rawContent);
 
     const upstreamRequestId = typeof root?.id === "string" && root.id.trim()
       ? root.id.trim()

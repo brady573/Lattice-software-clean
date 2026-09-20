@@ -2,9 +2,9 @@ export {
   canonicalModelRequestIdentity,
   sanitizeProviderMetadata,
   stableModelJson,
-  validateCanonicalModelRequest,
   validateCanonicalModelResponse,
 } from "./canonical.js";
+export { validateCanonicalModelRequest } from "./structured-request.js";
 export {
   buildExternalContextProjection,
   ContextProjectionError,
@@ -45,11 +45,15 @@ export {
 export type { ModelProvider } from "./provider.js";
 export { ModelRuntime } from "./runtime.js";
 export type {
+  CanonicalJsonObject,
+  CanonicalJsonPrimitive,
+  CanonicalJsonValue,
   CanonicalModelMessage,
   CanonicalModelOutput,
   CanonicalModelRequest,
   CanonicalModelResponse,
   CanonicalModelRole,
+  CanonicalModelStructuredOutput,
   CanonicalModelToolDefinition,
   CanonicalModelToolInputSchema,
   CanonicalModelToolProperty,
