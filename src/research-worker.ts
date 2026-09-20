@@ -1,10 +1,12 @@
 import type {
   DurableOrchestrationStore,
+  DurableResearchAttempt,
   DurableResearchTask,
 } from "./orchestration-store.js";
 
 export interface ResearchTaskExecutionContext {
   task: DurableResearchTask;
+  signal: AbortSignal;
 }
 
 /**
@@ -25,6 +27,7 @@ export interface ProcessResearchDispatchesInput {
   retryDelayMs?: number;
   limit?: number;
   clock?: () => Date;
+  leaseRenewalWait?: (delayMs: number, signal: AbortSignal) => Promise<void>;
 }
 
 export interface ResearchDispatchOutcome {
@@ -117,6 +120,98 @@ async function release(
   };
 }
 
+function leaseRenewalIntervalMs(leaseMs: number): number {
+  if (!Number.isSafeInteger(leaseMs) || leaseMs < 2) {
+    throw new Error("Research-worker leaseMs must be a safe integer of at least 2 ms.");
+  }
+  return Math.max(1, Math.floor(leaseMs / 3));
+}
+
+async function waitForLeaseRenewal(delayMs: number, signal: AbortSignal): Promise<void> {
+  if (signal.aborted) return;
+  await new Promise<void>((resolve) => {
+    const timer = setTimeout(finish, delayMs);
+    function finish(): void {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", finish);
+      resolve();
+    }
+    signal.addEventListener("abort", finish, { once: true });
+  });
+}
+
+type OwnedResearchExecutionOutcome =
+  | { kind: "result"; result: unknown }
+  | { kind: "error"; error: unknown }
+  | { kind: "stale" };
+
+async function executeWithLeaseRenewal(input: {
+  orchestrationStore: DurableOrchestrationStore;
+  executor: ResearchTaskExecutor;
+  task: DurableResearchTask;
+  attempt: DurableResearchAttempt;
+  workerId: string;
+  leaseMs: number;
+  clock: () => Date;
+  wait: (delayMs: number, signal: AbortSignal) => Promise<void>;
+}): Promise<OwnedResearchExecutionOutcome> {
+  const intervalMs = leaseRenewalIntervalMs(input.leaseMs);
+  const executionController = new AbortController();
+  const heartbeatController = new AbortController();
+  let leaseState: "owned" | "stale" | "error" = "owned";
+  let renewalError: unknown;
+  let resolveLeaseEvent!: () => void;
+  const leaseEvent = new Promise<void>((resolve) => {
+    resolveLeaseEvent = resolve;
+  });
+
+  const heartbeat = (async (): Promise<void> => {
+    try {
+      while (!heartbeatController.signal.aborted) {
+        await input.wait(intervalMs, heartbeatController.signal);
+        if (heartbeatController.signal.aborted) return;
+        const renewal = await input.orchestrationStore.renewResearchTaskLease({
+          taskId: input.task.id,
+          workerId: input.workerId,
+          attemptNumber: input.attempt.attemptNumber,
+          now: input.clock(),
+          leaseMs: input.leaseMs,
+        });
+        if (renewal.outcome === "stale") {
+          leaseState = "stale";
+          executionController.abort(new Error("Research task attempt ownership was lost."));
+          resolveLeaseEvent();
+          return;
+        }
+      }
+    } catch (error) {
+      leaseState = "error";
+      renewalError = error;
+      executionController.abort(error);
+      resolveLeaseEvent();
+    }
+  })();
+
+  const execution = input.executor.execute({
+    task: input.task,
+    signal: executionController.signal,
+  }).then<OwnedResearchExecutionOutcome>(
+    (result) => ({ kind: "result", result }),
+    (error: unknown) => ({ kind: "error", error }),
+  );
+
+  await Promise.race([
+    execution.then(() => undefined),
+    leaseEvent,
+  ]);
+  heartbeatController.abort();
+  await heartbeat;
+
+  if (leaseState === "stale") return { kind: "stale" };
+  if (leaseState === "error") throw renewalError ?? new Error("Research lease renewal failed.");
+  return await execution;
+}
+
 /**
  * Consume at-least-once `lattice.research` dispatches while preserving the
  * durable task/attempt contract as the operational source of truth. Work is
@@ -130,6 +225,7 @@ export async function processResearchDispatches(
   const retryDelayMs = input.retryDelayMs ?? 1_000;
   const limit = input.limit ?? 10;
   const clock = input.clock ?? (() => new Date(Math.max(input.now.getTime(), Date.now())));
+  const leaseRenewalWait = input.leaseRenewalWait ?? waitForLeaseRenewal;
   const outcomes: ResearchDispatchOutcome[] = [];
 
   for (let processed = 0; processed < limit; processed += 1) {
@@ -234,16 +330,36 @@ export async function processResearchDispatches(
       continue;
     }
 
-    let result: unknown;
-    try {
-      result = await input.executor.execute({ task: claim.task });
-    } catch (error) {
+    const execution = await executeWithLeaseRenewal({
+      orchestrationStore: input.orchestrationStore,
+      executor: input.executor,
+      task: claim.task,
+      attempt: claim.attempt,
+      workerId: input.workerId,
+      leaseMs,
+      clock,
+      wait: leaseRenewalWait,
+    });
+    if (execution.kind === "stale") {
+      const releaseTime = clock();
+      outcomes.push(await release(
+        input.orchestrationStore,
+        dispatch.id,
+        input.workerId,
+        releaseTime,
+        new Date(releaseTime.getTime() + retryDelayMs),
+        dispatch.runId,
+        payload.taskId,
+      ));
+      continue;
+    }
+    if (execution.kind === "error") {
       const failureTime = clock();
       const failed = await input.orchestrationStore.failResearchTask({
         taskId: claim.task.id,
         workerId: input.workerId,
         attemptNumber: claim.attempt.attemptNumber,
-        error: errorMessage(error),
+        error: errorMessage(execution.error),
         now: failureTime,
         retryAt: new Date(failureTime.getTime() + retryDelayMs),
       });
@@ -277,7 +393,7 @@ export async function processResearchDispatches(
       taskId: claim.task.id,
       workerId: input.workerId,
       attemptNumber: claim.attempt.attemptNumber,
-      result,
+      result: execution.result,
       now: completionTime,
     });
     if (completed.outcome === "stale") {

@@ -11,6 +11,7 @@ import {
   type DurableOrchestrationStore,
   type DurableResearchTask,
   type FailResearchTaskResult,
+  type RenewResearchTaskLeaseResult,
   type ScheduleResearchGraphInput,
   type ScheduleResearchGraphResult,
 } from "../src/orchestration-store.js";
@@ -275,6 +276,7 @@ class ClaimRecordingOrchestrationStore implements DurableOrchestrationStore {
     this.taskClaimTimes.push(input.now);
     return { outcome: "completed", result: { existing: true } };
   }
+  async renewResearchTaskLease(): Promise<RenewResearchTaskLeaseResult> { throw new Error("unused"); }
   async completeResearchTask(): Promise<CompleteResearchTaskResult> { throw new Error("unused"); }
   async failResearchTask(): Promise<FailResearchTaskResult> { throw new Error("unused"); }
   async claimDispatches(input: { queueName: string; workerId: string; now: Date; leaseMs: number; limit: number }): Promise<DispatchEnvelope[]> {

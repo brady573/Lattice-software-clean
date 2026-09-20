@@ -50,8 +50,9 @@ function task(): DurableResearchTask {
   };
 }
 
-function context(): LiveResearchOperationContext {
+function context(signal: AbortSignal = new AbortController().signal): LiveResearchOperationContext {
   return {
+    signal,
     task: task(),
     binding: {
       runId: "run-live-model",
