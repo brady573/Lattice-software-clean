@@ -55,11 +55,19 @@ def _links_from_latest_solandra_turn(page: Page) -> list[dict[str, str]]:
     ]
 
 
-def _record_stage(page: Page, label: str, prompt: str, evidence: list[dict[str, Any]]) -> None:
+def _record_stage(
+    page: Page,
+    label: str,
+    prompt: str,
+    evidence: list[dict[str, Any]],
+    evidence_dir: Path,
+) -> None:
     result = _submit_turn(page, prompt, label)
     visible = _assistant_text(result)
     final_body = _final_product_body(result)
     links = _links_from_latest_solandra_turn(page)
+    screenshot_path = evidence_dir / f"{len(evidence) + 1:02d}-{label.lower()}.png"
+    page.screenshot(path=str(screenshot_path), full_page=True)
 
     assert visible, f"{label}: Solandra rendered no usable response"
     assert not _INTERNAL_MACHINERY.search(visible), f"{label}: visible response exposed internal machinery"
@@ -74,6 +82,7 @@ def _record_stage(page: Page, label: str, prompt: str, evidence: list[dict[str, 
         "final_product_body": final_body,
         "visible_solandra_text": visible,
         "visible_links": links,
+        "screenshot": str(screenshot_path),
     }
     evidence.append(entry)
 
@@ -106,11 +115,11 @@ def test_fresh_canonical_solandra_e2e_breadth(page: Page) -> None:
         changed_capability = _connect_cognitive_assistance_if_available(page)
         meta["cognitive_assistance_changed_for_validation"] = changed_capability
 
-        _record_stage(page, "CURRENT_KNOWLEDGE", KNOWLEDGE_PROMPT, evidence)
-        _record_stage(page, "KNOWLEDGE_FOLLOWUP", FOLLOWUP_PROMPT, evidence)
-        _record_stage(page, "DECISION_SUPPORT", DECISION_PROMPT, evidence)
-        _record_stage(page, "AMBIGUITY", AMBIGUITY_PROMPT, evidence)
-        _record_stage(page, "TOPIC_RETURN", RETURN_PROMPT, evidence)
+        _record_stage(page, "CURRENT_KNOWLEDGE", KNOWLEDGE_PROMPT, evidence, evidence_dir)
+        _record_stage(page, "KNOWLEDGE_FOLLOWUP", FOLLOWUP_PROMPT, evidence, evidence_dir)
+        _record_stage(page, "DECISION_SUPPORT", DECISION_PROMPT, evidence, evidence_dir)
+        _record_stage(page, "AMBIGUITY", AMBIGUITY_PROMPT, evidence, evidence_dir)
+        _record_stage(page, "TOPIC_RETURN", RETURN_PROMPT, evidence, evidence_dir)
     finally:
         try:
             _restore_cognitive_assistance(page, changed_capability)
