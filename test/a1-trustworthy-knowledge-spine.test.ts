@@ -295,7 +295,11 @@ test("A1 non-responsive acquired material is excluded before V36 and cannot beco
     assert.equal(provider.requests.length, 1);
     assert.deepEqual(result.outcome.findings, []);
     assert.deepEqual(result.outcome.provenance, []);
-    assert.equal(result.presentation.assistantMessage, "I couldn't establish enough relevant evidence to answer that reliably.");
+    assert.equal(result.outcome.availability, "NO_RESPONSIVE_MATERIAL");
+    assert.equal(
+      result.presentation.assistantMessage,
+      "The available source search completed, but the material it returned did not actually address this request.",
+    );
     assert.doesNotMatch(result.presentation.assistantMessage, /V36|proof|finding|provider|worker/iu);
   } finally {
     await app.close();
@@ -399,7 +403,11 @@ test("A1 no-evidence outcome stays concise and avoids internal proof-state langu
     );
     const result = await outcomeFor(app, accepted);
     assert.deepEqual(result.outcome.findings, []);
-    assert.equal(result.presentation.assistantMessage, "I couldn't establish enough relevant evidence to answer that reliably.");
+    assert.equal(result.outcome.availability, "NO_CANDIDATES");
+    assert.equal(
+      result.presentation.assistantMessage,
+      "The available source search completed, but it returned no candidate material for this request.",
+    );
     assert.doesNotMatch(result.presentation.assistantMessage, /UNRESOLVED|V36|proof|finding|provider|worker|run state/iu);
   } finally {
     await app.close();
