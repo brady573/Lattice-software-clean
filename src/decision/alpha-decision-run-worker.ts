@@ -18,7 +18,7 @@ export async function runAlphaDecisionRunWorkerProcess(
   const config = resolveRunWorkerProcessConfig(env);
   const runtimeConfig = resolveRuntimeConfig(env);
   const groqRateLimitCoordinator = await createGroqRateLimitCoordinator(config.databaseUrl);
-  let worker;
+  let worker: Awaited<ReturnType<typeof createStandaloneRunWorker>>;
   try {
     worker = await createStandaloneRunWorker(config, {
       ...createAlphaDecisionWorkerComposition(),
