@@ -24,7 +24,7 @@ try {
     await assertDurableProcessSchemaReady(config.databaseUrl, "api");
   }
 
-  const groqRateLimitCoordinator = await createGroqRateLimitCoordinator(config.databaseUrl);
+  const groqRateLimitCoordinator = await createGroqRateLimitCoordinator(config.databaseUrl, { migrate: config.autoMigrate });
   startupGroqRateLimitCoordinator = groqRateLimitCoordinator;
   const solandra = requireConfiguredSolandraCognition(config, groqRateLimitCoordinator);
   const modelAssistance = await createConfiguredModelAssistanceCapability(config, groqRateLimitCoordinator);
