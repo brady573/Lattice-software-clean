@@ -7,6 +7,7 @@ import {
   AlphaDecisionKnowledgeAcquisitionProvider,
 } from "../knowledge/npm-decision-acquisition.js";
 import { WikimediaKnowledgeAcquisitionProvider } from "../knowledge/wikimedia-acquisition.js";
+import type { GroqRateLimitCoordinator } from "../model/groq-rate-limit-coordinator.js";
 import { resolveRuntimeConfig, type RuntimeConfig, type TruthMode } from "../runtime-config.js";
 import { createConfiguredSolandraKnowledgeInvestigator } from "../solandra/knowledge-investigator.js";
 import {
@@ -31,12 +32,13 @@ export function createConfiguredTruthPipeline(
   provider?: KnowledgeAcquisitionProvider,
   investigator?: KnowledgeInvestigator,
   runtimeConfig: RuntimeConfig = resolveRuntimeConfig(),
+  rateLimitCoordinator?: GroqRateLimitCoordinator,
 ): TruthExecutionPipeline {
   if (mode === "v36-offline") return createDefaultOfflineTruthPipeline();
 
   const semanticInvestigator = investigator
     ?? (provider === undefined
-      ? createConfiguredSolandraKnowledgeInvestigator(runtimeConfig)
+      ? createConfiguredSolandraKnowledgeInvestigator(runtimeConfig, rateLimitCoordinator)
       : undefined);
 
   if (provider === undefined && semanticInvestigator === undefined) {
