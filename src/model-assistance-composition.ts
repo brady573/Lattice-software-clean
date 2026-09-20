@@ -4,6 +4,7 @@ import {
   MemoryModelAssistanceAuthorizationStore,
   PostgresModelAssistanceAuthorizationStore,
 } from "./model-assistance-store.js";
+import type { GroqRateLimitCoordinator } from "./model/groq-rate-limit-coordinator.js";
 import { LocalOfflineModelRuntime } from "./model/local-offline-runtime.js";
 import { OpenAiCompatibleModelProvider } from "./model/openai-compatible.js";
 import {
@@ -12,8 +13,11 @@ import {
 } from "./presentation/solandra/knowledge-simplification.js";
 import type { RuntimeConfig } from "./runtime-config.js";
 
-function configuredDelegate(config: RuntimeConfig): KnowledgeSimplifier | undefined {
-  const live = createConfiguredKnowledgeSimplifier(config);
+function configuredDelegate(
+  config: RuntimeConfig,
+  rateLimitCoordinator?: GroqRateLimitCoordinator,
+): KnowledgeSimplifier | undefined {
+  const live = createConfiguredKnowledgeSimplifier(config, rateLimitCoordinator);
   if (live !== undefined) return live;
   if (config.localModelProviderBaseUrl === undefined || config.localModelProviderModel === undefined) {
     return undefined;
@@ -33,6 +37,7 @@ function configuredDelegate(config: RuntimeConfig): KnowledgeSimplifier | undefi
  */
 export async function createConfiguredModelAssistanceCapability(
   config: RuntimeConfig,
+  rateLimitCoordinator?: GroqRateLimitCoordinator,
 ): Promise<ModelAssistanceCapabilityService> {
   const store = config.databaseUrl === undefined
     ? new MemoryModelAssistanceAuthorizationStore()
@@ -42,5 +47,5 @@ export async function createConfiguredModelAssistanceCapability(
       }
       return await PostgresModelAssistanceAuthorizationStore.connect(config.databaseUrl!);
     })();
-  return new ModelAssistanceCapabilityService(store, configuredDelegate(config));
+  return new ModelAssistanceCapabilityService(store, configuredDelegate(config, rateLimitCoordinator));
 }
