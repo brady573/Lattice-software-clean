@@ -9,6 +9,14 @@ import type { TruthBundle, TruthConfidence } from "./truth/types.js";
 
 export type KnowledgeFindingStatus = "SUPPORTED" | "REFUTED" | "CONFLICTED" | "UNRESOLVED";
 export type EvidentiarySuitability = "AUTHORITATIVE_DOMAIN" | "GENERAL_REFERENCE" | "UNKNOWN";
+export type KnowledgeAvailability =
+  | "GOVERNED_FINDINGS"
+  | "PARTIAL"
+  | "INVESTIGATION_UNAVAILABLE"
+  | "SOURCE_UNAVAILABLE"
+  | "NO_CANDIDATES"
+  | "NO_RESPONSIVE_MATERIAL"
+  | "EVIDENCE_INSUFFICIENT";
 
 export interface KnowledgeFinding {
   claimId: string;
@@ -51,6 +59,7 @@ export interface KnowledgeEvidence {
 
 export interface KnowledgeOutcome {
   kind: "KNOWLEDGE";
+  availability: KnowledgeAvailability;
   objective: string;
   acceptedUnderstanding: string;
   findings: KnowledgeFinding[];
@@ -147,23 +156,73 @@ function claimQualifier(claim: TruthBundle["claims"][number], key: string): stri
   return claim.qualifiers.find((item) => item.key === key)?.value;
 }
 
+function acquisitionState(truth: TruthBundle): string | undefined {
+  return truth.claims
+    .map((claim) => claimQualifier(claim, "acquisition-state"))
+    .find((value) => value !== undefined);
+}
+
 function acquisitionUncertainties(truth: TruthBundle): string[] {
-  const partial = truth.claims.find((claim) => claimQualifier(claim, "acquisition-state") === "PARTIAL");
-  if (!partial) return [];
-  switch (claimQualifier(partial, "acquisition-reason")) {
-    case "RATE_LIMITED":
+  const state = acquisitionState(truth);
+  const limitation = truth.claims.find((claim) => claimQualifier(claim, "acquisition-state") === state);
+  const reason = limitation ? claimQualifier(limitation, "acquisition-reason") : undefined;
+  switch (state) {
+    case "PARTIAL":
+      switch (reason) {
+        case "RATE_LIMITED":
+          return [
+            "External source retrieval was incomplete because the source limited further requests. The result reflects only material retrieved before that interruption.",
+          ];
+        case "TIMED_OUT":
+          return [
+            "External source retrieval was incomplete because the source request timed out. The result reflects only material retrieved before that interruption.",
+          ];
+        default:
+          return [
+            "External source retrieval was incomplete because the source became unavailable. The result reflects only material retrieved before that interruption.",
+          ];
+      }
+    case "INVESTIGATION_UNAVAILABLE":
       return [
-        "External source retrieval was incomplete because the source provider limited further requests. The result reflects only material retrieved before that interruption.",
+        "I couldn't complete the external investigation needed for this request. That capability may be temporarily unavailable; please try again.",
       ];
-    case "TIMED_OUT":
+    case "SOURCE_UNAVAILABLE":
       return [
-        "External source retrieval was incomplete because the source request timed out. The result reflects only material retrieved before that interruption.",
+        reason === "RATE_LIMITED"
+          ? "I couldn't reach the external information source needed for this request because it temporarily limited requests. Please try again later."
+          : reason === "TIMED_OUT"
+            ? "I couldn't reach the external information source needed for this request before the source request timed out. Please try again later."
+            : "I couldn't reach the external information source needed for this request. Please try again later.",
+      ];
+    case "COMPLETE_NO_CANDIDATES":
+      return [
+        "The available source search completed, but it returned no candidate material for this request.",
+      ];
+    case "COMPLETE_NO_RESPONSIVE":
+      return [
+        "The available source search completed, but the material it returned did not actually address this request.",
       ];
     default:
-      return [
-        "External source retrieval was incomplete because the source provider became unavailable. The result reflects only material retrieved before that interruption.",
-      ];
+      return [];
   }
+}
+
+function knowledgeAvailability(
+  truth: TruthBundle,
+  findings: readonly KnowledgeFinding[],
+): KnowledgeAvailability {
+  switch (acquisitionState(truth)) {
+    case "PARTIAL": return "PARTIAL";
+    case "INVESTIGATION_UNAVAILABLE": return "INVESTIGATION_UNAVAILABLE";
+    case "SOURCE_UNAVAILABLE": return "SOURCE_UNAVAILABLE";
+    case "COMPLETE_NO_CANDIDATES": return "NO_CANDIDATES";
+    case "COMPLETE_NO_RESPONSIVE": return "NO_RESPONSIVE_MATERIAL";
+  }
+  if (findings.length === 0) return "EVIDENCE_INSUFFICIENT";
+  const hasAdmittedEvidence = truth.claimEvidence.some(
+    (item) => item.admitted && item.verification === "VERIFIED",
+  );
+  return hasAdmittedEvidence ? "GOVERNED_FINDINGS" : "EVIDENCE_INSUFFICIENT";
 }
 
 function unresolvedSummary(finding: KnowledgeFinding): string {
@@ -223,6 +282,7 @@ export function buildKnowledgeOutcome(run: LatticeRun, truth: TruthBundle): Know
     }];
   });
 
+  const availability = knowledgeAvailability(truth, findings);
   const acquisitionLimitations = acquisitionUncertainties(truth);
   const uncertainties = [
     ...acquisitionLimitations,
@@ -242,6 +302,7 @@ export function buildKnowledgeOutcome(run: LatticeRun, truth: TruthBundle): Know
 
   return {
     kind: "KNOWLEDGE",
+    availability,
     objective: runObjective(run.request),
     acceptedUnderstanding: runObjective(run.request),
     findings,
