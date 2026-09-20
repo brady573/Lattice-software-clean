@@ -73,6 +73,7 @@ function advisoryInput(): SolandraAdvisoryInput {
 
 class ExactBasisGroundingProvider implements ModelProvider {
   readonly kind = "issue-48-exact-basis-provider";
+  readonly structuredOutputCapability = "json_schema" as const;
   calls = 0;
   async generate(request: CanonicalModelRequest, _context: ModelCallContext): Promise<ModelProviderResult> {
     this.calls += 1;
