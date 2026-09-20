@@ -116,6 +116,42 @@ def test_contextual_clarification_accepts_null_material_ambiguity_with_structura
     )
 
 
+def test_contextual_clarification_accepts_exact_governed_reference_as_structural_context() -> None:
+    body = _clarification_body()
+    interpretation = body["interpretation"]
+    assert isinstance(interpretation, dict)
+    for field in ("entities", "referents", "constraints", "preferences", "knowledgeNeeds"):
+        interpretation[field] = []
+    interpretation["objectiveRelation"] = "CONTINUE"
+    interpretation["referencedRecommendationId"] = "recommendation:prior"
+
+    validator._assert_contextual_clarification(
+        _stage(
+            "AMBIGUITY",
+            "Which tradeoff matters more for the recommendation you were just considering?",
+            turn_body=body,
+        )
+    )
+
+
+def test_contextual_clarification_rejects_empty_governed_reference_as_context() -> None:
+    body = _clarification_body()
+    interpretation = body["interpretation"]
+    assert isinstance(interpretation, dict)
+    for field in ("entities", "referents", "constraints", "preferences", "knowledgeNeeds"):
+        interpretation[field] = []
+    interpretation["referencedRecommendationId"] = "   "
+
+    with pytest.raises(AssertionError, match="referencedRecommendationId must be a non-empty string"):
+        validator._assert_contextual_clarification(
+            _stage(
+                "AMBIGUITY",
+                "Which tradeoff matters more here?",
+                turn_body=body,
+            )
+        )
+
+
 def test_contextual_clarification_requires_visible_text() -> None:
     with pytest.raises(AssertionError, match="no visible clarification"):
         validator._assert_contextual_clarification(
