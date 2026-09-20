@@ -56,7 +56,29 @@ export const solandraSemanticProposalSchema = z.object({
 }).strict();
 export type SolandraSemanticProposal = z.infer<typeof solandraSemanticProposalSchema>;
 
+export const solandraConversationPresentationSchema = z.object({
+  conversationText: z.string().min(1).max(8_000),
+  composerBody: z.string().min(1).max(16_000).nullable(),
+}).strict();
+export type SolandraConversationPresentation = z.infer<typeof solandraConversationPresentationSchema>;
+
+const solandraConversationPresentationOutputSchema = z.object({
+  conversationText: z.string().min(1).max(8_000),
+  composerBody: z.union([
+    z.string().max(16_000),
+    z.array(z.string().max(4_000)).min(1).max(64),
+  ]).nullable(),
+}).strict();
+
+type SolandraConversationPresentationOutput = z.infer<typeof solandraConversationPresentationOutputSchema>;
+
 const solandraConversationOutputSchema = z.object({
+  mode: z.literal("CONVERSATION"),
+  presentation: solandraConversationPresentationOutputSchema,
+}).strict();
+
+/** Compatibility for pre-composition injected/model fixtures; canonical prompting no longer requests this shape. */
+const legacySolandraConversationOutputSchema = z.object({
   mode: z.literal("CONVERSATION"),
   response: z.string().min(1).max(16_000),
 }).strict();
@@ -66,8 +88,9 @@ const solandraGovernedOutputSchema = z.object({
   projection: solandraSemanticProposalSchema,
 }).strict();
 
-const solandraCognitionOutputSchema = z.discriminatedUnion("mode", [
+const solandraCognitionOutputSchema = z.union([
   solandraConversationOutputSchema,
+  legacySolandraConversationOutputSchema,
   solandraGovernedOutputSchema,
 ]);
 
@@ -118,7 +141,10 @@ export interface SolandraCognitionInput {
 
 export type SolandraConversationCognitionResult = Readonly<{
   mode: "CONVERSATION";
+  /** Full ordinary response text retained for bounded cognition continuity and legacy injected runtimes. */
   response: string;
+  /** Two-surface ordinary presentation. Absence is compatibility-only and means response belongs wholly in Conversation. */
+  presentation?: SolandraConversationPresentation;
   invocationProvenance: ModelInvocationProvenance;
 }>;
 
@@ -139,6 +165,35 @@ export function isConversationalCognition(
   result: SolandraCognitionResult,
 ): result is SolandraConversationCognitionResult {
   return result.mode === "CONVERSATION";
+}
+
+export function conversationPresentationFor(
+  result: SolandraConversationCognitionResult,
+): SolandraConversationPresentation {
+  if (result.presentation) return structuredClone(result.presentation);
+  return {
+    conversationText: result.response.trim(),
+    composerBody: null,
+  };
+}
+
+export function conversationPresentationText(presentation: SolandraConversationPresentation): string {
+  return [presentation.conversationText, presentation.composerBody]
+    .filter((part): part is string => typeof part === "string" && part.trim().length > 0)
+    .map((part) => part.trim())
+    .join("\n\n");
+}
+
+function normalizedConversationPresentation(
+  presentation: SolandraConversationPresentationOutput,
+): SolandraConversationPresentation {
+  const composerBody = Array.isArray(presentation.composerBody)
+    ? presentation.composerBody.map((part) => part.trim()).filter((part) => part.length > 0).join("\n\n")
+    : presentation.composerBody?.trim() ?? null;
+  return solandraConversationPresentationSchema.parse({
+    conversationText: presentation.conversationText,
+    composerBody,
+  });
 }
 
 function parseJsonObject(text: string): unknown {
@@ -213,6 +268,13 @@ function buildCognitionRequest(model: string, input: SolandraCognitionInput): Ca
       referencedIntentProposalId: "the supplied pending Intent proposal ID or null",
     },
   });
+  const conversationShape = JSON.stringify({
+    mode: "CONVERSATION",
+    presentation: {
+      conversationText: "natural conversational framing/content for this turn",
+      composerBody: "substantive work as one string or an array of text segments when useful, otherwise null",
+    },
+  });
 
   return {
     model,
@@ -225,11 +287,18 @@ function buildCognitionRequest(model: string, input: SolandraCognitionInput): Ca
           "Interpretation is not truth. Your ordinary conversational prose is useful model output, but it is not canonical USER intent, governed Knowledge, a Recommendation, USER choice, authorization, execution proof, or verification.",
           "Presentation must remain faithful to the strongest Product state Lattice actually supplies. A Recommendation is not a USER choice; a USER choice is not authorization; authorization is not execution; execution is not verification. Never present a stronger Lattice state than the supplied state establishes.",
           "Never present Lattice or Solandra as having started, performed, completed, sent, applied, or verified an external action unless corresponding governed action state is supplied. This does not prevent ordinary discussion of actions the USER says they performed or hypothetical actions.",
-          "Use CONVERSATION for ordinary discussion, explanation, brainstorming, transformation of USER material, hypothetical reasoning, or other non-consequential conversation that does not materially require a Lattice trust boundary. Answer the USER directly and naturally in response.",
+          "Use CONVERSATION for ordinary discussion, explanation, brainstorming, transformation of USER material, hypothetical reasoning, or other non-consequential conversation that does not materially require a Lattice trust boundary. Answer the USER directly and naturally.",
+          "Conversation and Composer are simultaneous presentation surfaces. conversationText carries the natural conversational framing/content for the turn; Composer can carry substantial ordinary generated work when that makes the response easier to use.",
+          "For a short ordinary response that does not warrant substantive Composer work, put the whole response in conversationText and set composerBody to null.",
+          "For an ordinary response with substantial structured work such as a procedure, checklist, plan, detailed explanation, or similar body, put the natural conversational framing or continuation together in conversationText, place the substantive work in composerBody, and do not duplicate the Composer body into conversationText.",
+          "composerBody may be one string or an array of text segments; both representations mean the same Composer presentation role and are normalized by Lattice without semantic reclassification.",
+          "Choose the Conversation and Composer presentation surfaces from the meaning and shape of the work itself, not from keywords, punctuation, formatting tokens, or a fixed domain taxonomy.",
+          "Composer placement does not grant authority. All CONVERSATION output remains ordinary non-authoritative generated guidance even when part of it is placed in Composer.",
           "A conversational answer may contain ordinary explanatory prose. Do not claim that conversational prose is verified or governed Knowledge. Do not add repetitive authority warnings unless they are useful to the USER's request.",
           "Use GOVERNED only when the current request materially requires a framework trust boundary: establishing or refreshing trustworthy external factual Knowledge; exact historical Knowledge provenance or transformation; a durable Recommendation or exact option/choice reference; confirmation of an exact pending Intent proposal; material meaning that must enter Intent Integrity for downstream governed work; or preparation of a governed resource/action boundary.",
           "Do not route to governed Knowledge merely because an ordinary answer could contain factual language. Use it when factual establishment, freshness, sourcing, or downstream reliance materially matters.",
-          "When mode is CONVERSATION, return exactly JSON {\"mode\":\"CONVERSATION\",\"response\":\"natural response\"} and no other fields.",
+          "When mode is CONVERSATION, return exactly the CONVERSATION shape below and no other fields:",
+          conversationShape,
           "When mode is GOVERNED, do not answer the user's factual question in projection. Project only the minimum structure required by the existing Lattice boundary.",
           "For a governed projection, classify objectiveRelation by comparing the Current USER message with the Current canonical objective. Being in the same Conversation or sharing generic words is not evidence that the USER is continuing the same objective.",
           "Use NEW_OBJECTIVE when governed downstream work would target a materially different question, task, goal, or decision. Use CONTINUE when the current governed request materially depends on the current objective or supplied governed context. Use CORRECTION when the USER revises the meaning of the same governed objective.",
@@ -272,7 +341,7 @@ function buildCognitionRequest(model: string, input: SolandraCognitionInput): Ca
       },
     ],
     temperature: 0.2,
-    maxOutputTokens: 1_600,
+    maxOutputTokens: 4_096,
     seed: 0,
   };
 }
@@ -386,9 +455,13 @@ export class ModelSolandraCognitiveRuntime implements SolandraCognitiveRuntime {
     }
     const parsed = solandraCognitionOutputSchema.parse(parseJsonObject(result.response.output[0].text));
     if (parsed.mode === "CONVERSATION") {
+      const presentation: SolandraConversationPresentation = "presentation" in parsed
+        ? normalizedConversationPresentation(parsed.presentation)
+        : { conversationText: parsed.response.trim(), composerBody: null };
       return Object.freeze({
         mode: "CONVERSATION" as const,
-        response: parsed.response.trim(),
+        response: conversationPresentationText(presentation),
+        presentation: Object.freeze({ ...presentation }),
         invocationProvenance: result.audit.invocationProvenance,
       });
     }

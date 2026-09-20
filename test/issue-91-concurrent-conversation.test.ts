@@ -63,8 +63,8 @@ test("Issue #91 concurrent duplicate conversational delivery shares one model ca
     const rightBody = right.json();
     assert.equal(leftBody.status, "CONVERSATION_COMPLETED");
     assert.equal(rightBody.status, "CONVERSATION_COMPLETED");
-    assert.equal(leftBody.presentation.assistantMessage, "One stable conversational response.");
-    assert.equal(rightBody.presentation.assistantMessage, leftBody.presentation.assistantMessage);
+    assert.equal(leftBody.presentation.conversationText, "One stable conversational response.");
+    assert.equal(rightBody.presentation.conversationText, leftBody.presentation.conversationText);
     assert.equal(rightBody.conversationResponse.responseId, leftBody.conversationResponse.responseId);
     assert.equal(provider.calls, 1, "ModelRuntime must single-flight an exact duplicate turn");
 

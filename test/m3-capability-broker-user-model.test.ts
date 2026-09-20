@@ -210,7 +210,6 @@ test("authorized user-model call is bounded, subject-isolated, provenance-aware,
   assert.doesNotMatch(payload, new RegExp(SECRET, "u"));
   assert.doesNotMatch(JSON.stringify(result), new RegExp(SECRET, "u"));
 
-  // Even an invented factual premise remains only capability output; no Knowledge is established.
   assert.match(result.output.text, /Moon is made of cheese/u);
   assert.deepEqual(await knowledge.listKnowledgeByConversation("conversation-a"), []);
 
@@ -355,12 +354,13 @@ test("ordinary Conversation uses canonical Solandra cognition without routing th
     assert.equal(response.statusCode, 200, response.body);
     const body = response.json<{
       status: string;
-      presentation: { assistantMessage: string };
+      presentation: { conversationText: string; composerBody: string | null };
       interpretation: { mode: string; authority: string; factualAuthority: boolean };
       conversationResponse: { authority: string; factualAuthority: boolean };
     }>();
     assert.equal(body.status, "CONVERSATION_COMPLETED");
-    assert.equal(body.presentation.assistantMessage, "Sorter, TidyNotes, and NoteShelf.");
+    assert.equal(body.presentation.conversationText, "Sorter, TidyNotes, and NoteShelf.");
+    assert.equal(body.presentation.composerBody, null);
     assert.equal(body.interpretation.mode, "CONVERSATION");
     assert.equal(body.interpretation.authority, "NON_AUTHORITATIVE_CONVERSATION");
     assert.equal(body.interpretation.factualAuthority, false);
