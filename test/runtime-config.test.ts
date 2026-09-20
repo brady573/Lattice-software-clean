@@ -192,3 +192,96 @@ test("live Knowledge acquisition is an explicit replaceable truth mode", () => {
   } as NodeJS.ProcessEnv);
   assert.equal(config.truthMode, "v36-live");
 });
+
+
+test("integer environment values require a complete integer lexical representation", () => {
+  for (const port of ["3000abc", "abc3000", "12.5"]) {
+    assert.throws(
+      () => resolveRuntimeConfig({ PORT: port }),
+      /PORT must be an integer between 1 and 65535/,
+    );
+  }
+
+  for (const timeout of ["60000abc", "abc60000", "12.5"]) {
+    assert.throws(
+      () => resolveRuntimeConfig({ LATTICE_ANDROID_MODEL_RELAY_TIMEOUT_MS: timeout }),
+      /LATTICE_ANDROID_MODEL_RELAY_TIMEOUT_MS must be an integer between 1000 and 115000/,
+    );
+  }
+
+  const config = resolveRuntimeConfig({
+    PORT: " 3000 ",
+    LATTICE_ANDROID_MODEL_RELAY_TIMEOUT_MS: " 60000 ",
+  });
+  assert.equal(config.port, 3_000);
+  assert.equal(config.androidModelRelayTimeoutMs, 60_000);
+});
+
+test("GROQ_API_KEY rejects surrounding whitespace instead of validating one representation and using another", () => {
+  const apiKey = "g".repeat(32);
+  const config = resolveRuntimeConfig({
+    LATTICE_SOLANDRA_COGNITION_ROUTE: "groq-gpt-oss-120b",
+    GROQ_API_KEY: apiKey,
+  });
+  assert.equal(config.solandraCognitionApiKey, apiKey);
+
+  for (const padded of [` ${apiKey}`, `${apiKey} `]) {
+    assert.throws(
+      () => resolveRuntimeConfig({
+        LATTICE_SOLANDRA_COGNITION_ROUTE: "groq-gpt-oss-120b",
+        GROQ_API_KEY: padded,
+      }),
+      /GROQ_API_KEY without leading or trailing whitespace/,
+    );
+  }
+
+  assert.throws(
+    () => resolveRuntimeConfig({
+      LATTICE_SOLANDRA_COGNITION_ROUTE: "groq-gpt-oss-120b",
+      GROQ_API_KEY: " ".repeat(32),
+    }),
+    /requires GROQ_API_KEY containing between 16 and 512 characters/,
+  );
+});
+
+test("Android relay token rejects blank or padded configured secrets", () => {
+  const token = "a".repeat(32);
+  assert.equal(
+    resolveRuntimeConfig({ LATTICE_ANDROID_MODEL_RELAY_TOKEN: token }).androidModelRelayToken,
+    token,
+  );
+
+  assert.throws(
+    () => resolveRuntimeConfig({ LATTICE_ANDROID_MODEL_RELAY_TOKEN: " ".repeat(32) }),
+    /must not be blank/,
+  );
+  for (const padded of [` ${token}`, `${token} `]) {
+    assert.throws(
+      () => resolveRuntimeConfig({ LATTICE_ANDROID_MODEL_RELAY_TOKEN: padded }),
+      /must not contain leading or trailing whitespace/,
+    );
+  }
+});
+
+test("DATABASE_URL normalizes non-secret surrounding whitespace and treats blank values as unset", () => {
+  assert.throws(
+    () => resolveRuntimeConfig({
+      LATTICE_DEPLOYMENT_MODE: "durable",
+      DATABASE_URL: "   ",
+    }),
+    /requires DATABASE_URL/,
+  );
+
+  const developmentBlank = resolveRuntimeConfig({ DATABASE_URL: "   " });
+  assert.equal(developmentBlank.databaseUrl, undefined);
+
+  const databaseUrl = "postgresql://example.invalid/lattice";
+  const padded = resolveRuntimeConfig({ DATABASE_URL: `  ${databaseUrl}  ` });
+  assert.equal(padded.databaseUrl, databaseUrl);
+
+  const durable = resolveRuntimeConfig({
+    LATTICE_DEPLOYMENT_MODE: "durable",
+    DATABASE_URL: databaseUrl,
+  });
+  assert.equal(durable.databaseUrl, databaseUrl);
+});
