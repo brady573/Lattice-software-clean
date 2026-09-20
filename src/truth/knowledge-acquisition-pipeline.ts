@@ -3,7 +3,7 @@ import { isConsultationRunRequest, type LatticeRunRequest } from "../domain.js";
 import type {
   KnowledgeAcquisitionProvider,
   KnowledgeAcquisitionCompletion,
-  type KnowledgeAcquisitionDisposition,
+  KnowledgeAcquisitionDisposition,
   KnowledgeAcquisitionPartialReason,
   KnowledgeAcquisitionResult,
   RetrievedKnowledgeClaim,
