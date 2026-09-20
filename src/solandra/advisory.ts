@@ -248,7 +248,11 @@ function buildAdvisoryStructuredOutput(
   });
 }
 
-function buildAdvisoryRequest(model: string, input: SolandraAdvisoryInput): CanonicalModelRequest {
+function buildAdvisoryRequest(
+  model: string,
+  input: SolandraAdvisoryInput,
+  structuredOutput: boolean,
+): CanonicalModelRequest {
   const knowledge = input.knowledge.length === 0
     ? "No governed Knowledge was supplied."
     : input.knowledge.map((item) => [
@@ -326,7 +330,9 @@ function buildAdvisoryRequest(model: string, input: SolandraAdvisoryInput): Cano
         ].join("\n"),
       },
     ],
-    structuredOutput: buildAdvisoryStructuredOutput(input),
+    ...(structuredOutput
+      ? { structuredOutput: buildAdvisoryStructuredOutput(input) }
+      : {}),
     temperature: 0,
     maxOutputTokens: 2_000,
     seed: 0,
@@ -430,11 +436,18 @@ export class ModelSolandraAdvisoryRuntime implements SolandraAdvisoryRuntime {
 
   async advise(input: SolandraAdvisoryInput): Promise<SolandraAdvisoryRuntimeResult> {
     const basisDigest = advisoryBasisDigest(input);
-    const response = await this.runtime.call(buildAdvisoryRequest(this.model, input), {
+    const response = await this.runtime.call(
+      buildAdvisoryRequest(
+        this.model,
+        input,
+        this.runtime.supportsStructuredOutput("json_schema"),
+      ),
+      {
       correlationId: `solandra-advisory:${input.conversationId}:${input.userMessageId}`,
       idempotencyKey: `advise:${input.userMessageId}:${basisDigest}`,
-      maxAttempts: 2,
-    });
+        maxAttempts: 2,
+      },
+    );
     if (response.response.output.length !== 1 || response.response.output[0]?.type !== "text") {
       throw new ModelProviderError("invalid_output", "Solandra advisory reasoning requires exactly one text output.");
     }
