@@ -4,10 +4,12 @@ import { createConfiguredCapabilityBroker } from "./capabilities/composition.js"
 import { createAlphaDecisionRuntimeComposition } from "./decision/alpha-decision-composition.js";
 import { registerModelAssistanceApi } from "./model-assistance-api.js";
 import { createConfiguredModelAssistanceCapability } from "./model-assistance-composition.js";
+import { createGroqRateLimitCoordinator } from "./model/groq-rate-limit-coordinator.js";
 import { createRuntimeApp } from "./runtime-app.js";
 import { resolveRuntimeConfig } from "./runtime-config.js";
 import { assertDurableProcessSchemaReady } from "./runtime-schema-readiness.js";
 import { requireConfiguredSolandraCognition } from "./solandra/cognition-composition.js";
+import { createConfiguredTruthPipeline } from "./truth/configured-pipeline.js";
 
 try {
   const config = resolveRuntimeConfig();
@@ -20,15 +22,24 @@ try {
     await assertDurableProcessSchemaReady(config.databaseUrl, "api");
   }
 
-  const solandra = requireConfiguredSolandraCognition(config);
-  const modelAssistance = await createConfiguredModelAssistanceCapability(config);
-  const capabilityComposition = await createConfiguredCapabilityBroker(config);
+  const groqRateLimitCoordinator = await createGroqRateLimitCoordinator(config.databaseUrl);
+  const solandra = requireConfiguredSolandraCognition(config, groqRateLimitCoordinator);
+  const modelAssistance = await createConfiguredModelAssistanceCapability(config, groqRateLimitCoordinator);
+  const capabilityComposition = await createConfiguredCapabilityBroker(config, groqRateLimitCoordinator);
+  const truthPipeline = createConfiguredTruthPipeline(
+    config.truthMode,
+    undefined,
+    undefined,
+    config,
+    groqRateLimitCoordinator,
+  );
   const decisionCapability = createAlphaDecisionRuntimeComposition();
   const authenticatedSubjectResolver = resolveCanonicalOwnerSubjectResolver(config);
   let app;
   try {
     app = await createRuntimeApp(config, {
       ...decisionCapability,
+      truthPipeline,
       modelAssistanceService: modelAssistance,
       ...(authenticatedSubjectResolver === undefined ? {} : { authenticatedSubjectResolver }),
       solandraCognition: solandra.cognition,
@@ -37,13 +48,13 @@ try {
       solandraKnowledgePresenter: solandra.knowledgePresenter,
     });
   } catch (error) {
-    await Promise.allSettled([modelAssistance.close(), capabilityComposition.broker.close()]);
+    await Promise.allSettled([modelAssistance.close(), capabilityComposition.broker.close(), groqRateLimitCoordinator.close()]);
     throw error;
   }
   registerModelAssistanceApi(app, modelAssistance);
   registerCapabilityBrokerApi(app, capabilityComposition.broker);
   app.addHook("onClose", async () => {
-    await Promise.allSettled([modelAssistance.close(), capabilityComposition.broker.close()]);
+    await Promise.allSettled([modelAssistance.close(), capabilityComposition.broker.close(), groqRateLimitCoordinator.close()]);
   });
 
   try {
