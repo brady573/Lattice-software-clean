@@ -180,7 +180,7 @@ test("M9-5 executes one injected operational research capability only inside the
     }),
   );
 
-  const result = await executor.execute({ task: task() });
+  const result = await executor.execute({ task: task(), signal: new AbortController().signal });
   assert.equal(calls, 1);
   assert.deepEqual(result, {
     artifacts: [],
@@ -202,7 +202,7 @@ test("M9-5 refuses operational dispatch when Product binding is inactive", async
   );
 
   await assert.rejects(
-    executor.execute({ task: task() }),
+    executor.execute({ task: task(), signal: new AbortController().signal }),
     /INVESTIGATING Run/u,
   );
   assert.equal(calls, 0);
@@ -223,8 +223,24 @@ test("M9-5 discards the external operation result when binding changes before pe
   );
 
   await assert.rejects(
-    executor.execute({ task: task() }),
+    executor.execute({ task: task(), signal: new AbortController().signal }),
     /binding changed after dispatch/u,
   );
   assert.equal(calls, 1);
+});
+
+
+test("Issue #131: BoundLiveResearchTaskExecutor forwards the worker ownership AbortSignal to the live operation", async () => {
+  const controller = new AbortController();
+  let observedSignal: AbortSignal | undefined;
+  const executor = new BoundLiveResearchTaskExecutor(
+    stores(),
+    operation(async (context) => {
+      observedSignal = context.signal;
+      return { artifacts: [], edges: [], evidence: [] };
+    }),
+  );
+
+  await executor.execute({ task: task(), signal: controller.signal });
+  assert.equal(observedSignal, controller.signal);
 });

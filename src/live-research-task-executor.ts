@@ -26,6 +26,7 @@ export interface ParsedLiveV36ResearchTask {
 }
 
 export interface LiveResearchOperationContext {
+  readonly signal: AbortSignal;
   readonly task: DurableResearchTask;
   readonly binding: LiveResearchBinding;
   readonly checkpointHash: string;
@@ -115,6 +116,7 @@ export class BoundLiveResearchTaskExecutor implements ResearchTaskExecutor {
     const parsed = parseLiveV36ResearchTask(context.task);
     const binding = await resolveLiveResearchBinding(this.stores, context.task);
     const result = await this.operation.execute({
+      signal: context.signal,
       task: context.task,
       binding,
       checkpointHash: parsed.checkpointHash,
