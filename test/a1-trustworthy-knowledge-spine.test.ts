@@ -298,7 +298,7 @@ test("A1 non-responsive acquired material is excluded before V36 and cannot beco
     assert.equal(result.outcome.availability, "NO_RESPONSIVE_MATERIAL");
     assert.equal(
       result.presentation.assistantMessage,
-      "The available source search completed, but the material it returned did not actually address this request.",
+      "I was able to check the available external source, but the material it returned did not actually address this request.",
     );
     assert.doesNotMatch(result.presentation.assistantMessage, /V36|proof|finding|provider|worker/iu);
   } finally {
@@ -406,7 +406,7 @@ test("A1 no-evidence outcome stays concise and avoids internal proof-state langu
     assert.equal(result.outcome.availability, "NO_CANDIDATES");
     assert.equal(
       result.presentation.assistantMessage,
-      "The available source search completed, but it returned no candidate material for this request.",
+      "I was able to check the available external source, but it returned no candidate material for this request.",
     );
     assert.doesNotMatch(result.presentation.assistantMessage, /UNRESOLVED|V36|proof|finding|provider|worker|run state/iu);
   } finally {
