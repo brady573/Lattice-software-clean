@@ -40,7 +40,7 @@ test("PostgreSQL Groq recovery state coordinates independent API/Run-worker-styl
 
   const credential = `gsk_pg_recovery_${randomUUID().replaceAll("-", "")}`;
   const scope = groqRateLimitScopeId(credential, GROQ_KNOWLEDGE_SIMPLIFIER_MODEL);
-  let now = Date.now();
+  let now = Math.floor(Date.now() / 1_000) * 1_000;
   const waits: number[] = [];
   const clientA = await PostgresGroqRateLimitCoordinator.connect(databaseUrl);
   const clientB = await PostgresGroqRateLimitCoordinator.connect(databaseUrl, {
@@ -53,12 +53,12 @@ test("PostgreSQL Groq recovery state coordinates independent API/Run-worker-styl
   const cleanup = new Pool({ connectionString: databaseUrl });
 
   try {
-    const firstDeadline = now + 50;
+    const firstDeadline = now + 1_000;
     assert.equal(await clientA.extendBlockedUntil(scope, firstDeadline), firstDeadline);
     assert.equal(await clientB.blockedUntil(scope), firstDeadline);
 
-    assert.equal(await clientB.extendBlockedUntil(scope, firstDeadline - 20), firstDeadline);
-    const laterDeadline = firstDeadline + 40;
+    assert.equal(await clientB.extendBlockedUntil(scope, firstDeadline - 500), firstDeadline);
+    const laterDeadline = firstDeadline + 1_000;
     assert.equal(await clientB.extendBlockedUntil(scope, laterDeadline), laterDeadline);
     assert.equal(await clientA.blockedUntil(scope), laterDeadline);
 
