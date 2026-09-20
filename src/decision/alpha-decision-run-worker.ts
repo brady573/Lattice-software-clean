@@ -1,4 +1,7 @@
 import { createAlphaDecisionWorkerComposition } from "./alpha-decision-composition.js";
+import { createGroqRateLimitCoordinator } from "../model/groq-rate-limit-coordinator.js";
+import { resolveRuntimeConfig } from "../runtime-config.js";
+import { createConfiguredTruthPipeline } from "../truth/configured-pipeline.js";
 import {
   createStandaloneRunWorker,
   resolveRunWorkerProcessConfig,
@@ -13,12 +16,27 @@ export async function runAlphaDecisionRunWorkerProcess(
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<void> {
   const config = resolveRunWorkerProcessConfig(env);
-  const worker = await createStandaloneRunWorker(config, {
-    ...createAlphaDecisionWorkerComposition(),
-    onPollError(error): void {
-      console.error("LATTICE_RUN_WORKER_POLL_FAILED", error);
-    },
-  });
+  const runtimeConfig = resolveRuntimeConfig(env);
+  const groqRateLimitCoordinator = await createGroqRateLimitCoordinator(config.databaseUrl);
+  let worker;
+  try {
+    worker = await createStandaloneRunWorker(config, {
+      ...createAlphaDecisionWorkerComposition(),
+      truthPipeline: createConfiguredTruthPipeline(
+        runtimeConfig.truthMode,
+        undefined,
+        undefined,
+        runtimeConfig,
+        groqRateLimitCoordinator,
+      ),
+      onPollError(error): void {
+        console.error("LATTICE_RUN_WORKER_POLL_FAILED", error);
+      },
+    });
+  } catch (error) {
+    await groqRateLimitCoordinator.close();
+    throw error;
+  }
 
   let resolveStop: ((signal: NodeJS.Signals) => void) | undefined;
   const stopRequested = new Promise<NodeJS.Signals>((resolve) => {
@@ -40,5 +58,6 @@ export async function runAlphaDecisionRunWorkerProcess(
     process.off("SIGINT", onSigint);
     process.off("SIGTERM", onSigterm);
     await worker.close();
+    await groqRateLimitCoordinator.close();
   }
 }
