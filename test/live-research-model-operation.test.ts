@@ -428,3 +428,52 @@ test("Issue #131: ownership cancellation reaches both the model runtime and capa
   await assert.rejects(executing, /cancelled/u);
   assert.equal(capabilitySignal?.aborted, true);
 });
+
+
+test("Issue #131: ownership cancellation actively aborts a pending live model operation before capability execution", async () => {
+  const controller = new AbortController();
+  let modelSignal: AbortSignal | undefined;
+  let capabilityCalls = 0;
+  let resolveModelStarted!: () => void;
+  const modelStarted = new Promise<void>((resolve) => {
+    resolveModelStarted = resolve;
+  });
+
+  const operation = new PinnedLiveResearchModelOperation(
+    { model: "live-model", requestedProvider: "fixture-provider", executionClass: "LIVE_DIRECT" },
+    {
+      async call(_request, options) {
+        modelSignal = options.signal;
+        resolveModelStarted();
+        return await new Promise<ModelRuntimeResult>((_resolve, reject) => {
+          const signal = options.signal;
+          assert.ok(signal);
+          if (signal.aborted) {
+            reject(signal.reason);
+            return;
+          }
+          signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+        });
+      },
+    },
+    { async load() { return projectionInput(); } },
+    { async load() { return grant(); } },
+    activeGuard(),
+    {
+      async execute() {
+        capabilityCalls += 1;
+        return { artifacts: [], edges: [], evidence: [] };
+      },
+    },
+  );
+
+  const executing = operation.execute(context(controller.signal));
+  await modelStarted;
+  assert.equal(modelSignal, controller.signal);
+  assert.equal(modelSignal?.aborted, false);
+
+  controller.abort(new Error("Research attempt ownership lost."));
+  await assert.rejects(executing, /ownership lost/u);
+  assert.equal(modelSignal?.aborted, true);
+  assert.equal(capabilityCalls, 0);
+});

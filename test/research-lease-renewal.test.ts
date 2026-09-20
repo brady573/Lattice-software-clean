@@ -80,15 +80,9 @@ class ObservedMemoryOrchestrationStore extends MemoryOrchestrationStore {
   }
 }
 
-class ForcedStaleRenewalStore extends MemoryOrchestrationStore {
+class PersistenceCountingStore extends MemoryOrchestrationStore {
   completeCalls = 0;
   failCalls = 0;
-
-  override async renewResearchTaskLease(
-    _input: Parameters<MemoryOrchestrationStore["renewResearchTaskLease"]>[0],
-  ): Promise<RenewResearchTaskLeaseResult> {
-    return { outcome: "stale" };
-  }
 
   override async completeResearchTask(
     input: Parameters<MemoryOrchestrationStore["completeResearchTask"]>[0],
@@ -105,6 +99,14 @@ class ForcedStaleRenewalStore extends MemoryOrchestrationStore {
   }
 }
 
+class ForcedStaleRenewalStore extends PersistenceCountingStore {
+  override async renewResearchTaskLease(
+    _input: Parameters<MemoryOrchestrationStore["renewResearchTaskLease"]>[0],
+  ): Promise<RenewResearchTaskLeaseResult> {
+    return { outcome: "stale" };
+  }
+}
+ 
 async function scheduleOne(
   runStore: MemoryRunStore,
   store: MemoryOrchestrationStore,
@@ -376,6 +378,62 @@ test("Issue #131: ownership-loss renewal aborts cooperative execution and never 
     assert.equal(persisted?.status, "RUNNING");
     assert.equal(persisted?.attemptCount, 1);
     assert.equal(persisted?.currentAttempt, 1);
+    assert.equal(persisted?.acceptedResult, null);
+  } finally {
+    await store.close();
+    await runStore.close();
+  }
+});
+
+
+test("Issue #131: actual Run epoch loss during execution aborts the owner and prevents result/failure persistence", { timeout: 2_000 }, async () => {
+  const runStore = new MemoryRunStore();
+  const store = new PersistenceCountingStore(runStore);
+  const runId = "00000000-0000-4000-8000-000000001736";
+  const task = await scheduleOne(runStore, store, runId, 1);
+  const wait = new ManualLeaseRenewalWait();
+  const started = deferred<void>();
+  const aborted = deferred<void>();
+  let elapsed = 0;
+
+  try {
+    const worker = processResearchDispatches({
+      orchestrationStore: store,
+      executor: {
+        async execute({ signal }) {
+          started.resolve(undefined);
+          signal.addEventListener("abort", () => aborted.resolve(undefined), { once: true });
+          return await new Promise<never>(() => undefined);
+        },
+      },
+      workerId: "run-invalidated-worker",
+      now: at(0),
+      leaseMs: 100,
+      retryDelayMs: 10,
+      limit: 1,
+      clock: () => at(elapsed),
+      leaseRenewalWait: wait.wait,
+    });
+
+    await started.promise;
+    assert.deepEqual(await runStore.transition({
+      runId,
+      expectedStatus: "CREATED",
+      expectedVersion: 1,
+      nextStatus: "UNDERSTANDING",
+    }), { outcome: "advanced", version: 2 });
+
+    elapsed = 40;
+    await wait.pulse();
+    await aborted.promise;
+    const outcomes = await worker;
+
+    assert.equal(outcomes[0]?.outcome, "released");
+    assert.equal(store.completeCalls, 0);
+    assert.equal(store.failCalls, 0);
+    const persisted = await store.getResearchTask(task.id);
+    assert.equal(persisted?.status, "RUNNING");
+    assert.equal(persisted?.attemptCount, 1);
     assert.equal(persisted?.acceptedResult, null);
   } finally {
     await store.close();
