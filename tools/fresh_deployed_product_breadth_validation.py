@@ -8,13 +8,16 @@ from typing import Any
 from playwright.sync_api import Page
 
 from tools.deployed_product_journey_validation import (
-    _assistant_text,
+    _composer,
     _connect_cognitive_assistance_if_available,
-    _final_product_body,
+    _json_object,
     _open_product_surface,
     _restore_cognitive_assistance,
-    _submit_turn,
+    _visible_text,
+    _wait_for_turn_completion,
 )
+
+EVIDENCE_DIR = Path("artifacts/fresh-product-breadth")
 
 KNOWLEDGE_PROMPT = (
     "I'm applying for a U.S. passport this week. What are the current routine and expedited "
@@ -25,13 +28,19 @@ FOLLOWUP_PROMPT = (
     "I should keep in mind?"
 )
 DECISION_PROMPT = (
-    "Switching topics: I'm choosing between a heat-pump dryer and a standard vented electric dryer "
-    "for a small condo. I care most about low energy use and avoiding new venting work; drying speed "
-    "matters less. Which fits better, and what am I giving up?"
+    "I'm choosing between a heat-pump dryer and a standard vented electric dryer for a small condo. "
+    "I care most about low energy use and avoiding new venting work; drying speed matters less. "
+    "Which fits better, and what am I giving up?"
 )
 AMBIGUITY_PROMPT = "I also want the cheaper one. Does that change your recommendation?"
+REFERENCE_SETUP_PROMPT = (
+    "Why do bananas make nearby avocados ripen faster? Keep the explanation short."
+)
+TOPIC_SWITCH_PROMPT = (
+    "Switch topics: why can a wool sweater feel warmer than a cotton one at the same room temperature?"
+)
 RETURN_PROMPT = (
-    "Back to the passport timing: if I were traveling in seven weeks, how would you frame the risk now?"
+    "Back to the fruit question: would the same thing happen if the bananas were still green?"
 )
 
 _INTERNAL_MACHINERY = re.compile(
@@ -40,9 +49,18 @@ _INTERNAL_MACHINERY = re.compile(
 )
 
 
-def _links_from_latest_solandra_turn(page: Page) -> list[dict[str, str]]:
-    links = page.locator("#conversation .turn.solandra").last.locator("a")
-    raw = links.evaluate_all(
+def _new_solandra_text(page: Page, prior_count: int) -> str:
+    turns = page.locator("#conversation .turn.solandra")
+    if turns.count() <= prior_count:
+        return ""
+    return turns.last.inner_text().strip()
+
+
+def _links_from_latest_solandra_turn(page: Page, prior_count: int) -> list[dict[str, str]]:
+    turns = page.locator("#conversation .turn.solandra")
+    if turns.count() <= prior_count:
+        return []
+    raw = turns.last.locator("a").evaluate_all(
         """els => els.map(a => ({
             text: String(a.textContent || '').trim(),
             href: String(a.href || '')
@@ -55,78 +73,127 @@ def _links_from_latest_solandra_turn(page: Page) -> list[dict[str, str]]:
     ]
 
 
-def _record_stage(
-    page: Page,
-    label: str,
-    prompt: str,
-    evidence: list[dict[str, Any]],
-    evidence_dir: Path,
-) -> None:
-    result = _submit_turn(page, prompt, label)
-    visible = _assistant_text(result)
-    final_body = _final_product_body(result)
-    links = _links_from_latest_solandra_turn(page)
-    screenshot_path = evidence_dir / f"{len(evidence) + 1:02d}-{label.lower()}.png"
-    page.screenshot(path=str(screenshot_path), full_page=True)
+def _wait_for_recovered_composer(page: Page) -> None:
+    page.wait_for_function(
+        """() => {
+            const composer = document.getElementById("composer");
+            const input = document.getElementById("conversationInput");
+            const send = document.getElementById("sendButton");
+            return composer?.getAttribute("aria-busy") === "false"
+                && input instanceof HTMLTextAreaElement
+                && input.disabled === false
+                && send instanceof HTMLButtonElement
+                && send.disabled === false;
+        }""",
+        timeout=15_000,
+    )
 
-    assert visible, f"{label}: Solandra rendered no usable response"
-    assert not _INTERNAL_MACHINERY.search(visible), f"{label}: visible response exposed internal machinery"
+
+def _submit_observed_turn(page: Page, prompt: str, label: str) -> dict[str, Any]:
+    EVIDENCE_DIR.mkdir(parents=True, exist_ok=True)
+    composer = _composer(page)
+    prior_count = page.locator("#conversation .turn.solandra").count()
+    composer.fill(prompt)
+
+    with page.expect_response(
+        lambda response: "/api/v1/conversations/" in response.url
+        and "/turns" in response.url
+        and response.request.method == "POST",
+        timeout=45_000,
+    ) as pending:
+        composer.press("Enter")
+    response = pending.value
+    body = _json_object(response)
+
+    completion_error = ""
+    if 200 <= response.status < 300:
+        try:
+            _wait_for_turn_completion(page, prior_count, label)
+        except Exception as error:
+            completion_error = f"{type(error).__name__}: {error}"
+    else:
+        try:
+            _wait_for_recovered_composer(page)
+        except Exception as error:
+            completion_error = f"{type(error).__name__}: {error}"
+
+    visible_solandra = _new_solandra_text(page, prior_count)
+    visible_page = _visible_text(page)
+    composer_value = _composer(page).input_value()
+    links = _links_from_latest_solandra_turn(page, prior_count)
+    screenshot_path = EVIDENCE_DIR / f"{label.lower()}.png"
+    page.screenshot(path=str(screenshot_path), full_page=True)
 
     entry = {
         "label": label,
         "prompt": prompt,
-        "turn_http_status": result.turn_http_status,
-        "turn_body": result.turn_body,
-        "outcome_http_status": result.outcome_http_status,
-        "outcome_body": result.outcome_body,
-        "final_product_body": final_body,
-        "visible_solandra_text": visible,
+        "turn_http_status": response.status,
+        "turn_body": body,
+        "visible_solandra_text": visible_solandra,
+        "visible_page_text": visible_page,
+        "composer_value_after_turn": composer_value,
         "visible_links": links,
+        "completion_error": completion_error,
         "screenshot": str(screenshot_path),
     }
-    evidence.append(entry)
+    (EVIDENCE_DIR / f"{label.lower()}.json").write_text(
+        json.dumps(entry, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
 
     print(f"FRESH_BREADTH_{label}_EVIDENCE_BEGIN")
     print(json.dumps(entry, indent=2, sort_keys=True))
     print(f"FRESH_BREADTH_{label}_EVIDENCE_END")
+    return entry
 
 
-def test_fresh_canonical_solandra_e2e_breadth(page: Page) -> None:
+def _assert_usable(result: dict[str, Any]) -> None:
+    assert 200 <= result["turn_http_status"] < 300, (
+        f"{result['label']}: turn POST returned HTTP {result['turn_http_status']} "
+        f"body={result['turn_body']!r}"
+    )
+    assert result["visible_solandra_text"], f"{result['label']}: no visible Solandra response"
+    assert not _INTERNAL_MACHINERY.search(result["visible_solandra_text"]), (
+        f"{result['label']}: visible response exposed internal machinery"
+    )
+
+
+def _prepare(page: Page) -> bool:
     page.set_viewport_size({"width": 1440, "height": 1000})
     _open_product_surface(page)
+    return _connect_cognitive_assistance_if_available(page)
 
-    evidence_dir = Path("artifacts/fresh-product-breadth")
-    evidence_dir.mkdir(parents=True, exist_ok=True)
-    evidence: list[dict[str, Any]] = []
-    meta: dict[str, Any] = {
-        "product_origin": page.url,
-        "journey": "fresh-canonical-solandra-e2e-breadth",
-        "cases": [
-            "current external Knowledge",
-            "natural source/uncertainty follow-up",
-            "comparison/decision support",
-            "material ambiguity",
-            "topic return/conversational reference",
-        ],
-    }
 
-    changed_capability = False
+def test_fresh_current_knowledge_and_followup(page: Page) -> None:
+    changed = _prepare(page)
     try:
-        changed_capability = _connect_cognitive_assistance_if_available(page)
-        meta["cognitive_assistance_changed_for_validation"] = changed_capability
-
-        _record_stage(page, "CURRENT_KNOWLEDGE", KNOWLEDGE_PROMPT, evidence, evidence_dir)
-        _record_stage(page, "KNOWLEDGE_FOLLOWUP", FOLLOWUP_PROMPT, evidence, evidence_dir)
-        _record_stage(page, "DECISION_SUPPORT", DECISION_PROMPT, evidence, evidence_dir)
-        _record_stage(page, "AMBIGUITY", AMBIGUITY_PROMPT, evidence, evidence_dir)
-        _record_stage(page, "TOPIC_RETURN", RETURN_PROMPT, evidence, evidence_dir)
+        knowledge = _submit_observed_turn(page, KNOWLEDGE_PROMPT, "CURRENT_KNOWLEDGE")
+        _assert_usable(knowledge)
+        followup = _submit_observed_turn(page, FOLLOWUP_PROMPT, "KNOWLEDGE_FOLLOWUP")
+        _assert_usable(followup)
     finally:
-        try:
-            _restore_cognitive_assistance(page, changed_capability)
-        finally:
-            payload = {"meta": meta, "turns": evidence}
-            (evidence_dir / "evidence.json").write_text(
-                json.dumps(payload, indent=2, sort_keys=True),
-                encoding="utf-8",
-            )
-            print("FRESH_PRODUCT_BREADTH_EVIDENCE=WRITTEN")
+        _restore_cognitive_assistance(page, changed)
+
+
+def test_fresh_decision_support_and_ambiguity(page: Page) -> None:
+    changed = _prepare(page)
+    try:
+        decision = _submit_observed_turn(page, DECISION_PROMPT, "DECISION_SUPPORT")
+        _assert_usable(decision)
+        ambiguity = _submit_observed_turn(page, AMBIGUITY_PROMPT, "AMBIGUITY")
+        _assert_usable(ambiguity)
+    finally:
+        _restore_cognitive_assistance(page, changed)
+
+
+def test_fresh_topic_change_and_reference(page: Page) -> None:
+    changed = _prepare(page)
+    try:
+        setup = _submit_observed_turn(page, REFERENCE_SETUP_PROMPT, "REFERENCE_SETUP")
+        _assert_usable(setup)
+        switched = _submit_observed_turn(page, TOPIC_SWITCH_PROMPT, "TOPIC_SWITCH")
+        _assert_usable(switched)
+        returned = _submit_observed_turn(page, RETURN_PROMPT, "TOPIC_RETURN")
+        _assert_usable(returned)
+    finally:
+        _restore_cognitive_assistance(page, changed)
