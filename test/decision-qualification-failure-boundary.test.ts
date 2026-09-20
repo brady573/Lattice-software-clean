@@ -81,7 +81,9 @@ test("expected inability to qualify has an explicit typed representation", () =>
 
 test("unexpected qualification failures propagate instead of masquerading as UNRESOLVED", () => {
   class FailingCatalog extends QualifiedCriterionCatalog {
-    override getLatest(_criterionId: string) {
+    override getLatest(
+      _criterionId: string,
+    ): ReturnType<QualifiedCriterionCatalog["getLatest"]> {
       throw new Error("injected qualification runtime failure");
     }
   }
