@@ -7,6 +7,10 @@ import { renderKnowledgeResponseForRun } from "./presentation/solandra/knowledge
 import { renderSolandraAuthoritativeConversationPage } from "./ui/solandra-authoritative-conversation-page.js";
 import { renderSolandraValidatorConversationPage } from "./ui/solandra-validator-conversation-page.js";
 
+/**
+ * @internal Lower-level HTTP composition options used by RuntimeApp assembly and
+ * deliberately isolated tests. This surface does not install authentication.
+ */
 export interface CanonicalAppOptions extends HttpCoreOptions {
   /** Compatibility-only direct simplifier for explicit test/non-canonical compositions. */
   knowledgeSimplifier?: KnowledgeSimplifier | undefined;
@@ -32,8 +36,12 @@ function renderCanonicalConversationPage(validatorDeployment: boolean): string {
 }
 
 /**
- * Canonical Product HTTP composition. Legacy structured intake and simulated
- * prototype routes are intentionally unavailable here.
+ * @internal Lower-level HTTP composition primitive for RuntimeApp assembly and
+ * deliberately isolated tests. It intentionally does not install the
+ * authenticated-subject boundary; supported Product construction goes through
+ * createRuntimeApp(), which owns that authentication boundary.
+ *
+ * Legacy structured intake and simulated prototype routes remain unavailable here.
  */
 export function buildCanonicalApp(options: CanonicalAppOptions = {}): FastifyInstance {
   const {
