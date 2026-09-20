@@ -6,7 +6,8 @@ import type {
   KnowledgeAcquisitionRequest,
   KnowledgeAcquisitionResult,
 } from "../src/knowledge/acquisition.js";
-import { KnowledgeAcquisitionTruthPipeline } from "../src/truth/knowledge-acquisition-pipeline.js";
+import { createRuntimeApp } from "../src/runtime-app.js";
+import { resolveRuntimeConfig } from "../src/runtime-config.js";
 
 class EmptyLiveKnowledgeProvider implements KnowledgeAcquisitionProvider {
   readonly kind = "health-live-fixture";
@@ -30,9 +31,14 @@ test("health endpoint reports composed offline truth and async dispatch lifecycl
 });
 
 
-test("health endpoint reports composed live truth without reinterpreting runtime configuration", async () => {
-  const app = buildApp({
-    truthPipeline: new KnowledgeAcquisitionTruthPipeline(new EmptyLiveKnowledgeProvider()),
+test("health endpoint reports the live truth state actually composed by the runtime", async () => {
+  const config = resolveRuntimeConfig({
+    LATTICE_DEPLOYMENT_MODE: "development",
+    LATTICE_TRUTH_MODE: "v36-live",
+    LATTICE_AUTHENTICATION_MODE: "development-fixture",
+  } as NodeJS.ProcessEnv);
+  const app = await createRuntimeApp(config, {
+    knowledgeAcquisitionProvider: new EmptyLiveKnowledgeProvider(),
   });
   const response = await app.inject({ method: "GET", url: "/health" });
   assert.equal(response.statusCode, 200);
