@@ -162,3 +162,38 @@ test("the user-authorized model capability observes the shared gate but retains 
     await composition.broker.close();
   }
 });
+
+
+test("non-Groq local Solandra composition retains one provider attempt", async () => {
+  const config = resolveRuntimeConfig({
+    LATTICE_DEPLOYMENT_MODE: "development",
+    LATTICE_TRUTH_MODE: "v36-offline",
+    LATTICE_LOCAL_MODEL_PROVIDER_BASE_URL: "http://127.0.0.1:11434/v1",
+    LATTICE_LOCAL_MODEL_PROVIDER_MODEL: "local-retry-boundary-fixture",
+  } as NodeJS.ProcessEnv);
+  const coordinator = new RecordingCoordinator();
+  const originalFetch = globalThis.fetch;
+  let fetches = 0;
+  globalThis.fetch = (async () => {
+    fetches += 1;
+    return new Response("local unavailable", { status: 503 });
+  }) as typeof fetch;
+
+  try {
+    const composition = createConfiguredSolandraCognition(config, coordinator);
+    assert.ok(composition);
+    await assert.rejects(composition.cognition.interpret({
+      conversationId: "local-retry-boundary",
+      messageId: "local-retry-boundary-message",
+      message: "Suggest a neutral label.",
+      recentUserMessages: [],
+      recentConversation: [],
+      governedKnowledge: [],
+      governedRecommendations: [],
+    }));
+    assert.equal(fetches, 1);
+    assert.equal(coordinator.waits.length, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
