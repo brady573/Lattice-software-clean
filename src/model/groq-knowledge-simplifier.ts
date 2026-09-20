@@ -233,6 +233,7 @@ export class GroqKnowledgeSimplifierModelProvider implements ModelProvider {
           await this.rateLimitCoordinator.extendBlockedUntil(
             this.rateLimitScopeId,
             this.now() + delayMs,
+            context.signal,
           );
         }
         throw new ModelProviderError(
