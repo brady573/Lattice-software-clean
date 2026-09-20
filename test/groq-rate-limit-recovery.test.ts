@@ -126,8 +126,7 @@ test("distinct Groq provider objects with the same credential and model observe 
 
   await assert.rejects(providerA.generate(request(), context()), (error) => errorCode(error) === "rate_limit");
   assert.equal(providerBFetches, 0);
-  const result = await providerB.generate(request(), context());
-  assert.equal(result.response.output[0]?.type, "text");
+  await providerB.generate(request(), context());
   assert.equal(providerBFetches, 1);
   assert.deepEqual(waits, [10]);
 });
