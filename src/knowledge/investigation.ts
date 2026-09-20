@@ -125,6 +125,14 @@ export class RelevantKnowledgeAcquisitionProvider implements KnowledgeAcquisitio
       investigationQueries: retrievalQueries,
     });
     assertUniqueAcquiredIdentities(acquired);
+    if (acquired.completion?.status === "FAILED") {
+      return {
+        sources: acquired.sources,
+        claims: acquired.claims,
+        completion: acquired.completion,
+        disposition: "NO_CANDIDATES",
+      };
+    }
     if (acquired.sources.length === 0 || acquired.claims.length === 0) {
       return {
         sources: acquired.sources,
