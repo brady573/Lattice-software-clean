@@ -1,7 +1,11 @@
 import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
 import { MemoryApiRunControlStore, type ApiRunControlStore } from "./api-control-store.js";
 import { MemoryRunStore, type RunStore } from "./run-store.js";
-import { createDefaultOfflineTruthPipeline, type TruthExecutionPipeline } from "./truth/execution-pipeline.js";
+import {
+  composedTruthMode,
+  createDefaultOfflineTruthPipeline,
+  type TruthExecutionPipeline,
+} from "./truth/execution-pipeline.js";
 import type { DecisionEvidenceProvider } from "./truth/decision-evidence-provider.js";
 
 export type HttpCoreOptions = {
@@ -47,7 +51,7 @@ export function createHttpCore(options: HttpCoreOptions = {}): HttpCore {
   app.get("/health", async () => ({
     status: "ok",
     mode: runStore.kind === "memory" ? "fixture" : "postgres",
-    truth: "v36-offline",
+    truth: composedTruthMode(truthPipeline),
     lifecycle: apiControlStore ? "async-dispatch" : "persisted-transitions",
   }));
 
