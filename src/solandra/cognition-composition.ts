@@ -21,11 +21,15 @@ export interface SolandraCognitionComposition {
   model: string;
 }
 
-function composition(runtime: ModelRuntime, model: string): SolandraCognitionComposition {
+function composition(
+  runtime: ModelRuntime,
+  model: string,
+  maxAttempts: 1 | 2 = 1,
+): SolandraCognitionComposition {
   return Object.freeze({
-    cognition: new ModelSolandraCognitiveRuntime(runtime, model),
-    advisory: new ModelSolandraAdvisoryRuntime(runtime, model),
-    actionPreparer: new ModelSolandraActionPreparer(runtime, model),
+    cognition: new ModelSolandraCognitiveRuntime(runtime, model, maxAttempts),
+    advisory: new ModelSolandraAdvisoryRuntime(runtime, model, maxAttempts),
+    actionPreparer: new ModelSolandraActionPreparer(runtime, model, maxAttempts),
     knowledgePresenter: new ModelSolandraKnowledgePresenter(runtime, model),
     model,
   });
@@ -50,7 +54,7 @@ export function createConfiguredSolandraCognition(
         ...(rateLimitCoordinator ? { rateLimitCoordinator } : {}),
       }),
     );
-    return composition(runtime, GROQ_KNOWLEDGE_SIMPLIFIER_MODEL);
+    return composition(runtime, GROQ_KNOWLEDGE_SIMPLIFIER_MODEL, 2);
   }
 
   if (config.localModelProviderBaseUrl !== undefined && config.localModelProviderModel !== undefined) {
