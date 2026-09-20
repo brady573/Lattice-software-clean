@@ -56,6 +56,12 @@ test("PostgreSQL Groq recovery state coordinates independent API/Run-worker-styl
     const firstDeadline = now + 1_000;
     assert.equal(await clientA.extendBlockedUntil(scope, firstDeadline), firstDeadline);
     assert.equal(await clientB.blockedUntil(scope), firstDeadline);
+    const persisted = await cleanup.query<{ scope_id: string }>(
+      "SELECT scope_id FROM groq_rate_limit_recovery WHERE scope_id=$1",
+      [scope],
+    );
+    assert.equal(persisted.rows[0]?.scope_id, scope);
+    assert.equal(persisted.rows[0]?.scope_id.includes(credential), false);
 
     assert.equal(await clientB.extendBlockedUntil(scope, firstDeadline - 500), firstDeadline);
     const laterDeadline = firstDeadline + 1_000;
