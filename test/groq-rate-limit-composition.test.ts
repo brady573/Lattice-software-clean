@@ -110,7 +110,7 @@ test("canonical API and Run-worker entrypoints independently construct shared du
   const apiSource = await readFile("src/index.ts", "utf8");
   const workerSource = await readFile("src/decision/alpha-decision-run-worker.ts", "utf8");
 
-  assert.match(apiSource, /createGroqRateLimitCoordinator\(config\.databaseUrl\)/u);
+  assert.match(apiSource, /createGroqRateLimitCoordinator\(config\.databaseUrl, \{ migrate: config\.autoMigrate \}\)/u);
   assert.match(apiSource, /requireConfiguredSolandraCognition\(config, groqRateLimitCoordinator\)/u);
   assert.match(apiSource, /createConfiguredCapabilityBroker\(config, groqRateLimitCoordinator\)/u);
   assert.match(apiSource, /createConfiguredTruthPipeline\([\s\S]*groqRateLimitCoordinator/u);
@@ -118,6 +118,11 @@ test("canonical API and Run-worker entrypoints independently construct shared du
   assert.match(workerSource, /createGroqRateLimitCoordinator\(config\.databaseUrl\)/u);
   assert.match(workerSource, /createConfiguredTruthPipeline\([\s\S]*groqRateLimitCoordinator/u);
   assert.doesNotMatch(workerSource, /sharedMemoryGroqRateLimitCoordinator/u);
+
+  const userModelSource = await readFile("src/capabilities/user-model-capability.ts", "utf8");
+  const simplifierSource = await readFile("src/presentation/solandra/knowledge-simplification.ts", "utf8");
+  assert.match(userModelSource, /maxAttempts: 1/u);
+  assert.match(simplifierSource, /maxAttempts: 1/u);
 });
 
 test("the user-authorized model capability observes the shared gate but retains one logical provider attempt", async () => {
