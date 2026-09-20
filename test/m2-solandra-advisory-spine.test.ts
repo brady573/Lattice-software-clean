@@ -613,6 +613,8 @@ class GroundedInferenceAdvisoryProvider implements ModelProvider {
   async generate(request: CanonicalModelRequest, _context: ModelCallContext): Promise<ModelProviderResult> {
     this.calls += 1;
     const system = request.messages[0]?.content ?? "";
+    assert.equal(request.structuredOutput?.type, "json_schema");
+    assert.ok(Array.isArray(request.structuredOutput.schema.anyOf));
     assert.match(system, /top-level object itself must contain status/iu);
     assert.match(system, /Do not wrap the result in a named property/iu);
     const text = JSON.stringify({
@@ -663,6 +665,29 @@ class FabricatedBasisProvider implements ModelProvider {
   }
 }
 
+class StaticStructuredAdvisoryProvider implements ModelProvider {
+  readonly kind = "m2-static-structured-advisory-provider";
+  readonly structuredOutputCapability = "json_schema" as const;
+
+  constructor(private readonly payload: unknown) {}
+
+  async generate(request: CanonicalModelRequest, _context: ModelCallContext): Promise<ModelProviderResult> {
+    assert.equal(request.structuredOutput?.type, "json_schema");
+    return {
+      response: {
+        id: "m2-static-structured-response",
+        model: request.model,
+        output: [{ type: "text", text: JSON.stringify(this.payload) }],
+      },
+      route: {
+        actualProvider: this.kind,
+        actualModel: request.model,
+        upstreamRequestId: "m2-static-structured-request",
+      },
+    };
+  }
+}
+
 const INTENT: IntentVersion = {
   intentScopeId: "consultation:m2-contract",
   intentVersionId: "intent-m2-contract-v1",
@@ -704,6 +729,16 @@ function contractAdvisoryInput(): SolandraAdvisoryInput {
   };
 }
 
+function contractAdvisoryInputWithMessages(): SolandraAdvisoryInput {
+  return {
+    ...contractAdvisoryInput(),
+    userContextMessages: [
+      { messageId: "message-m2-prior", content: "I prefer lower maintenance." },
+      { messageId: "message-m2-contract", content: FIRST_USER },
+    ],
+  };
+}
+
 test("ModelSolandraAdvisoryRuntime uses one model pass even when proposal wording contains unsupported external claims", async () => {
   const provider = new UnsupportedFactAdvisoryProvider();
   const runtime = new ModelSolandraAdvisoryRuntime(new ModelRuntime(provider), "m2-single-pass-model");
@@ -736,6 +771,62 @@ test("ModelSolandraAdvisoryRuntime rejects fabricated Knowledge/claim references
   await assert.rejects(
     runtime.advise(contractAdvisoryInput()),
     /referenced Knowledge that Lattice did not supply/iu,
+  );
+});
+
+test("ModelSolandraAdvisoryRuntime rejects a fabricated claim inside supplied Knowledge", async () => {
+  const runtime = new ModelSolandraAdvisoryRuntime(
+    new ModelRuntime(new StaticStructuredAdvisoryProvider({
+      status: "RECOMMENDATION",
+      recommendation: "Use the supplied Knowledge.",
+      basis: [{ knowledgeId: "knowledge-supplied", claimIds: ["claim-not-supplied"] }],
+      rationale: ["Advisory judgment."],
+      tradeoffs: [],
+      assumptions: [],
+      uncertainties: [],
+      alternatives: [],
+    })),
+    "m2-contract-model",
+  );
+  await assert.rejects(
+    runtime.advise(contractAdvisoryInput()),
+    /claim that is not part of the supplied Knowledge/iu,
+  );
+});
+
+test("ModelSolandraAdvisoryRuntime rejects fabricated USER premise message lineage", async () => {
+  const runtime = new ModelSolandraAdvisoryRuntime(
+    new ModelRuntime(new StaticStructuredAdvisoryProvider({
+      status: "RECOMMENDATION",
+      recommendation: "Use the supplied Knowledge.",
+      basis: [{ knowledgeId: "knowledge-supplied", claimIds: ["claim-supplied"] }],
+      rationale: ["Advisory judgment."],
+      tradeoffs: [],
+      assumptions: [],
+      uncertainties: [],
+      alternatives: [],
+      userPremiseMessageIds: ["message-m2-contract", "message-invented"],
+    })),
+    "m2-contract-model",
+  );
+  await assert.rejects(
+    runtime.advise(contractAdvisoryInputWithMessages()),
+    /referenced USER premise material that Lattice did not supply/iu,
+  );
+});
+
+test("ModelSolandraAdvisoryRuntime keeps schema-semantic validation after structured transport", async () => {
+  const runtime = new ModelSolandraAdvisoryRuntime(
+    new ModelRuntime(new StaticStructuredAdvisoryProvider({
+      status: "NEEDS_KNOWLEDGE",
+      knowledgeNeeds: [],
+      reason: "Missing external fact.",
+    })),
+    "m2-contract-model",
+  );
+  await assert.rejects(
+    runtime.advise(contractAdvisoryInput()),
+    /too_small|expected array to have|knowledgeNeeds/iu,
   );
 });
 
