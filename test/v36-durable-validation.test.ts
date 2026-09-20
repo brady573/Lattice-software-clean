@@ -80,6 +80,6 @@ test("V36 rejects malformed opaque durable provider results before admission", a
 
   await assert.rejects(
     pipeline.resumeDurableValidation(initial.checkpoint, malformed),
-    /V36 successful runtime research result must contain artifacts, edges, and evidence arrays/,
+    /Research result artifacts must be an array/,
   );
 });

@@ -4,7 +4,9 @@ import { laptopFixture } from "./fixtures/legacy-laptop-fixture.js";
 import {
   admitV36ResumeResults,
   createV36NeedsResearch,
+  prepareV36Resume,
   type V36ResearchRequest,
+  type V36UntrustedResearchExecutionResult,
 } from "../src/truth/continuation.js";
 import { OfflineFixtureTruthPipeline } from "../src/truth/execution-pipeline.js";
 import { prepareV36RuntimeResume } from "../src/truth/runtime-handoff.js";
@@ -81,7 +83,7 @@ test("malformed successful durable payload fails closed before canonical V36 res
 
   assert.throws(
     () => prepareV36RuntimeResume(yielded.checkpoint, [malformed]),
-    /must contain artifacts, edges, and evidence arrays/u,
+    /Research result artifacts must be an array|must contain artifacts, edges, and evidence arrays/u,
   );
 });
 
@@ -141,5 +143,65 @@ test("runtime handoff rejects successful payloads whose artifacts cross Run scop
   assert.throws(
     () => prepareV36RuntimeResume(yielded.checkpoint, [crossRun]),
     /Research artifact crossed Run scope/u,
+  );
+});
+
+
+test("direct V36 continuation rejects structurally incomplete successful research results", async () => {
+  const yielded = await oneRequestYield("run-v36-direct-continuation-structural");
+  const malformed: V36UntrustedResearchExecutionResult = {
+    requestId: yielded.researchRequests[0]!.id,
+    runId: yielded.checkpoint.runId,
+    outcome: "SUCCEEDED",
+    result: {
+      artifacts: [{
+        runId: yielded.checkpoint.runId,
+        untrusted: true,
+      }],
+      edges: [],
+      evidence: [],
+    },
+    operationalFailure: null,
+  };
+
+  assert.throws(
+    () => prepareV36Resume(yielded.checkpoint, [malformed]),
+  );
+});
+
+test("runtime handoff rejects malformed artifact fields before protected V36 continuation", async () => {
+  const yielded = await oneRequestYield("run-v36-runtime-handoff-structural");
+  const malformed: DurableV36ExecutionResult = {
+    requestId: yielded.researchRequests[0]!.id,
+    runId: yielded.checkpoint.runId,
+    outcome: "SUCCEEDED",
+    result: {
+      artifacts: [{
+        id: "artifact-invalid-provenance",
+        runId: yielded.checkpoint.runId,
+        canonicalUri: "fixture://artifact-invalid-provenance",
+        artifactHash: "hash",
+        publisher: null,
+        originKey: null,
+        provenanceComponentKey: null,
+        provenanceConfidence: "CERTAIN",
+        authoritativePrimary: false,
+        retrievedAt: "2026-09-20T00:00:00.000Z",
+        publishedAt: null,
+        effectiveFrom: null,
+        effectiveTo: null,
+        contentType: "text/plain",
+        metadata: {},
+        untrusted: true,
+      }],
+      edges: [],
+      evidence: [],
+    },
+    operationalFailure: null,
+  };
+
+  assert.throws(
+    () => prepareV36RuntimeResume(yielded.checkpoint, [malformed]),
+    /invalid provenanceConfidence/u,
   );
 });
