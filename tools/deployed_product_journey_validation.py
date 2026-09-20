@@ -291,6 +291,16 @@ def _assert_contextual_clarification(result: StageResult) -> None:
             f"Material ambiguity interpretation field {field} must contain non-empty strings"
         )
         context_present = context_present or bool(value)
+
+    for field in ("referencedKnowledgeId", "referencedRecommendationId", "referencedOptionId"):
+        value = interpretation.get(field)
+        if value is None:
+            continue
+        assert isinstance(value, str) and value.strip(), (
+            f"Material ambiguity interpretation field {field} must be a non-empty string when present"
+        )
+        context_present = True
+
     assert context_present, "Material ambiguity interpretation exposed no structural context"
 
 
