@@ -370,6 +370,7 @@ export class ModelSolandraCognitiveRuntime implements SolandraCognitiveRuntime {
   constructor(
     private readonly runtime: ModelRuntime,
     private readonly model: string,
+    private readonly maxAttempts: 1 | 2 = 1,
   ) {
     if (!model.trim()) throw new Error("Solandra cognition model must be non-empty.");
   }
@@ -379,7 +380,7 @@ export class ModelSolandraCognitiveRuntime implements SolandraCognitiveRuntime {
     const result = await this.runtime.call(request, {
       correlationId: `solandra-cognition:${input.conversationId}:${input.messageId}`,
       idempotencyKey: input.messageId,
-      maxAttempts: 2,
+      maxAttempts: this.maxAttempts,
     });
     if (result.response.output.length !== 1 || result.response.output[0]?.type !== "text") {
       throw new ModelProviderError("invalid_output", "Solandra cognition requires exactly one text output.");
