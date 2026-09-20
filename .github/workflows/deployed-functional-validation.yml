@@ -13,6 +13,11 @@ on:
         required: true
         default: true
         type: boolean
+      run_fresh_breadth:
+        description: Run fresh held-out canonical Solandra breadth capture
+        required: true
+        default: true
+        type: boolean
   deployment_status:
 
 permissions:
@@ -128,6 +133,30 @@ jobs:
             --tracing retain-on-failure \
             --screenshot only-on-failure \
             --video retain-on-failure
+
+      - name: Run fresh held-out Product breadth validation
+        id: fresh-breadth
+        if: ${{ github.event_name == 'workflow_dispatch' && steps.resolve.outputs.should_run == 'true' && inputs.run_fresh_breadth == true }}
+        env:
+          PYTHONUNBUFFERED: '1'
+          DEPLOYED_BASE_URL: ${{ steps.resolve.outputs.product_target }}
+        run: |
+          set -euo pipefail
+          test -z "${LATTICE_OWNER_ACCESS_TOKEN+x}"
+          python -m pytest -q -s tools/fresh_deployed_product_breadth_validation.py \
+            --browser chromium \
+            --tracing retain-on-failure \
+            --screenshot only-on-failure \
+            --video retain-on-failure
+
+      - name: Upload fresh breadth evidence
+        if: ${{ always() && github.event_name == 'workflow_dispatch' && inputs.run_fresh_breadth == true }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: fresh-product-breadth-${{ github.run_id }}
+          path: artifacts/fresh-product-breadth/
+          if-no-files-found: warn
+          retention-days: 7
 
       - name: Upload failed Product journey artifacts
         if: ${{ failure() && steps.product-journey.outcome == 'failure' }}
