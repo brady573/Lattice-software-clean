@@ -79,7 +79,7 @@ test("ordinary Solandra cognition recovers one transient retryable provider fail
     RETRYABLE,
     JSON.stringify({ mode: "CONVERSATION", response: "A quiet label could be Evening Notes." }),
   ]);
-  const cognition = new ModelSolandraCognitiveRuntime(runtime(provider), MODEL);
+  const cognition = new ModelSolandraCognitiveRuntime(runtime(provider), MODEL, 2);
 
   const result = await cognition.interpret({
     conversationId: "groq-retry-conversation",
@@ -100,7 +100,7 @@ test("Knowledge investigation planning recovers one transient retryable provider
     RETRYABLE,
     JSON.stringify({ retrievalQueries: ["lunar eclipse observation geometry"] }),
   ]);
-  const investigator = new ModelSolandraKnowledgeInvestigator(runtime(provider), MODEL);
+  const investigator = new ModelSolandraKnowledgeInvestigator(runtime(provider), MODEL, 2);
 
   const result = await investigator.plan({
     runId: "groq-retry-plan-run",
@@ -118,7 +118,7 @@ test("Knowledge responsiveness recovers one transient retryable provider failure
     RETRYABLE,
     JSON.stringify({ selections: [] }),
   ]);
-  const investigator = new ModelSolandraKnowledgeInvestigator(runtime(provider), MODEL);
+  const investigator = new ModelSolandraKnowledgeInvestigator(runtime(provider), MODEL, 2);
 
   const result = await investigator.selectResponsive({
     runId: "groq-retry-responsive-run",
@@ -157,7 +157,7 @@ test("advisory reasoning recovers one transient retryable provider failure witho
       uncertainties: ["The USER has not supplied a controlling preference."],
     }),
   ]);
-  const advisory = new ModelSolandraAdvisoryRuntime(runtime(provider), MODEL);
+  const advisory = new ModelSolandraAdvisoryRuntime(runtime(provider), MODEL, 2);
 
   const result = await advisory.advise({
     conversationId: "groq-retry-advisory",
@@ -192,7 +192,7 @@ test("advisory grounding recovers one transient retryable provider failure witho
       knowledgeNeeds: [],
     }),
   ]);
-  const advisory = new ModelSolandraAdvisoryRuntime(runtime(provider), MODEL);
+  const advisory = new ModelSolandraAdvisoryRuntime(runtime(provider), MODEL, 2);
 
   const result = await advisory.advise({
     conversationId: "groq-retry-advisory-grounding",
@@ -217,7 +217,7 @@ test("Action Preparation generation recovers one transient retryable provider fa
       basis: [],
     }),
   ]);
-  const preparer = new ModelSolandraActionPreparer(runtime(provider), MODEL);
+  const preparer = new ModelSolandraActionPreparer(runtime(provider), MODEL, 2);
 
   const result = await preparer.prepare({
     conversationId: "groq-retry-action",
@@ -248,7 +248,7 @@ test("Action Preparation grounding recovers one transient retryable provider fai
       authorityBoundaryPreserved: true,
     }),
   ]);
-  const preparer = new ModelSolandraActionPreparer(runtime(provider), MODEL);
+  const preparer = new ModelSolandraActionPreparer(runtime(provider), MODEL, 2);
 
   const result = await preparer.prepare({
     conversationId: "groq-retry-action-grounding",
