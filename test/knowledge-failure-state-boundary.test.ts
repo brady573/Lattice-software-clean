@@ -185,6 +185,19 @@ test("unexpected raw provider exceptions propagate instead of becoming epistemic
   );
 });
 
+test("semantic responsiveness failure remains investigation-unavailable rather than no-responsive", async () => {
+  const pipeline = new KnowledgeAcquisitionTruthPipeline(new RelevantKnowledgeAcquisitionProvider(
+    new FixedProvider(answerableResult()),
+    investigator({ selectionError: new Error("injected responsiveness runtime failure") }),
+  ));
+  const execution = await pipeline.execute("knowledge-responsiveness-failure", baseRequest);
+  const knowledge = buildKnowledgeOutcome(run("knowledge-responsiveness-failure"), execution.bundle);
+
+  assert.equal(knowledge.availability, "INVESTIGATION_UNAVAILABLE");
+  assert.deepEqual(knowledge.findings, []);
+  assert.doesNotMatch(JSON.stringify(execution.bundle), /injected responsiveness runtime failure/iu);
+});
+
 test("complete acquisition with zero candidates remains honest completed-search insufficiency", async () => {
   const pipeline = new KnowledgeAcquisitionTruthPipeline(new RelevantKnowledgeAcquisitionProvider(
     new FixedProvider({ sources: [], claims: [], completion: { status: "COMPLETE" } }),
