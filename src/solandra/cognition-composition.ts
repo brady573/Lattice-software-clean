@@ -3,6 +3,7 @@ import {
   GroqKnowledgeSimplifierModelProvider,
   GroqKnowledgeSimplifierModelRuntime,
 } from "../model/groq-knowledge-simplifier.js";
+import type { GroqRateLimitCoordinator } from "../model/groq-rate-limit-coordinator.js";
 import { LocalOfflineModelRuntime } from "../model/local-offline-runtime.js";
 import { OpenAiCompatibleModelProvider } from "../model/openai-compatible.js";
 import type { ModelRuntime } from "../model/runtime.js";
@@ -37,13 +38,17 @@ function composition(runtime: ModelRuntime, model: string): SolandraCognitionCom
  */
 export function createConfiguredSolandraCognition(
   config: RuntimeConfig,
+  rateLimitCoordinator?: GroqRateLimitCoordinator,
 ): SolandraCognitionComposition | undefined {
   if (config.solandraCognitionRoute === "groq-gpt-oss-120b") {
     if (!config.solandraCognitionApiKey) {
       throw new Error("Configured Solandra cognition route is missing its runtime credential.");
     }
     const runtime = new GroqKnowledgeSimplifierModelRuntime(
-      new GroqKnowledgeSimplifierModelProvider({ apiKey: config.solandraCognitionApiKey }),
+      new GroqKnowledgeSimplifierModelProvider({
+        apiKey: config.solandraCognitionApiKey,
+        ...(rateLimitCoordinator ? { rateLimitCoordinator } : {}),
+      }),
     );
     return composition(runtime, GROQ_KNOWLEDGE_SIMPLIFIER_MODEL);
   }
@@ -65,8 +70,9 @@ export function createConfiguredSolandraCognition(
  */
 export function requireConfiguredSolandraCognition(
   config: RuntimeConfig,
+  rateLimitCoordinator?: GroqRateLimitCoordinator,
 ): SolandraCognitionComposition {
-  const configured = createConfiguredSolandraCognition(config);
+  const configured = createConfiguredSolandraCognition(config, rateLimitCoordinator);
   if (configured === undefined) {
     throw new Error(
       "Canonical Solandra requires configured cognition; configure LATTICE_SOLANDRA_COGNITION_ROUTE or a development local model provider.",
