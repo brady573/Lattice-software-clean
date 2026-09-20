@@ -136,7 +136,7 @@ jobs:
 
       - name: Run fresh held-out Product breadth validation
         id: fresh-breadth
-        if: ${{ github.event_name == 'workflow_dispatch' && steps.resolve.outputs.should_run == 'true' && inputs.run_fresh_breadth == true }}
+        if: ${{ !cancelled() && github.event_name == 'workflow_dispatch' && steps.resolve.outputs.should_run == 'true' && inputs.run_fresh_breadth == true }}
         env:
           PYTHONUNBUFFERED: '1'
           DEPLOYED_BASE_URL: ${{ steps.resolve.outputs.product_target }}
