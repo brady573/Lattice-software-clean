@@ -483,7 +483,10 @@ test("multi-turn Product pressure survives a shorter Retry-After than the shared
         return groqTextResponse(content, requests);
       }
       if (correlationId.startsWith("solandra-advisory:")) {
-        return groqTextResponse(advisoryClarificationOutput(), requests);
+        return groqTextResponse(
+          JSON.stringify({ value: JSON.parse(advisoryClarificationOutput()) }),
+          requests,
+        );
       }
       throw new Error(`Unexpected Product-path model correlation: ${correlationId}`);
     },
