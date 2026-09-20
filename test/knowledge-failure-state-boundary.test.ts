@@ -196,7 +196,7 @@ test("complete acquisition with zero candidates remains honest completed-search 
   assert.equal(knowledge.availability, "NO_CANDIDATES");
   assert.deepEqual(knowledge.findings, []);
   const message = await renderKnowledgeResponseForRun(knowledge, run("knowledge-no-candidates"));
-  assert.match(message, /search completed/iu);
+  assert.match(message, /able to check the available external source/iu);
   assert.doesNotMatch(message, /temporar|unavailable|couldn't complete/iu);
 });
 
@@ -211,7 +211,7 @@ test("acquired candidates rejected by semantic responsiveness remain distinct fr
   assert.equal(knowledge.availability, "NO_RESPONSIVE_MATERIAL");
   assert.deepEqual(knowledge.findings, []);
   const message = await renderKnowledgeResponseForRun(knowledge, run("knowledge-no-responsive"));
-  assert.match(message, /search completed/iu);
+  assert.match(message, /able to check the available external source/iu);
   assert.match(message, /did not actually address/iu);
   assert.doesNotMatch(message, /couldn't reach/iu);
 });
