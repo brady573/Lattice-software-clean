@@ -321,6 +321,10 @@ export class ModelRuntime {
     this.attempts = new BoundedAttemptLedger(maxStateEntries);
   }
 
+  supportsStructuredOutput(type: "json_schema"): boolean {
+    return this.provider.structuredOutputCapability === type;
+  }
+
   async call(
     rawRequest: unknown,
     options: ModelCallOptions,
