@@ -116,6 +116,7 @@ class ForbiddenLegacyInterpreter implements ConsultationInterpreter {
 
 class RecordingAcquisition implements KnowledgeAcquisitionProvider {
   readonly kind = "m2-recording-acquisition";
+  readonly structuredOutputCapability = "json_schema" as const;
   readonly requests: KnowledgeAcquisitionRequest[] = [];
 
   async acquire(request: KnowledgeAcquisitionRequest): Promise<KnowledgeAcquisitionResult> {
@@ -583,6 +584,7 @@ test("M2 advisory Knowledge continuation is hard-bounded and fails honestly when
 
 class UnsupportedFactAdvisoryProvider implements ModelProvider {
   readonly kind = "m2-unsupported-fact-advisory-provider";
+  readonly structuredOutputCapability = "json_schema" as const;
   calls = 0;
 
   async generate(request: CanonicalModelRequest, _context: ModelCallContext): Promise<ModelProviderResult> {
@@ -606,6 +608,7 @@ class UnsupportedFactAdvisoryProvider implements ModelProvider {
 
 class GroundedInferenceAdvisoryProvider implements ModelProvider {
   readonly kind = "m2-grounded-inference-advisory-provider";
+  readonly structuredOutputCapability = "json_schema" as const;
   calls = 0;
 
   async generate(request: CanonicalModelRequest, _context: ModelCallContext): Promise<ModelProviderResult> {
@@ -632,6 +635,7 @@ class GroundedInferenceAdvisoryProvider implements ModelProvider {
 
 class FabricatedBasisProvider implements ModelProvider {
   readonly kind = "m2-fabricated-basis-provider";
+  readonly structuredOutputCapability = "json_schema" as const;
   async generate(request: CanonicalModelRequest, _context: ModelCallContext): Promise<ModelProviderResult> {
     return {
       response: {
@@ -738,6 +742,7 @@ test("ModelSolandraAdvisoryRuntime rejects fabricated Knowledge/claim references
 
 class SingleObjectArrayAdvisoryProvider implements ModelProvider {
   readonly kind = "m4-single-object-array-advisory-provider";
+  readonly structuredOutputCapability = "json_schema" as const;
   calls = 0;
 
   async generate(request: CanonicalModelRequest, _context: ModelCallContext): Promise<ModelProviderResult> {
@@ -761,6 +766,7 @@ class SingleObjectArrayAdvisoryProvider implements ModelProvider {
 
 class MultipleObjectArrayAdvisoryProvider implements ModelProvider {
   readonly kind = "m4-multiple-object-array-advisory-provider";
+  readonly structuredOutputCapability = "json_schema" as const;
   calls = 0;
 
   async generate(request: CanonicalModelRequest, _context: ModelCallContext): Promise<ModelProviderResult> {
