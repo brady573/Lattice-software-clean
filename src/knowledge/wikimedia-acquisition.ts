@@ -397,7 +397,9 @@ export class WikimediaKnowledgeAcquisitionProvider implements KnowledgeAcquisiti
       claims,
       completion: interruption === null
         ? { status: "COMPLETE" }
-        : { status: "PARTIAL", reason: interruption },
+        : sources.length === 0 || claims.length === 0
+          ? { status: "FAILED", reason: interruption }
+          : { status: "PARTIAL", reason: interruption },
     };
   }
 
