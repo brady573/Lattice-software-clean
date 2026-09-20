@@ -251,9 +251,16 @@ test("validateResearchResult establishes observation-only evidence and rejects i
     "relation",
     "specificEvidence",
   ]);
-  assert.equal("admitted" in observation, false);
-  assert.equal("verification" in observation, false);
-  assert.equal("authoritativePrimary" in observation, false);
+  for (const field of [
+    "admitted",
+    "verification",
+    "provenanceComponentKey",
+    "provenanceConfidence",
+    "authoritativePrimary",
+    "rejectionReason",
+  ]) {
+    assert.equal(field in observation, false);
+  }
 
   const malformed = [
     { ...candidate, artifactId: 42 },
