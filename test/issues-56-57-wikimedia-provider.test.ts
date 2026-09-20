@@ -143,7 +143,7 @@ test("Issue #57: stalled Wikimedia search is bounded and a later request still s
   });
 
   const timedOut = await provider.acquire(request("issue-57-timeout"));
-  assert.deepEqual(timedOut.completion, { status: "PARTIAL", reason: "TIMED_OUT" });
+  assert.deepEqual(timedOut.completion, { status: "FAILED", reason: "TIMED_OUT" });
   assert.deepEqual(timedOut.sources, []);
   assert.deepEqual(timedOut.claims, []);
   assert.equal(calls, 1, "Wikimedia acquisition must not invent a retry after timeout");
@@ -235,7 +235,7 @@ test("Issue #91: later Wikimedia rate limit preserves already retrieved source m
     investigationQueries: ["first useful query", "later interrupted query"],
   });
 
-  assert.deepEqual(result.completion, { status: "PARTIAL", reason: "RATE_LIMITED" });
+  assert.deepEqual(result.completion, { status: "FAILED", reason: "RATE_LIMITED" });
   assert.equal(result.sources[0]?.sourceId, "page:91");
   assert.equal(result.sources[0]?.content, "Materially useful introductory source report.");
   assert.equal(result.claims.length, 1);
