@@ -84,6 +84,10 @@ export type ClaimResearchTaskResult =
   | { outcome: "exhausted" }
   | { outcome: "stale" };
 
+export type RenewResearchTaskLeaseResult =
+  | { outcome: "renewed"; leaseExpiresAt: string }
+  | { outcome: "stale" };
+
 export type CompleteResearchTaskResult =
   | { outcome: "accepted"; result: unknown }
   | { outcome: "existing"; result: unknown }
@@ -105,6 +109,13 @@ export interface DurableOrchestrationStore {
     now: Date;
     leaseMs: number;
   }): Promise<ClaimResearchTaskResult>;
+  renewResearchTaskLease(input: {
+    taskId: string;
+    workerId: string;
+    attemptNumber: number;
+    now: Date;
+    leaseMs: number;
+  }): Promise<RenewResearchTaskLeaseResult>;
   completeResearchTask(input: {
     taskId: string;
     workerId: string;
@@ -391,6 +402,48 @@ export class MemoryOrchestrationStore implements DurableOrchestrationStore {
     task.leaseOwner = input.workerId;
     task.leaseExpiresAt = attempt.leaseExpiresAt;
     return { outcome: "claimed", task: cloneTask(task), attempt: structuredClone(attempt) };
+  }
+
+  async renewResearchTaskLease(input: {
+    taskId: string;
+    workerId: string;
+    attemptNumber: number;
+    now: Date;
+    leaseMs: number;
+  }): Promise<RenewResearchTaskLeaseResult> {
+    if (!Number.isSafeInteger(input.leaseMs) || input.leaseMs <= 0) {
+      throw new Error("Research task leaseMs must be a positive safe integer.");
+    }
+    const task = this.tasks.get(input.taskId);
+    if (!task) return { outcome: "stale" };
+    const run = await this.runStore.get(task.runId);
+    const attempt = this.attempts.get(task.id)?.find(
+      (item) => item.attemptNumber === input.attemptNumber,
+    );
+    const taskLeaseValid = task.leaseExpiresAt !== null
+      && new Date(task.leaseExpiresAt) > input.now;
+    const attemptLeaseValid = attempt !== undefined
+      && new Date(attempt.leaseExpiresAt) > input.now;
+    if (
+      !run
+      || isTerminal(run.status)
+      || run.version !== task.runEpoch
+      || task.status !== "RUNNING"
+      || task.currentAttempt !== input.attemptNumber
+      || task.leaseOwner !== input.workerId
+      || !taskLeaseValid
+      || !attempt
+      || attempt.status !== "RUNNING"
+      || attempt.workerId !== input.workerId
+      || !attemptLeaseValid
+    ) {
+      return { outcome: "stale" };
+    }
+
+    const leaseExpiresAt = new Date(input.now.getTime() + input.leaseMs).toISOString();
+    task.leaseExpiresAt = leaseExpiresAt;
+    attempt.leaseExpiresAt = leaseExpiresAt;
+    return { outcome: "renewed", leaseExpiresAt };
   }
 
   async completeResearchTask(input: {

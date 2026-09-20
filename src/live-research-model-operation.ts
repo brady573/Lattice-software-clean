@@ -225,6 +225,7 @@ export class PinnedLiveResearchModelOperation implements LiveResearchOperation {
         correlationId: `m9-5:${context.task.id}`,
         idempotencyKey: context.task.taskFingerprint,
         maxAttempts: 1,
+        signal: context.signal,
         invocation: {
           executionClass: this.config.executionClass,
           routeMode: "PINNED",
@@ -246,6 +247,7 @@ export class PinnedLiveResearchModelOperation implements LiveResearchOperation {
         intentVersionId: context.binding.intentVersionId,
         role: "RESEARCH",
         callNumber: 1,
+        signal: context.signal,
         ...(priorOperation === undefined ? {} : { priorOperation }),
       },
       this.guard,

@@ -15,6 +15,7 @@ import {
   type FailResearchTaskResult,
   type ResearchTaskDefinition,
   type ResearchTaskStatus,
+  type RenewResearchTaskLeaseResult,
   type ScheduleResearchGraphInput,
   type ScheduleResearchGraphResult,
 } from "./orchestration-store.js";
@@ -490,6 +491,83 @@ export class PostgresOrchestrationStore implements DurableOrchestrationStore {
       if (!claimed) throw new Error("Claimed research task could not be reloaded.");
       await client.query("COMMIT");
       return { outcome: "claimed", task: claimed, attempt: attemptFromRow(attemptResult.rows[0]!) };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async renewResearchTaskLease(input: {
+    taskId: string;
+    workerId: string;
+    attemptNumber: number;
+    now: Date;
+    leaseMs: number;
+  }): Promise<RenewResearchTaskLeaseResult> {
+    if (!Number.isSafeInteger(input.leaseMs) || input.leaseMs <= 0) {
+      throw new Error("Research task leaseMs must be a positive safe integer.");
+    }
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const runId = await taskRunId(client, input.taskId);
+      if (!runId) {
+        await client.query("ROLLBACK");
+        return { outcome: "stale" };
+      }
+      const run = await runState(client, runId, true);
+      const task = await loadTask(client, input.taskId, true);
+      if (!task) {
+        await client.query("ROLLBACK");
+        return { outcome: "stale" };
+      }
+      const taskLeaseValid = task.leaseExpiresAt !== null
+        && new Date(task.leaseExpiresAt) > input.now;
+      if (
+        !run
+        || isTerminal(run.status)
+        || run.version !== task.runEpoch
+        || task.status !== "RUNNING"
+        || task.currentAttempt !== input.attemptNumber
+        || task.leaseOwner !== input.workerId
+        || !taskLeaseValid
+      ) {
+        await client.query("ROLLBACK");
+        return { outcome: "stale" };
+      }
+
+      const attempt = await client.query<AttemptRow>(
+        `SELECT task_id,attempt_number,worker_id,status,lease_expires_at,result_json,error_text,started_at,completed_at
+         FROM run_task_attempts WHERE task_id=$1 AND attempt_number=$2 FOR UPDATE`,
+        [task.id, input.attemptNumber],
+      );
+      if (
+        !attempt.rows[0]
+        || attempt.rows[0].status !== "RUNNING"
+        || attempt.rows[0].worker_id !== input.workerId
+        || new Date(attempt.rows[0].lease_expires_at) <= input.now
+      ) {
+        await client.query("ROLLBACK");
+        return { outcome: "stale" };
+      }
+
+      const leaseExpiresAt = new Date(input.now.getTime() + input.leaseMs);
+      await client.query(
+        `UPDATE run_tasks
+         SET lease_expires_at=$2,updated_at=$3
+         WHERE id=$1`,
+        [task.id, leaseExpiresAt, input.now],
+      );
+      await client.query(
+        `UPDATE run_task_attempts
+         SET lease_expires_at=$3
+         WHERE task_id=$1 AND attempt_number=$2`,
+        [task.id, input.attemptNumber, leaseExpiresAt],
+      );
+      await client.query("COMMIT");
+      return { outcome: "renewed", leaseExpiresAt: leaseExpiresAt.toISOString() };
     } catch (error) {
       await client.query("ROLLBACK");
       throw error;
