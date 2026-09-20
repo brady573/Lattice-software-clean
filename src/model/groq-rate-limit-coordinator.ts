@@ -185,8 +185,11 @@ export class PostgresGroqRateLimitCoordinator implements GroqRateLimitCoordinato
   }
 }
 
-export async function createGroqRateLimitCoordinator(databaseUrl: string | undefined): Promise<GroqRateLimitCoordinator> {
-  return databaseUrl === undefined
-    ? sharedMemoryGroqRateLimitCoordinator()
-    : await PostgresGroqRateLimitCoordinator.connect(databaseUrl);
+export async function createGroqRateLimitCoordinator(
+  databaseUrl: string | undefined,
+  options: { migrate?: boolean } = {},
+): Promise<GroqRateLimitCoordinator> {
+  if (databaseUrl === undefined) return sharedMemoryGroqRateLimitCoordinator();
+  if (options.migrate === true) await PostgresGroqRateLimitCoordinator.migrate(databaseUrl);
+  return await PostgresGroqRateLimitCoordinator.connect(databaseUrl);
 }
