@@ -93,6 +93,9 @@ function renderSourceList(knowledge: KnowledgeOutcome): string {
 }
 
 function renderEmptyKnowledge(knowledge: KnowledgeOutcome): string {
+  if (knowledge.availability === undefined) {
+    return knowledge.uncertainties[0] ?? EMPTY_KNOWLEDGE_MESSAGE;
+  }
   if (knowledge.availability === "EVIDENCE_INSUFFICIENT") {
     return GENERIC_INSUFFICIENT_KNOWLEDGE_MESSAGE;
   }
