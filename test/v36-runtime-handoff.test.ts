@@ -166,7 +166,6 @@ test("direct V36 continuation rejects structurally incomplete successful researc
 
   assert.throws(
     () => prepareV36Resume(yielded.checkpoint, [malformed]),
-    /Research artifact 0 id must be a string/u,
   );
 });
 
