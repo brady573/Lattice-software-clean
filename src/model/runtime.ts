@@ -271,6 +271,16 @@ async function raceWithAbort<T>(
   }
 }
 
+async function waitForRetry(retryAfterMs: number | null, signal: AbortSignal): Promise<void> {
+  if (retryAfterMs === null || retryAfterMs === 0) return;
+  await raceWithAbort(
+    new Promise<void>((resolve) => {
+      setTimeout(resolve, retryAfterMs);
+    }),
+    signal,
+  );
+}
+
 export class ModelRuntime {
   private readonly timeoutMs: number;
   private readonly maxRequestBytes: number;
@@ -457,6 +467,7 @@ export class ModelRuntime {
             if (!classified.retryable || logicalAttempt + 1 >= maxAttempts) {
               throw classified;
             }
+            await waitForRetry(classified.retryAfterMs, signal);
           }
         }
         throw new ModelProviderError("unavailable", "Model call exhausted its attempts.");
