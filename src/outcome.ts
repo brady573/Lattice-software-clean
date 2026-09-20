@@ -59,7 +59,7 @@ export interface KnowledgeEvidence {
 
 export interface KnowledgeOutcome {
   kind: "KNOWLEDGE";
-  availability: KnowledgeAvailability;
+  availability?: KnowledgeAvailability;
   objective: string;
   acceptedUnderstanding: string;
   findings: KnowledgeFinding[];
@@ -171,7 +171,7 @@ function acquisitionUncertainties(truth: TruthBundle): string[] {
       switch (reason) {
         case "RATE_LIMITED":
           return [
-            "External source retrieval was incomplete because the source limited further requests. The result reflects only material retrieved before that interruption.",
+            "External source retrieval was incomplete because the source provider limited further requests. The result reflects only material retrieved before that interruption.",
           ];
         case "TIMED_OUT":
           return [
@@ -179,7 +179,7 @@ function acquisitionUncertainties(truth: TruthBundle): string[] {
           ];
         default:
           return [
-            "External source retrieval was incomplete because the source became unavailable. The result reflects only material retrieved before that interruption.",
+            "External source retrieval was incomplete because the source provider became unavailable. The result reflects only material retrieved before that interruption.",
           ];
       }
     case "INVESTIGATION_UNAVAILABLE":
