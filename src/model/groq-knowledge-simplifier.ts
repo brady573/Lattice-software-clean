@@ -162,19 +162,6 @@ export class GroqKnowledgeSimplifierModelProvider implements ModelProvider {
   }
 
   async generate(request: CanonicalModelRequest, context: ModelCallContext): Promise<ModelProviderResult> {
-    try {
-      await this.rateLimitCoordinator.waitUntilReady(this.rateLimitScopeId, context.signal);
-    } catch (error) {
-      if (context.signal.aborted) {
-        throw new ModelProviderError(
-          "cancelled",
-          "Groq Knowledge simplifier request was cancelled while waiting for provider recovery.",
-          { cause: error },
-        );
-      }
-      throw error;
-    }
-
     if (request.model !== GROQ_KNOWLEDGE_SIMPLIFIER_MODEL) {
       throw new ModelProviderError(
         "unsupported_capability",
@@ -186,6 +173,19 @@ export class GroqKnowledgeSimplifierModelProvider implements ModelProvider {
         "unsupported_capability",
         "Groq Knowledge simplifier does not accept tool calls.",
       );
+    }
+
+    try {
+      await this.rateLimitCoordinator.waitUntilReady(this.rateLimitScopeId, context.signal);
+    } catch (error) {
+      if (context.signal.aborted) {
+        throw new ModelProviderError(
+          "cancelled",
+          "Groq Knowledge simplifier request was cancelled while waiting for provider recovery.",
+          { cause: error },
+        );
+      }
+      throw error;
     }
 
     let response: Response;
