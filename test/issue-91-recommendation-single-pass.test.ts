@@ -86,6 +86,7 @@ function completedAdvisoryRun(
 
 class OneShotAdvisoryProvider implements ModelProvider {
   readonly kind = "issue-91-single-pass-held-out";
+  readonly structuredOutputCapability = "json_schema" as const;
   calls = 0;
 
   constructor(private readonly response: Readonly<Record<string, unknown>>) {}
