@@ -44,15 +44,16 @@ const sleep: GroqRateLimitWait = async (delayMs, signal) => {
   if (delayMs <= 0) return;
   if (signal.aborted) throw signal.reason ?? new Error("Aborted.");
   await new Promise<void>((resolveWait, reject) => {
-    const timer = setTimeout(() => {
-      signal.removeEventListener("abort", onAbort);
-      resolveWait();
-    }, delayMs);
+    let timer: ReturnType<typeof setTimeout>;
     const onAbort = () => {
       clearTimeout(timer);
       signal.removeEventListener("abort", onAbort);
       reject(signal.reason ?? new Error("Aborted."));
     };
+    timer = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolveWait();
+    }, delayMs);
     signal.addEventListener("abort", onAbort, { once: true });
   });
 };
