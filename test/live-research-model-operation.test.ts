@@ -381,3 +381,49 @@ test("M9-5 keeps capability reuse operational and attaches exact route provenanc
   assert.equal(capability.reused, true);
   assert.equal(invocation.routeProvenance, "COMPLETE");
 });
+
+
+test("Issue #131: ownership cancellation reaches both the model runtime and capability execution seams", async () => {
+  const controller = new AbortController();
+  let modelSignal: AbortSignal | undefined;
+  let capabilitySignal: AbortSignal | undefined;
+  const capabilityStarted = (() => {
+    let resolve!: () => void;
+    const promise = new Promise<void>((done) => { resolve = done; });
+    return { promise, resolve };
+  })();
+
+  const operation = new PinnedLiveResearchModelOperation(
+    { model: "live-model", requestedProvider: "fixture-provider", executionClass: "LIVE_DIRECT" },
+    {
+      async call(_request, options) {
+        modelSignal = options.signal;
+        return modelResult([{
+          type: "tool_call",
+          id: "tool-call-cancel",
+          name: "research_lookup",
+          arguments: { query: "Verify the current bounded claim." },
+        }]);
+      },
+    },
+    { async load() { return projectionInput(); } },
+    { async load() { return grant(); } },
+    activeGuard(),
+    {
+      async execute(execution) {
+        capabilitySignal = execution.signal;
+        capabilityStarted.resolve();
+        return await new Promise<never>(() => undefined);
+      },
+    },
+  );
+
+  const executing = operation.execute(context(controller.signal));
+  await capabilityStarted.promise;
+  assert.equal(modelSignal, controller.signal);
+  assert.equal(capabilitySignal?.aborted, false);
+
+  controller.abort(new Error("Research attempt ownership lost."));
+  await assert.rejects(executing, /cancelled/u);
+  assert.equal(capabilitySignal?.aborted, true);
+});
