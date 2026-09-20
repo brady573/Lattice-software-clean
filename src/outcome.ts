@@ -196,11 +196,11 @@ function acquisitionUncertainties(truth: TruthBundle): string[] {
       ];
     case "COMPLETE_NO_CANDIDATES":
       return [
-        "The available source search completed, but it returned no candidate material for this request.",
+        "I was able to check the available external source, but it returned no candidate material for this request.",
       ];
     case "COMPLETE_NO_RESPONSIVE":
       return [
-        "The available source search completed, but the material it returned did not actually address this request.",
+        "I was able to check the available external source, but the material it returned did not actually address this request.",
       ];
     default:
       return [];
