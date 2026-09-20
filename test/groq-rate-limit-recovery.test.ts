@@ -136,8 +136,10 @@ test("Groq recovery windows extend monotonically and different credential scopes
   const coordinator = new MemoryGroqRateLimitCoordinator();
   const scopeA = groqRateLimitScopeId(KEY_A, GROQ_KNOWLEDGE_SIMPLIFIER_MODEL);
   const scopeB = groqRateLimitScopeId(KEY_B, GROQ_KNOWLEDGE_SIMPLIFIER_MODEL);
+  const otherModelScope = groqRateLimitScopeId(KEY_A, "another-groq-model");
 
   assert.notEqual(scopeA, scopeB);
+  assert.notEqual(scopeA, otherModelScope);
   assert.equal(scopeA.includes(KEY_A), false);
   assert.equal(scopeB.includes(KEY_B), false);
 
@@ -146,6 +148,24 @@ test("Groq recovery windows extend monotonically and different credential scopes
   assert.equal(await coordinator.extendBlockedUntil(scopeA, 25_000), 25_000);
   assert.equal(await coordinator.blockedUntil(scopeA), 25_000);
   assert.equal(await coordinator.blockedUntil(scopeB), 0);
+  assert.equal(await coordinator.blockedUntil(otherModelScope), 0);
+});
+
+test("Groq bounded body fallback establishes recovery when rate-limit headers are absent", async () => {
+  let now = 30_000;
+  const coordinator = new MemoryGroqRateLimitCoordinator(() => now);
+  const scope = groqRateLimitScopeId(KEY_A, GROQ_KNOWLEDGE_SIMPLIFIER_MODEL);
+  const provider = new GroqKnowledgeSimplifierModelProvider({
+    apiKey: KEY_A,
+    rateLimitCoordinator: coordinator,
+    now: () => now,
+    fetchImpl: async () => new Response(JSON.stringify({
+      error: { message: "Limit reached; please try again in 0.007s" },
+    }), { status: 429 }),
+  });
+
+  await assert.rejects(provider.generate(request(), context()), (error) => errorCode(error) === "rate_limit");
+  assert.equal(await coordinator.blockedUntil(scope), 30_007);
 });
 
 test("malformed or missing Groq recovery metadata does not create an unbounded shared wait", async () => {
@@ -266,4 +286,32 @@ test("non-retryable Groq output failure remains one provider attempt even when t
     (error) => errorCode(error) === "malformed_response",
   );
   assert.equal(fetches, 1);
+});
+
+
+test("unsupported Groq requests fail before the recovery gate and never send upstream", async () => {
+  let waits = 0;
+  const coordinator = new MemoryGroqRateLimitCoordinator(
+    Date.now,
+    async () => { waits += 1; },
+  );
+  const scope = groqRateLimitScopeId(KEY_A, GROQ_KNOWLEDGE_SIMPLIFIER_MODEL);
+  await coordinator.extendBlockedUntil(scope, Date.now() + 10_000);
+  let fetches = 0;
+  const provider = new GroqKnowledgeSimplifierModelProvider({
+    apiKey: KEY_A,
+    rateLimitCoordinator: coordinator,
+    fetchImpl: async () => {
+      fetches += 1;
+      return success();
+    },
+  });
+  const unsupported: CanonicalModelRequest = {
+    ...request(),
+    model: "different-model",
+  };
+
+  await assert.rejects(provider.generate(unsupported, context()), (error) => errorCode(error) === "unsupported_capability");
+  assert.equal(waits, 0);
+  assert.equal(fetches, 0);
 });
