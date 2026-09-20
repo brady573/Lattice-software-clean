@@ -348,6 +348,7 @@ export class ModelSolandraAdvisoryRuntime implements SolandraAdvisoryRuntime {
   constructor(
     private readonly runtime: ModelRuntime,
     private readonly model: string,
+    private readonly maxAttempts: 1 | 2 = 1,
   ) {
     if (!model.trim()) throw new Error("Solandra advisory model must be non-empty.");
   }
@@ -357,7 +358,7 @@ export class ModelSolandraAdvisoryRuntime implements SolandraAdvisoryRuntime {
     const response = await this.runtime.call(buildAdvisoryRequest(this.model, input), {
       correlationId: `solandra-advisory:${input.conversationId}:${input.userMessageId}`,
       idempotencyKey: `advise:${input.userMessageId}:${basisDigest}`,
-      maxAttempts: 2,
+      maxAttempts: this.maxAttempts,
     });
     if (response.response.output.length !== 1 || response.response.output[0]?.type !== "text") {
       throw new ModelProviderError("invalid_output", "Solandra advisory reasoning requires exactly one text output.");
@@ -373,7 +374,7 @@ export class ModelSolandraAdvisoryRuntime implements SolandraAdvisoryRuntime {
       {
         correlationId: `solandra-advisory-grounding:${input.conversationId}:${input.userMessageId}`,
         idempotencyKey: `grounding:${input.userMessageId}:${basisDigest}`,
-        maxAttempts: 2,
+        maxAttempts: this.maxAttempts,
       },
     );
     if (auditResponse.response.output.length !== 1 || auditResponse.response.output[0]?.type !== "text") {
