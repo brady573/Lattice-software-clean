@@ -289,7 +289,8 @@ test("responsive acquired evidence rejected by V36 remains evidence insufficienc
   assert.equal(knowledge.provenance.length, 1);
   assert.equal(knowledge.evidence?.[0]?.admitted, false);
   const message = await renderKnowledgeResponseForRun(knowledge, run("knowledge-v36-rejected"));
-  assert.match(message, /Qualified evidence did not establish/iu);
+  assert.match(message, /Unresolved as a source report/iu);
+  assert.match(message, /does not independently verify the broader real-world claim/iu);
   assert.doesNotMatch(message, /external investigation|external information source/iu);
 });
 
