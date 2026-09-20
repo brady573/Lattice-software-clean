@@ -79,10 +79,45 @@ export interface CanonicalModelToolDefinition {
   readonly inputSchema: CanonicalModelToolInputSchema;
 }
 
+export type CanonicalModelJsonSchemaType =
+  | "object"
+  | "array"
+  | "string"
+  | "number"
+  | "integer"
+  | "boolean"
+  | "null";
+
+export type CanonicalModelJsonPrimitive = string | number | boolean | null;
+
+/**
+ * Provider-neutral JSON Schema subset for required structured model output.
+ * It is intentionally independent of any provider request field names.
+ */
+export interface CanonicalModelJsonSchema {
+  readonly type?: CanonicalModelJsonSchemaType;
+  readonly description?: string;
+  readonly enum?: readonly CanonicalModelJsonPrimitive[];
+  readonly properties?: Readonly<Record<string, CanonicalModelJsonSchema>>;
+  readonly required?: readonly string[];
+  readonly additionalProperties?: false;
+  readonly items?: CanonicalModelJsonSchema;
+  readonly anyOf?: readonly CanonicalModelJsonSchema[];
+}
+
+export interface CanonicalModelStructuredOutput {
+  readonly requirement: "REQUIRED";
+  readonly format: "JSON_SCHEMA";
+  readonly name: string;
+  readonly strict: boolean;
+  readonly schema: CanonicalModelJsonSchema;
+}
+
 export interface CanonicalModelRequest {
   readonly model: string;
   readonly messages: readonly CanonicalModelMessage[];
   readonly tools?: readonly CanonicalModelToolDefinition[];
+  readonly structuredOutput?: CanonicalModelStructuredOutput;
   readonly temperature?: number;
   readonly maxOutputTokens?: number;
   readonly seed?: number;
