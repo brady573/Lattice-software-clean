@@ -213,6 +213,7 @@ export class ModelSolandraKnowledgeInvestigator implements KnowledgeInvestigator
   constructor(
     private readonly runtime: ModelRuntime,
     private readonly model: string,
+    private readonly maxAttempts: 1 | 2 = 1,
   ) {
     if (!model.trim()) throw new Error("Solandra Knowledge investigator model must be non-empty.");
   }
@@ -221,7 +222,7 @@ export class ModelSolandraKnowledgeInvestigator implements KnowledgeInvestigator
     const result = await this.runtime.call(planningRequest(this.model, input), {
       correlationId: `solandra-investigation-plan:${input.runId}`,
       idempotencyKey: `${input.runId}:investigation-plan`,
-      maxAttempts: 2,
+      maxAttempts: this.maxAttempts,
     });
     return investigationPlanSchema.parse(parseJsonObject(
       singleTextOutput(result, "Knowledge investigation planning"),
@@ -238,7 +239,7 @@ export class ModelSolandraKnowledgeInvestigator implements KnowledgeInvestigator
       const result = await this.runtime.call(batch.request, {
         correlationId: `solandra-responsiveness:${input.runId}:batch:${batchNumber}`,
         idempotencyKey: `${input.runId}:responsiveness:batch:${batchNumber}`,
-        maxAttempts: 2,
+        maxAttempts: this.maxAttempts,
       });
       const parsed = responsivenessSchema.parse(parseJsonObject(
         singleTextOutput(result, "Knowledge responsiveness"),
@@ -265,7 +266,7 @@ export function createConfiguredSolandraKnowledgeInvestigator(
         ...(rateLimitCoordinator ? { rateLimitCoordinator } : {}),
       }),
     );
-    return new ModelSolandraKnowledgeInvestigator(runtime, GROQ_KNOWLEDGE_SIMPLIFIER_MODEL);
+    return new ModelSolandraKnowledgeInvestigator(runtime, GROQ_KNOWLEDGE_SIMPLIFIER_MODEL, 2);
   }
 
   if (config.localModelProviderBaseUrl !== undefined && config.localModelProviderModel !== undefined) {
