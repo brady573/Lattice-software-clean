@@ -197,3 +197,180 @@ test("non-Groq local Solandra composition retains one provider attempt", async (
     globalThis.fetch = originalFetch;
   }
 });
+
+
+test("configured Groq Solandra composition recovers one transient 429 for cognition, advisory, and Action Preparation", async () => {
+  const config = resolveRuntimeConfig({
+    LATTICE_DEPLOYMENT_MODE: "development",
+    LATTICE_TRUTH_MODE: "v36-offline",
+    LATTICE_SOLANDRA_COGNITION_ROUTE: "groq-gpt-oss-120b",
+    GROQ_API_KEY: API_KEY,
+  } as NodeJS.ProcessEnv);
+  const coordinator = new RecordingCoordinator();
+  const originalFetch = globalThis.fetch;
+  const scripts = [
+    new Response("{}", { status: 429, headers: { "retry-after": "0" } }),
+    responseFor(JSON.stringify({ messages: [{ content: "ordinary cognition" }] })),
+    new Response("{}", { status: 429, headers: { "retry-after": "0" } }),
+    new Response(JSON.stringify({
+      id: "advisory-success",
+      model: GROQ_KNOWLEDGE_SIMPLIFIER_MODEL,
+      choices: [{ message: { content: JSON.stringify({
+        status: "INSUFFICIENT_BASIS",
+        reason: "More USER preference is needed.",
+        uncertainties: ["A controlling preference is not established."],
+      }) } }],
+    }), { status: 200 }),
+    new Response("{}", { status: 429, headers: { "retry-after": "0" } }),
+    new Response(JSON.stringify({
+      id: "action-success",
+      model: GROQ_KNOWLEDGE_SIMPLIFIER_MODEL,
+      choices: [{ message: { content: JSON.stringify({
+        status: "INSUFFICIENT_BASIS",
+        reason: "More USER material is needed.",
+        body: null,
+        basis: [],
+      }) } }],
+    }), { status: 200 }),
+  ];
+  let fetches = 0;
+  globalThis.fetch = (async () => {
+    const response = scripts[fetches];
+    fetches += 1;
+    assert.ok(response, "configured Groq retry script exhausted");
+    return response;
+  }) as typeof fetch;
+
+  try {
+    const composition = createConfiguredSolandraCognition(config, coordinator);
+    assert.ok(composition);
+
+    const cognition = await composition.cognition.interpret({
+      conversationId: "groq-composition-retry",
+      messageId: "groq-composition-retry-message",
+      message: "Give my own scratch notes a neutral label.",
+      recentUserMessages: [],
+      recentConversation: [],
+      governedKnowledge: [],
+      governedRecommendations: [],
+    });
+    assert.equal(cognition.mode, "CONVERSATION");
+
+    const intent = {
+      intentScopeId: "groq-composition-intent-scope",
+      intentVersionId: "groq-composition-intent",
+      version: 1,
+      predecessorIntentVersionId: null,
+      transitionId: "groq-composition-transition",
+      lineageKind: "INITIAL" as const,
+      lineageTargetIntentVersionId: null,
+      state: {
+        objective: {
+          value: { state: "VALUE" as const, value: "Choose a neutral label." },
+          provenance: {
+            kind: "EXPLICIT_USER" as const,
+            logicalUserTurnId: "groq-composition-turn",
+            sourceMessageId: "groq-composition-message",
+            sourceDigest: "a".repeat(64),
+          },
+        },
+        requirements: {},
+        preferences: {},
+      },
+      createdAt: "2026-09-20T20:00:00.000Z",
+    };
+    const advisory = await composition.advisory.advise({
+      conversationId: "groq-composition-retry",
+      userMessageId: "groq-composition-message",
+      authoritativeIntent: intent,
+      authoritativeObjective: "Choose a neutral label.",
+      userContext: ["Choose a neutral label."],
+      knowledge: [],
+    });
+    assert.equal(advisory.result.status, "INSUFFICIENT_BASIS");
+
+    const preparation = await composition.actionPreparer.prepare({
+      conversationId: "groq-composition-retry",
+      runId: "groq-composition-action-run",
+      intentVersionId: intent.intentVersionId,
+      userMessageId: "groq-composition-message",
+      userMessage: "Draft a short note from only what I supplied.",
+      authoritativeObjective: "Prepare a bounded draft.",
+      knowledge: [],
+    });
+    assert.equal(preparation.result.status, "INSUFFICIENT_BASIS");
+
+    assert.equal(fetches, 6);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("configured Groq Knowledge investigator recovers one transient 429 in planning and responsiveness", async () => {
+  const config = resolveRuntimeConfig({
+    LATTICE_DEPLOYMENT_MODE: "development",
+    LATTICE_TRUTH_MODE: "v36-live",
+    LATTICE_SOLANDRA_COGNITION_ROUTE: "groq-gpt-oss-120b",
+    GROQ_API_KEY: API_KEY,
+  } as NodeJS.ProcessEnv);
+  const coordinator = new RecordingCoordinator();
+  const originalFetch = globalThis.fetch;
+  const success = (content: string, id: string) => new Response(JSON.stringify({
+    id,
+    model: GROQ_KNOWLEDGE_SIMPLIFIER_MODEL,
+    choices: [{ message: { content }, finish_reason: "stop" }],
+  }), { status: 200 });
+  const scripts = [
+    new Response("{}", { status: 429, headers: { "retry-after": "0" } }),
+    success(JSON.stringify({ retrievalQueries: ["controlled retry query"] }), "plan-success"),
+    new Response("{}", { status: 429, headers: { "retry-after": "0" } }),
+    success(JSON.stringify({ selections: [] }), "responsive-success"),
+  ];
+  let fetches = 0;
+  globalThis.fetch = (async () => {
+    const response = scripts[fetches];
+    fetches += 1;
+    assert.ok(response, "configured Knowledge retry script exhausted");
+    return response;
+  }) as typeof fetch;
+
+  try {
+    const investigator = createConfiguredSolandraKnowledgeInvestigator(config, coordinator);
+    assert.ok(investigator);
+    const plan = await investigator.plan({
+      runId: "configured-groq-knowledge-run",
+      objective: "Explain the observable mechanism.",
+      context: [],
+      knowledgeNeeds: ["Find explanatory source material."],
+    });
+    assert.deepEqual(plan.retrievalQueries, ["controlled retry query"]);
+
+    const responsive = await investigator.selectResponsive({
+      runId: "configured-groq-knowledge-run",
+      objective: "Explain the observable mechanism.",
+      context: [],
+      knowledgeNeeds: ["Find explanatory source material."],
+      retrievalQueries: plan.retrievalQueries,
+      sources: [{
+        sourceId: "configured-source",
+        canonicalUri: "https://example.test/configured",
+        title: "Configured source",
+        publisher: "Example",
+        retrievedAt: "2026-09-20T20:00:00.000Z",
+        publishedAt: null,
+        contentType: "text/plain",
+        content: "Candidate material.",
+      }],
+      claims: [{
+        claimId: "configured-claim",
+        text: "Candidate proposition.",
+        claimType: "INTERPRETIVE",
+        evidence: [{ sourceId: "configured-source", relation: "SUPPORTS", excerpt: "Candidate proposition." }],
+      }],
+    });
+    assert.deepEqual(responsive.selections, []);
+    assert.equal(fetches, 4);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
