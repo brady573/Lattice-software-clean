@@ -3,6 +3,7 @@ import {
   GroqKnowledgeSimplifierModelProvider,
   GroqKnowledgeSimplifierModelRuntime,
 } from "./model/groq-knowledge-simplifier.js";
+import type { GroqRateLimitCoordinator } from "./model/groq-rate-limit-coordinator.js";
 import {
   ModelKnowledgeSimplifier,
   type KnowledgeSimplifier,
@@ -15,6 +16,7 @@ import type { RuntimeConfig } from "./runtime-config.js";
  */
 export function createConfiguredKnowledgeSimplifier(
   config: RuntimeConfig,
+  rateLimitCoordinator?: GroqRateLimitCoordinator,
 ): KnowledgeSimplifier | undefined {
   if (config.knowledgeSimplifierRoute === undefined) return undefined;
 
@@ -25,6 +27,7 @@ export function createConfiguredKnowledgeSimplifier(
       }
       const provider = new GroqKnowledgeSimplifierModelProvider({
         apiKey: config.knowledgeSimplifierApiKey,
+        ...(rateLimitCoordinator ? { rateLimitCoordinator } : {}),
       });
       return new ModelKnowledgeSimplifier(
         new GroqKnowledgeSimplifierModelRuntime(provider),
