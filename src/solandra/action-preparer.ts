@@ -216,6 +216,7 @@ export class ModelSolandraActionPreparer implements SolandraActionPreparer {
   constructor(
     private readonly runtime: CallableModelRuntime,
     private readonly model: string,
+    private readonly maxAttempts: 1 | 2 = 1,
   ) {
     if (!model.trim()) throw new Error("Solandra Action Preparation model must be non-empty.");
   }
@@ -224,7 +225,7 @@ export class ModelSolandraActionPreparer implements SolandraActionPreparer {
     const generated = await this.runtime.call(generationRequest(this.model, input), {
       correlationId: `solandra-action-prepare:${input.runId}:${input.userMessageId}`,
       idempotencyKey: `PREPARED_MESSAGE:${input.intentVersionId}:${input.userMessageId}`,
-      maxAttempts: 2,
+      maxAttempts: this.maxAttempts,
     });
     const generationProvenance = generated.audit.invocationProvenance;
     if (generated.response.output.length !== 1 || generated.response.output[0]?.type !== "text") {
@@ -263,7 +264,7 @@ export class ModelSolandraActionPreparer implements SolandraActionPreparer {
       {
         correlationId: `solandra-action-ground:${input.runId}:${input.userMessageId}`,
         idempotencyKey: `PREPARED_MESSAGE_GROUND:${input.intentVersionId}:${input.userMessageId}`,
-        maxAttempts: 2,
+        maxAttempts: this.maxAttempts,
       },
     );
     const groundingProvenance = grounded.audit.invocationProvenance;
