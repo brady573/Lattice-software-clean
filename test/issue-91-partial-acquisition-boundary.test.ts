@@ -157,7 +157,7 @@ test("Issue #91: zero-source partial acquisition is distinct from complete no-re
   assert.deepEqual(completeKnowledge.findings, []);
   assert.equal(completeKnowledge.availability, "NO_CANDIDATES");
   assert.deepEqual(completeKnowledge.uncertainties, [
-    "The available source search completed, but it returned no candidate material for this request.",
+    "I was able to check the available external source, but it returned no candidate material for this request.",
   ]);
   const completeMessage = await renderKnowledgeResponseForRun(
     completeKnowledge,
@@ -165,6 +165,6 @@ test("Issue #91: zero-source partial acquisition is distinct from complete no-re
   );
   assert.equal(
     completeMessage,
-    "The available source search completed, but it returned no candidate material for this request.",
+    "I was able to check the available external source, but it returned no candidate material for this request.",
   );
 });
