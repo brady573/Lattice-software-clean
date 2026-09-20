@@ -92,15 +92,26 @@ function renderSourceList(knowledge: KnowledgeOutcome): string {
   return `Sources I used:\n${lines.join("\n")}${suitabilityNote}`;
 }
 
+function renderEmptyKnowledge(knowledge: KnowledgeOutcome): string {
+  if (knowledge.availability === "EVIDENCE_INSUFFICIENT") {
+    return GENERIC_INSUFFICIENT_KNOWLEDGE_MESSAGE;
+  }
+  const limitation = knowledge.uncertainties[0]?.trim();
+  return limitation && limitation !== EMPTY_KNOWLEDGE_MESSAGE
+    ? limitation
+    : GENERIC_INSUFFICIENT_KNOWLEDGE_MESSAGE;
+}
+
 function renderGovernedAnswer(knowledge: KnowledgeOutcome): string {
   if (knowledge.findings.length === 0) {
-    const limitation = knowledge.uncertainties[0]?.trim();
-    return limitation && limitation !== EMPTY_KNOWLEDGE_MESSAGE
-      ? limitation
-      : GENERIC_INSUFFICIENT_KNOWLEDGE_MESSAGE;
+    return renderEmptyKnowledge(knowledge);
   }
 
-  if (requiresAuthoritativeDomainSource(knowledge) && !hasAuthoritativeDomainSource(knowledge)) {
+  if (
+    knowledge.findings.length > 0
+    && requiresAuthoritativeDomainSource(knowledge)
+    && !hasAuthoritativeDomainSource(knowledge)
+  ) {
     return [SOURCE_SUITABILITY_LIMITATION, sourceLabel(knowledge)].filter(Boolean).join("\n\n");
   }
 
@@ -184,7 +195,7 @@ async function attemptSimplification(
 /** Project governed KnowledgeOutcome content into concise Solandra conversation text. */
 export function renderKnowledgeResponse(knowledge: KnowledgeOutcome): string {
   if (knowledge.findings.length === 0) {
-    return knowledge.uncertainties[0] ?? EMPTY_KNOWLEDGE_MESSAGE;
+    return renderEmptyKnowledge(knowledge);
   }
   return knowledge.findings.map((finding) => renderFinding(finding)).join("\n\n");
 }
