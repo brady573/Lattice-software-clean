@@ -286,20 +286,46 @@ test("normal answerable external Knowledge establishes governed source-bound fin
   assert.equal(knowledge.provenance[0]?.canonicalUri, "https://example.test/lunar-eclipse");
 });
 
-test("general-reference source material does not claim current authoritative Knowledge where suitability is required", async () => {
+test("fresh general-reference material is presented only as a source report, not current authoritative fact", async () => {
   const currentRequest: LatticeRunRequest = {
     ...baseRequest,
-    objective: "What is the current statutory filing deadline for this regulated process?",
+    objective: "What are the current public opening hours for the observatory?",
   };
-  const pipeline = new KnowledgeAcquisitionTruthPipeline(new FixedProvider(answerableResult()));
-  const execution = await pipeline.execute("knowledge-current-authority", currentRequest);
-  const knowledge = buildKnowledgeOutcome(run("knowledge-current-authority", currentRequest), execution.bundle);
+  const report = "A general reference page reports that the observatory opens to the public at 7 p.m.";
+  const currentResult: KnowledgeAcquisitionResult = {
+    sources: [{
+      sourceId: "source-current-reference",
+      canonicalUri: "https://example.test/observatory-reference",
+      title: "Observatory reference",
+      publisher: "Example Reference",
+      retrievedAt: "2026-09-20T00:00:00.000Z",
+      publishedAt: null,
+      contentType: "text/plain",
+      content: report,
+      metadata: { evidentiarySuitability: "GENERAL_REFERENCE" },
+    }],
+    claims: [{
+      claimId: "claim-current-reference",
+      text: report,
+      claimType: "CURRENT_STATE",
+      evidence: [{
+        sourceId: "source-current-reference",
+        relation: "SUPPORTS",
+        excerpt: report,
+      }],
+    }],
+    completion: { status: "COMPLETE" },
+  };
+  const pipeline = new KnowledgeAcquisitionTruthPipeline(new FixedProvider(currentResult));
+  const execution = await pipeline.execute("knowledge-current-reference", currentRequest);
+  const knowledge = buildKnowledgeOutcome(run("knowledge-current-reference", currentRequest), execution.bundle);
   const message = await renderKnowledgeResponseForRun(
     knowledge,
-    run("knowledge-current-authority", currentRequest),
+    run("knowledge-current-reference", currentRequest),
   );
 
   assert.equal(knowledge.provenance[0]?.evidentiarySuitability, "GENERAL_REFERENCE");
-  assert.match(message, /appropriate authoritative source/iu);
-  assert.doesNotMatch(message, /^A lunar eclipse occurs/iu);
+  assert.match(message, /retrieved source material reports/iu);
+  assert.match(message, /does not by itself independently verify the broader real-world claim/iu);
+  assert.doesNotMatch(message, /^The observatory opens to the public at 7 p\.m\./iu);
 });
