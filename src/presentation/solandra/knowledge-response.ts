@@ -214,7 +214,11 @@ export async function renderKnowledgeResponseForRun(
   const context = runContext(run);
   if (sourceRequest(context)) return renderSourceList(knowledge);
 
-  if (requiresAuthoritativeDomainSource(knowledge) && !hasAuthoritativeDomainSource(knowledge)) {
+  if (
+    knowledge.findings.length > 0
+    && requiresAuthoritativeDomainSource(knowledge)
+    && !hasAuthoritativeDomainSource(knowledge)
+  ) {
     return [SOURCE_SUITABILITY_LIMITATION, sourceLabel(knowledge)].filter(Boolean).join("\n\n");
   }
 
