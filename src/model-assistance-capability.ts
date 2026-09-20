@@ -129,16 +129,20 @@ class SubjectAuthorizedKnowledgeSimplifier implements KnowledgeSimplifier {
     }
 
     const attempt = await invokeDelegate(this.delegate, input);
-    const after = await this.store.get(this.subjectId);
-    if (after.status !== "CONNECTED" || after.version !== before.version) {
-      const revoked = Object.freeze({ status: "CAPABILITY_REVOKED", text: null }) satisfies KnowledgeSimplificationAttempt;
-      const evidence = evidenceFor(input, revoked);
-      if (evidence !== null) await this.store.recordInvocation(this.subjectId, evidence);
-      return revoked;
-    }
-
     const evidence = evidenceFor(input, attempt);
-    if (evidence !== null) await this.store.recordInvocation(this.subjectId, evidence);
+    if (evidence !== null) {
+      const finalized = await this.store.finalizeInvocation(
+        this.subjectId,
+        before.version,
+        evidence,
+      );
+      if (!finalized) {
+        return Object.freeze({
+          status: "CAPABILITY_REVOKED",
+          text: null,
+        }) satisfies KnowledgeSimplificationAttempt;
+      }
+    }
     return attempt;
   }
 

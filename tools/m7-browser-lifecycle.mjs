@@ -383,9 +383,10 @@ async function main() {
     assert.doesNotMatch(baseline.bodyText, /Conversation \+ adaptive Composer|Accepted understanding|semantic status/i);
     evidence.browser.baseline = baseline;
 
-    const installClarificationFixture = async () => cdp.eval(`(() => {
+    const installClarificationFixture = async (followupKind) => cdp.eval(`(() => {
       const requests=[];
       let turnCount=0;
+      const followupKind=${JSON.stringify(followupKind)};
       window.__clarificationFixtureRequests=requests;
       const originalOwnerFetch=window.ownerFetch;
       if(typeof originalOwnerFetch!=='function')throw new Error('canonical ownerFetch missing');
@@ -397,17 +398,22 @@ async function main() {
         if(path==='/api/v1/conversations')return new Response(JSON.stringify({conversation:{id:'browser-clarification'}}),{status:201,headers:{'content-type':'application/json'}});
         if(path.endsWith('/turns')){
           turnCount+=1;
+          const body=typeof init.body==='string'?JSON.parse(init.body):{};
           if(turnCount===1)return new Response(JSON.stringify({
             status:'NEEDS_CLARIFICATION',decisionNeed:'UNRESOLVED',acceptedUnderstanding:'Compare the available approaches.',
             proposalId:'proposal-browser',question:'Do you mean the inferred comparison?',confirmationExample:"Yes, that's correct."
           }),{status:202,headers:{'content-type':'application/json'}});
-          return new Response(JSON.stringify({
-            status:'RUN_ACCEPTED',runId:'run-corrected',acceptedUnderstanding:'Explain the evidence instead.',decisionNeed:'NONE',intentVersionId:'intent-v2'
+          if(body.clarificationProposalId!=='proposal-browser')return new Response(JSON.stringify({error:'CLARIFICATION_NOT_FOUND'}),{status:404,headers:{'content-type':'application/json'}});
+          if(followupKind==='confirmation')return new Response(JSON.stringify({
+            status:'RUN_ACCEPTED',runId:'run-confirmed',proposalId:'proposal-browser',acceptedUnderstanding:'Compare the available approaches.',
+            decisionNeed:'QUALIFIED',intentVersionId:'intent-v2'
           }),{status:202,headers:{'content-type':'application/json'}});
+          if(followupKind==='correction')return new Response(JSON.stringify({
+            status:'RUN_ACCEPTED',runId:'run-corrected',proposalId:'proposal-browser',acceptedUnderstanding:'Explain the evidence instead.',
+            decisionNeed:'NONE',intentVersionId:'intent-v2'
+          }),{status:202,headers:{'content-type':'application/json'}});
+          throw new Error('clarification fixture follow-up kind is invalid');
         }
-        if(path.includes('/clarifications/')&&path.endsWith('/confirm'))return new Response(JSON.stringify({
-          status:'RUN_ACCEPTED',runId:'run-confirmed',acceptedUnderstanding:'Compare the available approaches.',decisionNeed:'QUALIFIED',intentVersionId:'intent-v2'
-        }),{status:202,headers:{'content-type':'application/json'}});
         if(path.includes('/outcome'))return new Response(JSON.stringify({outcome:{
           kind:'KNOWLEDGE',acceptedUnderstanding:path.includes('run-corrected')?'Explain the evidence instead.':'Compare the available approaches.',
           findings:[],uncertainties:['Fixture limitation.'],provenance:[]
@@ -417,7 +423,7 @@ async function main() {
       return true;
     })()`);
 
-    await installClarificationFixture();
+    await installClarificationFixture("correction");
     await submitBrowserTurn(cdp, "Help me compare these approaches.");
     await waitFor("browser pending clarification", async () => cdp.eval(`(() => {
       const input=document.getElementById('conversationInput');
@@ -440,14 +446,18 @@ async function main() {
     assert.equal(correctionRouting.turns, 2);
     assert.match(correctionRouting.conversationText, /No, actually explain the evidence instead\./u);
     assert.match(correctionRouting.composerText, /Fixture limitation\./u);
-    assert.equal(correctionRouting.requests.filter((item) => item.path.endsWith('/turns')).length, 2);
+    const correctionTurns = correctionRouting.requests.filter((item) => item.path.endsWith('/turns'));
+    assert.equal(correctionTurns.length, 2);
     assert.equal(correctionRouting.requests.filter((item) => item.path.includes('/runs/run-corrected/outcome')).length, 1);
     assert.equal(correctionRouting.requests.some((item) => item.path.includes('/confirm')), false);
+    const correctionFollowup = JSON.parse(correctionTurns[1].body);
+    assert.equal(correctionFollowup.message, "No, actually explain the evidence instead.");
+    assert.equal(correctionFollowup.clarificationProposalId, "proposal-browser");
     assert.doesNotMatch(correctionRouting.composerText, /Do you mean the inferred comparison\?|Explain the evidence instead\.|Accepted understanding|semantic status/i);
     evidence.browser.clarificationCorrection = correctionRouting;
 
     evidence.browser.recoveryBoundaries.push(await reloadThroughRecoveryBoundary(cdp, "clarification-correction"));
-    await installClarificationFixture();
+    await installClarificationFixture("confirmation");
     await submitBrowserTurn(cdp, "Help me compare these approaches.");
     await waitFor("browser pending clarification before confirmation", async () => cdp.eval(`(() => {
       const input=document.getElementById('conversationInput');
@@ -456,14 +466,27 @@ async function main() {
       return !input.disabled&&conversation.includes('Do you mean the inferred comparison?')&&!composer.includes('Do you mean the inferred comparison?') ? true : null;
     })()`));
     await submitBrowserTurn(cdp, "Yes, that's correct.");
+    await waitFor("browser clarification confirmation outcome polling", async () => cdp.eval(`
+      window.__clarificationFixtureRequests.some((item)=>item.path.includes('/runs/run-confirmed/outcome')) ? true : null
+    `));
     const confirmationRouting = await waitFor("browser clarification confirmation", async () => cdp.eval(`(() => {
       const input=document.getElementById('conversationInput');
-      if(input.disabled)return null;
+      const composerText=document.getElementById('composer').innerText;
+      const conversationText=document.getElementById('conversation').innerText;
       const requests=window.__clarificationFixtureRequests;
-      return requests.some((item)=>item.path.includes('/confirm')) ? {requests} : null;
+      if(input.disabled||!composerText.includes('Fixture limitation.'))return null;
+      return {requests,composerText,conversationText,turns:document.querySelectorAll('#conversation .turn.user').length};
     })()`));
-    assert.equal(confirmationRouting.requests.filter((item) => item.path.endsWith('/turns')).length, 1);
-    assert.equal(confirmationRouting.requests.filter((item) => item.path.includes('/confirm')).length, 1);
+    const confirmationTurns = confirmationRouting.requests.filter((item) => item.path.endsWith('/turns'));
+    assert.equal(confirmationTurns.length, 2);
+    assert.equal(confirmationRouting.requests.filter((item) => item.path.includes('/runs/run-confirmed/outcome')).length, 1);
+    assert.equal(confirmationRouting.requests.some((item) => item.path.includes('/confirm')), false);
+    const confirmationFollowup = JSON.parse(confirmationTurns[1].body);
+    assert.equal(confirmationFollowup.message, "Yes, that's correct.");
+    assert.equal(confirmationFollowup.clarificationProposalId, "proposal-browser");
+    assert.equal(confirmationRouting.turns, 2);
+    assert.match(confirmationRouting.conversationText, /Yes, that's correct\./u);
+    assert.match(confirmationRouting.composerText, /Fixture limitation\./u);
     evidence.browser.clarificationConfirmation = confirmationRouting;
 
     evidence.browser.recoveryBoundaries.push(await reloadThroughRecoveryBoundary(cdp, "clarification-confirmation"));

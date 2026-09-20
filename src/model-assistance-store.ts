@@ -48,7 +48,11 @@ export interface ModelAssistanceAuthorizationStore {
   get(subjectId: string): Promise<ModelAssistanceAuthorizationState>;
   connect(subjectId: string): Promise<ModelAssistanceAuthorizationState>;
   disconnect(subjectId: string): Promise<ModelAssistanceAuthorizationState>;
-  recordInvocation(subjectId: string, evidence: ModelAssistanceInvocationEvidence): Promise<void>;
+  finalizeInvocation(
+    subjectId: string,
+    authorizationVersion: number,
+    evidence: ModelAssistanceInvocationEvidence,
+  ): Promise<boolean>;
   close(): Promise<void>;
 }
 
@@ -121,14 +125,19 @@ export class MemoryModelAssistanceAuthorizationStore implements ModelAssistanceA
     return await this.setStatus(subjectId, "DISCONNECTED");
   }
 
-  async recordInvocation(subjectId: string, evidence: ModelAssistanceInvocationEvidence): Promise<void> {
+  async finalizeInvocation(
+    subjectId: string,
+    authorizationVersion: number,
+    evidence: ModelAssistanceInvocationEvidence,
+  ): Promise<boolean> {
     const normalized = requireSubjectId(subjectId);
     const current = this.states.get(normalized) ?? defaultState(normalized);
-    if (current.version === 0) return;
+    if (current.status !== "CONNECTED" || current.version !== authorizationVersion) return false;
     this.states.set(normalized, {
       ...cloneState(current),
       lastInvocation: structuredClone(evidence),
     });
+    return true;
   }
 
   async close(): Promise<void> {
@@ -319,12 +328,19 @@ export class PostgresModelAssistanceAuthorizationStore implements ModelAssistanc
     return await this.setStatus(subjectId, "DISCONNECTED");
   }
 
-  async recordInvocation(subjectId: string, evidence: ModelAssistanceInvocationEvidence): Promise<void> {
+  async finalizeInvocation(
+    subjectId: string,
+    authorizationVersion: number,
+    evidence: ModelAssistanceInvocationEvidence,
+  ): Promise<boolean> {
     const normalized = requireSubjectId(subjectId);
-    await this.pool.query(
-      "UPDATE model_assistance_authorizations SET last_invocation_json=$2::jsonb WHERE subject_id=$1",
-      [normalized, JSON.stringify(evidence)],
+    const result = await this.pool.query(
+      `UPDATE model_assistance_authorizations
+       SET last_invocation_json=$3::jsonb
+       WHERE subject_id=$1 AND status='CONNECTED' AND version=$2`,
+      [normalized, authorizationVersion, JSON.stringify(evidence)],
     );
+    return (result.rowCount ?? 0) === 1;
   }
 
   async close(): Promise<void> {
