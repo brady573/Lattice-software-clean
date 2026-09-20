@@ -1,4 +1,9 @@
 import { ModelProviderError } from "./errors.js";
+import {
+  groqRateLimitScopeId,
+  sharedMemoryGroqRateLimitCoordinator,
+  type GroqRateLimitCoordinator,
+} from "./groq-rate-limit-coordinator.js";
 import type { ModelProvider } from "./provider.js";
 import { ModelRuntime } from "./runtime.js";
 import type {
@@ -34,6 +39,8 @@ export interface GroqKnowledgeSimplifierProviderOptions {
   readonly apiKey: string;
   readonly maxResponseBytes?: number;
   readonly fetchImpl?: typeof fetch;
+  readonly rateLimitCoordinator?: GroqRateLimitCoordinator;
+  readonly now?: () => number;
   /** Optional test/development-only observability. It has no Product authority or response effect. */
   readonly diagnosticSink?: GroqCompletionDiagnosticSink;
 }
@@ -53,6 +60,44 @@ function requireApiKey(value: string): string {
 
 function optionalFiniteInteger(value: unknown): number | null {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : null;
+}
+
+function secondsToMilliseconds(value: string | null): number | null {
+  if (value === null || !value.trim()) return null;
+  const seconds = Number(value.trim());
+  if (!Number.isFinite(seconds) || seconds < 0) return null;
+  const milliseconds = Math.ceil(seconds * 1_000);
+  return Number.isSafeInteger(milliseconds) ? milliseconds : null;
+}
+
+function groqDurationMilliseconds(value: string | null): number | null {
+  const text = value?.trim() ?? "";
+  if (!text) return null;
+  const match = /^(?:(\d+(?:\.\d+)?)m)?(?:(\d+(?:\.\d+)?)s)?$/iu.exec(text);
+  if (!match || (!match[1] && !match[2])) return null;
+  return secondsToMilliseconds(String(Number(match[1] ?? "0") * 60 + Number(match[2] ?? "0")));
+}
+
+function bodyFallbackMilliseconds(bodyText: string): number | null {
+  let body: unknown;
+  try {
+    body = JSON.parse(bodyText);
+  } catch {
+    return null;
+  }
+  const message = asRecord(asRecord(body)?.error)?.message;
+  if (typeof message !== "string") return null;
+  const match = /please try again in\s+([0-9]+(?:\.[0-9]+)?)s\b/iu.exec(message);
+  return match?.[1] ? secondsToMilliseconds(match[1]) : null;
+}
+
+function recoveryDelayMilliseconds(response: Response, bodyText: string): number | null {
+  const delays = [
+    secondsToMilliseconds(response.headers.get("retry-after")),
+    groqDurationMilliseconds(response.headers.get("x-ratelimit-reset-tokens")),
+    bodyFallbackMilliseconds(bodyText),
+  ].filter((value): value is number => value !== null);
+  return delays.length === 0 ? null : Math.max(...delays);
 }
 
 async function readBoundedText(response: Response, maxBytes: number): Promise<string> {
@@ -99,6 +144,9 @@ export class GroqKnowledgeSimplifierModelProvider implements ModelProvider {
   private readonly maxResponseBytes: number;
   private readonly fetchImpl: typeof fetch;
   private readonly diagnosticSink: GroqCompletionDiagnosticSink | undefined;
+  private readonly rateLimitCoordinator: GroqRateLimitCoordinator;
+  private readonly rateLimitScopeId: string;
+  private readonly now: () => number;
 
   constructor(options: GroqKnowledgeSimplifierProviderOptions) {
     this.apiKey = requireApiKey(options.apiKey);
@@ -108,9 +156,25 @@ export class GroqKnowledgeSimplifierModelProvider implements ModelProvider {
     }
     this.fetchImpl = options.fetchImpl ?? fetch;
     this.diagnosticSink = options.diagnosticSink;
+    this.rateLimitCoordinator = options.rateLimitCoordinator ?? sharedMemoryGroqRateLimitCoordinator();
+    this.rateLimitScopeId = groqRateLimitScopeId(this.apiKey, GROQ_KNOWLEDGE_SIMPLIFIER_MODEL);
+    this.now = options.now ?? Date.now;
   }
 
   async generate(request: CanonicalModelRequest, context: ModelCallContext): Promise<ModelProviderResult> {
+    try {
+      await this.rateLimitCoordinator.waitUntilReady(this.rateLimitScopeId, context.signal);
+    } catch (error) {
+      if (context.signal.aborted) {
+        throw new ModelProviderError(
+          "cancelled",
+          "Groq Knowledge simplifier request was cancelled while waiting for provider recovery.",
+          { cause: error },
+        );
+      }
+      throw error;
+    }
+
     if (request.model !== GROQ_KNOWLEDGE_SIMPLIFIER_MODEL) {
       throw new ModelProviderError(
         "unsupported_capability",
@@ -164,6 +228,13 @@ export class GroqKnowledgeSimplifierModelProvider implements ModelProvider {
     const text = await readBoundedText(response, this.maxResponseBytes);
     if (!response.ok) {
       if (response.status === 429) {
+        const delayMs = recoveryDelayMilliseconds(response, text);
+        if (delayMs !== null) {
+          await this.rateLimitCoordinator.extendBlockedUntil(
+            this.rateLimitScopeId,
+            this.now() + delayMs,
+          );
+        }
         throw new ModelProviderError(
           "rate_limit",
           "Groq Knowledge simplifier route was rate limited.",
