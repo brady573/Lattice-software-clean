@@ -1,0 +1,248 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import type { LatticeRun, LatticeRunRequest } from "../src/domain.js";
+import type {
+  KnowledgeAcquisitionProvider,
+  KnowledgeAcquisitionRequest,
+  KnowledgeAcquisitionResult,
+} from "../src/knowledge/acquisition.js";
+import {
+  RelevantKnowledgeAcquisitionProvider,
+  type KnowledgeInvestigator,
+} from "../src/knowledge/investigation.js";
+import { buildKnowledgeOutcome } from "../src/outcome.js";
+import { renderKnowledgeResponseForRun } from "../src/presentation/solandra/knowledge-response.js";
+import {
+  KnowledgeAcquisitionTruthPipeline,
+  type KnowledgeEvidenceAdmissionPolicy,
+} from "../src/truth/knowledge-acquisition-pipeline.js";
+
+const baseRequest: LatticeRunRequest = {
+  kind: "consultation",
+  objective: "Explain how a lunar eclipse happens.",
+  context: [],
+  investigationQueries: ["external explanation"],
+  advisoryRequested: false,
+  decisionNeed: "NONE",
+  resourceNeed: "NONE",
+  sourceMessageId: "knowledge-boundary-message",
+  sourceMessageDigest: "a".repeat(64),
+  intentVersion: 1,
+  intentScopeId: "knowledge-boundary-scope",
+  intentVersionId: "knowledge-boundary-intent",
+};
+
+function run(id: string, request: LatticeRunRequest = baseRequest): LatticeRun {
+  return {
+    id,
+    conversationId: "knowledge-boundary-conversation",
+    status: "COMPLETED",
+    version: 1,
+    request,
+    decision: null,
+    explanation: null,
+    truthAssessmentIds: [],
+    events: [],
+  };
+}
+
+function answerableResult(
+  completion: KnowledgeAcquisitionResult["completion"] = { status: "COMPLETE" },
+): KnowledgeAcquisitionResult {
+  const text = "A lunar eclipse occurs when Earth passes between the Sun and the Moon, placing the Moon in Earth's shadow.";
+  return {
+    sources: [{
+      sourceId: "source-lunar",
+      canonicalUri: "https://example.test/lunar-eclipse",
+      title: "Lunar eclipse reference",
+      publisher: "Example Reference",
+      retrievedAt: "2026-09-20T00:00:00.000Z",
+      publishedAt: null,
+      contentType: "text/plain",
+      content: text,
+      metadata: { evidentiarySuitability: "GENERAL_REFERENCE" },
+    }],
+    claims: [{
+      claimId: "claim-lunar",
+      text,
+      claimType: "INTERPRETIVE",
+      evidence: [{ sourceId: "source-lunar", relation: "SUPPORTS", excerpt: text }],
+    }],
+    completion,
+  };
+}
+
+class FixedProvider implements KnowledgeAcquisitionProvider {
+  readonly kind = "knowledge-boundary-fixed-provider";
+
+  constructor(
+    private readonly result: KnowledgeAcquisitionResult | Error,
+  ) {}
+
+  async acquire(_request: KnowledgeAcquisitionRequest): Promise<KnowledgeAcquisitionResult> {
+    if (this.result instanceof Error) throw this.result;
+    return structuredClone(this.result);
+  }
+}
+
+function investigator(options: {
+  planError?: Error;
+  selectionError?: Error;
+  select?: "all" | "none";
+} = {}): KnowledgeInvestigator {
+  return {
+    kind: "knowledge-boundary-investigator",
+    async plan() {
+      if (options.planError) throw options.planError;
+      return { retrievalQueries: ["lunar eclipse mechanism"] };
+    },
+    async selectResponsive(input) {
+      if (options.selectionError) throw options.selectionError;
+      if (options.select === "none") return { selections: [] };
+      return {
+        selections: input.claims.map((claim) => ({
+          claimId: claim.claimId,
+          sourceIds: claim.evidence.map((item) => item.sourceId),
+        })),
+      };
+    },
+  };
+}
+
+test("investigation cognition failure remains a capability failure instead of no-evidence insufficiency", async () => {
+  const pipeline = new KnowledgeAcquisitionTruthPipeline(new RelevantKnowledgeAcquisitionProvider(
+    new FixedProvider(answerableResult()),
+    investigator({ planError: new Error("injected model runtime failure") }),
+  ));
+  const execution = await pipeline.execute("knowledge-investigation-failure", baseRequest);
+  const knowledge = buildKnowledgeOutcome(run("knowledge-investigation-failure"), execution.bundle);
+
+  assert.equal(knowledge.availability, "INVESTIGATION_UNAVAILABLE");
+  assert.deepEqual(knowledge.findings, []);
+  const message = await renderKnowledgeResponseForRun(knowledge, run("knowledge-investigation-failure"));
+  assert.match(message, /couldn't complete the external investigation/iu);
+  assert.doesNotMatch(message, /couldn't establish enough relevant evidence/iu);
+  assert.doesNotMatch(JSON.stringify(execution.bundle), /injected model runtime failure/iu);
+});
+
+test("raw source acquisition failure remains distinct from completed search insufficiency", async () => {
+  const pipeline = new KnowledgeAcquisitionTruthPipeline(new RelevantKnowledgeAcquisitionProvider(
+    new FixedProvider(new Error("injected source outage")),
+    investigator(),
+  ));
+  const execution = await pipeline.execute("knowledge-source-failure", baseRequest);
+  const knowledge = buildKnowledgeOutcome(run("knowledge-source-failure"), execution.bundle);
+
+  assert.equal(knowledge.availability, "SOURCE_UNAVAILABLE");
+  assert.deepEqual(knowledge.findings, []);
+  const message = await renderKnowledgeResponseForRun(knowledge, run("knowledge-source-failure"));
+  assert.match(message, /couldn't reach the external information source/iu);
+  assert.doesNotMatch(message, /couldn't establish enough relevant evidence/iu);
+  assert.doesNotMatch(JSON.stringify(execution.bundle), /injected source outage/iu);
+});
+
+test("complete acquisition with zero candidates remains honest completed-search insufficiency", async () => {
+  const pipeline = new KnowledgeAcquisitionTruthPipeline(new RelevantKnowledgeAcquisitionProvider(
+    new FixedProvider({ sources: [], claims: [], completion: { status: "COMPLETE" } }),
+    investigator(),
+  ));
+  const execution = await pipeline.execute("knowledge-no-candidates", baseRequest);
+  const knowledge = buildKnowledgeOutcome(run("knowledge-no-candidates"), execution.bundle);
+
+  assert.equal(knowledge.availability, "NO_CANDIDATES");
+  assert.deepEqual(knowledge.findings, []);
+  const message = await renderKnowledgeResponseForRun(knowledge, run("knowledge-no-candidates"));
+  assert.match(message, /search completed/iu);
+  assert.doesNotMatch(message, /temporar|unavailable|couldn't complete/iu);
+});
+
+test("acquired candidates rejected by semantic responsiveness remain distinct from source failure", async () => {
+  const pipeline = new KnowledgeAcquisitionTruthPipeline(new RelevantKnowledgeAcquisitionProvider(
+    new FixedProvider(answerableResult()),
+    investigator({ select: "none" }),
+  ));
+  const execution = await pipeline.execute("knowledge-no-responsive", baseRequest);
+  const knowledge = buildKnowledgeOutcome(run("knowledge-no-responsive"), execution.bundle);
+
+  assert.equal(knowledge.availability, "NO_RESPONSIVE_MATERIAL");
+  assert.deepEqual(knowledge.findings, []);
+  const message = await renderKnowledgeResponseForRun(knowledge, run("knowledge-no-responsive"));
+  assert.match(message, /search completed/iu);
+  assert.match(message, /did not actually address/iu);
+  assert.doesNotMatch(message, /couldn't reach/iu);
+});
+
+test("partial acquisition preserves trustworthy partial evidence and explicit operational uncertainty", async () => {
+  const pipeline = new KnowledgeAcquisitionTruthPipeline(new RelevantKnowledgeAcquisitionProvider(
+    new FixedProvider(answerableResult({ status: "PARTIAL", reason: "RATE_LIMITED" })),
+    investigator(),
+  ));
+  const execution = await pipeline.execute("knowledge-partial", baseRequest);
+  const knowledge = buildKnowledgeOutcome(run("knowledge-partial"), execution.bundle);
+
+  assert.equal(knowledge.availability, "PARTIAL");
+  assert.equal(knowledge.findings.length, 1);
+  assert.equal(knowledge.provenance.length, 1);
+  assert.ok(knowledge.uncertainties.some((item) => /limited further requests/iu.test(item)));
+});
+
+test("responsive acquired evidence rejected by V36 remains evidence insufficiency, not provider failure", async () => {
+  const rejectAll: KnowledgeEvidenceAdmissionPolicy = {
+    disposition() {
+      return {
+        verification: "REJECTED",
+        admitted: false,
+        rejectionReason: "Held-out evidence does not satisfy this qualification policy.",
+        provenanceComponentKey: null,
+        provenanceConfidence: "UNKNOWN",
+        authoritativePrimary: false,
+        establishedProofKinds: [],
+      };
+    },
+  };
+  const pipeline = new KnowledgeAcquisitionTruthPipeline(
+    new FixedProvider(answerableResult()),
+    rejectAll,
+  );
+  const execution = await pipeline.execute("knowledge-v36-rejected", baseRequest);
+  const knowledge = buildKnowledgeOutcome(run("knowledge-v36-rejected"), execution.bundle);
+
+  assert.equal(knowledge.availability, "EVIDENCE_INSUFFICIENT");
+  assert.equal(knowledge.findings.length, 1);
+  assert.equal(knowledge.provenance.length, 1);
+  assert.equal(knowledge.evidence?.[0]?.admitted, false);
+  const message = await renderKnowledgeResponseForRun(knowledge, run("knowledge-v36-rejected"));
+  assert.match(message, /Qualified evidence did not establish/iu);
+  assert.doesNotMatch(message, /external investigation|external information source/iu);
+});
+
+test("normal answerable external Knowledge establishes governed source-bound findings and provenance", async () => {
+  const pipeline = new KnowledgeAcquisitionTruthPipeline(new FixedProvider(answerableResult()));
+  const execution = await pipeline.execute("knowledge-established", baseRequest);
+  const knowledge = buildKnowledgeOutcome(run("knowledge-established"), execution.bundle);
+
+  assert.equal(knowledge.availability, "GOVERNED_FINDINGS");
+  assert.equal(knowledge.findings.length, 1);
+  assert.equal(knowledge.provenance.length, 1);
+  assert.equal(knowledge.evidence?.[0]?.admitted, true);
+  assert.equal(knowledge.findings[0]?.evidenceIds[0], knowledge.evidence?.[0]?.evidenceId);
+  assert.equal(knowledge.provenance[0]?.canonicalUri, "https://example.test/lunar-eclipse");
+});
+
+test("general-reference source material does not claim current authoritative Knowledge where suitability is required", async () => {
+  const currentRequest: LatticeRunRequest = {
+    ...baseRequest,
+    objective: "What is the current statutory filing deadline for this regulated process?",
+  };
+  const pipeline = new KnowledgeAcquisitionTruthPipeline(new FixedProvider(answerableResult()));
+  const execution = await pipeline.execute("knowledge-current-authority", currentRequest);
+  const knowledge = buildKnowledgeOutcome(run("knowledge-current-authority", currentRequest), execution.bundle);
+  const message = await renderKnowledgeResponseForRun(
+    knowledge,
+    run("knowledge-current-authority", currentRequest),
+  );
+
+  assert.equal(knowledge.provenance[0]?.evidentiarySuitability, "GENERAL_REFERENCE");
+  assert.match(message, /appropriate authoritative source/iu);
+  assert.doesNotMatch(message, /^A lunar eclipse occurs/iu);
+});
