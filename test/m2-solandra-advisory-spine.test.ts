@@ -116,7 +116,6 @@ class ForbiddenLegacyInterpreter implements ConsultationInterpreter {
 
 class RecordingAcquisition implements KnowledgeAcquisitionProvider {
   readonly kind = "m2-recording-acquisition";
-  readonly structuredOutputCapability = "json_schema" as const;
   readonly requests: KnowledgeAcquisitionRequest[] = [];
 
   async acquire(request: KnowledgeAcquisitionRequest): Promise<KnowledgeAcquisitionResult> {
