@@ -9,6 +9,7 @@ import type {
   ResearchPurpose,
   SourceArtifact,
   SourceEdge,
+  SourceEdgeType,
   TruthAssessment,
 } from "./types.js";
 
@@ -27,10 +28,12 @@ export interface ResearchRequest {
  * capable of granting V36 admission, verification, provenance independence,
  * or primary-source authority.
  */
+export type ResearchEvidenceRelation = Extract<EvidenceRelation, "SUPPORTS" | "CONTRADICTS">;
+
 export interface ResearchEvidenceCandidate {
   artifactId: string;
   externalEvidenceId: string;
-  relation: EvidenceRelation;
+  relation: ResearchEvidenceRelation;
   specificEvidence: string;
 }
 
@@ -149,6 +152,69 @@ function requireArray(value: unknown, label: string): unknown[] {
   return value;
 }
 
+function requireString(value: unknown, label: string): string {
+  if (typeof value !== "string") throw new Error(`${label} must be a string.`);
+  return value;
+}
+
+function requireNullableString(value: unknown, label: string): string | null {
+  if (value === null) return null;
+  return requireString(value, label);
+}
+
+function requireFiniteNumber(value: unknown, label: string): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new Error(`${label} must be a finite number.`);
+  }
+  return value;
+}
+
+function requireProvenanceConfidence(value: unknown, label: string): ProvenanceConfidence {
+  switch (value) {
+    case "HIGH":
+    case "MODERATE":
+    case "LOW":
+    case "UNKNOWN":
+      return value;
+    default:
+      throw new Error(`${label} has an invalid provenanceConfidence.`);
+  }
+}
+
+function requireSourceEdgeType(value: unknown, label: string): SourceEdgeType {
+  switch (value) {
+    case "CITES":
+    case "DERIVES_FROM":
+    case "SYNDICATES":
+    case "COPIES":
+    case "MIRRORS":
+      return value;
+    default:
+      throw new Error(`${label} has an invalid edgeType.`);
+  }
+}
+
+function requireResearchEvidenceRelation(
+  value: unknown,
+  label: string,
+): ResearchEvidenceRelation {
+  switch (value) {
+    case "SUPPORTS":
+    case "CONTRADICTS":
+      return value;
+    default:
+      throw new Error(`${label} has an invalid relation.`);
+  }
+}
+
+function requireNonBlankString(value: unknown, label: string): string {
+  const text = requireString(value, label);
+  if (text.trim().length === 0) {
+    throw new Error("Research evidence candidate contains a blank or invalid required field.");
+  }
+  return text;
+}
+
 /**
  * Validate and sanitize an untrusted provider/runtime result for one exact V36
  * research request. Authority-shaped extra fields are deliberately discarded.
@@ -162,49 +228,82 @@ export function validateResearchResult(
   const edges = requireArray(raw.edges, "Research result edges");
   const candidates = requireArray(raw.evidence, "Research result evidence");
 
-  const validatedArtifacts = artifacts.map((artifactValue) => {
-    const artifact = requireRecord(artifactValue, "Research artifact") as unknown as SourceArtifact;
+  const validatedArtifacts = artifacts.map((artifactValue, index) => {
+    const label = `Research artifact ${index}`;
+    const artifact = requireRecord(artifactValue, label);
+    const runId = requireString(artifact.runId, `${label} runId`);
+    if (runId !== request.runId) throw new Error("Research artifact crossed Run scope.");
     if (artifact.untrusted !== true) {
       throw new Error("Research provider output must enter V36 as an untrusted SourceArtifact.");
     }
-    if (artifact.runId !== request.runId) throw new Error("Research artifact crossed Run scope.");
-    return structuredClone(artifact);
+    const authoritativePrimary = artifact.authoritativePrimary;
+    if (typeof authoritativePrimary !== "boolean") {
+      throw new Error(`${label} authoritativePrimary must be boolean.`);
+    }
+    return {
+      id: requireString(artifact.id, `${label} id`),
+      runId,
+      canonicalUri: requireString(artifact.canonicalUri, `${label} canonicalUri`),
+      artifactHash: requireString(artifact.artifactHash, `${label} artifactHash`),
+      publisher: requireNullableString(artifact.publisher, `${label} publisher`),
+      originKey: requireNullableString(artifact.originKey, `${label} originKey`),
+      provenanceComponentKey: requireNullableString(
+        artifact.provenanceComponentKey,
+        `${label} provenanceComponentKey`,
+      ),
+      provenanceConfidence: requireProvenanceConfidence(
+        artifact.provenanceConfidence,
+        label,
+      ),
+      authoritativePrimary,
+      retrievedAt: requireString(artifact.retrievedAt, `${label} retrievedAt`),
+      publishedAt: requireNullableString(artifact.publishedAt, `${label} publishedAt`),
+      effectiveFrom: requireNullableString(artifact.effectiveFrom, `${label} effectiveFrom`),
+      effectiveTo: requireNullableString(artifact.effectiveTo, `${label} effectiveTo`),
+      contentType: requireString(artifact.contentType, `${label} contentType`),
+      metadata: structuredClone(requireRecord(artifact.metadata, `${label} metadata`)),
+      untrusted: true,
+    } satisfies SourceArtifact;
   });
 
-  const validatedEdges = edges.map((edgeValue) => {
-    const edge = requireRecord(edgeValue, "Research source edge") as unknown as SourceEdge;
-    if (edge.runId !== request.runId) throw new Error("Research source edge crossed Run scope.");
-    return structuredClone(edge);
+  const validatedEdges = edges.map((edgeValue, index) => {
+    const label = `Research source edge ${index}`;
+    const edge = requireRecord(edgeValue, label);
+    const runId = requireString(edge.runId, `${label} runId`);
+    if (runId !== request.runId) throw new Error("Research source edge crossed Run scope.");
+    return {
+      id: requireString(edge.id, `${label} id`),
+      runId,
+      fromArtifactId: requireString(edge.fromArtifactId, `${label} fromArtifactId`),
+      toArtifactId: requireString(edge.toArtifactId, `${label} toArtifactId`),
+      edgeType: requireSourceEdgeType(edge.edgeType, label),
+      confidence: requireFiniteNumber(edge.confidence, `${label} confidence`),
+      contentSimilarity: edge.contentSimilarity === null
+        ? null
+        : requireFiniteNumber(edge.contentSimilarity, `${label} contentSimilarity`),
+    } satisfies SourceEdge;
   });
 
-  const evidence = candidates.map((candidateValue) => {
-    const rawCandidate = requireRecord(candidateValue, "Research evidence candidate");
-    const candidate = rawCandidate as unknown as ResearchEvidenceCandidate;
-    const legacyScope = rawCandidate as Partial<Pick<ClaimEvidence, "runId" | "claimId">>;
+  const evidence = candidates.map((candidateValue, index) => {
+    const label = `Research evidence candidate ${index}`;
+    const rawCandidate = requireRecord(candidateValue, label);
     if (
-      (legacyScope.runId !== undefined && legacyScope.runId !== request.runId)
-      || (legacyScope.claimId !== undefined && legacyScope.claimId !== request.claimId)
+      (rawCandidate.runId !== undefined && rawCandidate.runId !== request.runId)
+      || (rawCandidate.claimId !== undefined && rawCandidate.claimId !== request.claimId)
     ) {
       throw new Error("Research evidence crossed Run or claim scope.");
     }
-    if (
-      typeof candidate.artifactId !== "string"
-      || typeof candidate.externalEvidenceId !== "string"
-      || typeof candidate.specificEvidence !== "string"
-      || candidate.artifactId.trim().length === 0
-      || candidate.externalEvidenceId.trim().length === 0
-      || candidate.specificEvidence.trim().length === 0
-    ) {
-      throw new Error("Research evidence candidate contains a blank or invalid required field.");
-    }
-    if (candidate.relation !== "SUPPORTS" && candidate.relation !== "CONTRADICTS") {
-      throw new Error("Research evidence candidate has an invalid relation.");
-    }
     return {
-      artifactId: candidate.artifactId,
-      externalEvidenceId: candidate.externalEvidenceId,
-      relation: candidate.relation,
-      specificEvidence: candidate.specificEvidence,
+      artifactId: requireNonBlankString(rawCandidate.artifactId, `${label} artifactId`),
+      externalEvidenceId: requireNonBlankString(
+        rawCandidate.externalEvidenceId,
+        `${label} externalEvidenceId`,
+      ),
+      relation: requireResearchEvidenceRelation(rawCandidate.relation, label),
+      specificEvidence: requireNonBlankString(
+        rawCandidate.specificEvidence,
+        `${label} specificEvidence`,
+      ),
     } satisfies ResearchEvidenceCandidate;
   });
   return { artifacts: validatedArtifacts, edges: validatedEdges, evidence };
