@@ -83,7 +83,6 @@ import {
   PostgresKnowledgeRecordStore,
   type KnowledgeRecordStore,
 } from "./knowledge/knowledge-record-store.js";
-import type { ModelAssistanceCapabilityService } from "./model-assistance-capability.js";
 import {
   MemoryRecommendationStore,
   PostgresRecommendationStore,
@@ -91,15 +90,9 @@ import {
 } from "./recommendation/recommendation-store.js";
 import { PostgresModelAssistanceAuthorizationStore } from "./model-assistance-store.js";
 import { PostgresGroqRateLimitCoordinator } from "./model/groq-rate-limit-coordinator.js";
-import { LocalOfflineModelRuntime } from "./model/local-offline-runtime.js";
-import { OpenAiCompatibleModelProvider } from "./model/openai-compatible.js";
 import { PostgresApiRunControlStore } from "./postgres-api-control-store.js";
 import { PostgresOrchestrationStore } from "./postgres-orchestration-store.js";
 import { PostgresRunStore } from "./postgres-run-store.js";
-import {
-  ModelKnowledgeSimplifier,
-  type KnowledgeSimplifier,
-} from "./presentation/solandra/knowledge-simplification.js";
 import { registerRunEventStream } from "./progress/run-event-stream.js";
 import { executePersistedRun, type GeneralizedDecisionAdapter } from "./run-execution.js";
 import { MemoryRunStore, type RunStore } from "./run-store.js";
@@ -121,8 +114,6 @@ const DEFAULT_MEMORY_DISPATCH_DELAY_MS = 50;
 export interface RuntimeAppOptions {
   truthPipeline?: TruthExecutionPipeline;
   knowledgeAcquisitionProvider?: KnowledgeAcquisitionProvider;
-  knowledgeSimplifier?: KnowledgeSimplifier;
-  modelAssistanceService?: ModelAssistanceCapabilityService;
   memoryDispatchDelayMs?: number;
   authenticatedSubjectResolver?: AuthenticatedSubjectResolver;
   consultationInterpreter?: ConsultationInterpreter;
@@ -165,21 +156,6 @@ function resolveAuthenticatedSubjectResolver(
     );
   }
   return () => undefined;
-}
-
-function resolveKnowledgeSimplifier(
-  config: RuntimeConfig,
-  configured: KnowledgeSimplifier | undefined,
-): KnowledgeSimplifier | undefined {
-  if (configured !== undefined) return configured;
-  if (config.localModelProviderBaseUrl === undefined || config.localModelProviderModel === undefined) {
-    return undefined;
-  }
-  const provider = new OpenAiCompatibleModelProvider({ baseUrl: config.localModelProviderBaseUrl });
-  return new ModelKnowledgeSimplifier(
-    new LocalOfflineModelRuntime(provider),
-    config.localModelProviderModel,
-  );
 }
 
 type DeferredMemoryExecution = {
@@ -554,8 +530,6 @@ export async function createRuntimeApp(
     truthPipeline,
     apiControlStore,
     apiSubject: authenticatedApiSubject,
-    knowledgeSimplifier: resolveKnowledgeSimplifier(config, options.knowledgeSimplifier),
-    modelAssistanceService: options.modelAssistanceService,
     validatorDeployment: config.validatorDeployment === true,
   });
 

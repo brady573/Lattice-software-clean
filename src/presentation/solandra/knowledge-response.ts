@@ -1,11 +1,5 @@
 import { isConsultationRunRequest, type LatticeRun } from "../../domain.js";
 import type { KnowledgeFinding, KnowledgeOutcome } from "../../outcome.js";
-import {
-  KNOWLEDGE_SIMPLIFICATION_FAILURE_MESSAGE,
-  knowledgeSimplificationRequested,
-  type KnowledgeSimplificationAttempt,
-  type KnowledgeSimplifier,
-} from "./knowledge-simplification.js";
 
 const EMPTY_KNOWLEDGE_MESSAGE = "No validated external findings are sufficiently relevant to this objective.";
 const SOURCE_REQUEST_PATTERN = /\b(?:source|sources|citation|citations|evidence)\b/iu;
@@ -164,37 +158,6 @@ function renderGovernedAnswer(knowledge: KnowledgeOutcome): string {
   ].filter(Boolean).join("\n\n");
 }
 
-function simplificationLimitation(attempt: KnowledgeSimplificationAttempt): string {
-  switch (attempt.status) {
-    case "CAPABILITY_NOT_AUTHORIZED":
-      return "Model assistance isn't connected. Connect it in Solandra if you want me to simplify this wording.";
-    case "CAPABILITY_UNAVAILABLE":
-      return "Model assistance isn't available in this Lattice setup, so I kept the original wording.";
-    case "CAPABILITY_REVOKED":
-      return "Model assistance was disconnected before that result could be used, so I kept the original wording.";
-    case "PROVIDER_FAILURE":
-      return "Model assistance couldn't complete that request, so I kept the original wording.";
-    case "FIDELITY_REJECTED":
-      return KNOWLEDGE_SIMPLIFICATION_FAILURE_MESSAGE;
-    case "SIMPLIFIED":
-      return "";
-  }
-}
-
-async function attemptSimplification(
-  simplifier: KnowledgeSimplifier,
-  runId: string,
-  finding: KnowledgeFinding,
-): Promise<KnowledgeSimplificationAttempt> {
-  if (simplifier.simplifyWithAudit !== undefined) {
-    return await simplifier.simplifyWithAudit({ runId, finding });
-  }
-  const text = await simplifier.simplify({ runId, finding });
-  return text === null
-    ? Object.freeze({ status: "FIDELITY_REJECTED", text: null, invocationProvenance: null })
-    : Object.freeze({ status: "SIMPLIFIED", text, invocationProvenance: null });
-}
-
 /** Project governed KnowledgeOutcome content into concise Solandra conversation text. */
 export function renderKnowledgeResponse(knowledge: KnowledgeOutcome): string {
   if (knowledge.findings.length === 0) {
@@ -204,40 +167,15 @@ export function renderKnowledgeResponse(knowledge: KnowledgeOutcome): string {
 }
 
 /**
- * Produce Product-facing Knowledge without changing canonical Knowledge. Direct
- * answers render governed findings structurally rather than reconstructing their
- * meaning from lexical markers. Explicit legacy model assistance remains bounded
- * to its existing subject-authorized simplification capability.
+ * Produce Product-facing Knowledge without changing canonical Knowledge.
+ * Historical explanation/simplification belongs to exact ConversationReference
+ * presentation, not run-outcome lexical routing.
  */
 export async function renderKnowledgeResponseForRun(
   knowledge: KnowledgeOutcome,
   run: LatticeRun,
-  simplifier?: KnowledgeSimplifier,
 ): Promise<string> {
   const context = runContext(run);
   if (sourceRequest(context)) return renderSourceList(knowledge);
-
-  if (
-    knowledge.findings.length > 0
-    && requiresAuthoritativeDomainSource(knowledge)
-    && !hasAuthoritativeDomainSource(knowledge)
-  ) {
-    return [SOURCE_SUITABILITY_LIMITATION, sourceLabel(knowledge)].filter(Boolean).join("\n\n");
-  }
-
-  const governed = renderKnowledgeResponse(knowledge);
-  if (!knowledgeSimplificationRequested(run)) return renderGovernedAnswer(knowledge);
-
-  if (knowledge.findings.length !== 1 || simplifier === undefined) {
-    return `${governed}\n\n${KNOWLEDGE_SIMPLIFICATION_FAILURE_MESSAGE}`;
-  }
-
-  const finding = knowledge.findings[0];
-  if (finding === undefined) return `${governed}\n\n${KNOWLEDGE_SIMPLIFICATION_FAILURE_MESSAGE}`;
-
-  const attempt = await attemptSimplification(simplifier, run.id, finding);
-  if (attempt.status !== "SIMPLIFIED") {
-    return `${governed}\n\n${simplificationLimitation(attempt)}`;
-  }
-  return renderFinding(finding, attempt.text);
+  return renderGovernedAnswer(knowledge);
 }

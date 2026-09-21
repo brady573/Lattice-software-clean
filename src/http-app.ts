@@ -8,18 +8,6 @@ import { renderSolandraValidatorConversationPage } from "./ui/solandra-validator
  * deliberately isolated tests. This surface does not install authentication.
  */
 export interface CanonicalAppOptions extends HttpCoreOptions {
-  /**
-   * Retained temporarily as an inert noncanonical compatibility slot while
-   * predecessor simplification tests are removed. Canonical HTTP behavior does
-   * not invoke a direct simplifier.
-   */
-  knowledgeSimplifier?: unknown;
-  /**
-   * Retained temporarily as an inert noncanonical compatibility slot while
-   * predecessor assistance tests are removed. Canonical HTTP behavior does not
-   * consult Model-assistance authorization.
-   */
-  modelAssistanceService?: unknown;
   /** Deployment/session presentation role already resolved by runtime configuration. */
   validatorDeployment?: boolean;
 }
@@ -41,12 +29,7 @@ function renderCanonicalConversationPage(validatorDeployment: boolean): string {
  * serialization never invokes predecessor Model assistance.
  */
 export function buildCanonicalApp(options: CanonicalAppOptions = {}): FastifyInstance {
-  const {
-    knowledgeSimplifier: _knowledgeSimplifier,
-    modelAssistanceService: _modelAssistanceService,
-    validatorDeployment = false,
-    ...coreOptions
-  } = options;
+  const { validatorDeployment = false, ...coreOptions } = options;
   const { app } = createHttpCore(coreOptions);
   app.get("/", async (_request, reply) =>
     reply.type("text/html; charset=utf-8").send(renderCanonicalConversationPage(validatorDeployment))
