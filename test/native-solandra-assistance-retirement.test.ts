@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import type { ModelInvocationProvenance } from "../src/model/types.js";
@@ -111,7 +112,7 @@ test("ordinary Solandra conversation needs no assistance connection across held-
       const response = await app.inject({
         method: "POST",
         url: `/api/v1/conversations/${conversationId}/turns`,
-        payload: { turnId: `ordinary-held-out-${index}`, message },
+        payload: { turnId: randomUUID(), message },
       });
       assert.equal(response.statusCode, 200, response.body);
       const body = response.json<{ status: string; presentation: { assistantMessage: string }; runId?: string }>();

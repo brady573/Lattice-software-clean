@@ -180,7 +180,7 @@ export function renderSolandraAuthoritativeConversationPage(): string {
       '          renderPreparedResource(outcome.resource, outcome.knowledge, options.preparedBody ?? outcome.resource.body);',
     )
     .replace(
-      '        if (!body.runId) throw new Error("I couldn\\'t establish the requested work safely.");',
+      `        if (!body.runId) throw new Error("I couldn't establish the requested work safely.");`,
       directConversationHandling,
     )
     .replace("  <script>\n    (() => {", `${ownerAccessMarkup}${ownerAccessScript}  <script>\n    (() => {`);
