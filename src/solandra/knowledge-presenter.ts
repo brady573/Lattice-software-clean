@@ -26,7 +26,7 @@ export type SolandraKnowledgePresentationResult =
   }>
   | Readonly<{
     status: "FIDELITY_REJECTED";
-    text: string;
+    text: string | null;
     invocationProvenance: ModelInvocationProvenance;
   }>;
 

@@ -1027,7 +1027,12 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
               renderHistoricalSources(loaded),
             ].join("\n\n");
           } else {
-            assistantMessage = presented.text;
+            assistantMessage = presented.text ?? [
+              "I couldn\'t transform the established Knowledge faithfully, so I kept the original governed wording. I did not start new research.",
+              loaded.knowledge.findings.map((finding) => finding.text).join("\\n\\n"),
+              "The existing governed Knowledge remains available and unchanged.",
+              renderHistoricalSources(loaded),
+            ].filter(Boolean).join("\\n\\n");
           }
         }
 
