@@ -9,6 +9,7 @@ const deployedWorkflowName = 'deployed-functional-validation.yml';
 const expectedDurableWorkflowNames = [
   'browser-lifecycle-validation.yml',
   'core-validation.yml',
+  'live-solandra-cognition-validation.yml',
   'postgres-integration-validation.yml',
   'render-blueprint-validation.yml',
 ];
@@ -36,7 +37,7 @@ const workflowNames = readdirSync(workflowDirectory)
   .sort();
 const workflowEntries = workflowNames.map((name) => ({ name, text: workflowText(name) }));
 
-test('CI retains four durable hosted lanes plus one separate deployed-validation lane', () => {
+test('CI retains five durable hosted lanes plus one separate deployed-validation lane', () => {
   assert.deepEqual(workflowNames, expectedWorkflowNames);
   assert.deepEqual(
     workflowNames.filter((name) => name !== deployedWorkflowName),
