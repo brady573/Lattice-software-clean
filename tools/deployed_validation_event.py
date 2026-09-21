@@ -14,6 +14,9 @@ PREVIEW_TARGET_RE = re.compile(
     r"^https://lattice-solandra-validation-pr-([1-9][0-9]*)\.onrender\.com/?$"
 )
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+EVIDENCE_BINDING_NOT_REQUESTED = "NOT_REQUESTED"
+EVIDENCE_BINDING_REVISION_BOUND = "REVISION_BOUND"
+EVIDENCE_BINDING_UNBOUND_DIAGNOSTIC = "UNBOUND_DIAGNOSTIC"
 
 
 @dataclass(frozen=True)
@@ -25,6 +28,7 @@ class ValidationRequest:
     expected_sha: str = ""
     pr_number: str = ""
     skip_reason: str = ""
+    evidence_binding: str = EVIDENCE_BINDING_NOT_REQUESTED
 
 
 def _skip(reason: str, *, product_target: str = "", pr_number: str = "", expected_sha: str = "") -> ValidationRequest:
@@ -36,6 +40,7 @@ def _skip(reason: str, *, product_target: str = "", pr_number: str = "", expecte
         expected_sha=expected_sha,
         pr_number=pr_number,
         skip_reason=reason,
+        evidence_binding=EVIDENCE_BINDING_NOT_REQUESTED,
     )
 
 
@@ -56,7 +61,9 @@ def resolve_manual(product_target: str, run_owner_auth: bool) -> ValidationReque
         product_target=target,
         target_kind=kind,
         owner_auth_enabled=run_owner_auth,
+        expected_sha="",
         pr_number=pr_number,
+        evidence_binding=EVIDENCE_BINDING_UNBOUND_DIAGNOSTIC,
     )
 
 
@@ -130,6 +137,7 @@ def resolve_deployment_status(
         owner_auth_enabled=False,
         expected_sha=deployment_sha,
         pr_number=pr_number_text,
+        evidence_binding=EVIDENCE_BINDING_REVISION_BOUND,
     )
 
 
@@ -185,6 +193,7 @@ def _write_outputs(request: ValidationRequest, output_path: str) -> None:
         "expected_sha": request.expected_sha,
         "pr_number": request.pr_number,
         "skip_reason": request.skip_reason,
+        "evidence_binding": request.evidence_binding,
     }
     with Path(output_path).open("a", encoding="utf-8") as handle:
         for key, value in values.items():
@@ -203,7 +212,8 @@ def main() -> int:
         print(
             "MANUAL_PRODUCT_VALIDATION=ELIGIBLE "
             f"kind={request.target_kind} target={request.product_target} "
-            f"owner_auth={str(request.owner_auth_enabled).lower()}"
+            f"owner_auth={str(request.owner_auth_enabled).lower()} "
+            f"evidence_binding={request.evidence_binding}"
         )
     elif event_name == "deployment_status":
         event_path = os.environ.get("GITHUB_EVENT_PATH", "")
@@ -223,11 +233,12 @@ def main() -> int:
         if request.should_run:
             print(
                 "AUTOMATIC_PRODUCT_VALIDATION=ELIGIBLE "
-                f"pr={request.pr_number} sha={request.expected_sha} target={request.product_target}"
+                f"pr={request.pr_number} sha={request.expected_sha} target={request.product_target} "
+                f"evidence_binding={request.evidence_binding}"
             )
         else:
             print(
-                "AUTOMATIC_PRODUCT_VALIDATION=SKIP "
+                "AUTOMATIC_PRODUCT_VALIDATION=SKIP_NOT_REQUESTED "
                 f"reason={request.skip_reason}"
             )
     else:
