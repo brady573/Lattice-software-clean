@@ -415,6 +415,9 @@ export class ModelRuntime {
     try {
       return await this.lock.run(logicalKey, signal, async () => {
         for (let logicalAttempt = 0; logicalAttempt < maxAttempts; logicalAttempt += 1) {
+          if (signal.aborted) {
+            throw classifyAbort(callerSignal, timeoutController.signal, signal.reason);
+          }
           const attempt = this.attempts.next(logicalKey);
           const started = performance.now();
           try {
@@ -454,7 +457,7 @@ export class ModelRuntime {
             const classified = signal.aborted
               ? classifyAbort(callerSignal, timeoutController.signal, error)
               : asModelProviderError(error);
-            if (!classified.retryable || logicalAttempt + 1 >= maxAttempts) {
+            if (signal.aborted || !classified.retryable || logicalAttempt + 1 >= maxAttempts) {
               throw classified;
             }
           }
