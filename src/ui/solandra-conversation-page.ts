@@ -371,9 +371,17 @@ export function renderSolandraConversationPage(): string {
       const rebuildConversation = (continuity) => {
         conversation.replaceChildren();
         for (const message of continuity.messages || []) {
-          if (message.role === "USER" && typeof message.content === "string") appendUserTurn(message.content);
+          if (typeof message.content !== "string") continue;
+          if (message.role === "USER") appendUserTurn(message.content);
+          else if (message.role === "SOLANDRA") appendSolandraTurn(message.content);
         }
       };
+
+      const continuityHasLogicalTurn = (continuity, turnId) =>
+        Array.isArray(continuity?.messages)
+        && continuity.messages.some((message) =>
+          message?.role === "USER"
+          && message.logicalUserTurnId === turnId);
 
       const syncCancellationControl = async (work) => {
         const response = await fetch("/api/v1/runs/" + encodeURIComponent(work.runId));
@@ -508,7 +516,10 @@ export function renderSolandraConversationPage(): string {
         clearPendingTurn(record.turnId);
       };
 
-      const recoverPendingTurn = async (record) => {
+      const recoverPendingTurn = async (record, continuity) => {
+        if (!continuityHasLogicalTurn(continuity, record.turnId)) {
+          appendUserTurn(record.message);
+        }
         appendSolandraTurn("I’m checking the request you already sent before starting anything new.");
         await postTurnRecord(record);
       };
@@ -585,7 +596,7 @@ export function renderSolandraConversationPage(): string {
           const pendingTurn = readPendingTurn();
           if (pendingTurn?.conversationId === storedId) {
             await restoreLatestUsefulState(continuity);
-            await recoverPendingTurn(pendingTurn);
+            await recoverPendingTurn(pendingTurn, continuity);
             return;
           }
 

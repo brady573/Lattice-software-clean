@@ -875,10 +875,21 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
               governedKnowledge: [],
             },
           });
+          const persisted = await options.conversationResponseStore.putResponse({
+            responseId: stableUuid("conversation-response", conversationId, sourceMessage.messageId),
+            conversationId,
+            sourceMessageId: sourceMessage.messageId,
+            content: result.output.text,
+            origin: "SOLANDRA",
+            authority: "NON_AUTHORITATIVE_CONVERSATION",
+            factualAuthority: false,
+            createdAt: sourceMessage.createdAt,
+          });
           return reply.status(200).send({
             status: "COGNITIVE_ASSISTANCE_COMPLETED",
-            presentation: { assistantMessage: result.output.text },
+            presentation: { assistantMessage: persisted.content },
             interpretation: publicCognition(cognition),
+            conversationResponse: conversationResponsePayload(persisted),
             capability: {
               capabilityId: result.capabilityId,
               authority: result.output.authority,

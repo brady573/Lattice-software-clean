@@ -75,6 +75,7 @@ test("Issue #91 concurrent duplicate conversational delivery shares one model ca
     assert.equal(continuity.statusCode, 200);
     const body = continuity.json();
     assert.deepEqual(body.messages.map((message: { role: string }) => message.role), ["USER", "SOLANDRA"]);
+    assert.equal(body.messages[0].logicalUserTurnId, "duplicate-turn");
     assert.equal(body.messages[1].authority, "NON_AUTHORITATIVE_CONVERSATION");
     assert.equal(body.messages[1].factualAuthority, false);
   } finally {
