@@ -117,6 +117,7 @@ async function countRows(pool: Pool, sql: string, values: unknown[]): Promise<nu
 }
 
 async function cleanupConversation(pool: Pool, conversationId: string): Promise<void> {
+  await pool.query("DELETE FROM runs WHERE conversation_id=$1", [conversationId]);
   await pool.query("DELETE FROM conversations WHERE id=$1", [conversationId]);
   await pool.query("DELETE FROM intent_scopes WHERE intent_scope_id=$1", [`consultation:${conversationId}`]);
 }
@@ -294,7 +295,8 @@ test(
       };
       trigger = await installFailureTrigger(pool, "accepted_choices");
       const choiceBeforeObject = await app.inject({ method: "POST", url: turnUrl, payload: choicePayload });
-      assert.equal(choiceBeforeObject.statusCode, 500, choiceBeforeObject.body);
+      assert.equal(choiceBeforeObject.statusCode, 409, choiceBeforeObject.body);
+      assert.equal(choiceBeforeObject.json().error, "ACCEPTED_CHOICE_CONFLICT");
       assert.equal(await countRows(
         pool,
         "SELECT count(*)::text AS count FROM accepted_choices WHERE conversation_id=$1",
