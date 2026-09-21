@@ -54,7 +54,7 @@ function multiFindingKnowledge(): KnowledgeOutcome {
   const findings = [
     finding("claim-supported", "The API may return only 25 items when CACHE-V2 is enabled after 2026-09-01, and it does not guarantee delivery.", "SUPPORTED", "HIGH", 1),
     finding("claim-refuted", "The service does not accept HTTP requests before 08:00 UTC.", "REFUTED", "HIGH", 2),
-    finding("claim-conflicted", "If the network path fails, a fallback route could remain available.", "CONFLICTED", "MEDIUM", 3),
+    finding("claim-conflicted", "If the network path fails, a fallback route could remain available.", "CONFLICTED", "MODERATE", 3),
     finding("claim-unresolved", "The backup process might finish during the maintenance window.", "UNRESOLVED", "LOW", 4),
   ];
   return {
@@ -132,7 +132,7 @@ test("native simplification paraphrases claim-bound segments while authority met
   assert.equal(result.text.match(/Status:/gu)?.length, 4);
   assert.match(result.text, /Status: Supported; confidence: HIGH\./u);
   assert.match(result.text, /Status: Refuted; confidence: HIGH\./u);
-  assert.match(result.text, /Status: Materially conflicted; confidence: MEDIUM\./u);
+  assert.match(result.text, /Status: Materially conflicted; confidence: MODERATE\./u);
   assert.match(result.text, /Status: Unresolved; confidence: LOW\./u);
   assert.match(result.text, /Effective at: 2026-09-01T00:00:00\.000Z; Period: 2026-Q3/u);
   assert.match(result.text, /Delivery may still be delayed by conditions not established in this Knowledge/u);
@@ -147,7 +147,7 @@ test("native simplification paraphrases claim-bound segments while authority met
 test("bounded fidelity defense rejects dropped negation, modality, conditions, quantities, and technical identifiers", async () => {
   const knowledge = multiFindingKnowledge();
   knowledge.findings = [knowledge.findings[0]!];
-  knowledge.evidence = knowledge.evidence?.filter((item) => item.claimId === "claim-supported");
+  knowledge.evidence = (knowledge.evidence ?? []).filter((item) => item.claimId === "claim-supported");
   knowledge.provenance = [knowledge.provenance[0]!];
   const original = knowledge.findings[0]!.text;
   const invalid = [
