@@ -12,8 +12,8 @@ import type { TruthExecutionPipeline } from "../src/truth/execution-pipeline.js"
 const databaseUrl = process.env.DATABASE_URL;
 const request: RunRequest = {
   goal: "Prove exact durable worker ownership.",
-  hardConstraints: [],
-  priorities: [],
+  hardConstraints: [{ criterion: "ownership", operator: "eq", value: true }],
+  priorities: [{ criterion: "durability", weight: 1 }],
 };
 const BASE_TIME = Date.parse("2026-09-15T12:00:00.000Z");
 

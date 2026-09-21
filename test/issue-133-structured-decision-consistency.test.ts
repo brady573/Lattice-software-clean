@@ -420,8 +420,8 @@ test(
       const loaded = await store.get(legacyId);
       assert.equal(loaded?.decision?.outcome, "RECOMMENDATION");
       assert.equal(loaded?.decision?.winnerCandidateId, "alpha");
-      await assert.rejects(store.get(absentLegacyWinnerId), /Invalid persisted StructuredDecision/);
-      await assert.rejects(store.get(ineligibleLegacyWinnerId), /Invalid persisted StructuredDecision/);
+      await assert.rejects(store.get(absentLegacyWinnerId), /contains invalid decision_json/);
+      await assert.rejects(store.get(ineligibleLegacyWinnerId), /contains invalid decision_json/);
     } finally {
       await pool.query(
         "DELETE FROM runs WHERE id = ANY($1::uuid[])",

@@ -23,8 +23,8 @@ const databaseUrl = process.env.DATABASE_URL;
 const windowsProcessSignalsAreForced = process.platform === "win32";
 const request: RunRequest = {
   goal: "Exercise the durable Research-worker process role.",
-  hardConstraints: [],
-  priorities: [],
+  hardConstraints: [{ criterion: "research-ready", operator: "eq", value: true }],
+  priorities: [{ criterion: "durability", weight: 1 }],
 };
 
 function investigatingRun(id: string): LatticeRun {

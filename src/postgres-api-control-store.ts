@@ -13,6 +13,7 @@ import type {
   ApiSupersededRunResponse,
 } from "./api-control-store.js";
 import { isConsultationRunRequest, type LatticeRun, type RunStatus } from "./domain.js";
+import { parsePersistedRunRequest } from "./postgres-run-json.js";
 import {
   decisionPlanBindingForRun,
 } from "./intent/decision-plan-run-control.js";
@@ -168,7 +169,7 @@ async function existingRunMatchesSubmission(
   client: PoolClient,
   input: ApiRunSubmissionInput,
 ): Promise<boolean | undefined> {
-  const existing = await client.query<{ conversation_id: string; request_json: LatticeRun["request"] }>(
+  const existing = await client.query<{ conversation_id: string; request_json: unknown }>(
     "SELECT conversation_id,request_json FROM runs WHERE id=$1 FOR SHARE",
     [input.run.id],
   );
@@ -300,12 +301,13 @@ export class PostgresApiRunControlStore implements ApiRunControlStore {
   }
 
   private async repairPersistedDecisionPlan(client: PoolClient, runId: string): Promise<void> {
-    const runResult = await client.query<{ id: string; request_json: LatticeRun["request"] }>(
+    const runResult = await client.query<{ id: string; request_json: unknown }>(
       "SELECT id,request_json FROM runs WHERE id=$1 FOR SHARE",
       [runId],
     );
     const run = runResult.rows[0];
     if (!run) throw new Error("Idempotent API response references a missing durable Run.");
+    const request = parsePersistedRunRequest(run.id, run.request_json);
     const bindingResult = await client.query<{ intent_scope_id: string; intent_version_id: string }>(
       "SELECT intent_scope_id,intent_version_id FROM run_intent_bindings WHERE run_id=$1",
       [runId],
@@ -313,7 +315,7 @@ export class PostgresApiRunControlStore implements ApiRunControlStore {
     const binding = bindingResult.rows[0];
     await this.bindDecisionPlan(
       client,
-      { id: run.id, request: run.request_json },
+      { id: run.id, request },
       binding
         ? { intentScopeId: binding.intent_scope_id, intentVersionId: binding.intent_version_id }
         : undefined,
