@@ -47,7 +47,12 @@ test("canonical Product contains no predecessor assistance routing, controls, or
     assert.doesNotMatch(source, /COGNITIVE_ASSISTANCE|user-model|model-assistance/iu);
   }
   assert.doesNotMatch(index, /CapabilityBroker|ModelAssistanceCapabilityService/u);
-  assert.doesNotMatch(http, /preSerialization|knowledgeSimplifier/u);
+  assert.match(http, /preSerialization/u);
+  assert.match(http, /renderKnowledgeResponseForRun\(canonicalOutcome, run\)/u);
+  assert.doesNotMatch(
+    http,
+    /ModelAssistanceCapabilityService|modelAssistance|knowledgeSimplifier|SIMPLIFICATION_REQUEST_PATTERN/u,
+  );
 });
 
 test("neutral authenticated session probe is fail-closed and independent of capability authorization", async () => {

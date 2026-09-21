@@ -176,8 +176,10 @@ test("A1 cast-iron answer is direct, source-grounded, and follow-ups preserve th
     const simpler = await outcomeFor(app, simplerAccepted);
     assert.equal(simplerAccepted.intentVersionId, initialAccepted.intentVersionId);
     assert.equal(simplerAccepted.acceptedUnderstanding, objective);
-    assert.match(simpler.presentation.assistantMessage, /Cast iron rusts because iron reacts with oxygen and water\./u);
-    assert.match(simpler.presentation.assistantMessage, /source report/u);
+    assert.match(simpler.presentation.assistantMessage, /^The retrieved source material reports:/u);
+    assert.match(simpler.presentation.assistantMessage, /Cast iron rusts because iron reacts with oxygen and water/iu);
+    assert.match(simpler.presentation.assistantMessage, /does not by itself independently verify/u);
+    assert.doesNotMatch(simpler.presentation.assistantMessage, /Model assistance|couldn't simplify/iu);
     assert.equal(simpler.outcome.findings[0]?.text, castIron.content);
 
     const sourcesAccepted = requireAccepted(await submitTurn(app, conversationId, "cast-sources", "What are your sources?"));
