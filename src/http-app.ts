@@ -1,9 +1,5 @@
 import type { FastifyInstance } from "fastify";
 import { createHttpCore, type HttpCoreOptions } from "./http-core.js";
-import type { ModelAssistanceCapabilityService } from "./model-assistance-capability.js";
-import { buildRunOutcome } from "./outcome.js";
-import type { KnowledgeSimplifier } from "./presentation/solandra/knowledge-simplification.js";
-import { renderKnowledgeResponseForRun } from "./presentation/solandra/knowledge-response.js";
 import { renderSolandraAuthoritativeConversationPage } from "./ui/solandra-authoritative-conversation-page.js";
 import { renderSolandraValidatorConversationPage } from "./ui/solandra-validator-conversation-page.js";
 
@@ -12,21 +8,20 @@ import { renderSolandraValidatorConversationPage } from "./ui/solandra-validator
  * deliberately isolated tests. This surface does not install authentication.
  */
 export interface CanonicalAppOptions extends HttpCoreOptions {
-  /** Compatibility-only direct simplifier for explicit test/non-canonical compositions. */
-  knowledgeSimplifier?: KnowledgeSimplifier | undefined;
-  /** Canonical subject-authorized model assistance boundary. */
-  modelAssistanceService?: ModelAssistanceCapabilityService | undefined;
+  /**
+   * Retained temporarily as an inert noncanonical compatibility slot while
+   * predecessor simplification tests are removed. Canonical HTTP behavior does
+   * not invoke a direct simplifier.
+   */
+  knowledgeSimplifier?: unknown;
+  /**
+   * Retained temporarily as an inert noncanonical compatibility slot while
+   * predecessor assistance tests are removed. Canonical HTTP behavior does not
+   * consult Model-assistance authorization.
+   */
+  modelAssistanceService?: unknown;
   /** Deployment/session presentation role already resolved by runtime configuration. */
   validatorDeployment?: boolean;
-}
-
-function hasAssistantPresentation(payload: unknown): boolean {
-  if (payload === null || typeof payload !== "object" || !("presentation" in payload)) return false;
-  const presentation = payload.presentation;
-  if (presentation === null || typeof presentation !== "object" || !("assistantMessage" in presentation)) {
-    return false;
-  }
-  return typeof presentation.assistantMessage === "string" && presentation.assistantMessage.trim().length > 0;
 }
 
 function renderCanonicalConversationPage(validatorDeployment: boolean): string {
@@ -41,40 +36,18 @@ function renderCanonicalConversationPage(validatorDeployment: boolean): string {
  * authenticated-subject boundary; supported Product construction goes through
  * createRuntimeApp(), which owns that authentication boundary.
  *
- * Legacy structured intake and simulated prototype routes remain unavailable here.
+ * Historical Knowledge transformations are handled only through exact
+ * ConversationReference resolution in consultation intake. Run-outcome
+ * serialization never invokes predecessor Model assistance.
  */
 export function buildCanonicalApp(options: CanonicalAppOptions = {}): FastifyInstance {
   const {
-    knowledgeSimplifier,
-    modelAssistanceService,
+    knowledgeSimplifier: _knowledgeSimplifier,
+    modelAssistanceService: _modelAssistanceService,
     validatorDeployment = false,
     ...coreOptions
   } = options;
-  const { app, runStore, apiSubjectForRequest } = createHttpCore(coreOptions);
-  app.addHook("preSerialization", async (request, _reply, payload) => {
-    if (request.routeOptions.url !== "/api/v1/runs/:runId/outcome") return payload;
-    if (hasAssistantPresentation(payload)) return payload;
-
-    const runId = (request.params as { runId?: string }).runId;
-    if (runId === undefined) return payload;
-    const run = await runStore.get(runId);
-    if (run?.status !== "COMPLETED") return payload;
-    const truth = await runStore.getTruthBundle(run.id);
-    if (truth === undefined) return payload;
-
-    const canonicalOutcome = buildRunOutcome(run, truth);
-    if (canonicalOutcome.kind !== "KNOWLEDGE") return payload;
-
-    const simplifier = modelAssistanceService === undefined
-      ? knowledgeSimplifier
-      : modelAssistanceService.simplifierFor(apiSubjectForRequest(request));
-    const assistantMessage = await renderKnowledgeResponseForRun(canonicalOutcome, run, simplifier);
-    if (payload === null || typeof payload !== "object") return payload;
-    return {
-      ...payload,
-      presentation: { assistantMessage },
-    };
-  });
+  const { app } = createHttpCore(coreOptions);
   app.get("/", async (_request, reply) =>
     reply.type("text/html; charset=utf-8").send(renderCanonicalConversationPage(validatorDeployment))
   );

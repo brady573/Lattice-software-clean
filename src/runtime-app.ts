@@ -18,6 +18,7 @@ import {
   registerAuthenticatedSubjectBoundary,
   type AuthenticatedSubjectResolver,
 } from "./auth/authenticated-subject.js";
+import { registerAuthenticatedSessionApi } from "./auth/session-api.js";
 import { PostgresCapabilityAuthorizationStore } from "./capabilities/authorization-store.js";
 import {
   MemoryAcceptedChoiceStore,
@@ -564,6 +565,7 @@ export async function createRuntimeApp(
       options.authenticatedSubjectResolver,
     ),
   });
+  registerAuthenticatedSessionApi(app);
   registerConversationApi(app, { conversationStore, runStore });
   registerDurableUserMessageHistory(app, { userMessageStore });
   registerConsultationIntake(app, {
