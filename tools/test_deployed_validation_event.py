@@ -7,6 +7,9 @@ import pytest
 
 from tools.deployed_validation_event import (
     CANONICAL_VALIDATOR_TARGET,
+    EVIDENCE_BINDING_NOT_REQUESTED,
+    EVIDENCE_BINDING_REVISION_BOUND,
+    EVIDENCE_BINDING_UNBOUND_DIAGNOSTIC,
     resolve_deployment_status,
     resolve_manual,
 )
@@ -39,21 +42,25 @@ def _unexpected_lookup(_pr_number: int):
     raise AssertionError("PR lookup must not occur for an ineligible deployment event")
 
 
-def test_manual_canonical_validator_target_remains_accepted() -> None:
+def test_manual_canonical_validator_target_remains_accepted_as_unbound_diagnostic() -> None:
     request = resolve_manual(CANONICAL_VALIDATOR_TARGET, True)
     assert request.should_run
     assert request.product_target == CANONICAL_VALIDATOR_TARGET
     assert request.target_kind == "canonical-validator"
     assert request.owner_auth_enabled is True
+    assert request.expected_sha == ""
+    assert request.evidence_binding == EVIDENCE_BINDING_UNBOUND_DIAGNOSTIC
 
 
-def test_manual_pr_preview_target_remains_accepted() -> None:
+def test_manual_pr_preview_target_remains_accepted_without_claiming_revision_binding() -> None:
     request = resolve_manual(f"{PREVIEW}/", False)
     assert request.should_run
     assert request.product_target == PREVIEW
     assert request.target_kind == "validator-pr-preview"
     assert request.pr_number == "129"
     assert request.owner_auth_enabled is False
+    assert request.expected_sha == ""
+    assert request.evidence_binding == EVIDENCE_BINDING_UNBOUND_DIAGNOSTIC
 
 
 def test_successful_deployment_status_resolves_preview_pr_number() -> None:
@@ -70,16 +77,18 @@ def test_automatic_preview_forces_owner_auth_off() -> None:
     assert request.owner_auth_enabled is False
 
 
-def test_matching_deployment_sha_and_open_pr_head_is_eligible() -> None:
+def test_matching_deployment_sha_and_open_pr_head_is_revision_bound() -> None:
     request = resolve_deployment_status(_event(), lambda _pr: _open_pr())
     assert request.should_run
     assert request.expected_sha == DEPLOYED_SHA
+    assert request.evidence_binding == EVIDENCE_BINDING_REVISION_BOUND
 
 
-def test_stale_deployment_sha_is_a_clean_skip() -> None:
+def test_stale_deployment_sha_is_a_clean_not_requested_skip() -> None:
     request = resolve_deployment_status(_event(), lambda _pr: _open_pr(OTHER_SHA))
     assert request.should_run is False
     assert "does not match current PR head SHA" in request.skip_reason
+    assert request.evidence_binding == EVIDENCE_BINDING_NOT_REQUESTED
 
 
 def test_closed_pr_is_a_clean_skip() -> None:
@@ -141,6 +150,7 @@ def test_non_success_deployment_status_never_runs_product_journey(state: str) ->
     request = resolve_deployment_status(_event(state=state), _unexpected_lookup)
     assert request.should_run is False
     assert request.skip_reason == "deployment status is not success"
+    assert request.evidence_binding == EVIDENCE_BINDING_NOT_REQUESTED
 
 
 @pytest.mark.parametrize(
@@ -180,7 +190,7 @@ def test_automatic_workflow_cannot_receive_owner_token() -> None:
     ]
     assert len(owner_secret_lines) == 2
     assert all(line.startswith("          LATTICE_OWNER_ACCESS_TOKEN:") for line in owner_secret_lines)
-    assert workflow.count("github.event_name == 'workflow_dispatch' && steps.resolve.outputs.owner_auth_enabled == 'true'") == 2
+    assert workflow.count("github.event_name == 'workflow_dispatch' && needs.event_qualification.outputs.owner_auth_enabled == 'true'") == 2
     assert "test -z \"${LATTICE_OWNER_ACCESS_TOKEN+x}\"" in workflow
 
 
@@ -189,6 +199,21 @@ def test_workflow_rechecks_sha_immediately_before_automatic_product_journey() ->
     assert "name: Revalidate automatic preview revision" in workflow
     assert "steps.freshness.outputs.should_run == 'true'" in workflow
     assert "ref: ${{ github.workflow_sha }}" in workflow
+
+
+def test_event_qualification_and_product_validation_are_distinct_jobs() -> None:
+    workflow = Path(".github/workflows/deployed-functional-validation.yml").read_text(encoding="utf-8")
+    assert "name: Deployment event qualification" in workflow
+    assert "name: Deployed Solandra functional validation" in workflow
+    assert "if: ${{ needs.event_qualification.outputs.should_run == 'true' }}" in workflow
+    assert "PRODUCT_VALIDATION=SKIPPED_NOT_REQUESTED" in workflow
+
+
+def test_workflow_records_manual_unbound_evidence_without_expected_sha() -> None:
+    workflow = Path(".github/workflows/deployed-functional-validation.yml").read_text(encoding="utf-8")
+    assert "PRODUCT_EVIDENCE_BINDING=${{ needs.event_qualification.outputs.evidence_binding }}" in workflow
+    assert "PRODUCT_EXPECTED_DEPLOYED_SHA=${{ needs.event_qualification.outputs.expected_sha }}" in workflow
+    assert "Deployed Product diagnostic (unbound)" in workflow
 
 
 def test_concurrency_is_scoped_by_preview_url_and_cancels_only_automatic_runs() -> None:
