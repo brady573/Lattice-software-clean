@@ -3,9 +3,18 @@ import { randomUUID } from "node:crypto";
 import test from "node:test";
 import type { FastifyInstance } from "fastify";
 import { Pool } from "pg";
+import {
+  appendConversationReference,
+  buildConversationReference,
+  PostgresConversationReferenceStore,
+  type ConversationReferenceAuthority,
+  type ConversationReferenceRecord,
+  type ConversationReferenceStore,
+} from "../src/conversation/conversation-reference-store.js";
+import { PostgresConversationStore } from "../src/conversation/conversation-store.js";
 import { PostgresRunStore } from "../src/postgres-run-store.js";
 import { executePersistedRun } from "../src/run-execution.js";
-import { createRuntimeApp } from "../src/runtime-app.js";
+import { createRuntimeApp, migrateRuntimeDatabase } from "../src/runtime-app.js";
 import { resolveRuntimeConfig } from "../src/runtime-config.js";
 import type {
   SolandraAdvisoryInput,
@@ -121,6 +130,185 @@ async function cleanupConversation(pool: Pool, conversationId: string): Promise<
   await pool.query("DELETE FROM conversations WHERE id=$1", [conversationId]);
   await pool.query("DELETE FROM intent_scopes WHERE intent_scope_id=$1", [`consultation:${conversationId}`]);
 }
+
+class DeterministicReferenceRaceStore implements ConversationReferenceStore {
+  readonly kind = "postgres" as const;
+  private initialGetCount = 0;
+  private latestCount = 0;
+  private firstCommitResolved = false;
+  private releaseInitialGets!: () => void;
+  private releaseFirstCommit!: () => void;
+  private readonly bothInitialGets = new Promise<void>((resolve) => {
+    this.releaseInitialGets = resolve;
+  });
+  private readonly firstCommit = new Promise<void>((resolve) => {
+    this.releaseFirstCommit = resolve;
+  });
+  secondLatestReferenceId: string | null = null;
+
+  constructor(private readonly base: PostgresConversationReferenceStore) {}
+
+  async putReference(reference: ConversationReferenceRecord): Promise<ConversationReferenceRecord> {
+    const stored = await this.base.putReference(reference);
+    if (!this.firstCommitResolved) {
+      this.firstCommitResolved = true;
+      this.releaseFirstCommit();
+    }
+    return stored;
+  }
+
+  async getReference(referenceId: string): Promise<ConversationReferenceRecord | undefined> {
+    if (this.initialGetCount < 2) {
+      const observed = await this.base.getReference(referenceId);
+      assert.equal(observed, undefined, "both exact appenders must initially observe the deterministic identity absent");
+      this.initialGetCount += 1;
+      if (this.initialGetCount === 2) this.releaseInitialGets();
+      await this.bothInitialGets;
+      return undefined;
+    }
+    return this.base.getReference(referenceId);
+  }
+
+  async listByConversation(conversationId: string): Promise<ConversationReferenceRecord[]> {
+    return this.base.listByConversation(conversationId);
+  }
+
+  async latestReference(conversationId: string): Promise<ConversationReferenceRecord | undefined> {
+    this.latestCount += 1;
+    if (this.latestCount === 1) return this.base.latestReference(conversationId);
+    if (this.latestCount === 2) {
+      await this.firstCommit;
+      const latest = await this.base.latestReference(conversationId);
+      this.secondLatestReferenceId = latest?.referenceId ?? null;
+      return latest;
+    }
+    return this.base.latestReference(conversationId);
+  }
+
+  async close(): Promise<void> {}
+}
+
+test(
+  "Issue #100 PostgreSQL: exact concurrent ConversationReference append reuses the race winner without self-parent or integrity weakening",
+  { skip: !databaseUrl },
+  async () => {
+    assert.ok(databaseUrl);
+    await migrateRuntimeDatabase(databaseUrl);
+    const pool = new Pool({ connectionString: databaseUrl });
+    const conversationStore = await PostgresConversationStore.connect(databaseUrl, { migrate: false });
+    const conversationId = `conversation-${randomUUID()}`;
+    const intentScopeId = `scope-${randomUUID()}`;
+    const intentVersionId = `intent-${randomUUID()}`;
+    const userMessageId = `message-${randomUUID()}`;
+    const knowledgeId = `knowledge-${randomUUID()}`;
+    let base: PostgresConversationReferenceStore | undefined;
+    try {
+      await conversationStore.create(conversationId, SUBJECT);
+      const authority: ConversationReferenceAuthority = {
+        conversationStore,
+        userMessageStore: {
+          async get(id) {
+            return id === userMessageId
+              ? { messageId: id, conversationId, intentScopeId }
+              : undefined;
+          },
+        },
+        intentStore: {
+          async getVersion(id) {
+            return id === intentVersionId
+              ? { intentVersionId: id, intentScopeId }
+              : undefined;
+          },
+        },
+        knowledgeStore: {
+          async getKnowledge(id) {
+            return id === knowledgeId ? { knowledgeId: id, conversationId } : undefined;
+          },
+        },
+        recommendationStore: {
+          async getRecommendation() { return undefined; },
+          async listRecommendationsByConversation() { return []; },
+        },
+        acceptedChoiceStore: {
+          async getAcceptedChoice() { return undefined; },
+        },
+        preparedResourceStore: {
+          async getPreparedResource() { return undefined; },
+        },
+      };
+      base = await PostgresConversationReferenceStore.connect(databaseUrl, authority);
+      const parent = await base.putReference(buildConversationReference({
+        conversationId,
+        userMessageId,
+        responseId: `seed-${randomUUID()}`,
+        intentVersionId,
+        targets: [{ kind: "KNOWLEDGE", targetId: knowledgeId, relation: "CONSUMED" }],
+        parentReferenceId: null,
+        createdAt: "2026-09-21T18:00:00.000Z",
+      }));
+      const input = {
+        conversationId,
+        userMessageId,
+        responseId: `race-${randomUUID()}`,
+        intentVersionId,
+        targets: [{ kind: "KNOWLEDGE" as const, targetId: knowledgeId, relation: "PRODUCED" as const }],
+        createdAt: "2026-09-21T18:01:00.000Z",
+      };
+      const identity = buildConversationReference({ ...input, parentReferenceId: null });
+      const raceStore = new DeterministicReferenceRaceStore(base);
+
+      const [left, right] = await Promise.all([
+        appendConversationReference(raceStore, input),
+        appendConversationReference(raceStore, input),
+      ]);
+
+      assert.equal(left.referenceId, identity.referenceId);
+      assert.deepEqual(right, left, "both exact appenders must converge on the same durable ConversationReference");
+      assert.equal(raceStore.secondLatestReferenceId, identity.referenceId, "the losing appender must observe the winner as latest");
+      assert.equal(left.parentReferenceId, parent.referenceId);
+      assert.notEqual(left.parentReferenceId, left.referenceId, "the durable reference must never self-parent");
+
+      const durable = await base.getReference(identity.referenceId);
+      assert.deepEqual(durable, left);
+      assert.equal(await countRows(
+        pool,
+        "SELECT count(*)::text AS count FROM conversation_references WHERE reference_id=$1",
+        [identity.referenceId],
+      ), 1);
+
+      const laterParent = await base.putReference(buildConversationReference({
+        conversationId,
+        userMessageId,
+        responseId: `later-parent-${randomUUID()}`,
+        intentVersionId,
+        targets: [{ kind: "KNOWLEDGE", targetId: knowledgeId, relation: "CONSUMED" }],
+        parentReferenceId: identity.referenceId,
+        createdAt: "2026-09-21T18:02:00.000Z",
+      }));
+      const rebound = buildConversationReference({
+        ...input,
+        parentReferenceId: laterParent.referenceId,
+      });
+      assert.equal(rebound.referenceId, identity.referenceId);
+      await assert.rejects(
+        () => base!.putReference(rebound),
+        /ConversationReference identity cannot be rebound/,
+      );
+      await assert.rejects(
+        () => base!.putReference(buildConversationReference({
+          ...input,
+          parentReferenceId: `missing-parent-${randomUUID()}`,
+        })),
+        /ConversationReference parent must already exist in the same Conversation/,
+      );
+    } finally {
+      await base?.close();
+      await pool.query("DELETE FROM conversations WHERE id=$1", [conversationId]);
+      await conversationStore.close();
+      await pool.end();
+    }
+  },
+);
 
 class DecisionChoiceCognition implements SolandraCognitiveRuntime {
   readonly inputs: SolandraCognitionInput[] = [];

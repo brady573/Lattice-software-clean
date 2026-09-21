@@ -360,10 +360,16 @@ export async function appendConversationReference(
   const existing = await store.getReference(identity.referenceId);
   if (existing) return store.putReference(existing);
   const latest = await store.latestReference(input.conversationId);
-  return store.putReference(buildConversationReference({
-    ...input,
-    parentReferenceId: latest?.referenceId ?? null,
-  }));
+  try {
+    return await store.putReference(buildConversationReference({
+      ...input,
+      parentReferenceId: latest?.referenceId ?? null,
+    }));
+  } catch (error) {
+    const raced = await store.getReference(identity.referenceId);
+    if (!raced) throw error;
+    return store.putReference(raced);
+  }
 }
 
 export class MemoryConversationReferenceStore implements ConversationReferenceStore {
