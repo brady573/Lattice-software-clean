@@ -11,9 +11,11 @@ This repository is public, so ordinary automated validation uses standard GitHub
 | Responsibility | Workflow | Hosted surface | Owns |
 |---|---|---|---|
 | Core validation | `.github/workflows/core-validation.yml` | `windows-latest` | Node/runtime preflight, locked dependency install, one `npm run check` |
-| PostgreSQL integration | `.github/workflows/postgres-integration-validation.yml` | `ubuntu-latest` + isolated `postgres:18.6` service | database-dependent integration behavior |
-| Browser lifecycle | `.github/workflows/browser-lifecycle-validation.yml` | `ubuntu-latest` + isolated `postgres:18.6` service + hosted Chrome/Chromium | real-browser lifecycle behavior |
+| PostgreSQL integration | `.github/workflows/postgres-integration-validation.yml` | `ubuntu-latest` + digest-pinned PostgreSQL 18.6 service | database-dependent integration behavior plus immutable image identity and runtime PostgreSQL version evidence |
+| Deterministic browser lifecycle | `.github/workflows/browser-lifecycle-validation.yml` | `ubuntu-latest` + the same digest-pinned PostgreSQL 18.6 service + hosted Chrome/Chromium | deterministic real-browser lifecycle behavior independent of live model-provider availability |
+| Live Solandra cognition qualification | `.github/workflows/live-solandra-cognition-validation.yml` | `ubuntu-latest` + configured Groq/OpenAI model route | bounded real-provider/model cognition qualification for materially relevant cognition/runtime changes |
 | Render blueprint | `.github/workflows/render-blueprint-validation.yml` | `ubuntu-latest` | static zero-cost `render.yaml` contract |
+| Deployed Product functional validation | `.github/workflows/deployed-functional-validation.yml` | `ubuntu-latest` against an approved deployed Product target | deployment-event qualification plus deployed Product-surface journeys; automatic preview evidence is revision-bound, while manual runs without independent deployment proof are diagnostic only |
 
 The local-model A/B benchmark remains available through the repository tooling, but it is intentionally not a GitHub Actions workflow. GPU/model experiments run manually on hardware the Owner chooses rather than on public pull-request infrastructure.
 
@@ -22,11 +24,17 @@ The local-model A/B benchmark remains available through the repository tooling, 
 1. `Core PR validation` is the only ordinary workflow job that runs the complete `npm run check` gate.
 2. Specialist lanes execute only the checks required for their distinct surface; they do not duplicate the full repository gate.
 3. Public pull-request workflows must not use `self-hosted` runners or Owner-machine labels.
-4. Database CI uses an isolated PostgreSQL service container rather than a persistent development database.
-5. Workflow success is bounded evidence for the exact revision and exercised surface. It is not Product acceptance, production readiness, or deployment evidence.
-6. External GitHub Actions remain pinned to qualified full commit SHAs, and checkout does not persist repository credentials.
-7. Standard GitHub-hosted runners are used only while they remain zero-cost for this public repository. Paid runner capacity or billable CI services require explicit Owner authorization.
-8. Add another workflow only when it protects a genuinely distinct execution surface that cannot reasonably live in an existing lane.
+4. Database CI uses an isolated, digest-pinned PostgreSQL 18.6 service container and also verifies the running server version.
+5. Deterministic Browser Lifecycle does not depend on Groq credentials, quota, latency, or provider availability.
+6. Live Solandra cognition qualification is separate specialist evidence. Its triggers are limited to materially relevant model/cognition/runtime surfaces, and the shared Groq/model qualification scope is serialized repository-wide.
+7. Automatic deployed Product validation is eligible only after approved preview-target, full deployment-SHA, open-PR, and current-PR-head checks pass. The same revision relationship is revalidated immediately before the Product journey.
+8. A manual deployed Product run with no independently verified deployed revision is classified `UNBOUND_DIAGNOSTIC`; `PRODUCT_EXPECTED_DEPLOYED_SHA` remains empty and the run is not candidate validation.
+9. Deployment event qualification and actual deployed Product validation are distinct job identities. Ineligible deployment events record that Product validation was skipped/not requested rather than presenting a successful Product-validation job.
+10. Workflow success is bounded evidence for the exact revision and exercised surface when the lane actually establishes that binding. It is not Product acceptance, production readiness, or deployment evidence beyond the lane's explicit contract.
+11. Live provider qualification and deployed Product validation are specialist/Product-surface evidence, not Core. Neither becomes Product PASS merely because its workflow succeeds, and specialist lanes are not automatically required merge checks.
+12. External GitHub Actions remain pinned to qualified full commit SHAs, and checkout does not persist repository credentials.
+13. Standard GitHub-hosted runners are used only while they remain zero-cost for this public repository. Paid runner capacity or billable CI services require explicit Owner authorization.
+14. Add another workflow only when it protects a genuinely distinct execution surface that cannot reasonably live in an existing lane.
 
 ## Retired workflow structure
 
@@ -44,7 +52,7 @@ Implementation identifiers inside existing test or browser tooling may retain hi
 
 Workflow files describe validation behavior; they do not prove that Actions are enabled or that a check is required by GitHub branch protection.
 
-The fresh clean repository starts without an inherited ruleset. If branch protection is added after the hosted workflows have demonstrated stable behavior, prefer the smallest useful rule: require the durable `Core PR validation` context. PostgreSQL, browser, and Render lanes should remain conditional specialist evidence unless a concrete reliability problem justifies making one required.
+The repository currently has no ruleset. Branch-protection changes are outside this CI slice. If branch protection is later separately Owner-authorized, prefer the smallest useful rule: require the durable `Core PR validation` context. PostgreSQL, deterministic browser, Render, deployed Product, and live-provider lanes remain conditional specialist evidence unless a separate Owner decision changes that policy.
 
 ## Changing CI
 
