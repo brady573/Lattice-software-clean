@@ -56,6 +56,25 @@ test("canonical Solandra recovery keeps browser state non-authoritative and expo
   assert.doesNotMatch(html, /worker status|queue status|provider status|retry epoch/iu);
 });
 
+test("recovery rebuilds durable USER and SOLANDRA continuity and overlays only an absent pending logical turn", () => {
+  const html = renderSolandraConversationPage();
+
+  assert.match(
+    html,
+    /for \(const message of continuity\.messages \|\| \[\]\) \{[\s\S]*message\.role === "USER"[\s\S]*appendUserTurn\(message\.content\)[\s\S]*message\.role === "SOLANDRA"[\s\S]*appendSolandraTurn\(message\.content\)/u,
+  );
+  assert.match(
+    html,
+    /message\?\.role === "USER"[\s\S]*message\.logicalUserTurnId === turnId/u,
+  );
+  assert.match(
+    html,
+    /const recoverPendingTurn = async \(record, continuity\) => \{[\s\S]*!continuityHasLogicalTurn\(continuity, record\.turnId\)[\s\S]*appendUserTurn\(record\.message\)[\s\S]*postTurnRecord\(record\)/u,
+  );
+  assert.match(html, /await recoverPendingTurn\(pendingTurn, continuity\)/u);
+  assert.doesNotMatch(html, /message\.content === record\.message/u);
+});
+
 test("browser keeps accepted logical-turn recovery identity until active-work handoff is established", async () => {
   const html = renderSolandraConversationPage();
   assert.match(html, /clearDraftIfSame\(record\.message\);[\s\S]*await handleTurnResponse\(body, record\);[\s\S]*clearPendingTurn\(record\.turnId\);/u);
@@ -82,9 +101,10 @@ test("browser keeps accepted logical-turn recovery identity until active-work ha
       url: `/api/v1/conversations/${encodeURIComponent(conversationId)}/continuity`,
     });
     assert.equal(continuity.statusCode, 200, continuity.body);
-    const state = continuity.json<{ messages: Array<{ id: string }>; runs: Array<{ runId: string }> }>();
+    const state = continuity.json<{ messages: Array<{ id: string; logicalUserTurnId?: string }>; runs: Array<{ runId: string }> }>();
     assert.equal(state.messages.length, 1);
     assert.equal(state.messages[0]?.id, first.provenance.messageId);
+    assert.equal(state.messages[0]?.logicalUserTurnId, turnId);
     assert.equal(state.runs.length, 1);
     assert.equal(state.runs[0]?.runId, first.runId);
   } finally {

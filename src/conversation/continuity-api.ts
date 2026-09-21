@@ -127,6 +127,7 @@ export function registerConversationContinuityApi(
           role: "USER" as const,
           content: message.content,
           createdAt: message.createdAt,
+          logicalUserTurnId: message.logicalUserTurnId,
         };
         const response = responsesBySourceMessage.get(message.messageId);
         if (!response) return [user];

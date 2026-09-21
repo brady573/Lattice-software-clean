@@ -28,7 +28,6 @@ import { registerConsultationIntake } from "./consultation-intake.js";
 import { buildCanonicalApp } from "./http-app.js";
 import { registerConversationApi } from "./conversation/conversation-api.js";
 import { backfillLegacyConversationKnowledgeReferences } from "./conversation/conversation-reference-backfill.js";
-import { registerConversationMembershipGuard } from "./conversation/conversation-membership-guard.js";
 import { registerConversationContinuityApi } from "./conversation/continuity-api.js";
 import {
   MemoryConversationReferenceStore,
@@ -565,7 +564,6 @@ export async function createRuntimeApp(
       options.authenticatedSubjectResolver,
     ),
   });
-  registerConversationMembershipGuard(app, { conversationStore, runStore });
   registerConversationApi(app, { conversationStore, runStore });
   registerDurableUserMessageHistory(app, { userMessageStore });
   registerConsultationIntake(app, {

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { createRuntimeApp } from "../src/runtime-app.js";
 import type { RuntimeConfig } from "../src/runtime-config.js";
@@ -22,6 +23,14 @@ const clearPayload = {
   messageId: "m7-d-message-1",
   content: "I need a laptop under $1,300 with at least 12 hours of battery life as a hard requirement. Performance matters more.",
 };
+
+test("canonical runtime installs the conversation membership guard only through registerConversationApi", async () => {
+  const runtimeSource = await readFile("src/runtime-app.ts", "utf8");
+  const conversationApiSource = await readFile("src/conversation/conversation-api.ts", "utf8");
+
+  assert.equal(runtimeSource.includes("registerConversationMembershipGuard"), false);
+  assert.match(conversationApiSource, /registerConversationMembershipGuard\(app, options\)/u);
+});
 
 test("M7 authoritative USER writes require an existing durable Conversation", async () => {
   const app = await createRuntimeApp(config, { memoryDispatchDelayMs: 0 });

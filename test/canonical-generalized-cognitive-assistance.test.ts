@@ -96,7 +96,13 @@ async function continuity(app: FastifyInstance, conversationId: string) {
   const response = await app.inject({ method: "GET", url: `/api/v1/conversations/${conversationId}/continuity` });
   assert.equal(response.statusCode, 200, response.body);
   return response.json<{
-    messages: unknown[];
+    messages: Array<{
+      role: "USER" | "SOLANDRA";
+      content: string;
+      logicalUserTurnId?: string;
+      authority?: string;
+      factualAuthority?: boolean;
+    }>;
     runs: unknown[];
     knowledge: unknown[];
     recommendations: unknown[];
@@ -181,6 +187,9 @@ test("canonical cognitive assistance requires explicit connection, remains non-a
     assert.equal(body.interpretation.authority, "NON_AUTHORITATIVE_PROPOSAL");
     assert.equal(body.capability.authority, "NON_AUTHORITATIVE_PROPOSAL");
     assert.equal(body.capability.effect, "COGNITIVE_ONLY");
+    assert.equal(body.conversationResponse.origin, "SOLANDRA");
+    assert.equal(body.conversationResponse.authority, "NON_AUTHORITATIVE_CONVERSATION");
+    assert.equal(body.conversationResponse.factualAuthority, false);
     assert.equal(body.runId, undefined);
     assert.equal(body.intentScopeId, undefined);
     assert.equal(body.intentVersionId, undefined);
@@ -189,6 +198,13 @@ test("canonical cognitive assistance requires explicit connection, remains non-a
     assert.equal(fixture.calls(), 1);
 
     const afterSuccess = await continuity(app, conversationId);
+    assert.equal(afterSuccess.messages.length, 3);
+    assert.deepEqual(afterSuccess.messages.map((message) => message.role), ["USER", "USER", "SOLANDRA"]);
+    assert.equal(afterSuccess.messages[0]?.logicalUserTurnId, "canonical-cognitive-denied");
+    assert.equal(afterSuccess.messages[1]?.logicalUserTurnId, "canonical-cognitive-success");
+    assert.equal(afterSuccess.messages[2]?.content, "Three bounded ideas from cognitive assistance.");
+    assert.equal(afterSuccess.messages[2]?.authority, "NON_AUTHORITATIVE_CONVERSATION");
+    assert.equal(afterSuccess.messages[2]?.factualAuthority, false);
     assert.equal(afterSuccess.runs.length, 0);
     assert.equal(afterSuccess.knowledge.length, 0);
     assert.equal(afterSuccess.recommendations.length, 0);
