@@ -13,6 +13,10 @@ import {
   type ConversationReferenceStore,
   type ConversationReferenceTarget,
 } from "./conversation/conversation-reference-store.js";
+import {
+  isProducedConversationTarget,
+  producedTargetIds,
+} from "./conversation/governed-reference-admission.js";
 import type { ConversationResponse, ConversationResponseStore } from "./conversation/conversation-response-store.js";
 import type { ConversationStore } from "./conversation/conversation-store.js";
 import { buildAcceptedChoiceRecord, type AcceptedChoiceStore } from "./intent/accepted-choice-store.js";
@@ -738,6 +742,129 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
         return reply.status(500).send({ error: "AUTHORITATIVE_INTENT_VERSION_MISSING" });
       }
 
+      if (options.conversationReferenceStore) {
+        const choices = options.acceptedChoiceStore
+          ? (await options.acceptedChoiceStore.listAcceptedChoicesByConversation(conversationId))
+            .filter((choice) => choice.sourceMessageId === sourceMessage.messageId)
+          : [];
+        const recommendations = options.recommendationStore
+          ? (await options.recommendationStore.listRecommendationsByConversation(conversationId))
+            .filter((recommendation) =>
+              recommendation.runId === null
+              && recommendation.sourceMessageId === sourceMessage.messageId)
+          : [];
+        if (choices.length > 1 || recommendations.length > 1 || (choices.length > 0 && recommendations.length > 0)) {
+          return reply.status(409).send({
+            error: "GOVERNED_TURN_RECOVERY_CONFLICT",
+            message: "The exact USER turn resolves to conflicting governed durable state.",
+          });
+        }
+
+        const replayChoice = choices[0];
+        if (replayChoice) {
+          if (!options.recommendationStore || !options.knowledgeStore) {
+            return reply.status(409).send({ error: "ACCEPTED_CHOICE_RECOVERY_UNAVAILABLE" });
+          }
+          const replayVersion = await options.intentStore.getVersion(replayChoice.intentVersionId);
+          const loaded = await loadRecommendation(
+            options.recommendationStore,
+            options.knowledgeStore,
+            options.runStore,
+            replayChoice.recommendationId,
+          );
+          const option = loaded ? recommendationOption(loaded.record, replayChoice.optionId) : undefined;
+          if (
+            !replayVersion
+            || replayVersion.intentScopeId !== sourceMessage.intentScopeId
+            || !loaded
+            || loaded.record.conversationId !== conversationId
+            || !option
+            || option.text !== replayChoice.optionText
+            || !await isProducedConversationTarget(
+              options.conversationReferenceStore,
+              conversationId,
+              "RECOMMENDATION",
+              loaded.record.recommendationId,
+            )
+          ) {
+            return reply.status(409).send({ error: "ACCEPTED_CHOICE_RECOVERY_INTEGRITY_FAILED" });
+          }
+          await recordConversationReference(options, {
+            conversationId,
+            userMessageId: sourceMessage.messageId,
+            responseId: governedResponseId("accepted-choice", sourceMessage.messageId, replayChoice.acceptedChoiceId),
+            intentVersionId: replayChoice.intentVersionId,
+            targets: [
+              { kind: "RECOMMENDATION", targetId: loaded.record.recommendationId, relation: "CONSUMED" },
+              { kind: "OPTION", targetId: option.optionId, relation: "CONSUMED" },
+              { kind: "ACCEPTED_CHOICE", targetId: replayChoice.acceptedChoiceId, relation: "PRODUCED" },
+            ],
+            createdAt: replayChoice.createdAt,
+          });
+          return reply.status(200).send({
+            status: "ACCEPTED_CHOICE_ESTABLISHED",
+            acceptedUnderstanding: authoritativeObjective(replayVersion),
+            intentScopeId: replayVersion.intentScopeId,
+            intentVersionId: replayVersion.intentVersionId,
+            recommendationReference: { recommendationId: loaded.record.recommendationId },
+            optionReference: option,
+            acceptedChoice: replayChoice,
+            presentation: {
+              assistantMessage: `You chose: ${option.text}\n\nI preserved that as your choice. It does not authorize any external action.`,
+            },
+          });
+        }
+
+        const replayRecommendation = recommendations[0];
+        if (replayRecommendation) {
+          if (!options.recommendationStore || !options.knowledgeStore) {
+            return reply.status(409).send({ error: "RECOMMENDATION_RECOVERY_UNAVAILABLE" });
+          }
+          const replayVersion = await options.intentStore.getVersion(replayRecommendation.intentVersionId);
+          const loaded = await loadRecommendation(
+            options.recommendationStore,
+            options.knowledgeStore,
+            options.runStore,
+            replayRecommendation.recommendationId,
+          );
+          if (
+            !replayVersion
+            || replayVersion.intentScopeId !== sourceMessage.intentScopeId
+            || !loaded
+            || loaded.record.conversationId !== conversationId
+          ) {
+            return reply.status(409).send({ error: "RECOMMENDATION_RECOVERY_INTEGRITY_FAILED" });
+          }
+          await recordConversationReference(options, {
+            conversationId,
+            userMessageId: sourceMessage.messageId,
+            responseId: governedResponseId(
+              "recommendation-established",
+              sourceMessage.messageId,
+              replayRecommendation.recommendationId,
+            ),
+            intentVersionId: replayRecommendation.intentVersionId,
+            targets: producedRecommendationTargets(replayRecommendation),
+            createdAt: replayRecommendation.createdAt,
+          });
+          return reply.status(200).send({
+            status: "RECOMMENDATION_ESTABLISHED",
+            acceptedUnderstanding: authoritativeObjective(replayVersion),
+            intentScopeId: replayVersion.intentScopeId,
+            intentVersionId: replayVersion.intentVersionId,
+            recommendationReference: {
+              recommendationId: replayRecommendation.recommendationId,
+              intentVersionId: replayRecommendation.intentVersionId,
+              knowledgeIds: replayRecommendation.knowledgeIds,
+              claimIds: replayRecommendation.claimIds,
+              options: recommendationOptions(replayRecommendation),
+              selectionAuthorized: false,
+            },
+            presentation: { assistantMessage: renderRecommendation(replayRecommendation) },
+          });
+        }
+      }
+
       let cognition: SolandraGovernedCognitionResult | undefined;
       let interpretation: ConsultationInterpretationProposal;
       let cognitiveGovernedKnowledge: Awaited<ReturnType<typeof recentGovernedKnowledge>> = [];
@@ -755,6 +882,16 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
           const recommendations = options.recommendationStore
             ? await options.recommendationStore.listRecommendationsByConversation(conversationId)
             : [];
+          const recommendationReferences = options.conversationReferenceStore
+            ? await options.conversationReferenceStore.listByConversation(conversationId)
+            : [];
+          const committedRecommendationIds = options.conversationReferenceStore
+            ? producedTargetIds(recommendationReferences, "RECOMMENDATION")
+            : undefined;
+          const committedRecommendations = committedRecommendationIds
+            ? recommendations.filter((recommendation) =>
+              committedRecommendationIds.has(recommendation.recommendationId))
+            : recommendations;
           const recentMessages = [...history.map((message) => message.content)];
           if (!recentMessages.includes(sourceMessage.content)) recentMessages.push(sourceMessage.content);
           const cognitionResult = await options.solandraCognition.interpret({
@@ -765,7 +902,7 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
             recentUserMessages: recentMessages.slice(-MAX_COGNITIVE_HISTORY_ITEMS),
             recentConversation: boundedConversationContext(history, conversationResponses, sourceMessage),
             governedKnowledge: governed.map(governedKnowledgeContext),
-            governedRecommendations: recommendations.slice(-4).map(recommendationContext),
+            governedRecommendations: committedRecommendations.slice(-4).map(recommendationContext),
             ...(clarificationProposal
               ? { pendingIntentProposal: pendingIntentProposalContext(clarificationProposal) }
               : {}),
@@ -858,7 +995,16 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
           options.runStore,
           cognition.proposal.referencedRecommendationId!,
         );
-        if (!loaded || loaded.record.conversationId !== conversationId) {
+        if (
+          !loaded
+          || loaded.record.conversationId !== conversationId
+          || !await isProducedConversationTarget(
+            options.conversationReferenceStore,
+            conversationId,
+            "RECOMMENDATION",
+            loaded.record.recommendationId,
+          )
+        ) {
           return reply.status(404).send({ error: "RECOMMENDATION_NOT_FOUND" });
         }
         const option = recommendationOption(loaded.record, cognition.proposal.referencedOptionId!);
@@ -959,7 +1105,16 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
           options.runStore,
           recommendationId,
         );
-        if (!loaded || loaded.record.conversationId !== conversationId) {
+        if (
+          !loaded
+          || loaded.record.conversationId !== conversationId
+          || !await isProducedConversationTarget(
+            options.conversationReferenceStore,
+            conversationId,
+            "RECOMMENDATION",
+            loaded.record.recommendationId,
+          )
+        ) {
           return reply.status(404).send({ error: "RECOMMENDATION_NOT_FOUND" });
         }
         const assistantMessage = cognition.proposal.requestedHelp === "SOURCES_RECOMMENDATION"
@@ -1552,6 +1707,14 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
         run.id,
       );
       if (existing) {
+        await recordConversationReference(options, {
+          conversationId: run.conversationId,
+          userMessageId: run.request.sourceMessageId,
+          responseId: governedResponseId("recommendation-established", run.id, existing.record.recommendationId),
+          intentVersionId: existing.record.intentVersionId,
+          targets: producedRecommendationTargets(existing.record),
+          createdAt: existing.record.createdAt,
+        });
         return reply.send({
           runId: run.id,
           status: run.status,
@@ -1730,7 +1893,15 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
   app.get<{ Params: { knowledgeId: string } }>("/api/v1/knowledge/:knowledgeId", async (request, reply) => {
     if (!options.knowledgeStore) return reply.status(404).send({ error: "KNOWLEDGE_NOT_FOUND" });
     const loaded = await loadKnowledge(options.knowledgeStore, options.runStore, request.params.knowledgeId.trim());
-    if (!loaded) return reply.status(404).send({ error: "KNOWLEDGE_NOT_FOUND" });
+    if (
+      !loaded
+      || !await isProducedConversationTarget(
+        options.conversationReferenceStore,
+        loaded.record.conversationId,
+        "KNOWLEDGE",
+        loaded.record.knowledgeId,
+      )
+    ) return reply.status(404).send({ error: "KNOWLEDGE_NOT_FOUND" });
     if (!await options.conversationStore.getOwned(loaded.record.conversationId, apiSubjectForRequest(request))) {
       return reply.status(404).send({ error: "KNOWLEDGE_NOT_FOUND" });
     }
@@ -1758,7 +1929,16 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
       options.runStore,
       request.params.recommendationId.trim(),
     );
-    if (!loaded || !await options.conversationStore.getOwned(loaded.record.conversationId, apiSubjectForRequest(request))) {
+    if (
+      !loaded
+      || !await isProducedConversationTarget(
+        options.conversationReferenceStore,
+        loaded.record.conversationId,
+        "RECOMMENDATION",
+        loaded.record.recommendationId,
+      )
+      || !await options.conversationStore.getOwned(loaded.record.conversationId, apiSubjectForRequest(request))
+    ) {
       return reply.status(404).send({ error: "RECOMMENDATION_NOT_FOUND" });
     }
     return reply.status(200).send({

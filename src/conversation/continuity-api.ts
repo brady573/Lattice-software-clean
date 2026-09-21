@@ -24,6 +24,10 @@ import {
 } from "../presentation/solandra-presentation.js";
 import type { RunStore } from "../run-store.js";
 import type { ConversationReferenceStore } from "./conversation-reference-store.js";
+import {
+  isProducedConversationTarget,
+  producedTargetIds,
+} from "./governed-reference-admission.js";
 import type { ConversationResponseStore } from "./conversation-response-store.js";
 import type { ConversationStore } from "./conversation-store.js";
 import type { ConversationRunIndexStore } from "./run-index-store.js";
@@ -85,7 +89,17 @@ async function readLatestPresentationBasis(
       && options.preparedResourceStore
     ) {
       const prepared = await options.preparedResourceStore.getPreparedResourceByRunId(run.id);
-      if (prepared) outcome = { ...outcome, resource: preparedResourceFromRecord(prepared) };
+      if (
+        prepared
+        && await isProducedConversationTarget(
+          options.conversationReferenceStore,
+          conversationId,
+          "PREPARED_RESOURCE",
+          prepared.resourceId,
+        )
+      ) {
+        outcome = { ...outcome, resource: preparedResourceFromRecord(prepared) };
+      }
     }
     return { run, decisionPlan, intentVersion, outcome };
   }
@@ -184,11 +198,23 @@ export function registerConversationContinuityApi(
         };
       }));
 
+      const committedKnowledgeIds = options.conversationReferenceStore
+        ? producedTargetIds(conversationReferences, "KNOWLEDGE")
+        : undefined;
+      const committedRecommendationIds = options.conversationReferenceStore
+        ? producedTargetIds(conversationReferences, "RECOMMENDATION")
+        : undefined;
+      const committedAcceptedChoiceIds = options.conversationReferenceStore
+        ? producedTargetIds(conversationReferences, "ACCEPTED_CHOICE")
+        : undefined;
+
       return reply.status(200).send({
         conversation,
         messages: conversationMessages,
         runs: runs.filter((run) => run !== undefined),
-        knowledge: knowledge.map((record) => ({
+        knowledge: knowledge
+          .filter((record) => committedKnowledgeIds?.has(record.knowledgeId) ?? true)
+          .map((record) => ({
           knowledgeId: record.knowledgeId,
           runId: record.runId,
           intentVersionId: record.intentVersionId,
@@ -210,7 +236,9 @@ export function registerConversationContinuityApi(
           parentReferenceId: reference.parentReferenceId,
           createdAt: reference.createdAt,
         })),
-        recommendations: recommendations.map((record) => ({
+        recommendations: recommendations
+          .filter((record) => committedRecommendationIds?.has(record.recommendationId) ?? true)
+          .map((record) => ({
           recommendationId: record.recommendationId,
           runId: record.runId,
           intentVersionId: record.intentVersionId,
@@ -227,7 +255,9 @@ export function registerConversationContinuityApi(
           createdAt: record.createdAt,
           link: `/api/v1/recommendations/${encodeURIComponent(record.recommendationId)}`,
         })),
-        acceptedChoices: acceptedChoices.map((choice) => ({ ...choice })),
+        acceptedChoices: acceptedChoices
+          .filter((choice) => committedAcceptedChoiceIds?.has(choice.acceptedChoiceId) ?? true)
+          .map((choice) => ({ ...choice })),
       });
     },
   );
