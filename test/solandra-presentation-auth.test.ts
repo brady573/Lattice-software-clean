@@ -32,7 +32,11 @@ const completedRun: LatticeRun = {
   request: structuredClone(plan.planningMaterial),
   decision: {
     goal: plan.planningMaterial.goal,
+    outcome: "RECOMMENDATION",
     winnerCandidateId: "candidate-a",
+    frontierCandidateIds: ["candidate-a"],
+    tiedCandidateIds: [],
+    materialUnknowns: [],
     evaluations: [],
     rationale: ["Candidate A is the eligible winner."],
     evidenceIds: ["evidence-1"],

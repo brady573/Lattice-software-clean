@@ -210,6 +210,54 @@ test("frontier preserves tie, unresolved, and no-eligible outcomes", () => {
   }).outcome, "NO_ELIGIBLE_CANDIDATE");
 });
 
+test("current cyclic dominance may remain FRONTIER with an empty frontier; cycle semantics are outside Issue #133", () => {
+  const result = constructMaterialDominanceFrontier({
+    alternatives: [
+      { alternativeId: "alpha", eligibility: "ELIGIBLE" },
+      { alternativeId: "beta", eligibility: "ELIGIBLE" },
+      { alternativeId: "gamma", eligibility: "ELIGIBLE" },
+    ],
+    comparisons: [
+      {
+        leftAlternativeId: "alpha",
+        rightAlternativeId: "beta",
+        criteria: [{
+          criterionId: "quality",
+          criterionVersion: 1,
+          tier: "MATTERS_MOST",
+          state: "MEANINGFUL",
+          preferredSide: "LEFT",
+        }],
+      },
+      {
+        leftAlternativeId: "alpha",
+        rightAlternativeId: "gamma",
+        criteria: [{
+          criterionId: "quality",
+          criterionVersion: 1,
+          tier: "MATTERS_MOST",
+          state: "MEANINGFUL",
+          preferredSide: "RIGHT",
+        }],
+      },
+      {
+        leftAlternativeId: "beta",
+        rightAlternativeId: "gamma",
+        criteria: [{
+          criterionId: "quality",
+          criterionVersion: 1,
+          tier: "MATTERS_MOST",
+          state: "MEANINGFUL",
+          preferredSide: "LEFT",
+        }],
+      },
+    ],
+  });
+
+  assert.equal(result.outcome, "FRONTIER");
+  assert.deepEqual(result.frontierAlternativeIds, []);
+});
+
 test("comparison orientation does not change the dominant alternative", () => {
   const result = build({
     comparisons: [{

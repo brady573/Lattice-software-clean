@@ -1,4 +1,5 @@
 import type { LatticeRun, RunStatus, StructuredDecision } from "./domain.js";
+import { validateCurrentStructuredDecision } from "./decision/structured-decision.js";
 import {
   assertTruthSnapshotTransition,
   type TruthSnapshot,
@@ -74,7 +75,11 @@ export class MemoryRunStore implements RunStore {
   private readonly truthSnapshots = new Map<string, TruthSnapshot>();
 
   async create(run: LatticeRun): Promise<void> {
-    this.runs.set(run.id, structuredClone(run));
+    const storedRun = structuredClone(run);
+    if (run.decision !== null) {
+      storedRun.decision = validateCurrentStructuredDecision(run.decision);
+    }
+    this.runs.set(run.id, storedRun);
   }
 
   async listByConversation(conversationId: string): Promise<LatticeRun[]> {
@@ -110,8 +115,9 @@ export class MemoryRunStore implements RunStore {
     if (!run || run.status !== "DECIDING" || run.version !== input.expectedVersion || run.decision !== null) {
       return { outcome: "stale" };
     }
-    run.decision = structuredClone(input.decision);
-    run.truthAssessmentIds = [...input.decision.truthAssessmentIds];
+    const decision = validateCurrentStructuredDecision(input.decision);
+    run.decision = decision;
+    run.truthAssessmentIds = [...decision.truthAssessmentIds];
     run.version += 1;
     return { outcome: "advanced", version: run.version };
   }

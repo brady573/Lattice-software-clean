@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { DecisionOutcome, RunRequest, StructuredDecision } from "../src/domain.js";
+import type { RunRequest, StructuredDecision } from "../src/domain.js";
 import { createDecision } from "../src/engine.js";
 import { laptopFixture } from "./fixtures/legacy-laptop-fixture.js";
 import {
@@ -99,6 +99,7 @@ test("Solandra cannot license an invented truth assessment through presentation"
 
 test("Solandra cannot explain an ineligible candidate as the authoritative winner", () => {
   const { decision, truth } = authoritativeState();
+  if (decision.outcome !== "RECOMMENDATION") throw new Error("Fixture must produce a recommendation.");
   const alteredDecision = { ...decision, winnerCandidateId: "atlas-pro" };
   assert.throws(
     () => createSolandraExplanationPlan(alteredDecision, laptopFixture.candidates, truth),
@@ -123,56 +124,61 @@ test("unsupported material prose fails explanation fidelity", () => {
 
 test("Solandra explanation plan preserves non-winner authoritative decision outcomes", () => {
   const { truth } = authoritativeState();
-  const scenarios: Array<{
-    outcome: DecisionOutcome;
-    frontierCandidateIds: string[];
-    tiedCandidateIds: string[];
-    materialUnknowns: string[];
-    expected: RegExp;
-  }> = [
-    { outcome: "FRONTIER", frontierCandidateIds: ["nova-air", "atlas-pro"], tiedCandidateIds: [], materialUnknowns: [], expected: /^I can't justify a unique recommendation from the confirmed priorities\./ },
-    { outcome: "TIE", frontierCandidateIds: ["nova-air", "forge-15"], tiedCandidateIds: ["nova-air", "forge-15"], materialUnknowns: [], expected: /^I can't justify a unique recommendation because the qualified comparison found no meaningful difference\./ },
-    { outcome: "INSUFFICIENT_EVIDENCE", frontierCandidateIds: [], tiedCandidateIds: [], materialUnknowns: [], expected: /^I can't justify a unique recommendation yet because required admitted evidence is missing\./ },
-    { outcome: "UNRESOLVED", frontierCandidateIds: [], tiedCandidateIds: [], materialUnknowns: ["nova-air:batteryHours"], expected: /^I can't justify a unique recommendation because a material qualified comparison remains unresolved\./ },
-    { outcome: "NO_ELIGIBLE_CANDIDATE", frontierCandidateIds: [], tiedCandidateIds: [], materialUnknowns: [], expected: /^I can't recommend an alternative because none is known to satisfy all confirmed hard requirements\./ },
+  const common = {
+    goal: request.goal,
+    evaluations: laptopFixture.candidates.map((candidate) => ({
+      candidateId: candidate.id,
+      eligible: false,
+      rawScore: 0,
+      normalizedScore: 0,
+      constraints: [],
+      supportingEvidenceIds: [],
+    })),
+    rationale: ["Synthetic non-winner outcome preserved without a winner."],
+    evidenceIds: [],
+    truthAssessmentIds: [],
+  };
+  const scenarios: Array<{ decision: StructuredDecision; expected: RegExp }> = [
+    {
+      decision: { ...common, outcome: "FRONTIER", frontierCandidateIds: ["nova-air", "atlas-pro"], tiedCandidateIds: [], materialUnknowns: [] },
+      expected: /^I can't justify a unique recommendation from the confirmed priorities\./,
+    },
+    {
+      decision: { ...common, outcome: "TIE", frontierCandidateIds: ["nova-air", "forge-15"], tiedCandidateIds: ["nova-air", "forge-15"], materialUnknowns: [] },
+      expected: /^I can't justify a unique recommendation because the qualified comparison found no meaningful difference\./,
+    },
+    {
+      decision: { ...common, outcome: "INSUFFICIENT_EVIDENCE", frontierCandidateIds: ["nova-air"], tiedCandidateIds: [], materialUnknowns: ["forge-15:batteryHours"] },
+      expected: /^I can't justify a unique recommendation yet because required admitted evidence is missing\./,
+    },
+    {
+      decision: { ...common, outcome: "UNRESOLVED", frontierCandidateIds: [], tiedCandidateIds: [], materialUnknowns: ["nova-air:batteryHours"] },
+      expected: /^I can't justify a unique recommendation because a material qualified comparison remains unresolved\./,
+    },
+    {
+      decision: { ...common, outcome: "NO_ELIGIBLE_CANDIDATE", frontierCandidateIds: [], tiedCandidateIds: [], materialUnknowns: [] },
+      expected: /^I can't recommend an alternative because none is known to satisfy all confirmed hard requirements\./,
+    },
   ];
 
   for (const scenario of scenarios) {
-    const decision: StructuredDecision = {
-      goal: request.goal,
-      outcome: scenario.outcome,
-      frontierCandidateIds: scenario.frontierCandidateIds,
-      tiedCandidateIds: scenario.tiedCandidateIds,
-      materialUnknowns: scenario.materialUnknowns,
-      evaluations: laptopFixture.candidates.map((candidate) => ({
-        candidateId: candidate.id,
-        eligible: false,
-        rawScore: 0,
-        normalizedScore: 0,
-        constraints: [],
-        supportingEvidenceIds: [],
-      })),
-      rationale: [`Synthetic ${scenario.outcome} outcome preserved without a winner.`],
-      evidenceIds: [],
-      truthAssessmentIds: [],
-    };
-
-    const plan = createSolandraExplanationPlan(decision, laptopFixture.candidates, truth);
+    const plan = createSolandraExplanationPlan(scenario.decision, laptopFixture.candidates, truth);
     assert.equal(plan.winnerCandidateId, undefined);
     assert.equal(plan.winnerLabel, undefined);
-    assert.equal(plan.outcome, scenario.outcome);
-    assert.deepEqual(plan.frontierCandidateIds, scenario.frontierCandidateIds);
-    assert.deepEqual(plan.tiedCandidateIds, scenario.tiedCandidateIds);
-    assert.deepEqual(plan.materialUnknowns, scenario.materialUnknowns);
+    assert.equal(plan.outcome, scenario.decision.outcome);
+    assert.deepEqual(plan.frontierCandidateIds, scenario.decision.frontierCandidateIds);
+    assert.deepEqual(plan.tiedCandidateIds, scenario.decision.tiedCandidateIds);
+    assert.deepEqual(plan.materialUnknowns, scenario.decision.materialUnknowns);
 
     const explanation = renderCanonicalExplanation(plan);
     assert.match(explanation, scenario.expected);
-    if (scenario.frontierCandidateIds.length > 0) {
-      const labels = scenario.frontierCandidateIds.map((id) => laptopFixture.candidates.find((candidate) => candidate.id === id)?.label);
+    if (scenario.decision.frontierCandidateIds.length > 0) {
+      const labels = scenario.decision.frontierCandidateIds.map((id) =>
+        laptopFixture.candidates.find((candidate) => candidate.id === id)?.label);
       assert.match(explanation, new RegExp(`Alternatives still under consideration: ${labels.join(", ")}\\.`));
     }
     assert.doesNotMatch(explanation, /Authoritative frontier|Unresolved:|material dominance/iu);
     assert.doesNotThrow(() =>
-      assertSolandraExplanationFidelity(explanation, plan, decision, laptopFixture.candidates, truth));
+      assertSolandraExplanationFidelity(explanation, plan, scenario.decision, laptopFixture.candidates, truth));
   }
 });

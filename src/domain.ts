@@ -117,23 +117,6 @@ export interface CandidateEvaluation {
   supportingEvidenceIds: string[];
 }
 
-export interface StructuredDecision {
-  goal: string;
-  /**
-   * A decision may deliberately preserve a frontier or non-selection outcome.
-   * `winnerCandidateId` remains optional for compatibility with older decisions.
-   */
-  outcome?: DecisionOutcome;
-  winnerCandidateId?: string;
-  frontierCandidateIds?: string[];
-  tiedCandidateIds?: string[];
-  materialUnknowns?: string[];
-  evaluations: CandidateEvaluation[];
-  rationale: string[];
-  evidenceIds: string[];
-  truthAssessmentIds: string[];
-}
-
 export type DecisionOutcome =
   | "RECOMMENDATION"
   | "FRONTIER"
@@ -141,6 +124,74 @@ export type DecisionOutcome =
   | "INSUFFICIENT_EVIDENCE"
   | "UNRESOLVED"
   | "NO_ELIGIBLE_CANDIDATE";
+
+export type NonEmptyDecisionIds = [string, ...string[]];
+export type MultipleDecisionIds = [string, string, ...string[]];
+export type FrontierDecisionIds = [] | MultipleDecisionIds;
+
+interface StructuredDecisionBase {
+  goal: string;
+  evaluations: CandidateEvaluation[];
+  rationale: string[];
+  evidenceIds: string[];
+  truthAssessmentIds: string[];
+}
+
+export type RecommendationStructuredDecision = StructuredDecisionBase & {
+  outcome: "RECOMMENDATION";
+  winnerCandidateId: string;
+  frontierCandidateIds: [string];
+  tiedCandidateIds: [];
+  materialUnknowns: [];
+};
+
+export type FrontierStructuredDecision = StructuredDecisionBase & {
+  outcome: "FRONTIER";
+  winnerCandidateId?: never;
+  frontierCandidateIds: FrontierDecisionIds;
+  tiedCandidateIds: [];
+  materialUnknowns: [];
+};
+
+export type TieStructuredDecision = StructuredDecisionBase & {
+  outcome: "TIE";
+  winnerCandidateId?: never;
+  frontierCandidateIds: MultipleDecisionIds;
+  tiedCandidateIds: MultipleDecisionIds;
+  materialUnknowns: [];
+};
+
+export type InsufficientEvidenceStructuredDecision = StructuredDecisionBase & {
+  outcome: "INSUFFICIENT_EVIDENCE";
+  winnerCandidateId?: never;
+  frontierCandidateIds: NonEmptyDecisionIds;
+  tiedCandidateIds: [];
+  materialUnknowns: NonEmptyDecisionIds;
+};
+
+export type UnresolvedStructuredDecision = StructuredDecisionBase & {
+  outcome: "UNRESOLVED";
+  winnerCandidateId?: never;
+  frontierCandidateIds: string[];
+  tiedCandidateIds: [];
+  materialUnknowns: NonEmptyDecisionIds;
+};
+
+export type NoEligibleCandidateStructuredDecision = StructuredDecisionBase & {
+  outcome: "NO_ELIGIBLE_CANDIDATE";
+  winnerCandidateId?: never;
+  frontierCandidateIds: [];
+  tiedCandidateIds: [];
+  materialUnknowns: [];
+};
+
+export type StructuredDecision =
+  | RecommendationStructuredDecision
+  | FrontierStructuredDecision
+  | TieStructuredDecision
+  | InsufficientEvidenceStructuredDecision
+  | UnresolvedStructuredDecision
+  | NoEligibleCandidateStructuredDecision;
 
 export type RunStatus =
   | "CREATED"

@@ -7,8 +7,11 @@ import type {
   RunEventType,
   RunRequest,
   RunStatus,
-  StructuredDecision,
 } from "./domain.js";
+import {
+  parseStructuredDecision,
+  validateCurrentStructuredDecision,
+} from "./decision/structured-decision.js";
 import {
   assertAllowedTransition,
   type RunCompletion,
@@ -100,7 +103,7 @@ type RunRow = {
   status: RunStatus;
   version: string | number;
   request_json: RunRequest;
-  decision_json: StructuredDecision | null;
+  decision_json: unknown | null;
   explanation: string | null;
 };
 
@@ -297,6 +300,7 @@ export class PostgresRunStore implements RunStore {
   }
 
   async create(run: LatticeRun): Promise<void> {
+    const decision = run.decision === null ? null : validateCurrentStructuredDecision(run.decision);
     const client = await this.pool.connect();
     try {
       await client.query("BEGIN");
@@ -304,7 +308,7 @@ export class PostgresRunStore implements RunStore {
         "INSERT INTO runs(id,conversation_id,status,version,request_json,decision_json,explanation) VALUES ($1,$2,$3,$4,$5::jsonb,$6::jsonb,$7)",
         [
           run.id, run.conversationId, run.status, run.version, JSON.stringify(run.request),
-          run.decision === null ? null : JSON.stringify(run.decision), run.explanation,
+          decision === null ? null : JSON.stringify(decision), run.explanation,
         ],
       );
       await insertEvents(client, run);
@@ -364,9 +368,10 @@ export class PostgresRunStore implements RunStore {
   }
 
   async persistDecision(input: RunDecisionPersistence): Promise<RunTransitionResult> {
+    const decision = validateCurrentStructuredDecision(input.decision);
     const updated = await this.pool.query<{ version: string | number }>(
       "UPDATE runs SET decision_json=$1::jsonb, version=version+1, updated_at=now() WHERE id=$2 AND status='DECIDING' AND version=$3 AND decision_json IS NULL RETURNING version",
-      [JSON.stringify(input.decision), input.runId, input.expectedVersion],
+      [JSON.stringify(decision), input.runId, input.expectedVersion],
     );
     const row = updated.rows[0];
     return row ? { outcome: "advanced", version: Number(row.version) } : { outcome: "stale" };
@@ -434,7 +439,7 @@ export class PostgresRunStore implements RunStore {
       status: row.status,
       version: Number(row.version),
       request: row.request_json,
-      decision: row.decision_json,
+      decision: row.decision_json === null ? null : parseStructuredDecision(row.decision_json),
       explanation: row.explanation,
       truthAssessmentIds: assessmentRows.rows.map((assessment) => assessment.id),
       events,

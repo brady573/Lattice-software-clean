@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { DecisionOutcome, LatticeRun } from "../src/domain.js";
+import type { LatticeRun, StructuredDecision } from "../src/domain.js";
 import type { DurableDecisionPlan } from "../src/intent/decision-plan-store.js";
 import type { IntentProvenance, IntentVersion } from "../src/intent/types.js";
 import type { KnowledgeOutcome, RunOutcome } from "../src/outcome.js";
@@ -71,7 +71,11 @@ function run(status: LatticeRun["status"]): LatticeRun {
     decision: status === "COMPLETED"
       ? {
           goal: plan.planningMaterial.goal,
+          outcome: "RECOMMENDATION",
           winnerCandidateId: "candidate-a",
+          frontierCandidateIds: ["candidate-a"],
+          tiedCandidateIds: [],
+          materialUnknowns: [],
           evaluations: [],
           rationale: ["Candidate A satisfies the hard requirements and best serves the accepted priority."],
           evidenceIds: ["evidence-1"],
@@ -304,31 +308,62 @@ test("only StructuredDecision supplies winner authority for actionable presentat
 });
 
 test("decision-rationale Resources hydrate frontier, tie, unresolved, and winner outcomes without fabricating a winner", () => {
-  const cases: Array<{
-    outcome: DecisionOutcome;
-    winnerCandidateId?: string;
-    frontierCandidateIds?: string[];
-    tiedCandidateIds?: string[];
-    materialUnknowns?: string[];
-    expected: RegExp;
-  }> = [
-    { outcome: "FRONTIER", frontierCandidateIds: ["candidate-a", "candidate-b"], expected: /Frontier: candidate-a, candidate-b/u },
-    { outcome: "TIE", tiedCandidateIds: ["candidate-a", "candidate-b"], expected: /Tied options: candidate-a, candidate-b/u },
-    { outcome: "UNRESOLVED", materialUnknowns: ["criterion@1"], expected: /Material unknowns: criterion@1/u },
-    { outcome: "RECOMMENDATION", winnerCandidateId: "candidate-a", expected: /Winner: candidate-a/u },
+  const completedBase = run("COMPLETED").decision!;
+  const {
+    outcome: _baseOutcome,
+    winnerCandidateId: _baseWinner,
+    frontierCandidateIds: _baseFrontier,
+    tiedCandidateIds: _baseTies,
+    materialUnknowns: _baseUnknowns,
+    ...common
+  } = completedBase;
+  const cases: Array<{ decision: StructuredDecision; expected: RegExp }> = [
+    {
+      decision: {
+        ...common,
+        outcome: "FRONTIER",
+        frontierCandidateIds: ["candidate-a", "candidate-b"],
+        tiedCandidateIds: [],
+        materialUnknowns: [],
+      },
+      expected: /Frontier: candidate-a, candidate-b/u,
+    },
+    {
+      decision: {
+        ...common,
+        outcome: "TIE",
+        frontierCandidateIds: ["candidate-a", "candidate-b"],
+        tiedCandidateIds: ["candidate-a", "candidate-b"],
+        materialUnknowns: [],
+      },
+      expected: /Tied options: candidate-a, candidate-b/u,
+    },
+    {
+      decision: {
+        ...common,
+        outcome: "UNRESOLVED",
+        frontierCandidateIds: [],
+        tiedCandidateIds: [],
+        materialUnknowns: ["criterion@1"],
+      },
+      expected: /Material unknowns: criterion@1/u,
+    },
+    {
+      decision: {
+        ...common,
+        outcome: "RECOMMENDATION",
+        winnerCandidateId: "candidate-a",
+        frontierCandidateIds: ["candidate-a"],
+        tiedCandidateIds: [],
+        materialUnknowns: [],
+      },
+      expected: /Winner: candidate-a/u,
+    },
   ];
 
   for (const fixture of cases) {
     const completed = run("COMPLETED");
-    const { winnerCandidateId: _priorWinner, ...decisionWithoutWinner } = completed.decision!;
-    completed.decision = {
-      ...decisionWithoutWinner,
-      outcome: fixture.outcome,
-      ...(fixture.winnerCandidateId ? { winnerCandidateId: fixture.winnerCandidateId } : {}),
-      frontierCandidateIds: fixture.frontierCandidateIds ?? [],
-      tiedCandidateIds: fixture.tiedCandidateIds ?? [],
-      materialUnknowns: fixture.materialUnknowns ?? [],
-    };
+    completed.decision = fixture.decision;
     const snapshot = composeSolandraPresentation({
       conversationId: "conversation-1",
       run: completed,
@@ -336,7 +371,7 @@ test("decision-rationale Resources hydrate frontier, tie, unresolved, and winner
       intentVersion,
     });
     const descriptor = snapshot.resources.find((resource) => resource.id === `decision-rationale:${completed.id}`);
-    assert.ok(descriptor, `Expected an advertised rationale Resource for ${fixture.outcome}.`);
+    assert.ok(descriptor, `Expected an advertised rationale Resource for ${fixture.decision.outcome}.`);
     const hydrated = hydrateSolandraResource({
       snapshot,
       resourceId: descriptor.id,
@@ -345,9 +380,11 @@ test("decision-rationale Resources hydrate frontier, tie, unresolved, and winner
     });
     assert.equal(hydrated?.payload.kind, "generated_artifact");
     if (hydrated?.payload.kind !== "generated_artifact") continue;
-    assert.match(hydrated.payload.text, new RegExp(`Outcome: ${fixture.outcome}`, "u"));
+    assert.match(hydrated.payload.text, new RegExp(`Outcome: ${fixture.decision.outcome}`, "u"));
     assert.match(hydrated.payload.text, fixture.expected);
-    if (fixture.winnerCandidateId === undefined) assert.doesNotMatch(hydrated.payload.text, /Winner:/u);
+    if (fixture.decision.outcome !== "RECOMMENDATION") {
+      assert.doesNotMatch(hydrated.payload.text, /Winner:/u);
+    }
   }
 });
 
