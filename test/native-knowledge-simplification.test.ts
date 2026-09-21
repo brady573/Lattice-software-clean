@@ -4,7 +4,10 @@ import type { ModelProvider } from "../src/model/provider.js";
 import { ModelRuntime } from "../src/model/runtime.js";
 import type { CanonicalModelRequest, ModelCallContext, ModelProviderResult } from "../src/model/types.js";
 import type { KnowledgeFinding, KnowledgeOutcome } from "../src/outcome.js";
-import { ModelSolandraKnowledgePresenter } from "../src/solandra/knowledge-presenter.js";
+import {
+  ModelSolandraKnowledgePresenter,
+  validateKnowledgePresentationRewrite,
+} from "../src/solandra/knowledge-presenter.js";
 
 class ScriptedPresentationProvider implements ModelProvider {
   readonly kind = "native-knowledge-presentation-fixture";
@@ -112,63 +115,146 @@ async function present(output: unknown, knowledge: KnowledgeOutcome, mode: "EXPL
   return { result, provider };
 }
 
-test("native simplification paraphrases claim-bound segments while authority metadata stays exact and multi-finding", async () => {
+function mixedRiskKnowledge(): KnowledgeOutcome {
   const knowledge = multiFindingKnowledge();
+  const lowRisk = finding(
+    "claim-low-risk",
+    "The archive stores reports in a public catalog.",
+    "SUPPORTED",
+    "HIGH",
+    5,
+  );
+  knowledge.findings = [...knowledge.findings, lowRisk];
+  knowledge.provenance = [
+    ...knowledge.provenance,
+    {
+      sourceId: "source-5",
+      canonicalUri: "https://knowledge.example/source-5",
+      title: "Governed source 5",
+      publisher: "Knowledge Example",
+      provenanceConfidence: "HIGH",
+      authoritativePrimary: false,
+      evidentiarySuitability: "GENERAL_REFERENCE",
+      retrievedAt: "2026-09-20T00:00:00.000Z",
+      publishedAt: null,
+    },
+  ];
+  knowledge.evidence = [
+    ...(knowledge.evidence ?? []),
+    {
+      evidenceId: "evidence-5",
+      claimId: lowRisk.claimId,
+      sourceId: "source-5",
+      relation: "SUPPORTS",
+      excerpt: lowRisk.text,
+      verification: "VERIFIED",
+      admitted: true,
+      rejectionReason: null,
+    },
+  ];
+  knowledge.truthAssessmentIds = [...knowledge.truthAssessmentIds, "assessment-5"];
+  return knowledge;
+}
+
+test("exact governed wording stays safe while a low-risk claim can simplify inside a multi-finding presentation", async () => {
+  const knowledge = mixedRiskKnowledge();
   const before = structuredClone(knowledge);
   const { result, provider } = await present({
     needsNewKnowledge: false,
     segments: [
-      { claimId: "claim-supported", text: "The API may return only 25 items when CACHE-V2 is enabled after 2026-09-01; delivery is not guaranteed." },
-      { claimId: "claim-refuted", text: "Before 08:00 UTC, the service does not accept HTTP requests." },
-      { claimId: "claim-conflicted", text: "If the network path fails, a fallback route could still be available." },
-      { claimId: "claim-unresolved", text: "The backup process might finish during the maintenance window." },
+      ...knowledge.findings.slice(0, 4).map((item) => ({ claimId: item.claimId, text: item.text })),
+      { claimId: "claim-low-risk", text: "The archive keeps reports in a public catalog." },
     ],
   }, knowledge);
 
   assert.equal(result.status, "PRESENTED");
   assert.ok(result.text);
-  assert.match(result.text, /API may return only 25 items when CACHE-V2/u);
-  assert.doesNotMatch(result.text, /and it does not guarantee delivery/u);
-  assert.equal(result.text.match(/Status:/gu)?.length, 4);
+  assert.match(result.text, /The archive keeps reports in a public catalog\./u);
+  assert.match(result.text, /The API may return only 25 items when CACHE-V2/u);
+  assert.match(result.text, /The service does not accept HTTP requests before 08:00 UTC\./u);
+  assert.equal(result.text.match(/Status:/gu)?.length, 5);
   assert.match(result.text, /Status: Supported; confidence: HIGH\./u);
-  assert.match(result.text, /Status: Refuted; confidence: HIGH\./u);
   assert.match(result.text, /Status: Materially conflicted; confidence: MODERATE\./u);
   assert.match(result.text, /Status: Unresolved; confidence: LOW\./u);
   assert.match(result.text, /Effective at: 2026-09-01T00:00:00\.000Z; Period: 2026-Q3/u);
   assert.match(result.text, /Delivery may still be delayed by conditions not established in this Knowledge/u);
-  assert.match(result.text, /The backup process might finish during the maintenance window\./u);
-  assert.doesNotMatch(result.text, /couldn't simplify every selected finding faithfully/iu);
-  for (let index = 1; index <= 4; index += 1) {
-    assert.match(result.text, new RegExp(`https://knowledge\\.example/source-${index}`, "u"));
+  for (let index = 1; index <= 5; index += 1) {
+    assert.match(result.text, new RegExp("https://knowledge\\.example/source-" + index, "u"));
   }
   assert.deepEqual(knowledge, before, "presentation must not mutate governed Knowledge");
   const requestText = provider.requests[0]?.messages.map((message) => message.content).join("\n") ?? "";
   for (const item of knowledge.findings) assert.match(requestText, new RegExp(item.claimId, "u"));
 });
 
-test("bounded fidelity defense rejects dropped negation, modality, conditions, quantities, and technical identifiers", async () => {
+test("fidelity guard fails closed on changed high-risk material instead of treating marker presence as semantic proof", () => {
+  const cases = [
+    {
+      label: "negation reassociation",
+      original: "The service does not accept requests, and the audit log records failures.",
+      candidate: "The service accepts requests, and the audit log does not record failures.",
+    },
+    {
+      label: "modality reassociation",
+      original: "The primary route may remain available, and the backup route remains unavailable.",
+      candidate: "The primary route remains available, and the backup route may remain unavailable.",
+    },
+    {
+      label: "condition reassociation",
+      original: "If the cache is warm, the service returns the stored result, and the audit remains available.",
+      candidate: "The cache is warm, the service returns the stored result if the audit remains available.",
+    },
+    {
+      label: "identifier quantity and date reassociation",
+      original: "CACHE-V2 records 25 entries after 2026-09-01, and the archive retains the batch.",
+      candidate: "After 2026-09-01 the archive retains 25 entries, and CACHE-V2 records the batch.",
+    },
+  ] as const;
+
+  for (const item of cases) {
+    assert.equal(
+      validateKnowledgePresentationRewrite(item.original, item.candidate),
+      null,
+      item.label,
+    );
+  }
+});
+
+test("fidelity guard accepts exact wording and bounded low-risk rewrites without claiming semantic authority", () => {
+  const unchanged = "The primary route may remain available if the cache is warm.";
+  assert.equal(validateKnowledgePresentationRewrite(unchanged, unchanged), unchanged);
+
+  const lowRiskOriginal = "The archive stores reports in a public catalog.";
+  const lowRiskCandidate = "The archive keeps reports in a public catalog.";
+  assert.equal(
+    validateKnowledgePresentationRewrite(lowRiskOriginal, lowRiskCandidate),
+    lowRiskCandidate,
+  );
+});
+
+test("unsafe transformed high-risk wording falls back to exact governed Knowledge without mutation", async () => {
   const knowledge = multiFindingKnowledge();
   knowledge.findings = [knowledge.findings[0]!];
   knowledge.evidence = (knowledge.evidence ?? []).filter((item) => item.claimId === "claim-supported");
   knowledge.provenance = [knowledge.provenance[0]!];
+  knowledge.truthAssessmentIds = [knowledge.truthAssessmentIds[0]!];
+  const before = structuredClone(knowledge);
   const original = knowledge.findings[0]!.text;
-  const invalid = [
-    "The API may return only 25 items when CACHE-V2 is enabled after 2026-09-01, and delivery is guaranteed.",
-    "The API will return only 25 items when CACHE-V2 is enabled after 2026-09-01, and it does not guarantee delivery.",
-    "The API may return 25 items with CACHE-V2 enabled from 2026-09-01, and it does not guarantee delivery.",
-    "The API may return only 30 items when CACHE-V2 is enabled after 2026-09-01, and it does not guarantee delivery.",
-    "The API may return only 25 items when the cache is enabled after 2026-09-01, and it does not guarantee delivery.",
-  ];
+  const unsafe = "The API may not return only 25 items when CACHE-V2 is enabled after 2026-09-01, and it does guarantee delivery.";
 
-  for (const text of invalid) {
-    const { result } = await present({
-      needsNewKnowledge: false,
-      segments: [{ claimId: "claim-supported", text }],
-    }, knowledge);
-    assert.equal(result.status, "FIDELITY_REJECTED");
-    assert.ok(result.text);
-    assert.match(result.text, new RegExp(original.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"));
-  }
+  const { result, provider } = await present({
+    needsNewKnowledge: false,
+    segments: [{ claimId: "claim-supported", text: unsafe }],
+  }, knowledge);
+
+  assert.equal(result.status, "FIDELITY_REJECTED");
+  assert.ok(result.text);
+  assert.equal(result.text.includes(original), true);
+  assert.equal(result.text.includes(unsafe), false);
+  assert.match(result.text, /Status: Supported; confidence: HIGH\./u);
+  assert.match(result.text, /Effective at: 2026-09-01T00:00:00\.000Z; Period: 2026-Q3/u);
+  assert.match(result.text, /https:\/\/knowledge\.example\/source-1/u);
+  assert.deepEqual(knowledge, before, "rejected presentation must not mutate governed Knowledge");
+  assert.equal(provider.requests.length, 1, "fallback must not launch a second model or acquisition path");
 });
 
 test("invented claim identity is rejected and NEEDS_NEW_KNOWLEDGE never manufactures substitute prose", async () => {

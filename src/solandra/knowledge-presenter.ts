@@ -61,28 +61,21 @@ function matches(value: string, pattern: RegExp): string[] {
   return [...value.matchAll(pattern)].map((match) => normalizeWhitespace(match[0] ?? ""));
 }
 
-function sameMultiset(left: readonly string[], right: readonly string[]): boolean {
-  if (left.length !== right.length) return false;
-  const counts = new Map<string, number>();
-  for (const value of left) counts.set(value, (counts.get(value) ?? 0) + 1);
-  for (const value of right) {
-    const remaining = counts.get(value);
-    if (remaining === undefined || remaining === 0) return false;
-    if (remaining === 1) counts.delete(value);
-    else counts.set(value, remaining - 1);
-  }
-  return counts.size === 0;
-}
-
-function preservesSemanticMarker(original: string, candidate: string, pattern: RegExp): boolean {
-  const normalizedOriginal = normalizeSemanticMarkerTypography(original);
-  const normalizedCandidate = normalizeSemanticMarkerTypography(candidate);
-  return pattern.test(normalizedOriginal) === pattern.test(normalizedCandidate);
+function containsProtectedRewriteMaterial(value: string): boolean {
+  const normalized = normalizeSemanticMarkerTypography(value);
+  return NEGATION_PATTERN.test(normalized)
+    || UNCERTAINTY_PATTERN.test(normalized)
+    || CONDITION_PATTERN.test(normalized)
+    || matches(value, NUMBER_PATTERN).length > 0
+    || matches(value, ACRONYM_PATTERN).length > 0;
 }
 
 /**
- * Bounded defense-in-depth for obvious rewrite drift. These checks do not
- * establish semantic equivalence; authority remains exclusively in Knowledge.
+ * Bounded defense-in-depth for rewrite drift. Exact governed wording is always
+ * safe. Changed text containing protected high-risk material fails closed
+ * because this deterministic layer cannot establish proposition-level marker
+ * attachment without becoming semantic machinery. Authority remains
+ * exclusively in Knowledge.
  */
 export function validateKnowledgePresentationRewrite(
   originalText: string,
@@ -92,12 +85,8 @@ export function validateKnowledgePresentationRewrite(
   const candidate = normalizeWhitespace(candidateText);
   if (!original || !candidate) return null;
   if (candidate === original) return originalText;
+  if (containsProtectedRewriteMaterial(original) || containsProtectedRewriteMaterial(candidate)) return null;
   if (candidate.length < 12 || candidate.length > Math.max(600, original.length * 2)) return null;
-  if (!preservesSemanticMarker(original, candidate, NEGATION_PATTERN)) return null;
-  if (!preservesSemanticMarker(original, candidate, UNCERTAINTY_PATTERN)) return null;
-  if (!preservesSemanticMarker(original, candidate, CONDITION_PATTERN)) return null;
-  if (!sameMultiset(matches(original, NUMBER_PATTERN), matches(candidate, NUMBER_PATTERN))) return null;
-  if (!sameMultiset(matches(original, ACRONYM_PATTERN), matches(candidate, ACRONYM_PATTERN))) return null;
   return candidate;
 }
 
