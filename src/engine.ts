@@ -7,6 +7,8 @@ import type {
   Priority,
   RunRequest,
   StructuredDecision,
+  MultipleDecisionIds,
+  NonEmptyDecisionIds,
 } from "./domain.js";
 import type { DecisionFixtureDataset } from "./truth/fixture-dataset.js";
 import {
@@ -21,6 +23,16 @@ import { evaluateFixtureTruth } from "./truth/fixture-evaluation.js";
 import { materializeFixtureDecisionEvidence } from "./truth/decision-evidence-provider.js";
 
 const deterministicEvaluationRunId = "00000000-0000-4000-8000-000000000036";
+
+function nonEmptyDecisionIds(values: string[], label: string): NonEmptyDecisionIds {
+  if (values.length === 0) throw new Error(`${label} unexpectedly resolved to an empty decision set.`);
+  return [values[0]!, ...values.slice(1)];
+}
+
+function multipleDecisionIds(values: string[], label: string): MultipleDecisionIds {
+  if (values.length < 2) throw new Error(`${label} unexpectedly resolved to fewer than two candidates.`);
+  return [values[0]!, values[1]!, ...values.slice(2)];
+}
 
 function compareConstraint(observed: EvidenceValue, constraint: HardConstraint): boolean | null {
   if (observed === null || observed === undefined) return null;
@@ -117,7 +129,7 @@ export function createDecisionFromAdmittedEvidence(
       frontierCandidateIds: normalized.filter((evaluation) => evaluation.eligible)
         .map((evaluation) => evaluation.candidateId),
       tiedCandidateIds: [],
-      materialUnknowns: unresolved,
+      materialUnknowns: nonEmptyDecisionIds(unresolved, "UNRESOLVED material unknowns"),
       evaluations: normalized,
       rationale: ["The available evidence leaves at least one candidate's eligibility unresolved, so no winner is forced."],
       evidenceIds: [],
@@ -142,11 +154,12 @@ export function createDecisionFromAdmittedEvidence(
   const candidateLabel = candidates.find((candidate) => candidate.id === winner.candidateId)?.label ?? winner.candidateId;
   const tied = eligible.filter((evaluation) => evaluation.rawScore === winner.rawScore);
   if (tied.length > 1) {
+    const tiedIds = tied.map((evaluation) => evaluation.candidateId);
     return {
       goal: request.goal,
       outcome: "TIE",
-      frontierCandidateIds: tied.map((evaluation) => evaluation.candidateId),
-      tiedCandidateIds: tied.map((evaluation) => evaluation.candidateId),
+      frontierCandidateIds: multipleDecisionIds(tiedIds, "TIE frontier"),
+      tiedCandidateIds: multipleDecisionIds(tiedIds, "TIE candidates"),
       materialUnknowns: [],
       evaluations: normalized,
       rationale: ["Eligible candidates have equal weighted preference scores; no single recommendation is supported."],

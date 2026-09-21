@@ -7,8 +7,8 @@ import type {
   RunEventType,
   RunRequest,
   RunStatus,
-  StructuredDecision,
 } from "./domain.js";
+import { parseStructuredDecision } from "./decision/structured-decision.js";
 import {
   assertAllowedTransition,
   type RunCompletion,
@@ -100,7 +100,7 @@ type RunRow = {
   status: RunStatus;
   version: string | number;
   request_json: RunRequest;
-  decision_json: StructuredDecision | null;
+  decision_json: unknown | null;
   explanation: string | null;
 };
 
@@ -434,7 +434,7 @@ export class PostgresRunStore implements RunStore {
       status: row.status,
       version: Number(row.version),
       request: row.request_json,
-      decision: row.decision_json,
+      decision: row.decision_json === null ? null : parseStructuredDecision(row.decision_json),
       explanation: row.explanation,
       truthAssessmentIds: assessmentRows.rows.map((assessment) => assessment.id),
       events,

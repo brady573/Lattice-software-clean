@@ -32,7 +32,7 @@ export function createSolandraExplanationPlan(
 
   let winnerCandidateId: string | undefined;
   let winnerLabel: string | undefined;
-  if (decision.winnerCandidateId) {
+  if (decision.outcome === "RECOMMENDATION") {
     const winner = candidateById.get(decision.winnerCandidateId);
     if (!winner) {
       throw new Error("Structured decision references an unknown winning candidate.");
@@ -63,11 +63,11 @@ export function createSolandraExplanationPlan(
 
   return {
     goal: decision.goal,
-    outcome: decision.outcome ?? (winnerCandidateId ? "RECOMMENDATION" : "UNRESOLVED"),
+    outcome: decision.outcome,
     ...(winnerCandidateId && winnerLabel ? { winnerCandidateId, winnerLabel } : {}),
-    frontierCandidateIds: [...(decision.frontierCandidateIds ?? (winnerCandidateId ? [winnerCandidateId] : []))],
-    tiedCandidateIds: [...(decision.tiedCandidateIds ?? [])],
-    materialUnknowns: [...(decision.materialUnknowns ?? [])],
+    frontierCandidateIds: [...decision.frontierCandidateIds],
+    tiedCandidateIds: [...decision.tiedCandidateIds],
+    materialUnknowns: [...decision.materialUnknowns],
     candidates: candidateViews,
     rationale: [...decision.rationale],
     evidenceIds: [...decision.evidenceIds],

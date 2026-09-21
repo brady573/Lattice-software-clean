@@ -63,7 +63,7 @@ export interface SupportingKnowledge {
 }
 
 export interface ActionRecommendation {
-  outcome: NonNullable<import("../domain.js").StructuredDecision["outcome"]>;
+  outcome: import("../domain.js").StructuredDecision["outcome"];
   winnerCandidateId?: string;
   frontierCandidateIds: string[];
   tiedCandidateIds: string[];
@@ -302,6 +302,27 @@ function revisionFor(snapshot: Omit<SolandraPresentationSnapshot, "presentationR
   return createHash("sha256").update(JSON.stringify(snapshot)).digest("hex").slice(0, 24);
 }
 
+function actionRecommendationFromDecision(
+  decision: NonNullable<LatticeRun["decision"]>,
+  runId: string,
+  truthAssessmentIds: readonly string[],
+): ActionRecommendation {
+  const common = {
+    outcome: decision.outcome,
+    frontierCandidateIds: [...decision.frontierCandidateIds],
+    tiedCandidateIds: [...decision.tiedCandidateIds],
+    materialUnknowns: [...decision.materialUnknowns],
+    rationale: [...decision.rationale],
+    provenance: [
+      { authority: "structured_decision" as const, ref: runId },
+      ...truthAssessmentIds.map((id) => ({ authority: "v36" as const, ref: id })),
+    ],
+  };
+  return decision.outcome === "RECOMMENDATION"
+    ? { ...common, winnerCandidateId: decision.winnerCandidateId }
+    : common;
+}
+
 export function composeSolandraPresentation(input: {
   conversationId: string;
   run?: LatticeRun;
@@ -328,21 +349,7 @@ export function composeSolandraPresentation(input: {
       }]
     : actionPreparationUncertainty(run, outcome);
   const nextAction = run?.status === "COMPLETED" && run.decision !== null
-    ? {
-        outcome: run.decision.outcome
-          ?? (run.decision.winnerCandidateId ? "RECOMMENDATION" : "UNRESOLVED"),
-        ...(run.decision.winnerCandidateId
-          ? { winnerCandidateId: run.decision.winnerCandidateId }
-          : {}),
-        frontierCandidateIds: [...(run.decision.frontierCandidateIds ?? [])],
-        tiedCandidateIds: [...(run.decision.tiedCandidateIds ?? [])],
-        materialUnknowns: [...(run.decision.materialUnknowns ?? [])],
-        rationale: [...run.decision.rationale],
-        provenance: [
-          { authority: "structured_decision" as const, ref: run.id },
-          ...run.truthAssessmentIds.map((id) => ({ authority: "v36" as const, ref: id })),
-        ],
-      }
+    ? actionRecommendationFromDecision(run.decision, run.id, run.truthAssessmentIds)
     : undefined;
   const resources = resourcesFor(run, decisionPlan, outcome);
   const revisionInput = {
@@ -423,19 +430,17 @@ export function hydrateSolandraResource(input: {
   }
   if (descriptor.id === `decision-rationale:${input.run?.id ?? ""}` && input.run?.decision) {
     const decision = input.run.decision;
-    const outcome = decision.outcome
-      ?? (decision.winnerCandidateId ? "RECOMMENDATION" : "UNRESOLVED");
     const text = [
-      `Outcome: ${outcome}`,
-      ...(decision.winnerCandidateId ? [`Winner: ${decision.winnerCandidateId}`] : []),
-      ...((decision.frontierCandidateIds?.length ?? 0) > 0
-        ? [`Frontier: ${decision.frontierCandidateIds?.join(", ")}`]
+      `Outcome: ${decision.outcome}`,
+      ...(decision.outcome === "RECOMMENDATION" ? [`Winner: ${decision.winnerCandidateId}`] : []),
+      ...(decision.frontierCandidateIds.length > 0
+        ? [`Frontier: ${decision.frontierCandidateIds.join(", ")}`]
         : []),
-      ...((decision.tiedCandidateIds?.length ?? 0) > 0
-        ? [`Tied options: ${decision.tiedCandidateIds?.join(", ")}`]
+      ...(decision.tiedCandidateIds.length > 0
+        ? [`Tied options: ${decision.tiedCandidateIds.join(", ")}`]
         : []),
-      ...((decision.materialUnknowns?.length ?? 0) > 0
-        ? [`Material unknowns: ${decision.materialUnknowns?.join(", ")}`]
+      ...(decision.materialUnknowns.length > 0
+        ? [`Material unknowns: ${decision.materialUnknowns.join(", ")}`]
         : []),
       ...decision.rationale.map((line) => `- ${line}`),
       `Evidence: ${decision.evidenceIds.join(", ") || "none recorded"}`,

@@ -27,7 +27,7 @@ export function renderCanonicalExplanation(
   decision: StructuredDecision,
   candidates: Candidate[],
 ): string {
-  if (decision.winnerCandidateId) {
+  if (decision.outcome === "RECOMMENDATION") {
     const winner = candidates.find((candidate) => candidate.id === decision.winnerCandidateId);
     if (!winner) throw new Error("Structured decision references an unknown winning candidate.");
     const winnerEvaluation = decision.evaluations.find((evaluation) => evaluation.candidateId === winner.id);
@@ -40,12 +40,12 @@ export function renderCanonicalExplanation(
       : "";
     return `Solandra recommends ${winner.label}. It satisfies every hard constraint and has the strongest weighted preference score among the remaining eligible candidates.${exclusions}`;
   }
-  const outcome = decision.outcome ?? "UNRESOLVED";
-  const frontier = decision.frontierCandidateIds ?? [];
   return [
-    `Solandra reports ${outcome.toLowerCase().replaceAll("_", " ")}.`,
-    frontier.length > 0 ? `Authoritative frontier: ${frontier.join(", ")}.` : "",
-    ...(decision.materialUnknowns ?? []).map((item) => `Unresolved: ${item}.`),
+    `Solandra reports ${decision.outcome.toLowerCase().replaceAll("_", " ")}.`,
+    decision.frontierCandidateIds.length > 0
+      ? `Authoritative frontier: ${decision.frontierCandidateIds.join(", ")}.`
+      : "",
+    ...decision.materialUnknowns.map((item) => `Unresolved: ${item}.`),
   ].filter(Boolean).join(" ");
 }
 
