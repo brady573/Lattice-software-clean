@@ -127,6 +127,7 @@ export type DecisionOutcome =
 
 export type NonEmptyDecisionIds = [string, ...string[]];
 export type MultipleDecisionIds = [string, string, ...string[]];
+export type FrontierDecisionIds = [] | MultipleDecisionIds;
 
 interface StructuredDecisionBase {
   goal: string;
@@ -147,7 +148,7 @@ export type RecommendationStructuredDecision = StructuredDecisionBase & {
 export type FrontierStructuredDecision = StructuredDecisionBase & {
   outcome: "FRONTIER";
   winnerCandidateId?: never;
-  frontierCandidateIds: string[];
+  frontierCandidateIds: FrontierDecisionIds;
   tiedCandidateIds: [];
   materialUnknowns: [];
 };
@@ -163,7 +164,7 @@ export type TieStructuredDecision = StructuredDecisionBase & {
 export type InsufficientEvidenceStructuredDecision = StructuredDecisionBase & {
   outcome: "INSUFFICIENT_EVIDENCE";
   winnerCandidateId?: never;
-  frontierCandidateIds: string[];
+  frontierCandidateIds: NonEmptyDecisionIds;
   tiedCandidateIds: [];
   materialUnknowns: NonEmptyDecisionIds;
 };

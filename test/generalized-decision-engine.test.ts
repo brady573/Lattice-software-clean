@@ -125,6 +125,10 @@ test("incompatible raw numeric scales cannot manufacture a winner", () => {
   assert.equal(decision.outcome, "FRONTIER");
   assert.equal(decision.winnerCandidateId, undefined);
   assert.deepEqual(decision.frontierCandidateIds, ["alpha", "beta"]);
+  assert.equal(
+    decision.rationale[0],
+    "No unique recommendation is supported by the qualified material-dominance result; no scalar score or forced winner was manufactured.",
+  );
   assert.equal(decision.evaluations.every((evaluation) => evaluation.rawScore === 0), true);
 });
 

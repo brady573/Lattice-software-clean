@@ -2,6 +2,7 @@ import type {
   Candidate,
   CandidateEvaluation,
   DecisionOutcome,
+  FrontierDecisionIds,
   StructuredDecision,
   MultipleDecisionIds,
   NonEmptyDecisionIds,
@@ -34,12 +35,17 @@ function multipleDecisionIds(values: string[], label: string): MultipleDecisionI
   return [values[0]!, values[1]!, ...values.slice(2)];
 }
 
+function frontierDecisionIds(values: string[], label: string): FrontierDecisionIds {
+  if (values.length === 0) return [];
+  return multipleDecisionIds(values, label);
+}
+
 function rationaleFor(outcome: DecisionOutcome): string {
   switch (outcome) {
     case "RECOMMENDATION":
       return "One eligible alternative materially dominates the others under the qualified criterion semantics.";
     case "FRONTIER":
-      return "More than one eligible alternative remains nondominated; no scalar score or forced winner was manufactured.";
+      return "No unique recommendation is supported by the qualified material-dominance result; no scalar score or forced winner was manufactured.";
     case "TIE":
       return "The qualified comparisons found no meaningful difference between the remaining alternatives.";
     case "INSUFFICIENT_EVIDENCE":
@@ -129,7 +135,7 @@ export function createGeneralizedDecisionFromAdmittedEvidence(
     return {
       ...shared("INSUFFICIENT_EVIDENCE", frontierCandidateIds),
       outcome: "INSUFFICIENT_EVIDENCE",
-      frontierCandidateIds,
+      frontierCandidateIds: nonEmptyDecisionIds(frontierCandidateIds, "INSUFFICIENT_EVIDENCE frontier"),
       tiedCandidateIds: [],
       materialUnknowns: nonEmptyDecisionIds(materialUnknowns, "INSUFFICIENT_EVIDENCE material unknowns"),
     };
@@ -160,7 +166,7 @@ export function createGeneralizedDecisionFromAdmittedEvidence(
     return {
       ...shared("FRONTIER", eligibleIds),
       outcome: "FRONTIER",
-      frontierCandidateIds: [...eligibleIds],
+      frontierCandidateIds: multipleDecisionIds(eligibleIds, "FRONTIER candidates"),
       tiedCandidateIds: [],
       materialUnknowns: [],
     };
@@ -240,7 +246,7 @@ export function createGeneralizedDecisionFromAdmittedEvidence(
       return {
         ...shared("FRONTIER", frontierCandidateIds),
         outcome: "FRONTIER",
-        frontierCandidateIds,
+        frontierCandidateIds: frontierDecisionIds(frontierCandidateIds, "FRONTIER candidates"),
         tiedCandidateIds: [],
         materialUnknowns: [],
       };
@@ -259,7 +265,7 @@ export function createGeneralizedDecisionFromAdmittedEvidence(
       return {
         ...shared("INSUFFICIENT_EVIDENCE", frontierCandidateIds),
         outcome: "INSUFFICIENT_EVIDENCE",
-        frontierCandidateIds,
+        frontierCandidateIds: nonEmptyDecisionIds(frontierCandidateIds, "INSUFFICIENT_EVIDENCE frontier"),
         tiedCandidateIds: [],
         materialUnknowns: nonEmptyDecisionIds(materialUnknowns, "INSUFFICIENT_EVIDENCE material unknowns"),
       };
