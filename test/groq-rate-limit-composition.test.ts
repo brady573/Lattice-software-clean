@@ -2,12 +2,6 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import {
-  createConfiguredCapabilityBroker,
-} from "../src/capabilities/composition.js";
-import {
-  USER_AUTHORIZED_MODEL_CAPABILITY_ID,
-} from "../src/capabilities/user-model-capability.js";
-import {
   GROQ_KNOWLEDGE_SIMPLIFIER_MODEL,
 } from "../src/model/groq-knowledge-simplifier.js";
 import {
@@ -35,8 +29,6 @@ function responseFor(body: string): Response {
   let content: string;
   if (system.includes("Knowledge investigation cognition")) {
     content = JSON.stringify({ retrievalQueries: ["controlled composition query"] });
-  } else if (system.includes("user-authorized cognitive capability")) {
-    content = "Bounded capability output.";
   } else {
     content = JSON.stringify({ mode: "CONVERSATION", response: "Bounded conversation output." });
   }
@@ -60,7 +52,6 @@ test("canonical API-side and Knowledge-investigator compositions derive the same
   globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) =>
     responseFor(String(init?.body ?? "{}"))) as typeof fetch;
 
-  let broker: Awaited<ReturnType<typeof createConfiguredCapabilityBroker>> | undefined;
   try {
     const apiComposition = createConfiguredSolandraCognition(config, coordinator);
     assert.ok(apiComposition);
@@ -83,26 +74,10 @@ test("canonical API-side and Knowledge-investigator compositions derive the same
       knowledgeNeeds: ["Find relevant explanatory material."],
     });
 
-    broker = await createConfiguredCapabilityBroker(config, coordinator);
-    await broker.broker.connect("composition-subject", USER_AUTHORIZED_MODEL_CAPABILITY_ID);
-    await broker.broker.invoke({
-      subjectId: "composition-subject",
-      capabilityId: USER_AUTHORIZED_MODEL_CAPABILITY_ID,
-      requestId: "composition-capability-request",
-      purpose: "ordinary-conversation-cognitive-assistance",
-      payload: {
-        purpose: "GENERAL_COGNITIVE_ASSISTANCE",
-        instruction: "Offer one label.",
-        userContext: ["My own scratch notes."],
-        governedKnowledge: [],
-      },
-    });
-
-    assert.equal(coordinator.waits.length, 3);
+    assert.equal(coordinator.waits.length, 2);
     assert.deepEqual(new Set(coordinator.waits), new Set([expectedScope]));
   } finally {
     globalThis.fetch = originalFetch;
-    await broker?.broker.close();
   }
 });
 
@@ -112,57 +87,14 @@ test("canonical API and Run-worker entrypoints independently construct shared du
 
   assert.match(apiSource, /createGroqRateLimitCoordinator\(config\.databaseUrl, \{ migrate: config\.autoMigrate \}\)/u);
   assert.match(apiSource, /requireConfiguredSolandraCognition\(config, groqRateLimitCoordinator\)/u);
-  assert.match(apiSource, /createConfiguredCapabilityBroker\(config, groqRateLimitCoordinator\)/u);
+  assert.doesNotMatch(apiSource, /createConfiguredCapabilityBroker/u);
   assert.match(apiSource, /createConfiguredTruthPipeline\([\s\S]*groqRateLimitCoordinator/u);
 
   assert.match(workerSource, /createGroqRateLimitCoordinator\(config\.databaseUrl\)/u);
   assert.match(workerSource, /createConfiguredTruthPipeline\([\s\S]*groqRateLimitCoordinator/u);
   assert.doesNotMatch(workerSource, /sharedMemoryGroqRateLimitCoordinator/u);
 
-  const userModelSource = await readFile("src/capabilities/user-model-capability.ts", "utf8");
-  const simplifierSource = await readFile("src/presentation/solandra/knowledge-simplification.ts", "utf8");
-  assert.match(userModelSource, /maxAttempts: 1/u);
-  assert.match(simplifierSource, /maxAttempts: 1/u);
 });
-
-test("the user-authorized model capability observes the shared gate but retains one logical provider attempt", async () => {
-  const config = resolveRuntimeConfig({
-    LATTICE_DEPLOYMENT_MODE: "development",
-    LATTICE_TRUTH_MODE: "v36-offline",
-    LATTICE_SOLANDRA_COGNITION_ROUTE: "groq-gpt-oss-120b",
-    GROQ_API_KEY: API_KEY,
-  } as NodeJS.ProcessEnv);
-  const coordinator = new RecordingCoordinator();
-  const originalFetch = globalThis.fetch;
-  let fetches = 0;
-  globalThis.fetch = (async () => {
-    fetches += 1;
-    return new Response(JSON.stringify({ error: { message: "controlled 429" } }), { status: 429 });
-  }) as typeof fetch;
-
-  const composition = await createConfiguredCapabilityBroker(config, coordinator);
-  try {
-    await composition.broker.connect("one-attempt-subject", USER_AUTHORIZED_MODEL_CAPABILITY_ID);
-    await assert.rejects(composition.broker.invoke({
-      subjectId: "one-attempt-subject",
-      capabilityId: USER_AUTHORIZED_MODEL_CAPABILITY_ID,
-      requestId: "one-attempt-request",
-      purpose: "ordinary-conversation-cognitive-assistance",
-      payload: {
-        purpose: "GENERAL_COGNITIVE_ASSISTANCE",
-        instruction: "Offer one label.",
-        userContext: [],
-        governedKnowledge: [],
-      },
-    }));
-    assert.equal(fetches, 1);
-    assert.equal(coordinator.waits.length, 1);
-  } finally {
-    globalThis.fetch = originalFetch;
-    await composition.broker.close();
-  }
-});
-
 
 test("non-Groq local Solandra composition retains one provider attempt", async () => {
   const config = resolveRuntimeConfig({

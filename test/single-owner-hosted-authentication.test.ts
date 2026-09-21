@@ -5,6 +5,7 @@ import {
   registerAuthenticatedSubjectBoundary,
   getAuthenticatedSubject,
 } from "../src/auth/authenticated-subject.js";
+import { registerAuthenticatedSessionApi } from "../src/auth/session-api.js";
 import {
   OWNER_SUBJECT_ID,
   createOwnerAccessSubjectResolver,
@@ -21,6 +22,7 @@ async function createProbeApp(token = TOKEN) {
     resolveSubject: createOwnerAccessSubjectResolver(token),
   });
   app.get("/api/v1/owner-probe", async (request) => getAuthenticatedSubject(request));
+  registerAuthenticatedSessionApi(app);
   return app;
 }
 
@@ -120,7 +122,7 @@ test("canonical Solandra uses a session-scoped Owner access gate and bearer wrap
   assert.match(html, /sessionStorage\.setItem\(STORAGE_KEY, value\)/u);
   assert.doesNotMatch(html, /localStorage\.setItem\([^\n]*owner-access/iu);
   assert.match(html, /headers\.set\("authorization", "Bearer " \+ token\)/u);
-  assert.match(html, /nativeFetch\("\/api\/v1\/capabilities\/model-assistance", \{/u);
+  assert.match(html, /nativeFetch\("\/api\/v1\/auth\/session", \{/u);
   assert.match(html, /authorization: "Bearer " \+ candidate/u);
   assert.match(html, /window\.ownerFetch\("\/api\/v1\/conversations"/u);
   assert.match(html, /window\.ownerFetch\("\/api\/v1\/runs\//u);

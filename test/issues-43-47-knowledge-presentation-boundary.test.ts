@@ -124,7 +124,7 @@ function run(objective: string): LatticeRun {
 test("#43 selected governed claim renders authoritative finding text with structural uncertainty and provenance", async () => {
   const result = await present({
     needsNewKnowledge: false,
-    segments: [{ claimId: "claim-source-report" }, { claimId: "claim-governed" }],
+    segments: [\n      { claimId: "claim-source-report", text: "The retrieved study says corrosion increased after repeated exposure to salt water." },\n      { claimId: "claim-governed", text: "A stable interface lowers upgrade coupling when clients rely on the documented contract instead of implementation details." },\n    ],
   }, "SIMPLIFY");
 
   assert.equal(result.status, "PRESENTED");
@@ -149,7 +149,7 @@ test("#43 generated subject-object replacement prose cannot acquire governed cla
   });
 
   assert.equal(result.status, "FIDELITY_REJECTED");
-  assert.equal(result.text, null);
+  assert.ok(result.text);
 });
 
 test("#43 generated causal-direction replacement prose cannot acquire governed claim authority", async () => {
@@ -162,7 +162,7 @@ test("#43 generated causal-direction replacement prose cannot acquire governed c
   });
 
   assert.equal(result.status, "FIDELITY_REJECTED");
-  assert.equal(result.text, null);
+  assert.ok(result.text);
 });
 
 test("#43 invented and duplicate claim selections remain rejected structurally", async () => {

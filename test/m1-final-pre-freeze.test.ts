@@ -431,7 +431,7 @@ test("ModelSolandraKnowledgePresenter rejects unsupported factual additions with
 
   assert.equal(provider.calls, 1);
   assert.equal(result.status, "FIDELITY_REJECTED");
-  assert.equal(result.text, null);
+  assert.ok(result.text);\n  assert.match(result.text, /A stable public interface can reduce upgrade coupling/u);
   assert.deepEqual(knowledge, before);
   assert.deepEqual(knowledge.findings.map((item) => item.claimId), ["presenter-claim"]);
   assert.deepEqual(knowledge.evidence?.map((item) => item.evidenceId), ["presenter-evidence"]);
