@@ -335,6 +335,96 @@ test("queued caller cancellation is prompt and does not let a successor bypass o
   assert.deepEqual(provider.attempts, [0, 1]);
 });
 
+test("total logical timeout does not allocate or invoke a second provider attempt", async () => {
+  const provider = new TrackingProvider(100);
+  const runtime = new ModelRuntime(provider, { timeoutMs: 20 });
+
+  await assert.rejects(
+    () => runtime.call(fixtureRequest, {
+      correlationId: "timeout-no-retry",
+      maxAttempts: 2,
+    }),
+    (error: unknown) =>
+      error instanceof ModelProviderError
+      && error.code === "timeout",
+  );
+
+  assert.equal(provider.calls, 1);
+  assert.deepEqual(provider.attempts, [0]);
+});
+
+test("caller cancellation does not allocate or invoke a second provider attempt", async () => {
+  const provider = new TrackingProvider(100);
+  const runtime = new ModelRuntime(provider, { timeoutMs: 1_000 });
+  const controller = new AbortController();
+  setTimeout(() => controller.abort(new Error("caller cancel")), 20);
+
+  await assert.rejects(
+    () => runtime.call(fixtureRequest, {
+      correlationId: "cancel-no-retry",
+      maxAttempts: 2,
+      signal: controller.signal,
+    }),
+    (error: unknown) =>
+      error instanceof ModelProviderError
+      && error.code === "cancelled",
+  );
+
+  assert.equal(provider.calls, 1);
+  assert.deepEqual(provider.attempts, [0]);
+});
+
+test("retryable operational failure before the logical deadline still recovers on attempt two", async () => {
+  const provider = new TrackingProvider(0, true);
+  const runtime = new ModelRuntime(provider, { timeoutMs: 1_000 });
+
+  const result = await runtime.call(fixtureRequest, {
+    correlationId: "retry-before-deadline",
+    maxAttempts: 2,
+  });
+
+  assert.equal(result.response.output[0]?.type, "text");
+  assert.equal(provider.calls, 2);
+  assert.deepEqual(provider.attempts, [0, 1]);
+});
+
+test("provider-originated retryable timeout remains retryable while the logical deadline is active", async () => {
+  let calls = 0;
+  const attempts: number[] = [];
+  const provider: ModelProvider = {
+    kind: "provider-timeout-fixture",
+    async generate(
+      request: CanonicalModelRequest,
+      context: ModelCallContext,
+    ): Promise<ModelProviderResult> {
+      calls += 1;
+      attempts.push(context.attempt);
+      if (calls === 1) {
+        throw new ModelProviderError("timeout", "provider-local timeout", {
+          retryable: true,
+        });
+      }
+      return {
+        response: {
+          id: "provider-timeout-recovered",
+          model: request.model,
+          output: [{ type: "text", text: "RECOVERED" }],
+        },
+      };
+    },
+  };
+  const runtime = new ModelRuntime(provider, { timeoutMs: 1_000 });
+
+  const result = await runtime.call(fixtureRequest, {
+    correlationId: "provider-timeout-retry",
+    maxAttempts: 2,
+  });
+
+  assert.equal(result.response.output[0]?.type, "text");
+  assert.equal(calls, 2);
+  assert.deepEqual(attempts, [0, 1]);
+});
+
 test("timeout and caller cancellation are distinct", async () => {
   const timeoutRuntime = new ModelRuntime(new TrackingProvider(100), { timeoutMs: 20 });
   await assert.rejects(
