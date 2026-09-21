@@ -83,7 +83,7 @@ def test_deployed_owner_authentication(browser: Browser) -> None:
 
     unauthenticated = page.evaluate(
         """async () => {
-            const response = await window.fetch('/api/v1/capabilities/model-assistance');
+            const response = await window.fetch('/api/v1/auth/session');
             return { status: response.status, body: await response.text() };
         }"""
     )
@@ -123,7 +123,7 @@ def test_deployed_owner_authentication(browser: Browser) -> None:
     page.on("request", inspect_request)
     authenticated_probe = page.evaluate(
         """async () => {
-            const response = await window.ownerFetch('/api/v1/capabilities/model-assistance');
+            const response = await window.ownerFetch('/api/v1/auth/session');
             const text = await response.text();
             return { status: response.status, bodyContainsBearerPrefix: text.includes('Bearer ') };
         }"""
@@ -142,7 +142,7 @@ def test_deployed_owner_authentication(browser: Browser) -> None:
     )
     forced_401 = page.evaluate(
         """async () => {
-            const response = await window.ownerFetch('/api/v1/capabilities/model-assistance');
+            const response = await window.ownerFetch('/api/v1/auth/session');
             return response.status;
         }"""
     )

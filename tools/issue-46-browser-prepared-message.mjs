@@ -31,12 +31,8 @@ const server = createServer((request, response) => {
     response.end(renderSolandraAuthoritativeConversationPage());
     return;
   }
-  if (request.method === "GET" && url.pathname === "/api/v1/capabilities/model-assistance") {
-    json(response, 200, { capability: { status: "UNAVAILABLE", authorized: false } });
-    return;
-  }
-  if (request.method === "GET" && url.pathname === "/api/v1/capabilities/user-model") {
-    json(response, 200, { capability: { status: "UNAVAILABLE", authorized: false } });
+  if (request.method === "GET" && url.pathname === "/api/v1/auth/session") {
+    json(response, 200, { authenticated: true, subjectId: "issue-46-browser-user" });
     return;
   }
   if (request.method === "POST" && url.pathname === "/api/v1/conversations") {

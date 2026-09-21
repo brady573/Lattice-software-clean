@@ -7,17 +7,6 @@ import {
   preparedResourceFromRecord,
   type PreparedResourceStore,
 } from "./action-preparation/prepared-resource-store.js";
-import { registeredCapabilityBrokerFor } from "./capabilities/api.js";
-import {
-  CapabilityNotAuthorizedError,
-  CapabilityRevokedError,
-  CapabilityUnavailableError,
-} from "./capabilities/broker.js";
-import {
-  USER_AUTHORIZED_MODEL_CAPABILITY_ID,
-  type UserModelInput,
-  type UserModelOutput,
-} from "./capabilities/user-model-capability.js";
 import {
   appendConversationReference,
   type ConversationReferenceRecord,
@@ -853,77 +842,6 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
         return reply.status(422).send({ error: "CONSULTATION_INTERPRETATION_FAILED", message });
       }
 
-      if (cognition?.proposal.requestedHelp === "COGNITIVE_ASSISTANCE") {
-        const broker = registeredCapabilityBrokerFor(app);
-        if (!broker) {
-          return reply.status(503).send({
-            error: "COGNITIVE_ASSISTANCE_UNAVAILABLE",
-            message: "The requested USER-authorized cognitive capability is not available in this Product composition.",
-            interpretation: publicCognition(cognition),
-          });
-        }
-        try {
-          const result = await broker.invoke<UserModelInput, UserModelOutput>({
-            subjectId: apiSubjectForRequest(request),
-            capabilityId: USER_AUTHORIZED_MODEL_CAPABILITY_ID,
-            requestId: `conversation:${sourceMessage.messageId}`,
-            purpose: "ordinary-conversation-cognitive-assistance",
-            payload: {
-              purpose: "GENERAL_COGNITIVE_ASSISTANCE",
-              instruction: sourceMessage.content,
-              userContext: [sourceMessage.content],
-              governedKnowledge: [],
-            },
-          });
-          const persisted = await options.conversationResponseStore.putResponse({
-            responseId: stableUuid("conversation-response", conversationId, sourceMessage.messageId),
-            conversationId,
-            sourceMessageId: sourceMessage.messageId,
-            content: result.output.text,
-            origin: "SOLANDRA",
-            authority: "NON_AUTHORITATIVE_CONVERSATION",
-            factualAuthority: false,
-            createdAt: sourceMessage.createdAt,
-          });
-          return reply.status(200).send({
-            status: "COGNITIVE_ASSISTANCE_COMPLETED",
-            presentation: { assistantMessage: persisted.content },
-            interpretation: publicCognition(cognition),
-            conversationResponse: conversationResponsePayload(persisted),
-            capability: {
-              capabilityId: result.capabilityId,
-              authority: result.output.authority,
-              effect: result.effect,
-              trustHandling: result.trustHandling,
-            },
-          });
-        } catch (error) {
-          if (error instanceof CapabilityUnavailableError) {
-            return reply.status(503).send({
-              error: "COGNITIVE_ASSISTANCE_UNAVAILABLE",
-              message: "The requested USER-authorized cognitive capability is unavailable.",
-              interpretation: publicCognition(cognition),
-            });
-          }
-          if (error instanceof CapabilityNotAuthorizedError) {
-            return reply.status(403).send({
-              error: "COGNITIVE_ASSISTANCE_NOT_AUTHORIZED",
-              message: "This cognitive capability requires an explicit USER grant before Solandra may use it.",
-              interpretation: publicCognition(cognition),
-            });
-          }
-          if (error instanceof CapabilityRevokedError) {
-            return reply.status(409).send({
-              error: "COGNITIVE_ASSISTANCE_REVOKED",
-              message: "The capability grant changed before the result could be released, so the result was discarded.",
-              interpretation: publicCognition(cognition),
-            });
-          }
-          const message = error instanceof Error ? error.message : "Cognitive capability execution failed.";
-          return reply.status(422).send({ error: "COGNITIVE_ASSISTANCE_FAILED", message });
-        }
-      }
-
       if (
         cognition
         && isOptionReferenceHelp(cognition.proposal.requestedHelp)
@@ -1109,11 +1027,12 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
               renderHistoricalSources(loaded),
             ].join("\n\n");
           } else {
-            assistantMessage = [
-              "I couldn't transform the established Knowledge faithfully, so I left it unchanged. I did not start new research.",
+            assistantMessage = presented.text ?? [
+              "I couldn\'t transform the established Knowledge faithfully, so I kept the original governed wording. I did not start new research.",
+              loaded.knowledge.findings.map((finding) => finding.text).join("\\n\\n"),
               "The existing governed Knowledge remains available and unchanged.",
               renderHistoricalSources(loaded),
-            ].join("\n\n");
+            ].filter(Boolean).join("\\n\\n");
           }
         }
 

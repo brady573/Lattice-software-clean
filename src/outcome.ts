@@ -132,8 +132,7 @@ function followUpCapabilityLimitations(run: LatticeRun): string[] {
   if (!latest) return [];
 
   const limitations: string[] = [];
-  const simplificationRequested = /\b(?:simpler|simply|plain language)\b/iu.test(latest);
-  if (!simplificationRequested && (/^why\??$/iu.test(latest) || /\b(?:explain|tell me more)\b/iu.test(latest))) {
+  if (/^why\??$/iu.test(latest) || /\b(?:explain|tell me more)\b/iu.test(latest)) {
     limitations.push(
       "This v0.1 follow-up uses additional source-grounded retrieval only; it does not produce a model-synthesized explanation.",
     );

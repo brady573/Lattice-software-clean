@@ -36,9 +36,9 @@ function composition(
 }
 
 /**
- * Configure Solandra's Product cognition role independently from the A2
- * user-authorized model-assistance capability. Reusing provider machinery never
- * grants that provider intent, truth, decision, or authorization authority.
+ * Configure Solandra's Product cognition role directly on the shared model
+ * runtime boundary. Reusing provider machinery never grants that provider
+ * intent, truth, decision, authorization, execution, or verification authority.
  */
 export function createConfiguredSolandraCognition(
   config: RuntimeConfig,

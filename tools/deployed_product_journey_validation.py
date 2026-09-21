@@ -375,57 +375,12 @@ def _exercise_product_journey(submit_turn: Callable[[str, str], StageResult]) ->
     )
 
 
-def _connect_cognitive_assistance_if_available(page: Page) -> bool:
-    button = page.get_by_role("button", name=re.compile(r"Cognitive assistance", re.I))
-    if button.count() == 0:
-        print("COGNITIVE_ASSISTANCE_CONTROL=NOT_PRESENT")
-        return False
-    button.first.click()
-    dialog = page.locator("dialog:visible").last
-    expect(dialog).to_be_visible(timeout=10_000)
-    text = dialog.inner_text()
-    if re.search(r"Unavailable", text, re.I):
-        print("COGNITIVE_ASSISTANCE=UNAVAILABLE")
-        dialog.get_by_role("button", name="Close").click()
-        return False
-    toggle = dialog.get_by_role("button", name=re.compile(r"Connect|Disconnect", re.I))
-    label = toggle.inner_text().strip().lower()
-    changed = label == "connect"
-    if changed:
-        toggle.click()
-        expect(dialog).to_contain_text(re.compile(r"Connected", re.I), timeout=20_000)
-        print("COGNITIVE_ASSISTANCE=CONNECTED_FOR_VALIDATION")
-    else:
-        print("COGNITIVE_ASSISTANCE=ALREADY_CONNECTED")
-    dialog.get_by_role("button", name="Close").click()
-    return changed
-
-
-def _restore_cognitive_assistance(page: Page, changed: bool) -> None:
-    if not changed:
-        return
-    button = page.get_by_role("button", name=re.compile(r"Cognitive assistance", re.I))
-    if button.count() == 0:
-        return
-    button.first.click()
-    dialog = page.locator("dialog:visible").last
-    expect(dialog).to_be_visible(timeout=10_000)
-    toggle = dialog.get_by_role("button", name=re.compile(r"Disconnect", re.I))
-    if toggle.count():
-        toggle.click()
-        expect(dialog).to_contain_text(re.compile(r"Disconnected|Not connected", re.I), timeout=20_000)
-        print("COGNITIVE_ASSISTANCE=RESTORED_DISCONNECTED")
-    dialog.get_by_role("button", name="Close").click()
-
-
 def test_deployed_solandra_product_journeys(page: Page) -> None:
     page.set_viewport_size({"width": 1440, "height": 1000})
     _open_product_surface(page)
 
-    changed_capability = _connect_cognitive_assistance_if_available(page)
-    try:
-        _exercise_product_journey(lambda prompt, label: _submit_turn(page, prompt, label))
-    finally:
-        _restore_cognitive_assistance(page, changed_capability)
+    assert page.get_by_role("button", name=re.compile(r"Cognitive assistance", re.I)).count() == 0
+    assert page.get_by_role("button", name=re.compile(r"Model assistance", re.I)).count() == 0
+    _exercise_product_journey(lambda prompt, label: _submit_turn(page, prompt, label))
 
     print("DEPLOYED_PRODUCT_JOURNEYS=PASS")

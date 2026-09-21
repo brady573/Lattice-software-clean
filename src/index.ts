@@ -1,9 +1,5 @@
 import { resolveCanonicalOwnerSubjectResolver } from "./auth/owner-access.js";
-import { registerCapabilityBrokerApi } from "./capabilities/api.js";
-import { createConfiguredCapabilityBroker } from "./capabilities/composition.js";
 import { createAlphaDecisionRuntimeComposition } from "./decision/alpha-decision-composition.js";
-import { registerModelAssistanceApi } from "./model-assistance-api.js";
-import { createConfiguredModelAssistanceCapability } from "./model-assistance-composition.js";
 import { createGroqRateLimitCoordinator, type GroqRateLimitCoordinator } from "./model/groq-rate-limit-coordinator.js";
 import { createRuntimeApp } from "./runtime-app.js";
 import { resolveRuntimeConfig } from "./runtime-config.js";
@@ -27,8 +23,6 @@ try {
   const groqRateLimitCoordinator = await createGroqRateLimitCoordinator(config.databaseUrl, { migrate: config.autoMigrate });
   startupGroqRateLimitCoordinator = groqRateLimitCoordinator;
   const solandra = requireConfiguredSolandraCognition(config, groqRateLimitCoordinator);
-  const modelAssistance = await createConfiguredModelAssistanceCapability(config, groqRateLimitCoordinator);
-  const capabilityComposition = await createConfiguredCapabilityBroker(config, groqRateLimitCoordinator);
   const truthPipeline = createConfiguredTruthPipeline(
     config.truthMode,
     undefined,
@@ -43,7 +37,6 @@ try {
     app = await createRuntimeApp(config, {
       ...decisionCapability,
       truthPipeline,
-      modelAssistanceService: modelAssistance,
       ...(authenticatedSubjectResolver === undefined ? {} : { authenticatedSubjectResolver }),
       solandraCognition: solandra.cognition,
       solandraAdvisory: solandra.advisory,
@@ -51,13 +44,11 @@ try {
       solandraKnowledgePresenter: solandra.knowledgePresenter,
     });
   } catch (error) {
-    await Promise.allSettled([modelAssistance.close(), capabilityComposition.broker.close()]);
+    await groqRateLimitCoordinator.close();
     throw error;
   }
-  registerModelAssistanceApi(app, modelAssistance);
-  registerCapabilityBrokerApi(app, capabilityComposition.broker);
   app.addHook("onClose", async () => {
-    await Promise.allSettled([modelAssistance.close(), capabilityComposition.broker.close(), groqRateLimitCoordinator.close()]);
+    await groqRateLimitCoordinator.close();
   });
   startupGroqRateLimitCoordinator = undefined;
 

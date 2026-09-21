@@ -15,7 +15,6 @@ export const solandraRequestedHelpSchema = z.enum([
   "EXPLAIN_OPTION",
   "ACCEPT_CHOICE",
   "CONFIRM_INTENT",
-  "COGNITIVE_ASSISTANCE",
   "RESOURCE",
 ]);
 export type SolandraRequestedHelp = z.infer<typeof solandraRequestedHelpSchema>;
@@ -291,12 +290,6 @@ function validateGovernedProjection(
   proposal: SolandraSemanticProposal,
   input: SolandraCognitionInput,
 ): void {
-  if (proposal.requestedHelp === "COGNITIVE_ASSISTANCE") {
-    throw new ModelProviderError(
-      "invalid_output",
-      "Canonical Solandra conversation must use CONVERSATION instead of projecting ordinary cognition into a governed help taxonomy.",
-    );
-  }
   const allowedKnowledgeIds = new Set(input.governedKnowledge.map((item) => item.knowledgeId));
   if (proposal.referencedKnowledgeId !== null && !allowedKnowledgeIds.has(proposal.referencedKnowledgeId)) {
     throw new ModelProviderError(

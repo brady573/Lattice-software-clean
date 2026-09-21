@@ -2,7 +2,6 @@ export type DeploymentMode = "development" | "durable";
 /** Runtime truth capability only; Product decision criteria are supplied by qualified adapters. */
 export type TruthMode = "v36-offline" | "v36-live";
 export type AuthenticationMode = "development-fixture" | "required";
-export type KnowledgeSimplifierRoute = "groq-gpt-oss-120b";
 export type SolandraCognitionRoute = "groq-gpt-oss-120b";
 
 export interface RuntimeConfig {
@@ -22,10 +21,6 @@ export interface RuntimeConfig {
   localModelProviderBaseUrl?: string | undefined;
   /** First-class local model identifier. Omitted only by older programmatic fixtures. */
   localModelProviderModel?: string;
-  /** Explicit Product configuration boundary for the one qualified simplification route. */
-  knowledgeSimplifierRoute?: KnowledgeSimplifierRoute;
-  /** Provider credential held only in runtime process configuration. */
-  knowledgeSimplifierApiKey?: string;
   /** Solandra's cognition role is Product cognition, not the A2 user-authorized assistance capability. */
   solandraCognitionRoute?: SolandraCognitionRoute;
   /** Provider credential held only in runtime process configuration for Solandra cognition. */
@@ -121,15 +116,6 @@ function resolveLocalModelProvider(
       modernConfigured ? "LATTICE_LOCAL_MODEL_PROVIDER_MODEL" : "LATTICE_MODEL_SIMULATOR_MODEL",
     ),
   };
-}
-
-function parseKnowledgeSimplifierRoute(value: string | undefined): KnowledgeSimplifierRoute | undefined {
-  if (value === undefined) return undefined;
-  const route = value.trim();
-  if (route !== "groq-gpt-oss-120b") {
-    throw new Error(`Unsupported LATTICE_KNOWLEDGE_SIMPLIFIER_ROUTE: ${route || "<blank>"}`);
-  }
-  return route;
 }
 
 function parseSolandraCognitionRoute(value: string | undefined): SolandraCognitionRoute | undefined {
@@ -268,21 +254,8 @@ export function resolveRuntimeConfig(
     deploymentMode === "development",
   );
   const localModelProvider = resolveLocalModelProvider(env);
-  const knowledgeSimplifierRoute = parseKnowledgeSimplifierRoute(
-    env.LATTICE_KNOWLEDGE_SIMPLIFIER_ROUTE,
-  );
   const solandraCognitionRoute = parseSolandraCognitionRoute(
     env.LATTICE_SOLANDRA_COGNITION_ROUTE,
-  );
-  if (knowledgeSimplifierRoute !== undefined && localModelProvider.baseUrl !== undefined) {
-    throw new Error(
-      "Configure either the local Knowledge simplifier route or LATTICE_KNOWLEDGE_SIMPLIFIER_ROUTE, not both.",
-    );
-  }
-  const knowledgeSimplifierApiKey = resolveGroqApiKey(
-    env,
-    knowledgeSimplifierRoute !== undefined,
-    "LATTICE_KNOWLEDGE_SIMPLIFIER_ROUTE=groq-gpt-oss-120b",
   );
   const solandraCognitionApiKey = resolveGroqApiKey(
     env,
@@ -312,8 +285,6 @@ export function resolveRuntimeConfig(
     autoMigrate,
     localModelProviderBaseUrl: localModelProvider.baseUrl,
     localModelProviderModel: localModelProvider.model,
-    ...(knowledgeSimplifierRoute === undefined ? {} : { knowledgeSimplifierRoute }),
-    ...(knowledgeSimplifierApiKey === undefined ? {} : { knowledgeSimplifierApiKey }),
     ...(solandraCognitionRoute === undefined ? {} : { solandraCognitionRoute }),
     ...(solandraCognitionApiKey === undefined ? {} : { solandraCognitionApiKey }),
     modelSimulatorBaseUrl: localModelProvider.baseUrl,
