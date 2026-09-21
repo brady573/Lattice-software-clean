@@ -82,12 +82,14 @@ class PresentationProvider implements ModelProvider {
 test("sparse historical Knowledge presents exact absence and uncertainty without new acquisition machinery", async () => {
   const provider = new NeverCalledProvider();
   const presenter = new ModelSolandraKnowledgePresenter(new ModelRuntime(provider), "issue-91-sparse-presenter");
+  const knowledge = sparseKnowledge();
+  const before = structuredClone(knowledge);
 
   const result = await presenter.present({
     knowledgeId: "knowledge-sparse-history",
     userMessageId: "message-sparse-history",
     mode: "EXPLAIN",
-    knowledge: sparseKnowledge(),
+    knowledge,
   });
 
   assert.equal(provider.calls, 0);
@@ -95,7 +97,10 @@ test("sparse historical Knowledge presents exact absence and uncertainty without
   assert.ok(result.text);
   assert.match(result.text, /contains no governed findings/u);
   assert.match(result.text, new RegExp(UNCERTAINTY.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"));
-  assert.match(result.text, /No admitted source is linked to this established Knowledge/u);
+  assert.match(result.text, /Sources:/u);
+  assert.match(result.text, /no admitted source/iu);
+  assert.doesNotMatch(result.text, /https?:\/\//u);
+  assert.deepEqual(knowledge, before);
   assert.equal(result.invocationProvenance.actualProvider, null);
   assert.equal(result.invocationProvenance.routeProvenance, "MISSING");
 });
@@ -109,18 +114,22 @@ test("source-empty unresolved Knowledge reports source absence while preserving 
     "issue-91-unresolved-presenter",
   );
 
+  const knowledge = unresolvedKnowledge();
+  const before = structuredClone(knowledge);
   const result = await presenter.present({
     knowledgeId: "knowledge-unresolved-history",
     userMessageId: "message-unresolved-history",
     mode: "EXPLAIN",
-    knowledge: unresolvedKnowledge(),
+    knowledge,
   });
 
   assert.equal(result.status, "PRESENTED");
   assert.ok(result.text);
   assert.match(result.text, new RegExp(UNRESOLVED.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"));
   assert.match(result.text, new RegExp(UNCERTAINTY.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"));
-  assert.match(result.text, /No admitted source is linked to this established Knowledge/u);
+  assert.match(result.text, /no admitted source/iu);
+  assert.doesNotMatch(result.text, /https?:\/\//u);
+  assert.deepEqual(knowledge, before);
 });
 
 test("NEEDS_NEW_KNOWLEDGE remains available when presentation requires facts beyond non-sparse Knowledge", async () => {

@@ -136,6 +136,8 @@ test("native simplification paraphrases claim-bound segments while authority met
   assert.match(result.text, /Status: Unresolved; confidence: LOW\./u);
   assert.match(result.text, /Effective at: 2026-09-01T00:00:00\.000Z; Period: 2026-Q3/u);
   assert.match(result.text, /Delivery may still be delayed by conditions not established in this Knowledge/u);
+  assert.match(result.text, /The backup process might finish during the maintenance window\./u);
+  assert.doesNotMatch(result.text, /couldn't simplify every selected finding faithfully/iu);
   for (let index = 1; index <= 4; index += 1) {
     assert.match(result.text, new RegExp(`https://knowledge\\.example/source-${index}`, "u"));
   }

@@ -90,7 +90,8 @@ export function validateKnowledgePresentationRewrite(
 ): string | null {
   const original = normalizeWhitespace(originalText);
   const candidate = normalizeWhitespace(candidateText);
-  if (!original || !candidate || candidate === original) return null;
+  if (!original || !candidate) return null;
+  if (candidate === original) return originalText;
   if (candidate.length < 12 || candidate.length > Math.max(600, original.length * 2)) return null;
   if (!preservesSemanticMarker(original, candidate, NEGATION_PATTERN)) return null;
   if (!preservesSemanticMarker(original, candidate, UNCERTAINTY_PATTERN)) return null;
@@ -253,10 +254,25 @@ function renderSelection(
   ].filter(Boolean).join("\n\n");
 }
 
+function renderSparseKnowledgeSources(knowledge: KnowledgeOutcome): string {
+  if (knowledge.provenance.length === 0) {
+    return "Sources:\n- No admitted source is linked to this Knowledge.";
+  }
+  return [
+    "Sources:",
+    ...knowledge.provenance.map((source) => {
+      const title = source.title.trim() || source.canonicalUri;
+      const publisher = source.publisher ? ` — ${source.publisher}` : "";
+      return `- ${title}${publisher}\n  ${source.canonicalUri}`;
+    }),
+  ].join("\n");
+}
+
 function renderSparseKnowledge(knowledge: KnowledgeOutcome): string {
   return [
     "This established Knowledge contains no governed findings.",
     renderUncertainties(knowledge),
+    renderSparseKnowledgeSources(knowledge),
     "The underlying Knowledge and its sources are unchanged.",
   ].filter(Boolean).join("\n\n");
 }
