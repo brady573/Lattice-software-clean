@@ -5,13 +5,15 @@ import type {
   LatticeRun,
   RunEvent,
   RunEventType,
-  RunRequest,
   RunStatus,
 } from "./domain.js";
 import {
-  parseStructuredDecision,
   validateCurrentStructuredDecision,
 } from "./decision/structured-decision.js";
+import {
+  parsePersistedRunDecision,
+  parsePersistedRunRequest,
+} from "./postgres-run-json.js";
 import {
   assertAllowedTransition,
   type RunCompletion,
@@ -102,7 +104,7 @@ type RunRow = {
   conversation_id: string;
   status: RunStatus;
   version: string | number;
-  request_json: RunRequest;
+  request_json: unknown;
   decision_json: unknown | null;
   explanation: string | null;
 };
@@ -421,6 +423,10 @@ export class PostgresRunStore implements RunStore {
     }
     const row = result.rows[0];
     if (!row) return undefined;
+    const request = parsePersistedRunRequest(row.id, row.request_json);
+    const decision = row.decision_json === null
+      ? null
+      : parsePersistedRunDecision(row.id, row.decision_json);
     const eventRows = await this.pool.query<EventRow>(
       "SELECT sequence,event_type FROM run_events WHERE run_id=$1 ORDER BY sequence",
       [runId],
@@ -438,8 +444,8 @@ export class PostgresRunStore implements RunStore {
       conversationId: row.conversation_id,
       status: row.status,
       version: Number(row.version),
-      request: row.request_json,
-      decision: row.decision_json === null ? null : parseStructuredDecision(row.decision_json),
+      request,
+      decision,
       explanation: row.explanation,
       truthAssessmentIds: assessmentRows.rows.map((assessment) => assessment.id),
       events,
