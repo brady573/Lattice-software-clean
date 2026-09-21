@@ -121,7 +121,7 @@ function run(objective: string): LatticeRun {
   } as unknown as LatticeRun;
 }
 
-test("#43 selected governed claim renders simplified wording with structural uncertainty and provenance", async () => {
+test("#43 high-risk simplified wording falls back while structural uncertainty and provenance remain exact", async () => {
   const result = await present({
     needsNewKnowledge: false,
     segments: [
@@ -130,10 +130,12 @@ test("#43 selected governed claim renders simplified wording with structural unc
     ],
   }, "SIMPLIFY");
 
-  assert.equal(result.status, "PRESENTED");
+  assert.equal(result.status, "FIDELITY_REJECTED");
   assert.ok(result.text);
-  assert.match(result.text, /retrieved study says corrosion increased after repeated exposure to salt water/iu);
-  assert.match(result.text, /stable interface lowers upgrade coupling when clients rely on the documented contract/iu);
+  assert.equal(result.text.includes(SOURCE_REPORT), true);
+  assert.equal(result.text.includes(GOVERNED), true);
+  assert.doesNotMatch(result.text, /retrieved study says corrosion increased after repeated exposure to salt water/iu);
+  assert.doesNotMatch(result.text, /stable interface lowers upgrade coupling when clients rely on the documented contract/iu);
   assert.match(result.text, /Status: Unresolved; confidence: LOW\./u);
   assert.match(result.text, /Source report:/u);
   assert.match(result.text, /does not independently verify the broader real-world claim/u);
