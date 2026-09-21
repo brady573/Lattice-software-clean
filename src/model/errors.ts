@@ -13,6 +13,7 @@ export class ModelProviderError extends Error {
   readonly code: ModelErrorCode;
   readonly retryable: boolean;
   readonly statusCode: number | null;
+  readonly retryAfterMs: number | null;
 
   constructor(
     code: ModelErrorCode,
@@ -20,6 +21,7 @@ export class ModelProviderError extends Error {
     options: {
       readonly retryable?: boolean;
       readonly statusCode?: number | null;
+      readonly retryAfterMs?: number | null;
       readonly cause?: unknown;
     } = {},
   ) {
@@ -28,6 +30,14 @@ export class ModelProviderError extends Error {
     this.code = code;
     this.retryable = options.retryable ?? false;
     this.statusCode = options.statusCode ?? null;
+    const retryAfterMs = options.retryAfterMs ?? null;
+    if (
+      retryAfterMs !== null
+      && (!Number.isSafeInteger(retryAfterMs) || retryAfterMs < 0)
+    ) {
+      throw new Error("Model provider retryAfterMs must be a non-negative safe integer.");
+    }
+    this.retryAfterMs = retryAfterMs;
   }
 }
 

@@ -177,7 +177,6 @@ class RecordingAdvisory implements SolandraAdvisoryRuntime {
         tradeoffs: ["The preferred approach may sacrifice benefits that were not established by the supplied Knowledge."],
         assumptions: [changed ? "easiest to reverse later" : "maintenance burden low"],
         uncertainties: [...knowledge.uncertainties],
-        preservedUncertainties: [...knowledge.uncertainties],
         alternatives: [changed ? "Approach Atlas" : "Approach Birch"],
       },
       invocationProvenance: PROVENANCE,
@@ -498,7 +497,6 @@ class NeedsKnowledgeThenRecommendationAdvisory implements SolandraAdvisoryRuntim
         tradeoffs: ["The recommendation is conditional on the USER's stated objective."],
         assumptions: ["maintenance burden low"],
         uncertainties: [...preserved],
-        preservedUncertainties: [...preserved],
         alternatives: ["Approach Birch"],
       },
       invocationProvenance: PROVENANCE,
@@ -585,28 +583,21 @@ test("M2 advisory Knowledge continuation is hard-bounded and fails honestly when
 
 class UnsupportedFactAdvisoryProvider implements ModelProvider {
   readonly kind = "m2-unsupported-fact-advisory-provider";
+  readonly structuredOutputCapability = "json_schema" as const;
   calls = 0;
 
   async generate(request: CanonicalModelRequest, _context: ModelCallContext): Promise<ModelProviderResult> {
     this.calls += 1;
-    const system = request.messages[0]?.content ?? "";
-    const text = system.includes("bounded grounding verifier")
-      ? JSON.stringify({
-        status: "NEEDS_KNOWLEDGE",
-        unsupportedExternalPremises: ["The option guarantees a 99% reduction in operating cost."],
-        knowledgeNeeds: ["governed evidence about operating-cost reduction"],
-      })
-      : JSON.stringify({
-        status: "RECOMMENDATION",
-        recommendation: "Prefer this option because it guarantees a 99% reduction in operating cost.",
-        basis: [{ knowledgeId: "knowledge-supplied", claimIds: ["claim-supplied"] }],
-        rationale: [FINDING],
-        tradeoffs: [],
-        assumptions: [],
-        uncertainties: ["Material uncertainty remains."],
-        preservedUncertainties: ["Material uncertainty remains."],
-        alternatives: [],
-      });
+    const text = JSON.stringify({
+      status: "RECOMMENDATION",
+      recommendation: "Prefer this option because it guarantees a 99% reduction in operating cost.",
+      basis: [{ knowledgeId: "knowledge-supplied", claimIds: ["claim-supplied"] }],
+      rationale: [FINDING],
+      tradeoffs: [],
+      assumptions: [],
+      uncertainties: ["Material uncertainty remains."],
+      alternatives: [],
+    });
     return {
       response: { id: `m2-unsupported-${this.calls}`, model: request.model, output: [{ type: "text", text }] },
       route: { actualProvider: this.kind, actualModel: request.model, upstreamRequestId: `m2-unsupported-${this.calls}` },
@@ -616,29 +607,26 @@ class UnsupportedFactAdvisoryProvider implements ModelProvider {
 
 class GroundedInferenceAdvisoryProvider implements ModelProvider {
   readonly kind = "m2-grounded-inference-advisory-provider";
+  readonly structuredOutputCapability = "json_schema" as const;
   calls = 0;
 
   async generate(request: CanonicalModelRequest, _context: ModelCallContext): Promise<ModelProviderResult> {
     this.calls += 1;
     const system = request.messages[0]?.content ?? "";
-    const isGroundingAudit = system.includes("bounded grounding verifier");
-    if (!isGroundingAudit) {
-      assert.match(system, /top-level object itself must contain status/iu);
-      assert.match(system, /Do not wrap the result in a named property/iu);
-    }
-    const text = isGroundingAudit
-      ? JSON.stringify({ status: "GROUNDED", unsupportedExternalPremises: [], knowledgeNeeds: [] })
-      : JSON.stringify({
-        status: "RECOMMENDATION",
-        recommendation: "Prefer the approach that best aligns with the USER's stated maintenance preference.",
-        basis: [{ knowledgeId: "knowledge-supplied", claimIds: ["claim-supplied"] }],
-        rationale: ["Given the governed finding and the USER's stated preference, I judge the lower-maintenance path to be the better fit."],
-        tradeoffs: ["That judgment is preference-sensitive rather than an additional factual claim."],
-        assumptions: ["The USER's stated maintenance preference remains controlling."],
-        uncertainties: ["Material uncertainty remains."],
-        preservedUncertainties: ["Material uncertainty remains."],
-        alternatives: [],
-      });
+    assert.equal(request.structuredOutput?.type, "json_schema");
+    assert.ok(Array.isArray(request.structuredOutput.schema.anyOf));
+    assert.match(system, /top-level object itself must contain status/iu);
+    assert.match(system, /Do not wrap the result in a named property/iu);
+    const text = JSON.stringify({
+      status: "RECOMMENDATION",
+      recommendation: "Prefer the approach that best aligns with the USER's stated maintenance preference.",
+      basis: [{ knowledgeId: "knowledge-supplied", claimIds: ["claim-supplied"] }],
+      rationale: ["Given the governed finding and the USER's stated preference, I judge the lower-maintenance path to be the better fit."],
+      tradeoffs: ["That judgment is preference-sensitive rather than an additional factual claim."],
+      assumptions: ["The USER's stated maintenance preference remains controlling."],
+      uncertainties: ["Material uncertainty remains."],
+      alternatives: [],
+    });
     return {
       response: { id: `m2-grounded-${this.calls}`, model: request.model, output: [{ type: "text", text }] },
       route: { actualProvider: this.kind, actualModel: request.model, upstreamRequestId: `m2-grounded-${this.calls}` },
@@ -648,6 +636,7 @@ class GroundedInferenceAdvisoryProvider implements ModelProvider {
 
 class FabricatedBasisProvider implements ModelProvider {
   readonly kind = "m2-fabricated-basis-provider";
+  readonly structuredOutputCapability = "json_schema" as const;
   async generate(request: CanonicalModelRequest, _context: ModelCallContext): Promise<ModelProviderResult> {
     return {
       response: {
@@ -663,7 +652,6 @@ class FabricatedBasisProvider implements ModelProvider {
             tradeoffs: [],
             assumptions: [],
             uncertainties: [],
-            preservedUncertainties: [],
             alternatives: [],
           }),
         }],
@@ -672,6 +660,29 @@ class FabricatedBasisProvider implements ModelProvider {
         actualProvider: this.kind,
         actualModel: request.model,
         upstreamRequestId: "m2-fabricated-request",
+      },
+    };
+  }
+}
+
+class StaticStructuredAdvisoryProvider implements ModelProvider {
+  readonly kind = "m2-static-structured-advisory-provider";
+  readonly structuredOutputCapability = "json_schema" as const;
+
+  constructor(private readonly payload: unknown) {}
+
+  async generate(request: CanonicalModelRequest, _context: ModelCallContext): Promise<ModelProviderResult> {
+    assert.equal(request.structuredOutput?.type, "json_schema");
+    return {
+      response: {
+        id: "m2-static-structured-response",
+        model: request.model,
+        output: [{ type: "text", text: JSON.stringify(this.payload) }],
+      },
+      route: {
+        actualProvider: this.kind,
+        actualModel: request.model,
+        upstreamRequestId: "m2-static-structured-request",
       },
     };
   }
@@ -718,22 +729,34 @@ function contractAdvisoryInput(): SolandraAdvisoryInput {
   };
 }
 
-test("ModelSolandraAdvisoryRuntime turns an unsupported external factual premise into NEEDS_KNOWLEDGE despite valid basis IDs", async () => {
+function contractAdvisoryInputWithMessages(): SolandraAdvisoryInput {
+  return {
+    ...contractAdvisoryInput(),
+    userContextMessages: [
+      { messageId: "message-m2-prior", content: "I prefer lower maintenance." },
+      { messageId: "message-m2-contract", content: FIRST_USER },
+    ],
+  };
+}
+
+test("ModelSolandraAdvisoryRuntime uses one model pass even when proposal wording contains unsupported external claims", async () => {
   const provider = new UnsupportedFactAdvisoryProvider();
-  const runtime = new ModelSolandraAdvisoryRuntime(new ModelRuntime(provider), "m2-grounding-model");
+  const runtime = new ModelSolandraAdvisoryRuntime(new ModelRuntime(provider), "m2-single-pass-model");
   const result = await runtime.advise(contractAdvisoryInput());
-  assert.equal(provider.calls, 2);
-  assert.equal(result.result.status, "NEEDS_KNOWLEDGE");
-  if (result.result.status !== "NEEDS_KNOWLEDGE") return;
-  assert.deepEqual(result.result.knowledgeNeeds, ["governed evidence about operating-cost reduction"]);
-  assert.match(result.result.reason, /not established by governed Knowledge/iu);
+  assert.equal(provider.calls, 1);
+  assert.equal(result.result.status, "RECOMMENDATION");
+  if (result.result.status !== "RECOMMENDATION") return;
+  assert.deepEqual(result.result.basis, [{
+    knowledgeId: "knowledge-supplied",
+    claimIds: ["claim-supplied"],
+  }]);
 });
 
-test("ModelSolandraAdvisoryRuntime preserves preference-sensitive advisory inference when its external premises are grounded", async () => {
+test("ModelSolandraAdvisoryRuntime preserves preference-sensitive advisory inference in one pass", async () => {
   const provider = new GroundedInferenceAdvisoryProvider();
-  const runtime = new ModelSolandraAdvisoryRuntime(new ModelRuntime(provider), "m2-grounding-model");
+  const runtime = new ModelSolandraAdvisoryRuntime(new ModelRuntime(provider), "m2-single-pass-model");
   const result = await runtime.advise(contractAdvisoryInput());
-  assert.equal(provider.calls, 2);
+  assert.equal(provider.calls, 1);
   assert.equal(result.result.status, "RECOMMENDATION");
   if (result.result.status !== "RECOMMENDATION") return;
   assert.match(result.result.recommendation, /USER's stated maintenance preference/iu);
@@ -751,26 +774,79 @@ test("ModelSolandraAdvisoryRuntime rejects fabricated Knowledge/claim references
   );
 });
 
-class SingleObjectArrayGroundingProvider implements ModelProvider {
-  readonly kind = "m4-single-object-array-grounding-provider";
+test("ModelSolandraAdvisoryRuntime rejects a fabricated claim inside supplied Knowledge", async () => {
+  const runtime = new ModelSolandraAdvisoryRuntime(
+    new ModelRuntime(new StaticStructuredAdvisoryProvider({
+      status: "RECOMMENDATION",
+      recommendation: "Use the supplied Knowledge.",
+      basis: [{ knowledgeId: "knowledge-supplied", claimIds: ["claim-not-supplied"] }],
+      rationale: ["Advisory judgment."],
+      tradeoffs: [],
+      assumptions: [],
+      uncertainties: [],
+      alternatives: [],
+    })),
+    "m2-contract-model",
+  );
+  await assert.rejects(
+    runtime.advise(contractAdvisoryInput()),
+    /claim that is not part of the supplied Knowledge/iu,
+  );
+});
+
+test("ModelSolandraAdvisoryRuntime rejects fabricated USER premise message lineage", async () => {
+  const runtime = new ModelSolandraAdvisoryRuntime(
+    new ModelRuntime(new StaticStructuredAdvisoryProvider({
+      status: "RECOMMENDATION",
+      recommendation: "Use the supplied Knowledge.",
+      basis: [{ knowledgeId: "knowledge-supplied", claimIds: ["claim-supplied"] }],
+      rationale: ["Advisory judgment."],
+      tradeoffs: [],
+      assumptions: [],
+      uncertainties: [],
+      alternatives: [],
+      userPremiseMessageIds: ["message-m2-contract", "message-invented"],
+    })),
+    "m2-contract-model",
+  );
+  await assert.rejects(
+    runtime.advise(contractAdvisoryInputWithMessages()),
+    /referenced USER premise material that Lattice did not supply/iu,
+  );
+});
+
+test("ModelSolandraAdvisoryRuntime keeps schema-semantic validation after structured transport", async () => {
+  const runtime = new ModelSolandraAdvisoryRuntime(
+    new ModelRuntime(new StaticStructuredAdvisoryProvider({
+      status: "NEEDS_KNOWLEDGE",
+      knowledgeNeeds: [],
+      reason: "Missing external fact.",
+    })),
+    "m2-contract-model",
+  );
+  await assert.rejects(
+    runtime.advise(contractAdvisoryInput()),
+    /too_small|expected array to have|knowledgeNeeds/iu,
+  );
+});
+
+class SingleObjectArrayAdvisoryProvider implements ModelProvider {
+  readonly kind = "m4-single-object-array-advisory-provider";
+  readonly structuredOutputCapability = "json_schema" as const;
   calls = 0;
 
   async generate(request: CanonicalModelRequest, _context: ModelCallContext): Promise<ModelProviderResult> {
     this.calls += 1;
-    const system = request.messages[0]?.content ?? "";
-    const text = system.includes("bounded grounding verifier")
-      ? JSON.stringify([{ status: "GROUNDED", unsupportedExternalPremises: [], knowledgeNeeds: [] }])
-      : JSON.stringify({
-        status: "RECOMMENDATION",
-        recommendation: "Prefer the approach that best fits the USER's stated maintenance preference.",
-        basis: [{ knowledgeId: "knowledge-supplied", claimIds: ["claim-supplied"] }],
-        rationale: [FINDING],
-        tradeoffs: [],
-        assumptions: ["The USER's stated preference remains controlling."],
-        uncertainties: ["Material uncertainty remains."],
-        preservedUncertainties: ["Material uncertainty remains."],
-        alternatives: [],
-      });
+    const text = JSON.stringify([{
+      status: "RECOMMENDATION",
+      recommendation: "Prefer the approach that best fits the USER's stated maintenance preference.",
+      basis: [{ knowledgeId: "knowledge-supplied", claimIds: ["claim-supplied"] }],
+      rationale: [FINDING],
+      tradeoffs: [],
+      assumptions: ["The USER's stated preference remains controlling."],
+      uncertainties: ["Material uncertainty remains."],
+      alternatives: [],
+    }]);
     return {
       response: { id: `m4-array-${this.calls}`, model: request.model, output: [{ type: "text", text }] },
       route: { actualProvider: this.kind, actualModel: request.model, upstreamRequestId: `m4-array-${this.calls}` },
@@ -778,29 +854,24 @@ class SingleObjectArrayGroundingProvider implements ModelProvider {
   }
 }
 
-class MultipleObjectArrayGroundingProvider implements ModelProvider {
-  readonly kind = "m4-multiple-object-array-grounding-provider";
+class MultipleObjectArrayAdvisoryProvider implements ModelProvider {
+  readonly kind = "m4-multiple-object-array-advisory-provider";
+  readonly structuredOutputCapability = "json_schema" as const;
   calls = 0;
 
   async generate(request: CanonicalModelRequest, _context: ModelCallContext): Promise<ModelProviderResult> {
     this.calls += 1;
-    const system = request.messages[0]?.content ?? "";
-    const text = system.includes("bounded grounding verifier")
-      ? JSON.stringify([
-        { status: "GROUNDED", unsupportedExternalPremises: [], knowledgeNeeds: [] },
-        { status: "GROUNDED", unsupportedExternalPremises: [], knowledgeNeeds: [] },
-      ])
-      : JSON.stringify({
-        status: "RECOMMENDATION",
-        recommendation: "Prefer the approach that best fits the USER's stated maintenance preference.",
-        basis: [{ knowledgeId: "knowledge-supplied", claimIds: ["claim-supplied"] }],
-        rationale: [FINDING],
-        tradeoffs: [],
-        assumptions: ["The USER's stated preference remains controlling."],
-        uncertainties: ["Material uncertainty remains."],
-        preservedUncertainties: ["Material uncertainty remains."],
-        alternatives: [],
-      });
+    const recommendation = {
+      status: "RECOMMENDATION",
+      recommendation: "Prefer the approach that best fits the USER's stated maintenance preference.",
+      basis: [{ knowledgeId: "knowledge-supplied", claimIds: ["claim-supplied"] }],
+      rationale: [FINDING],
+      tradeoffs: [],
+      assumptions: ["The USER's stated preference remains controlling."],
+      uncertainties: ["Material uncertainty remains."],
+      alternatives: [],
+    };
+    const text = JSON.stringify([recommendation, recommendation]);
     return {
       response: { id: `m4-array-multi-${this.calls}`, model: request.model, output: [{ type: "text", text }] },
       route: { actualProvider: this.kind, actualModel: request.model, upstreamRequestId: `m4-array-multi-${this.calls}` },
@@ -808,17 +879,17 @@ class MultipleObjectArrayGroundingProvider implements ModelProvider {
   }
 }
 
-test("ModelSolandraAdvisoryRuntime tolerates one-object JSON array framing while preserving strict grounding schema", async () => {
-  const provider = new SingleObjectArrayGroundingProvider();
-  const runtime = new ModelSolandraAdvisoryRuntime(new ModelRuntime(provider), "m4-grounding-framing-model");
+test("ModelSolandraAdvisoryRuntime tolerates one-object JSON array framing for advisory output", async () => {
+  const provider = new SingleObjectArrayAdvisoryProvider();
+  const runtime = new ModelSolandraAdvisoryRuntime(new ModelRuntime(provider), "m4-advisory-framing-model");
   const result = await runtime.advise(contractAdvisoryInput());
-  assert.equal(provider.calls, 2);
+  assert.equal(provider.calls, 1);
   assert.equal(result.result.status, "RECOMMENDATION");
 });
 
 test("ModelSolandraAdvisoryRuntime rejects multi-object JSON array framing", async () => {
-  const provider = new MultipleObjectArrayGroundingProvider();
-  const runtime = new ModelSolandraAdvisoryRuntime(new ModelRuntime(provider), "m4-grounding-framing-model");
+  const provider = new MultipleObjectArrayAdvisoryProvider();
+  const runtime = new ModelSolandraAdvisoryRuntime(new ModelRuntime(provider), "m4-advisory-framing-model");
   await assert.rejects(
     runtime.advise(contractAdvisoryInput()),
     /must return exactly one JSON object/iu,

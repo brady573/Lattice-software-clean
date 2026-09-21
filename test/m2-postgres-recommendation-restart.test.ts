@@ -154,7 +154,6 @@ class RacingAdvisory implements SolandraAdvisoryRuntime {
         tradeoffs: ["The recommendation is conditional on the USER's stated objective."],
         assumptions: ["ongoing maintenance manageable"],
         uncertainties: [...knowledge.uncertainties],
-        preservedUncertainties: [...knowledge.uncertainties],
         alternatives: ["Approach Flint"],
       },
       invocationProvenance: PROVENANCE,

@@ -81,7 +81,10 @@ import { recommendationOption, recommendationOptions } from "./recommendation/re
 import type { RecommendationStore } from "./recommendation/recommendation-store.js";
 import { createPendingRun } from "./run-execution.js";
 import type { RunStore } from "./run-store.js";
-import type { SolandraAdvisoryRuntime } from "./solandra/advisory.js";
+import {
+  projectAdvisoryTransientCognition,
+  type SolandraAdvisoryRuntime,
+} from "./solandra/advisory.js";
 import type { SolandraActionPreparer } from "./solandra/action-preparer.js";
 import {
   isConversationalCognition,
@@ -301,17 +304,17 @@ function publicCognition(result: SolandraCognitionResult | undefined): unknown {
   };
 }
 
-function isReferenceHelp(help: SolandraRequestedHelp): boolean {
+function isReferenceHelp(help: SolandraRequestedHelp | null): boolean {
   return help === "SOURCES_REFERENCE"
     || help === "EXPLAIN_REFERENCE"
     || help === "SIMPLIFY_REFERENCE";
 }
 
-function isRecommendationReferenceHelp(help: SolandraRequestedHelp): boolean {
+function isRecommendationReferenceHelp(help: SolandraRequestedHelp | null): boolean {
   return help === "EXPLAIN_RECOMMENDATION" || help === "SOURCES_RECOMMENDATION";
 }
 
-function isOptionReferenceHelp(help: SolandraRequestedHelp): boolean {
+function isOptionReferenceHelp(help: SolandraRequestedHelp | null): boolean {
   return help === "EXPLAIN_OPTION" || help === "ACCEPT_CHOICE";
 }
 
@@ -376,6 +379,27 @@ function boundedConversationContext(
     if (response) turns.push({ role: "SOLANDRA", content: response.content });
   }
   return turns.slice(-MAX_COGNITIVE_HISTORY_ITEMS);
+}
+
+function boundedAdvisoryUserMessages(
+  userMessages: readonly IntentUserMessage[],
+  sourceMessage: IntentUserMessage,
+  priorIntentVersion: IntentVersion | undefined,
+  cognition: SolandraGovernedCognitionResult,
+): IntentUserMessage[] {
+  const messages = [...userMessages];
+  if (!messages.some((message) => message.messageId === sourceMessage.messageId)) messages.push(sourceMessage);
+  const bounded = messages
+    .filter((message) =>
+      message.conversationId === sourceMessage.conversationId
+      && message.intentScopeId === sourceMessage.intentScopeId
+      && message.messageHorizon <= sourceMessage.messageHorizon)
+    .sort((left, right) => left.messageHorizon - right.messageHorizon || left.createdAt.localeCompare(right.createdAt));
+
+  if (priorIntentVersion && cognition.proposal.objectiveRelation === "NEW_OBJECTIVE") {
+    return [sourceMessage];
+  }
+  return bounded.slice(-MAX_COGNITIVE_HISTORY_ITEMS);
 }
 
 function conversationResponsePayload(response: ConversationResponse): Record<string, unknown> {
@@ -1259,6 +1283,12 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
             4,
           )
           : [];
+        const advisoryUserMessages = boundedAdvisoryUserMessages(
+          history,
+          sourceMessage,
+          currentVersion,
+          cognition,
+        );
         let advisory;
         try {
           advisory = await options.solandraAdvisory.advise({
@@ -1266,7 +1296,12 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
             userMessageId: sourceMessage.messageId,
             authoritativeIntent: version,
             authoritativeObjective: authoritativeObjective(version),
-            userContext: [sourceMessage.content],
+            userContext: advisoryUserMessages.map((message) => message.content),
+            userContextMessages: advisoryUserMessages.map((message) => ({
+              messageId: message.messageId,
+              content: message.content,
+            })),
+            transientCognition: projectAdvisoryTransientCognition(cognition.proposal),
             knowledge: governed.map(advisoryKnowledge),
           });
         } catch (error) {
@@ -1279,6 +1314,7 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
             conversationId,
             intentVersion: version,
             sourceMessage,
+            userMessages: advisoryUserMessages,
             knowledge: governed,
             advisory: advisory.result,
           });
