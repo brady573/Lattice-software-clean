@@ -70,6 +70,7 @@ async function abortable<T>(operation: Promise<T>, signal: AbortSignal | undefin
     return await Promise.race([operation, aborted]);
   } finally {
     signal.removeEventListener("abort", onAbort);
+    void operation.catch(() => undefined);
   }
 }
 
