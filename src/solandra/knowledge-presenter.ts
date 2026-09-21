@@ -102,7 +102,7 @@ export function validateKnowledgePresentationRewrite(
 
 function parseJsonObject(text: string): unknown {
   const trimmed = text.trim();
-  const unfenced = /^\`\`\`(?:json)?\s*([\s\S]*?)\s*\`\`\`$/iu.exec(trimmed)?.[1] ?? trimmed;
+  const unfenced = /^```(?:json)?\\s*([\\s\\S]*?)\\s*```$/iu.exec(trimmed)?.[1] ?? trimmed;
   try {
     return JSON.parse(unfenced);
   } catch (error) {
