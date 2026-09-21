@@ -238,6 +238,9 @@ function canonicalizeCurrentInput(
       ) {
         invalid(surface, "NO_ELIGIBLE_CANDIDATE cannot carry an active frontier, tie, or unresolved state.");
       }
+      if (input.evaluations.some((evaluation) => evaluation.eligible)) {
+        invalid(surface, "NO_ELIGIBLE_CANDIDATE cannot contain an eligible evaluation.");
+      }
       return {
         ...shared,
         outcome: "NO_ELIGIBLE_CANDIDATE",

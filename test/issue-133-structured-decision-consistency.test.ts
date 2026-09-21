@@ -40,6 +40,15 @@ const common = {
   truthAssessmentIds: ["assessment-1"],
 };
 
+const noEligibleCommon = {
+  ...common,
+  evaluations: [
+    evaluation("alpha", false),
+    evaluation("beta", false),
+    evaluation("gamma", false),
+  ],
+};
+
 // Compile-time invariant checks: these current states must remain impossible.
 // @ts-expect-error RECOMMENDATION requires winnerCandidateId.
 const recommendationWithoutWinner: StructuredDecision = { ...common, outcome: "RECOMMENDATION", frontierCandidateIds: ["alpha"], tiedCandidateIds: [], materialUnknowns: [] };
@@ -63,7 +72,7 @@ const currentDecisions: StructuredDecision[] = [
   { ...common, outcome: "TIE", frontierCandidateIds: ["alpha", "beta"], tiedCandidateIds: ["alpha", "beta"], materialUnknowns: [] },
   { ...common, outcome: "INSUFFICIENT_EVIDENCE", frontierCandidateIds: ["alpha", "gamma"], tiedCandidateIds: [], materialUnknowns: ["gamma:eligible"] },
   { ...common, outcome: "UNRESOLVED", frontierCandidateIds: ["alpha"], tiedCandidateIds: [], materialUnknowns: ["alpha:quality"] },
-  { ...common, outcome: "NO_ELIGIBLE_CANDIDATE", frontierCandidateIds: [], tiedCandidateIds: [], materialUnknowns: [] },
+  { ...noEligibleCommon, outcome: "NO_ELIGIBLE_CANDIDATE", frontierCandidateIds: [], tiedCandidateIds: [], materialUnknowns: [] },
 ];
 
 const recommendationMismatch: StructuredDecision = {
@@ -71,6 +80,14 @@ const recommendationMismatch: StructuredDecision = {
   outcome: "RECOMMENDATION",
   winnerCandidateId: "alpha",
   frontierCandidateIds: ["beta"],
+  tiedCandidateIds: [],
+  materialUnknowns: [],
+};
+
+const noEligibleWithEligibleEvaluation: StructuredDecision = {
+  ...common,
+  outcome: "NO_ELIGIBLE_CANDIDATE",
+  frontierCandidateIds: [],
   tiedCandidateIds: [],
   materialUnknowns: [],
 };
@@ -123,6 +140,7 @@ test("current relational contradictions fail closed while an empty cyclic FRONTI
     { ...common, outcome: "INSUFFICIENT_EVIDENCE", frontierCandidateIds: ["alpha", "alpha"], tiedCandidateIds: [], materialUnknowns: ["alpha:quality"] },
     { ...common, outcome: "UNRESOLVED", frontierCandidateIds: ["gamma"], tiedCandidateIds: [], materialUnknowns: ["gamma:quality"] },
     { ...common, outcome: "NO_ELIGIBLE_CANDIDATE", frontierCandidateIds: ["alpha"], tiedCandidateIds: [], materialUnknowns: [] },
+    noEligibleWithEligibleEvaluation,
   ];
   for (const value of invalid) {
     assert.throws(() => validateCurrentStructuredDecision(value), /Invalid current StructuredDecision/);
@@ -135,6 +153,27 @@ test("current relational contradictions fail closed while an empty cyclic FRONTI
     tiedCandidateIds: [],
     materialUnknowns: [],
   }).frontierCandidateIds, []);
+});
+
+test("NO_ELIGIBLE_CANDIDATE rejects eligible evaluations at current and persisted boundaries", () => {
+  assert.throws(
+    () => validateCurrentStructuredDecision(noEligibleWithEligibleEvaluation),
+    /NO_ELIGIBLE_CANDIDATE cannot contain an eligible evaluation/,
+  );
+  assert.throws(
+    () => parseStructuredDecision(JSON.parse(JSON.stringify(noEligibleWithEligibleEvaluation))),
+    /NO_ELIGIBLE_CANDIDATE cannot contain an eligible evaluation/,
+  );
+
+  const valid = validateCurrentStructuredDecision({
+    ...noEligibleCommon,
+    outcome: "NO_ELIGIBLE_CANDIDATE",
+    frontierCandidateIds: [],
+    tiedCandidateIds: [],
+    materialUnknowns: [],
+  });
+  assert.equal(valid.outcome, "NO_ELIGIBLE_CANDIDATE");
+  assert.equal(valid.evaluations.some((candidate) => candidate.eligible), false);
 });
 
 test("active candidate identity must resolve unambiguously to outcome-appropriate evaluations", () => {
@@ -230,6 +269,12 @@ test("MemoryRunStore validates both create and persistDecision before current de
     );
     assert.equal(await store.get("memory-invalid-create"), undefined);
 
+    await assert.rejects(
+      store.create(decidingRun("memory-no-eligible-invalid-create", noEligibleWithEligibleEvaluation)),
+      /NO_ELIGIBLE_CANDIDATE cannot contain an eligible evaluation/,
+    );
+    assert.equal(await store.get("memory-no-eligible-invalid-create"), undefined);
+
     const run = decidingRun("memory-invalid-persist");
     await store.create(run);
     await assert.rejects(
@@ -239,6 +284,19 @@ test("MemoryRunStore validates both create and persistDecision before current de
     const unchanged = await store.get(run.id);
     assert.equal(unchanged?.decision, null);
     assert.equal(unchanged?.version, 6);
+
+    const noEligibleRun = decidingRun("memory-no-eligible-invalid-persist");
+    await store.create(noEligibleRun);
+    await assert.rejects(
+      store.persistDecision({
+        runId: noEligibleRun.id,
+        expectedVersion: noEligibleRun.version,
+        decision: noEligibleWithEligibleEvaluation,
+      }),
+      /NO_ELIGIBLE_CANDIDATE cannot contain an eligible evaluation/,
+    );
+    assert.equal((await store.get(noEligibleRun.id))?.decision, null);
+    assert.equal((await store.get(noEligibleRun.id))?.version, 6);
 
     const tieRun = decidingRun("memory-tie");
     await store.create(tieRun);
@@ -269,6 +327,8 @@ test(
     const pool = new Pool({ connectionString: databaseUrl });
     const invalidCreateId = randomUUID();
     const invalidPersistId = randomUUID();
+    const noEligibleInvalidCreateId = randomUUID();
+    const noEligibleInvalidPersistId = randomUUID();
     const tieId = randomUUID();
     const legacyId = randomUUID();
     const absentLegacyWinnerId = randomUUID();
@@ -283,6 +343,16 @@ test(
         [invalidCreateId],
       );
       assert.equal(invalidCreateCount.rows[0]?.count, "0");
+
+      await assert.rejects(
+        store.create(decidingRun(noEligibleInvalidCreateId, noEligibleWithEligibleEvaluation)),
+        /NO_ELIGIBLE_CANDIDATE cannot contain an eligible evaluation/,
+      );
+      const noEligibleCreateCount = await pool.query<{ count: string }>(
+        "SELECT count(*)::text AS count FROM runs WHERE id=$1",
+        [noEligibleInvalidCreateId],
+      );
+      assert.equal(noEligibleCreateCount.rows[0]?.count, "0");
 
       const invalidPersistRun = decidingRun(invalidPersistId);
       await store.create(invalidPersistRun);
@@ -300,6 +370,23 @@ test(
       );
       assert.equal(Number(unchanged.rows[0]?.version), 6);
       assert.equal(unchanged.rows[0]?.decision_json, null);
+
+      const noEligibleInvalidPersistRun = decidingRun(noEligibleInvalidPersistId);
+      await store.create(noEligibleInvalidPersistRun);
+      await assert.rejects(
+        store.persistDecision({
+          runId: noEligibleInvalidPersistId,
+          expectedVersion: noEligibleInvalidPersistRun.version,
+          decision: noEligibleWithEligibleEvaluation,
+        }),
+        /NO_ELIGIBLE_CANDIDATE cannot contain an eligible evaluation/,
+      );
+      const noEligibleUnchanged = await pool.query<{ version: string | number; decision_json: unknown | null }>(
+        "SELECT version,decision_json FROM runs WHERE id=$1",
+        [noEligibleInvalidPersistId],
+      );
+      assert.equal(Number(noEligibleUnchanged.rows[0]?.version), 6);
+      assert.equal(noEligibleUnchanged.rows[0]?.decision_json, null);
 
       const tieRun = decidingRun(tieId);
       await store.create(tieRun);
@@ -338,7 +425,16 @@ test(
     } finally {
       await pool.query(
         "DELETE FROM runs WHERE id = ANY($1::uuid[])",
-        [[invalidCreateId, invalidPersistId, tieId, legacyId, absentLegacyWinnerId, ineligibleLegacyWinnerId]],
+        [[
+          invalidCreateId,
+          invalidPersistId,
+          noEligibleInvalidCreateId,
+          noEligibleInvalidPersistId,
+          tieId,
+          legacyId,
+          absentLegacyWinnerId,
+          ineligibleLegacyWinnerId,
+        ]],
       );
       await pool.end();
       await store.close();
