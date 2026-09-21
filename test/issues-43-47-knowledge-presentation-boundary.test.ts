@@ -121,24 +121,27 @@ function run(objective: string): LatticeRun {
   } as unknown as LatticeRun;
 }
 
-test("#43 selected governed claim renders authoritative finding text with structural uncertainty and provenance", async () => {
+test("#43 selected governed claim renders simplified wording with structural uncertainty and provenance", async () => {
   const result = await present({
     needsNewKnowledge: false,
-    segments: [\n      { claimId: "claim-source-report", text: "The retrieved study says corrosion increased after repeated exposure to salt water." },\n      { claimId: "claim-governed", text: "A stable interface lowers upgrade coupling when clients rely on the documented contract instead of implementation details." },\n    ],
+    segments: [
+      { claimId: "claim-source-report", text: "The retrieved study says corrosion increased after repeated exposure to salt water." },
+      { claimId: "claim-governed", text: "A stable interface lowers upgrade coupling when clients rely on the documented contract instead of implementation details." },
+    ],
   }, "SIMPLIFY");
 
   assert.equal(result.status, "PRESENTED");
   assert.ok(result.text);
-  assert.match(result.text, new RegExp(SOURCE_REPORT.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"));
-  assert.match(result.text, new RegExp(GOVERNED.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"));
-  assert.match(result.text, /Unresolved as a source report:/u);
+  assert.match(result.text, /retrieved study says corrosion increased after repeated exposure to salt water/iu);
+  assert.match(result.text, /stable interface lowers upgrade coupling when clients rely on the documented contract/iu);
+  assert.match(result.text, /Status: Unresolved; confidence: LOW\./u);
+  assert.match(result.text, /Source report:/u);
   assert.match(result.text, /does not independently verify the broader real-world claim/u);
   assert.match(result.text, /Known uncertainty:/u);
   assert.match(result.text, /corrosion evidence establishes the retrieved report/u);
   assert.match(result.text, /Governed source — Knowledge Example/u);
   assert.match(result.text, /https:\/\/knowledge\.example\/governed/u);
 });
-
 test("#43 generated subject-object replacement prose cannot acquire governed claim authority", async () => {
   const result = await present({
     needsNewKnowledge: false,
