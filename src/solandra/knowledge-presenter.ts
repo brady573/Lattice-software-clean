@@ -173,10 +173,35 @@ function temporalQualification(finding: KnowledgeFinding): string {
   return parts.length === 0 ? "" : parts.join("; ");
 }
 
-function renderFinding(finding: KnowledgeFinding, text = finding.text): string {
+function renderFindingSources(knowledge: KnowledgeOutcome, finding: KnowledgeFinding): string {
+  const evidenceIds = new Set([...finding.evidenceIds, ...finding.contradictoryEvidenceIds]);
+  const sourceIds = new Set(
+    (knowledge.evidence ?? [])
+      .filter((evidence) => evidence.admitted && evidenceIds.has(evidence.evidenceId))
+      .map((evidence) => evidence.sourceId),
+  );
+  const sources = knowledge.provenance.filter((source) => sourceIds.has(source.sourceId));
+  if (sources.length === 0) {
+    return "Sources for this finding:\n- No admitted source is linked to this finding.";
+  }
+  return [
+    "Sources for this finding:",
+    ...sources.map((source) => {
+      const title = source.title.trim() || source.canonicalUri;
+      const publisher = source.publisher ? ` — ${source.publisher}` : "";
+      return `- ${title}${publisher}\n  ${source.canonicalUri}`;
+    }),
+  ].join("\n");
+}
+
+function renderFinding(
+  knowledge: KnowledgeOutcome,
+  finding: KnowledgeFinding,
+  text = finding.text,
+): string {
   let rendered: string;
   if (finding.basis === "SOURCE_REPORT") {
-    rendered = `${statusLabel(finding)} as a source report: ${text} This status concerns what the retrieved source material reports; it does not independently verify the broader real-world claim.`;
+    rendered = `Source report: ${text} This status concerns what the retrieved source material reports; it does not independently verify the broader real-world claim.`;
   } else {
     switch (finding.status) {
       case "SUPPORTED": rendered = text; break;
@@ -185,25 +210,17 @@ function renderFinding(finding: KnowledgeFinding, text = finding.text): string {
       case "UNRESOLVED": rendered = `The available governed evidence does not establish this strongly enough: ${text}`; break;
     }
   }
-  const temporal = temporalQualification(finding);
-  return temporal ? `${rendered}\n${temporal}` : rendered;
+  return [
+    `Status: ${statusLabel(finding)}; confidence: ${finding.confidence}.`,
+    rendered,
+    temporalQualification(finding),
+    renderFindingSources(knowledge, finding),
+  ].filter(Boolean).join("\n");
 }
 
 function renderUncertainties(knowledge: KnowledgeOutcome): string {
   if (knowledge.uncertainties.length === 0) return "";
   return `Known uncertainty:\n${knowledge.uncertainties.map((item) => `- ${item}`).join("\n")}`;
-}
-
-function renderSources(knowledge: KnowledgeOutcome): string {
-  if (knowledge.provenance.length === 0) {
-    return "Sources:\n- No admitted source is linked to this established Knowledge.";
-  }
-  const lines = knowledge.provenance.map((source) => {
-    const title = source.title.trim() || source.canonicalUri;
-    const publisher = source.publisher ? ` — ${source.publisher}` : "";
-    return `- ${title}${publisher}\n  ${source.canonicalUri}`;
-  });
-  return `Sources:\n${lines.join("\n")}`;
 }
 
 function noModelInvocationProvenance(model: string): ModelInvocationProvenance {
@@ -230,9 +247,8 @@ function renderSelection(
     fallback
       ? "I couldn't simplify every selected finding faithfully, so any rejected rewrite below uses the original governed wording."
       : "",
-    selected.map(({ finding, text }) => renderFinding(finding, text)).join("\n\n"),
+    selected.map(({ finding, text }) => renderFinding(knowledge, finding, text)).join("\n\n"),
     renderUncertainties(knowledge),
-    renderSources(knowledge),
     "The underlying Knowledge, claim identities, statuses, uncertainty, provenance, and sources are unchanged.",
   ].filter(Boolean).join("\n\n");
 }
@@ -241,7 +257,6 @@ function renderSparseKnowledge(knowledge: KnowledgeOutcome): string {
   return [
     "This established Knowledge contains no governed findings.",
     renderUncertainties(knowledge),
-    renderSources(knowledge),
     "The underlying Knowledge and its sources are unchanged.",
   ].filter(Boolean).join("\n\n");
 }
