@@ -38,7 +38,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:18.6
+        image: postgres:18.6@sha256:0377e72c5289ed2f98cf61b1a9c2db9eb9d300317fe14244492fbc94343b3d04
         env:
           POSTGRES_USER: lattice
           POSTGRES_PASSWORD: lattice
@@ -98,6 +98,7 @@ jobs:
           }
           console.log(`POSTGRES_EXECUTION_SURFACE_PASS database=${row.current_database} version=${versionNumber}`);
           NODE
+          echo 'POSTGRES_IMAGE_IDENTITY=postgres:18.6@sha256:0377e72c5289ed2f98cf61b1a9c2db9eb9d300317fe14244492fbc94343b3d04'
 
       - name: Reset dedicated PostgreSQL test schema
         run: |
@@ -140,6 +141,7 @@ jobs:
         run: |
           echo "POSTGRES_INTEGRATION=PASS sha=$(git rev-parse HEAD)"
           echo 'POSTGRES_VALIDATION_SURFACE=github-hosted-postgresql-18.6-service'
+          echo 'POSTGRES_IMAGE_IDENTITY=postgres:18.6@sha256:0377e72c5289ed2f98cf61b1a9c2db9eb9d300317fe14244492fbc94343b3d04'
           echo 'SELECTION_POLICY=postgres-filename-or-DATABASE_URL-opt-in'
           echo 'MILESTONE_ACCEPTANCE=NOT_CLAIMED_BY_POSTGRES_LANE'
           echo 'PRODUCTION_DATABASE=NOT_CLAIMED_BY_THIS_LANE'
