@@ -34,11 +34,15 @@ function success(text = "Recovered response."): Response {
   }), { status: 200, headers: { "content-type": "application/json" } });
 }
 
-function context(signal = new AbortController().signal): ModelCallContext {
+function context(
+  signal = new AbortController().signal,
+  deadlineAtMs?: number,
+): ModelCallContext {
   return {
     correlationId: "groq-recovery-test",
     requestIdentity: "request-identity",
     attempt: 0,
+    ...(deadlineAtMs === undefined ? {} : { deadlineAtMs }),
     signal,
   };
 }
@@ -318,6 +322,46 @@ test("caller cancellation while waiting behind the Groq recovery gate sends no u
   controller.abort(new Error("test caller cancelled"));
 
   await assert.rejects(pending, (error) => errorCode(error) === "cancelled");
+  assert.equal(fetches, 0);
+});
+
+test("shared memory recovery extension beyond the deadline is rejected from inside the active wait", async () => {
+  let now = 40_000;
+  const deadlineAtMs = 40_100;
+  const scope = groqRateLimitScopeId(KEY_A, GROQ_KNOWLEDGE_SIMPLIFIER_MODEL);
+  let coordinator!: MemoryGroqRateLimitCoordinator;
+  const waits: number[] = [];
+  coordinator = new MemoryGroqRateLimitCoordinator(
+    () => now,
+    async (delayMs) => {
+      waits.push(delayMs);
+      assert.equal(waits.length, 1, "deadline-aware wait must stop after the concurrent extension");
+      await coordinator.extendBlockedUntil(scope, deadlineAtMs + 500);
+      now += delayMs;
+    },
+  );
+  await coordinator.extendBlockedUntil(scope, now + 50);
+
+  let fetches = 0;
+  const provider = new GroqKnowledgeSimplifierModelProvider({
+    apiKey: KEY_A,
+    rateLimitCoordinator: coordinator,
+    now: () => now,
+    fetchImpl: async () => {
+      fetches += 1;
+      return success();
+    },
+  });
+
+  await assert.rejects(
+    provider.generate(request(), context(new AbortController().signal, deadlineAtMs)),
+    (error) => {
+      assert.equal(errorCode(error), "rate_limit");
+      assert.equal((error as ModelProviderError).retryable, false);
+      return true;
+    },
+  );
+  assert.deepEqual(waits, [50]);
   assert.equal(fetches, 0);
 });
 

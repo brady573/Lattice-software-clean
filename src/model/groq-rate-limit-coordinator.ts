@@ -12,7 +12,7 @@ export interface GroqRateLimitCoordinator {
   readonly kind: "memory" | "postgres";
   blockedUntil(scopeId: string, signal?: AbortSignal): Promise<number>;
   extendBlockedUntil(scopeId: string, blockedUntilMs: number, signal?: AbortSignal): Promise<number>;
-  waitUntilReady(scopeId: string, signal: AbortSignal): Promise<void>;
+  waitUntilReady(scopeId: string, signal: AbortSignal, deadlineAtMs?: number): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -74,15 +74,28 @@ async function abortable<T>(operation: Promise<T>, signal: AbortSignal | undefin
   }
 }
 
+export class GroqRateLimitDeadlineError extends Error {
+  constructor() {
+    super("Groq rate-limit recovery cannot complete within the current model-call deadline.");
+    this.name = "GroqRateLimitDeadlineError";
+  }
+}
+
 async function waitReady(
   read: () => Promise<number>,
   signal: AbortSignal,
   now: () => number,
   wait: GroqRateLimitWait,
+  deadlineAtMs?: number,
 ): Promise<void> {
+  const deadline = deadlineAtMs === undefined ? undefined : boundedTime(deadlineAtMs);
   for (;;) {
     if (signal.aborted) throw signal.reason ?? new Error("Aborted.");
-    const delayMs = (await read()) - now();
+    const blockedUntilMs = await read();
+    if (deadline !== undefined && blockedUntilMs >= deadline) {
+      throw new GroqRateLimitDeadlineError();
+    }
+    const delayMs = blockedUntilMs - now();
     if (delayMs <= 0) return;
     await wait(delayMs, signal);
   }
@@ -106,9 +119,9 @@ export class MemoryGroqRateLimitCoordinator implements GroqRateLimitCoordinator 
     this.state.set(key, next);
     return next;
   }
-  async waitUntilReady(scopeId: string, signal: AbortSignal): Promise<void> {
+  async waitUntilReady(scopeId: string, signal: AbortSignal, deadlineAtMs?: number): Promise<void> {
     const key = boundedScope(scopeId);
-    await waitReady(() => this.blockedUntil(key, signal), signal, this.now, this.wait);
+    await waitReady(() => this.blockedUntil(key, signal), signal, this.now, this.wait, deadlineAtMs);
   }
   async close(): Promise<void> {
     this.state.clear();
@@ -194,9 +207,9 @@ export class PostgresGroqRateLimitCoordinator implements GroqRateLimitCoordinato
     if (!row) throw new Error("Groq rate-limit recovery update returned no state.");
     return Number(row.blocked_until_ms);
   }
-  async waitUntilReady(scopeId: string, signal: AbortSignal): Promise<void> {
+  async waitUntilReady(scopeId: string, signal: AbortSignal, deadlineAtMs?: number): Promise<void> {
     const key = boundedScope(scopeId);
-    await waitReady(() => this.blockedUntil(key, signal), signal, this.now, this.wait);
+    await waitReady(() => this.blockedUntil(key, signal), signal, this.now, this.wait, deadlineAtMs);
   }
   async close(): Promise<void> {
     await this.pool.end();

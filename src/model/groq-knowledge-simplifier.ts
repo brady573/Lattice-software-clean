@@ -1,5 +1,6 @@
 import { ModelProviderError } from "./errors.js";
 import {
+  GroqRateLimitDeadlineError,
   groqRateLimitScopeId,
   sharedMemoryGroqRateLimitCoordinator,
   type GroqRateLimitCoordinator,
@@ -182,21 +183,25 @@ export class GroqKnowledgeSimplifierModelProvider implements ModelProvider {
     }
 
     try {
-      const blockedUntilMs = await this.rateLimitCoordinator.blockedUntil(this.rateLimitScopeId, context.signal);
-      if (context.deadlineAtMs !== undefined && blockedUntilMs >= context.deadlineAtMs) {
-        throw new ModelProviderError(
-          "rate_limit",
-          "Groq Knowledge simplifier capacity cannot recover within the current model-call deadline.",
-        );
-      }
       context.diagnosticSink?.({ kind: "rate_limit_wait_start" });
-      await this.rateLimitCoordinator.waitUntilReady(this.rateLimitScopeId, context.signal);
+      await this.rateLimitCoordinator.waitUntilReady(
+        this.rateLimitScopeId,
+        context.signal,
+        context.deadlineAtMs,
+      );
       context.diagnosticSink?.({ kind: "rate_limit_wait_complete" });
     } catch (error) {
       if (context.signal.aborted) {
         throw new ModelProviderError(
           "cancelled",
           "Groq Knowledge simplifier request was cancelled while waiting for provider recovery.",
+          { cause: error },
+        );
+      }
+      if (error instanceof GroqRateLimitDeadlineError) {
+        throw new ModelProviderError(
+          "rate_limit",
+          "Groq Knowledge simplifier capacity cannot recover within the current model-call deadline.",
           { cause: error },
         );
       }
