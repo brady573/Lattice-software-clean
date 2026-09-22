@@ -57,7 +57,10 @@ import {
   renderHistoricalSources,
 } from "./knowledge/knowledge-continuity.js";
 import type { KnowledgeRecord, KnowledgeRecordStore } from "./knowledge/knowledge-record-store.js";
-import { ModelProviderError } from "./model/errors.js";
+import {
+  ModelProviderError,
+  type ModelFailureDiagnostic,
+} from "./model/errors.js";
 import { buildRunOutcome } from "./outcome.js";
 import {
   advisoryKnowledge,
@@ -79,6 +82,7 @@ import type { SolandraAdvisoryRuntime } from "./solandra/advisory.js";
 import type { SolandraActionPreparer } from "./solandra/action-preparer.js";
 import {
   isConversationalCognition,
+  type SolandraCognitionOperationalDiagnostic,
   type SolandraCognitionResult,
   type SolandraCognitiveRuntime,
   type SolandraConversationContextTurn,
@@ -93,6 +97,16 @@ const MAX_RUN_CONTEXT_ITEMS = 32;
 const MAX_COGNITIVE_HISTORY_ITEMS = 12;
 const MAX_ADVISORY_KNOWLEDGE_ROUNDS = 2;
 const MODEL_CALL_DIAGNOSTIC_HEADER = "x-lattice-model-call-diagnostic";
+
+function clientModelCallDiagnostic(
+  diagnostic: ModelFailureDiagnostic | SolandraCognitionOperationalDiagnostic,
+): string {
+  const clientSafe: Record<string, unknown> = { ...diagnostic };
+  delete clientSafe.rateLimitLimitTokens;
+  delete clientSafe.rateLimitRemainingTokens;
+  delete clientSafe.rateLimitResetTokensMs;
+  return JSON.stringify(clientSafe);
+}
 
 type ConsultationInterpretationFailure = Readonly<{
   statusCode: 422 | 503;
@@ -950,7 +964,7 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
               : {}),
           });
           if (cognitionResult.operationalDiagnostic !== undefined) {
-            reply.header(MODEL_CALL_DIAGNOSTIC_HEADER, JSON.stringify(cognitionResult.operationalDiagnostic));
+            reply.header(MODEL_CALL_DIAGNOSTIC_HEADER, clientModelCallDiagnostic(cognitionResult.operationalDiagnostic));
           }
           if (
             !isConversationalCognition(cognitionResult)
@@ -1026,7 +1040,7 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
           && error instanceof ModelProviderError
           && error.diagnostic !== null
         ) {
-          reply.header(MODEL_CALL_DIAGNOSTIC_HEADER, JSON.stringify(error.diagnostic));
+          reply.header(MODEL_CALL_DIAGNOSTIC_HEADER, clientModelCallDiagnostic(error.diagnostic));
         }
         return reply.status(failure.statusCode).send({
           error: failure.error,

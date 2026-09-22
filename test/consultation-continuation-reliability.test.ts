@@ -195,6 +195,20 @@ const config = resolveRuntimeConfig({
   LATTICE_TRUTH_MODE: "v36-offline",
 } as NodeJS.ProcessEnv);
 
+function clientModelCallDiagnostic(
+  header: string | string[] | undefined,
+): Record<string, unknown> {
+  assert.equal(typeof header, "string");
+  if (typeof header !== "string") {
+    throw new Error("Expected model-call diagnostic response header.");
+  }
+  const diagnostic = JSON.parse(header) as Record<string, unknown>;
+  assert.equal("rateLimitLimitTokens" in diagnostic, false);
+  assert.equal("rateLimitRemainingTokens" in diagnostic, false);
+  assert.equal("rateLimitResetTokensMs" in diagnostic, false);
+  return diagnostic;
+}
+
 async function createConversation(app: FastifyInstance): Promise<string> {
   const response = await app.inject({ method: "POST", url: "/api/v1/conversations" });
   assert.equal(response.statusCode, 201, response.body);
@@ -267,6 +281,11 @@ test("ordinary governed continuations expose timeout truthfully and exact replay
       assert.equal(seed.statusCode, 202, seed.body);
       const accepted = seed.json<{ status: string; runId: string }>();
       assert.equal(accepted.status, "RUN_ACCEPTED");
+      const seedDiagnostic = clientModelCallDiagnostic(
+        seed.headers["x-lattice-model-call-diagnostic"],
+      );
+      assert.equal(seedDiagnostic.outcome, "SUCCESS");
+      assert.equal(typeof seedDiagnostic.modelElapsedMs, "number");
       await waitForCompletion(app, accepted.runId);
 
       const outcome = await app.inject({
@@ -309,12 +328,9 @@ test("ordinary governed continuations expose timeout truthfully and exact replay
         error: "CONSULTATION_COGNITION_TIMEOUT",
         message: "Solandra's cognition model route did not complete within its bounded runtime budget.",
       });
-      const diagnosticHeader = timedOut.headers["x-lattice-model-call-diagnostic"];
-      assert.equal(typeof diagnosticHeader, "string");
-      if (typeof diagnosticHeader !== "string") {
-        throw new Error("Expected model-call diagnostic response header.");
-      }
-      const diagnostic = JSON.parse(diagnosticHeader) as {
+      const diagnostic = clientModelCallDiagnostic(
+        timedOut.headers["x-lattice-model-call-diagnostic"],
+      ) as unknown as {
         timeoutPhase: string;
         providerRequestMs: number;
         totalMs: number;
