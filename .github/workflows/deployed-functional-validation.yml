@@ -70,7 +70,7 @@ jobs:
           MANUAL_HISTORICAL_CASES_JSON: ${{ inputs.historical_cases_json }}
         run: |
           set -euo pipefail
-          python tools/deployed_validation_event.py
+          python -m tools.deployed_validation_event
 
       - name: Record ineligible automatic deployment
         if: ${{ github.event_name == 'deployment_status' && steps.resolve.outputs.should_run != 'true' }}
@@ -183,7 +183,7 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          python tools/deployed_validation_event.py
+          python -m tools.deployed_validation_event
 
       - name: Record superseded automatic deployment
         if: ${{ github.event_name == 'deployment_status' && steps.resolve.outputs.should_run == 'true' && steps.freshness.outputs.should_run != 'true' }}

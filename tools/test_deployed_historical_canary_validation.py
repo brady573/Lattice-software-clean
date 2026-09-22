@@ -148,6 +148,8 @@ def test_workflow_keeps_baseline_automatic_behavior_and_isolates_historical_owne
     assert "validation_profile:" in workflow
     assert "historical_cases_json:" in workflow
     assert "validator_deploy_id_before:" in workflow
+    assert workflow.count("python -m tools.deployed_validation_event") == 2
+    assert "python tools/deployed_validation_event.py" not in workflow
     assert "steps.resolve.outputs.validation_profile == 'baseline'" in workflow
     assert "steps.freshness.outputs.should_run == 'true'" in workflow
     assert "cancel-in-progress: ${{ github.event_name == 'deployment_status' }}" in workflow
