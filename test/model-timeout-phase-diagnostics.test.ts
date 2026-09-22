@@ -13,7 +13,6 @@ import {
 import type { CanonicalModelRequest } from "../src/model/types.js";
 import {
   ModelSolandraCognitiveRuntime,
-  type SolandraCognitionOperationalDiagnostic,
 } from "../src/solandra/cognition.js";
 
 const DIAGNOSTIC_KEY = "diagnostic-key-material-not-a-secret-1234567890";
@@ -172,20 +171,16 @@ test("successful Groq cognition reports content-free usage and token-capacity me
     GROQ_KNOWLEDGE_SIMPLIFIER_MODEL,
     2,
   );
-  let observed: SolandraCognitionOperationalDiagnostic | undefined;
-
   const result = await cognition.interpret({
     conversationId: "diagnostic-success-conversation",
     messageId: "diagnostic-success-message",
     message: userMessage,
     recentUserMessages: [userMessage],
     governedKnowledge: [],
-    operationalDiagnosticSink: (diagnostic) => {
-      observed = diagnostic;
-    },
   });
 
   assert.equal(result.mode, "CONVERSATION");
+  const observed = result.operationalDiagnostic;
   assert.ok(observed);
   assert.equal(observed.outcome, "SUCCESS");
   assert.equal(observed.providerStatus, 200);

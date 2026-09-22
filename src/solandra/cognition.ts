@@ -117,10 +117,6 @@ export interface SolandraCognitionOperationalDiagnostic {
   readonly maxOutputTokens: number | null;
 }
 
-export type SolandraCognitionOperationalDiagnosticSink = (
-  diagnostic: SolandraCognitionOperationalDiagnostic,
-) => void;
-
 export interface SolandraCognitionInput {
   readonly conversationId: string;
   readonly messageId: string;
@@ -131,13 +127,13 @@ export interface SolandraCognitionInput {
   readonly governedKnowledge: readonly SolandraGovernedKnowledgeContext[];
   readonly governedRecommendations?: readonly SolandraGovernedRecommendationContext[];
   readonly pendingIntentProposal?: SolandraPendingIntentProposalContext;
-  readonly operationalDiagnosticSink?: SolandraCognitionOperationalDiagnosticSink;
 }
 
 export type SolandraConversationCognitionResult = Readonly<{
   mode: "CONVERSATION";
   response: string;
   invocationProvenance: ModelInvocationProvenance;
+  operationalDiagnostic?: SolandraCognitionOperationalDiagnostic;
 }>;
 
 export type SolandraGovernedCognitionResult = Readonly<{
@@ -145,6 +141,7 @@ export type SolandraGovernedCognitionResult = Readonly<{
   mode?: "GOVERNED";
   proposal: SolandraSemanticProposal;
   invocationProvenance: ModelInvocationProvenance;
+  operationalDiagnostic?: SolandraCognitionOperationalDiagnostic;
 }>;
 
 export type SolandraCognitionResult = SolandraConversationCognitionResult | SolandraGovernedCognitionResult;
@@ -420,19 +417,19 @@ export class ModelSolandraCognitiveRuntime implements SolandraCognitiveRuntime {
       maxOutputTokens: request.maxOutputTokens ?? null,
     });
     if (parsed.mode === "CONVERSATION") {
-      input.operationalDiagnosticSink?.(operationalDiagnostic);
       return Object.freeze({
         mode: "CONVERSATION" as const,
         response: parsed.response.trim(),
         invocationProvenance: result.audit.invocationProvenance,
+        operationalDiagnostic,
       });
     }
     validateGovernedProjection(parsed.projection, input);
-    input.operationalDiagnosticSink?.(operationalDiagnostic);
     return Object.freeze({
       mode: "GOVERNED" as const,
       proposal: parsed.projection,
       invocationProvenance: result.audit.invocationProvenance,
+      operationalDiagnostic,
     });
   }
 }
