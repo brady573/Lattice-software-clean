@@ -389,10 +389,10 @@ test("advisory grounding failure on completed Run preserves 422 contract and sur
     }
     assert.ok(outcome);
     assert.equal(outcome.statusCode, 422, outcome.body);
-    assert.deepEqual(outcome.json(), {
-      error: "SOLANDRA_ADVISORY_FAILED",
-      message: "Model call exceeded its timeout.",
-    });
+    const failure = outcome.json();
+    assert.equal(failure.error, "SOLANDRA_ADVISORY_FAILED");
+    assert.equal(failure.message, "Model call exceeded its timeout.");
+    assert.equal(typeof failure.presentation?.assistantMessage, "string");
     assertClientAdvisoryDiagnostic(
       outcome.headers["x-lattice-model-call-diagnostic"],
       1_200,
