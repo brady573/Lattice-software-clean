@@ -9,6 +9,13 @@ from typing import Any, Callable, Mapping
 import urllib.error
 import urllib.request
 
+from tools.historical_canary_schema import (
+    BASELINE_PROFILE,
+    HISTORICAL_PROFILE,
+    VALIDATION_PROFILES,
+    parse_historical_cases,
+)
+
 CANONICAL_VALIDATOR_TARGET = "https://lattice-solandra-validation.onrender.com"
 PREVIEW_TARGET_RE = re.compile(
     r"^https://lattice-solandra-validation-pr-([1-9][0-9]*)\.onrender\.com/?$"
@@ -25,6 +32,7 @@ class ValidationRequest:
     expected_sha: str = ""
     pr_number: str = ""
     skip_reason: str = ""
+    validation_profile: str = BASELINE_PROFILE
 
 
 def _skip(reason: str, *, product_target: str = "", pr_number: str = "", expected_sha: str = "") -> ValidationRequest:
@@ -49,14 +57,32 @@ def _manual_target(value: str) -> tuple[str, str, str]:
     raise ValueError("manual Product target is not in the deployed-validation allowlist")
 
 
-def resolve_manual(product_target: str, run_owner_auth: bool) -> ValidationRequest:
+def resolve_manual(
+    product_target: str,
+    run_owner_auth: bool,
+    validation_profile: str = BASELINE_PROFILE,
+    historical_cases_json: str = "",
+) -> ValidationRequest:
     target, kind, pr_number = _manual_target(product_target)
+    profile = validation_profile.strip() or BASELINE_PROFILE
+    if profile not in VALIDATION_PROFILES:
+        raise ValueError("validation_profile must be baseline or historical-canaries")
+    if profile == HISTORICAL_PROFILE:
+        if kind != "canonical-validator":
+            raise ValueError("historical-canaries requires the canonical validator Product target")
+        if run_owner_auth:
+            raise ValueError("historical-canaries requires run_owner_auth=false")
+        parse_historical_cases(historical_cases_json)
+    elif historical_cases_json.strip():
+        raise ValueError("historical_cases_json is only valid with the historical-canaries profile")
+
     return ValidationRequest(
         should_run=True,
         product_target=target,
         target_kind=kind,
         owner_auth_enabled=run_owner_auth,
         pr_number=pr_number,
+        validation_profile=profile,
     )
 
 
@@ -185,6 +211,7 @@ def _write_outputs(request: ValidationRequest, output_path: str) -> None:
         "expected_sha": request.expected_sha,
         "pr_number": request.pr_number,
         "skip_reason": request.skip_reason,
+        "validation_profile": request.validation_profile,
     }
     with Path(output_path).open("a", encoding="utf-8") as handle:
         for key, value in values.items():
@@ -199,11 +226,14 @@ def main() -> int:
         request = resolve_manual(
             os.environ.get("MANUAL_PRODUCT_TARGET", ""),
             _parse_bool(os.environ.get("MANUAL_RUN_OWNER_AUTH", "")),
+            os.environ.get("MANUAL_VALIDATION_PROFILE", BASELINE_PROFILE),
+            os.environ.get("MANUAL_HISTORICAL_CASES_JSON", ""),
         )
         print(
             "MANUAL_PRODUCT_VALIDATION=ELIGIBLE "
             f"kind={request.target_kind} target={request.product_target} "
-            f"owner_auth={str(request.owner_auth_enabled).lower()}"
+            f"owner_auth={str(request.owner_auth_enabled).lower()} "
+            f"profile={request.validation_profile}"
         )
     elif event_name == "deployment_status":
         event_path = os.environ.get("GITHUB_EVENT_PATH", "")

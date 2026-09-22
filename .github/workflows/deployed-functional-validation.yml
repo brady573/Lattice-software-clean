@@ -13,6 +13,19 @@ on:
         required: true
         default: true
         type: boolean
+      validation_profile:
+        description: User-facing Product validation profile
+        required: true
+        default: baseline
+        type: choice
+        options:
+          - baseline
+          - historical-canaries
+      historical_cases_json:
+        description: JSON cases for the manual historical-canaries profile
+        required: false
+        default: ''
+        type: string
   deployment_status:
 
 permissions:
@@ -48,6 +61,8 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           MANUAL_PRODUCT_TARGET: ${{ inputs.product_target }}
           MANUAL_RUN_OWNER_AUTH: ${{ inputs.run_owner_auth }}
+          MANUAL_VALIDATION_PROFILE: ${{ inputs.validation_profile }}
+          MANUAL_HISTORICAL_CASES_JSON: ${{ inputs.historical_cases_json }}
         run: |
           set -euo pipefail
           python tools/deployed_validation_event.py
@@ -72,7 +87,8 @@ jobs:
         run: |
           python -m pytest -q \
             tools/test_deployed_product_journey_validation.py \
-            tools/test_deployed_validation_event.py
+            tools/test_deployed_validation_event.py \
+            tools/test_deployed_historical_canary_validation.py
 
       - name: Verify owner secret is configured
         if: ${{ github.event_name == 'workflow_dispatch' && steps.resolve.outputs.owner_auth_enabled == 'true' }}
@@ -116,7 +132,7 @@ jobs:
 
       - name: Run deployed Product journey validation
         id: product-journey
-        if: ${{ steps.resolve.outputs.should_run == 'true' && (github.event_name != 'deployment_status' || steps.freshness.outputs.should_run == 'true') }}
+        if: ${{ steps.resolve.outputs.should_run == 'true' && steps.resolve.outputs.validation_profile == 'baseline' && (github.event_name != 'deployment_status' || steps.freshness.outputs.should_run == 'true') }}
         env:
           PYTHONUNBUFFERED: '1'
           DEPLOYED_BASE_URL: ${{ steps.resolve.outputs.product_target }}
@@ -138,6 +154,32 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
+      - name: Run historical user-facing canaries
+        id: historical-canaries
+        if: ${{ github.event_name == 'workflow_dispatch' && steps.resolve.outputs.should_run == 'true' && steps.resolve.outputs.validation_profile == 'historical-canaries' }}
+        env:
+          PYTHONUNBUFFERED: '1'
+          DEPLOYED_BASE_URL: ${{ steps.resolve.outputs.product_target }}
+          EXPECTED_PRODUCT_SHA: 6ef1d7ab6110cec0197fc93fb7c71ac17c6902a6
+          HISTORICAL_CASES_JSON: ${{ inputs.historical_cases_json }}
+        run: |
+          set -euo pipefail
+          test -z "${LATTICE_OWNER_ACCESS_TOKEN+x}"
+          python -m pytest -q -s tools/deployed_historical_canary_validation.py \
+            --browser chromium \
+            --tracing retain-on-failure \
+            --screenshot off \
+            --video retain-on-failure
+
+      - name: Upload historical canary evidence
+        if: ${{ always() && github.event_name == 'workflow_dispatch' && steps.resolve.outputs.should_run == 'true' && steps.resolve.outputs.validation_profile == 'historical-canaries' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: historical-canaries-${{ github.run_id }}
+          path: test-results/historical-canaries/
+          if-no-files-found: error
+          retention-days: 14
+
       - name: Record validation scope
         if: always()
         run: |
@@ -149,6 +191,7 @@ jobs:
           echo "PRODUCT_PREVIEW_PR=${{ steps.resolve.outputs.pr_number }}"
           echo "PRODUCT_VALIDATION_REQUESTED=${{ steps.resolve.outputs.should_run || 'false' }}"
           echo "PRODUCT_VALIDATION_SKIP_REASON=${{ steps.freshness.outputs.skip_reason || steps.resolve.outputs.skip_reason }}"
+          echo "PRODUCT_VALIDATION_PROFILE=${{ steps.resolve.outputs.validation_profile || 'baseline' }}"
           echo 'SECRET_OUTPUT=PROHIBITED'
           echo 'OWNER_CREDENTIAL_SCOPE=OWNER_AUTH_ONLY'
           echo 'VALIDATION_SCOPE=OPTIONAL_OWNER_AUTH_PLUS_PRODUCT_JOURNEY'
