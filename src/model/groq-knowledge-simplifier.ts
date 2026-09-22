@@ -340,6 +340,9 @@ export class GroqKnowledgeSimplifierModelProvider implements ModelProvider {
         promptTokens,
         completionTokens,
         totalTokens,
+        rateLimitLimitTokens: nonNegativeHeaderInteger(response.headers.get("x-ratelimit-limit-tokens")),
+        rateLimitRemainingTokens: nonNegativeHeaderInteger(response.headers.get("x-ratelimit-remaining-tokens")),
+        rateLimitResetTokensMs: groqDurationMilliseconds(response.headers.get("x-ratelimit-reset-tokens")),
       },
       route: {
         actualProvider: GROQ_KNOWLEDGE_SIMPLIFIER_PROVIDER,

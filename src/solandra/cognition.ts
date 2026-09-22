@@ -103,6 +103,24 @@ export interface SolandraConversationContextTurn {
   readonly content: string;
 }
 
+export interface SolandraCognitionOperationalDiagnostic {
+  readonly outcome: "SUCCESS";
+  readonly modelElapsedMs: number;
+  readonly attempt: number;
+  readonly providerStatus: number | null;
+  readonly promptTokens: number | null;
+  readonly completionTokens: number | null;
+  readonly totalTokens: number | null;
+  readonly rateLimitLimitTokens: number | null;
+  readonly rateLimitRemainingTokens: number | null;
+  readonly rateLimitResetTokensMs: number | null;
+  readonly maxOutputTokens: number | null;
+}
+
+export type SolandraCognitionOperationalDiagnosticSink = (
+  diagnostic: SolandraCognitionOperationalDiagnostic,
+) => void;
+
 export interface SolandraCognitionInput {
   readonly conversationId: string;
   readonly messageId: string;
@@ -113,6 +131,7 @@ export interface SolandraCognitionInput {
   readonly governedKnowledge: readonly SolandraGovernedKnowledgeContext[];
   readonly governedRecommendations?: readonly SolandraGovernedRecommendationContext[];
   readonly pendingIntentProposal?: SolandraPendingIntentProposalContext;
+  readonly operationalDiagnosticSink?: SolandraCognitionOperationalDiagnosticSink;
 }
 
 export type SolandraConversationCognitionResult = Readonly<{
@@ -138,6 +157,14 @@ export function isConversationalCognition(
   result: SolandraCognitionResult,
 ): result is SolandraConversationCognitionResult {
   return result.mode === "CONVERSATION";
+}
+
+function operationalMetadataNumber(
+  metadata: Readonly<Record<string, string | number | boolean | null>>,
+  key: string,
+): number | null {
+  const value = metadata[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
 function parseJsonObject(text: string): unknown {
@@ -379,7 +406,21 @@ export class ModelSolandraCognitiveRuntime implements SolandraCognitiveRuntime {
       throw new ModelProviderError("invalid_output", "Solandra cognition requires exactly one text output.");
     }
     const parsed = solandraCognitionOutputSchema.parse(parseJsonObject(result.response.output[0].text));
+    const operationalDiagnostic = Object.freeze({
+      outcome: "SUCCESS" as const,
+      modelElapsedMs: result.audit.elapsedMs,
+      attempt: result.audit.attempt,
+      providerStatus: operationalMetadataNumber(result.audit.providerMetadata, "upstreamStatus"),
+      promptTokens: operationalMetadataNumber(result.audit.providerMetadata, "promptTokens"),
+      completionTokens: operationalMetadataNumber(result.audit.providerMetadata, "completionTokens"),
+      totalTokens: operationalMetadataNumber(result.audit.providerMetadata, "totalTokens"),
+      rateLimitLimitTokens: operationalMetadataNumber(result.audit.providerMetadata, "rateLimitLimitTokens"),
+      rateLimitRemainingTokens: operationalMetadataNumber(result.audit.providerMetadata, "rateLimitRemainingTokens"),
+      rateLimitResetTokensMs: operationalMetadataNumber(result.audit.providerMetadata, "rateLimitResetTokensMs"),
+      maxOutputTokens: request.maxOutputTokens ?? null,
+    });
     if (parsed.mode === "CONVERSATION") {
+      input.operationalDiagnosticSink?.(operationalDiagnostic);
       return Object.freeze({
         mode: "CONVERSATION" as const,
         response: parsed.response.trim(),
@@ -387,6 +428,7 @@ export class ModelSolandraCognitiveRuntime implements SolandraCognitiveRuntime {
       });
     }
     validateGovernedProjection(parsed.projection, input);
+    input.operationalDiagnosticSink?.(operationalDiagnostic);
     return Object.freeze({
       mode: "GOVERNED" as const,
       proposal: parsed.projection,

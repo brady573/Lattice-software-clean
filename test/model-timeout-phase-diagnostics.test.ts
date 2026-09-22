@@ -11,6 +11,10 @@ import {
   groqRateLimitScopeId,
 } from "../src/model/groq-rate-limit-coordinator.js";
 import type { CanonicalModelRequest } from "../src/model/types.js";
+import {
+  ModelSolandraCognitiveRuntime,
+  type SolandraCognitionOperationalDiagnostic,
+} from "../src/solandra/cognition.js";
 
 const DIAGNOSTIC_KEY = "diagnostic-key-material-not-a-secret-1234567890";
 
@@ -127,4 +131,74 @@ test("model timeout diagnostic preserves 429 status, token headers, recovery del
     },
   );
   assert.equal(fetches, 1);
+});
+
+test("successful Groq cognition reports content-free usage and token-capacity metadata", async () => {
+  const userMessage = "Explain a simple tradeoff in ordinary language.";
+  const responseText = "A bounded ordinary explanation.";
+  const runtime = new GroqKnowledgeSimplifierModelRuntime(
+    new GroqKnowledgeSimplifierModelProvider({
+      apiKey: DIAGNOSTIC_KEY,
+      rateLimitCoordinator: new MemoryGroqRateLimitCoordinator(),
+      fetchImpl: async () => new Response(JSON.stringify({
+        id: "diagnostic-cognition-success",
+        model: GROQ_KNOWLEDGE_SIMPLIFIER_MODEL,
+        choices: [{
+          message: {
+            content: JSON.stringify({
+              mode: "CONVERSATION",
+              response: responseText,
+            }),
+          },
+          finish_reason: "stop",
+        }],
+        usage: {
+          prompt_tokens: 640,
+          completion_tokens: 83,
+          total_tokens: 723,
+        },
+      }), {
+        status: 200,
+        headers: {
+          "x-ratelimit-limit-tokens": "8000",
+          "x-ratelimit-remaining-tokens": "6400",
+          "x-ratelimit-reset-tokens": "12.500s",
+        },
+      }),
+    }),
+  );
+  const cognition = new ModelSolandraCognitiveRuntime(
+    runtime,
+    GROQ_KNOWLEDGE_SIMPLIFIER_MODEL,
+    2,
+  );
+  let observed: SolandraCognitionOperationalDiagnostic | undefined;
+
+  const result = await cognition.interpret({
+    conversationId: "diagnostic-success-conversation",
+    messageId: "diagnostic-success-message",
+    message: userMessage,
+    recentUserMessages: [userMessage],
+    governedKnowledge: [],
+    operationalDiagnosticSink: (diagnostic) => {
+      observed = diagnostic;
+    },
+  });
+
+  assert.equal(result.mode, "CONVERSATION");
+  assert.ok(observed);
+  assert.equal(observed.outcome, "SUCCESS");
+  assert.equal(observed.providerStatus, 200);
+  assert.equal(observed.promptTokens, 640);
+  assert.equal(observed.completionTokens, 83);
+  assert.equal(observed.totalTokens, 723);
+  assert.equal(observed.rateLimitLimitTokens, 8_000);
+  assert.equal(observed.rateLimitRemainingTokens, 6_400);
+  assert.equal(observed.rateLimitResetTokensMs, 12_500);
+  assert.equal(observed.maxOutputTokens, 1_600);
+  assert.ok(observed.modelElapsedMs >= 0);
+  const serialized = JSON.stringify(observed);
+  assert.equal(serialized.includes(DIAGNOSTIC_KEY), false);
+  assert.equal(serialized.includes(userMessage), false);
+  assert.equal(serialized.includes(responseText), false);
 });

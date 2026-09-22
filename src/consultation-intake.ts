@@ -79,6 +79,7 @@ import type { SolandraAdvisoryRuntime } from "./solandra/advisory.js";
 import type { SolandraActionPreparer } from "./solandra/action-preparer.js";
 import {
   isConversationalCognition,
+  type SolandraCognitionOperationalDiagnostic,
   type SolandraCognitionResult,
   type SolandraCognitiveRuntime,
   type SolandraConversationContextTurn,
@@ -908,6 +909,7 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
       }
 
       let cognition: SolandraGovernedCognitionResult | undefined;
+      let cognitionOperationalDiagnostic: SolandraCognitionOperationalDiagnostic | undefined;
       let interpretation: ConsultationInterpretationProposal;
       let cognitiveGovernedKnowledge: Awaited<ReturnType<typeof recentGovernedKnowledge>> = [];
       try {
@@ -948,7 +950,13 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
             ...(clarificationProposal
               ? { pendingIntentProposal: pendingIntentProposalContext(clarificationProposal) }
               : {}),
+            operationalDiagnosticSink: (diagnostic) => {
+              cognitionOperationalDiagnostic = diagnostic;
+            },
           });
+          if (cognitionOperationalDiagnostic !== undefined) {
+            reply.header(MODEL_CALL_DIAGNOSTIC_HEADER, JSON.stringify(cognitionOperationalDiagnostic));
+          }
           if (
             !isConversationalCognition(cognitionResult)
             && cognitionResult.proposal.requestedHelp === "CONFIRM_INTENT"
