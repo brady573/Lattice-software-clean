@@ -131,6 +131,95 @@ test("distinct Groq provider objects with the same credential and model observe 
   assert.deepEqual(waits, [10]);
 });
 
+test("successful Groq zero-token headroom pre-arms the shared recovery gate for the next provider instance", async () => {
+  let now = 7_000;
+  const waits: number[] = [];
+  const coordinator = new MemoryGroqRateLimitCoordinator(
+    () => now,
+    async (delayMs) => {
+      waits.push(delayMs);
+      now += delayMs;
+    },
+  );
+  const scope = groqRateLimitScopeId(KEY_A, GROQ_KNOWLEDGE_SIMPLIFIER_MODEL);
+  const providerA = new GroqKnowledgeSimplifierModelProvider({
+    apiKey: KEY_A,
+    rateLimitCoordinator: coordinator,
+    now: () => now,
+    fetchImpl: async () => new Response(JSON.stringify({
+      id: "groq-zero-headroom",
+      model: GROQ_KNOWLEDGE_SIMPLIFIER_MODEL,
+      choices: [{ message: { content: "First response." }, finish_reason: "stop" }],
+      usage: { prompt_tokens: 5, completion_tokens: 2, total_tokens: 7 },
+    }), {
+      status: 200,
+      headers: {
+        "content-type": "application/json",
+        "x-ratelimit-remaining-tokens": "0",
+        "x-ratelimit-reset-tokens": "0.010s",
+      },
+    }),
+  });
+  let providerBFetches = 0;
+  const providerB = new GroqKnowledgeSimplifierModelProvider({
+    apiKey: KEY_A,
+    rateLimitCoordinator: coordinator,
+    now: () => now,
+    fetchImpl: async () => {
+      providerBFetches += 1;
+      assert.ok(now >= 7_010, "next provider request escaped successful-response capacity pacing");
+      return success("Second response.");
+    },
+  });
+
+  await providerA.generate(request(), context());
+  assert.equal(await coordinator.blockedUntil(scope), 7_010);
+  await providerB.generate(request(), context());
+
+  assert.equal(providerBFetches, 1);
+  assert.deepEqual(waits, [10]);
+});
+
+test("an unexpected Groq 429 does not start a retry when exact recovery cannot fit the logical deadline", async () => {
+  let fetches = 0;
+  let waits = 0;
+  const coordinator = new MemoryGroqRateLimitCoordinator(
+    Date.now,
+    async () => { waits += 1; },
+  );
+  const runtime = new GroqKnowledgeSimplifierModelRuntime(new GroqKnowledgeSimplifierModelProvider({
+    apiKey: KEY_A,
+    rateLimitCoordinator: coordinator,
+    fetchImpl: async () => {
+      fetches += 1;
+      return new Response("{}", {
+        status: 429,
+        headers: { "retry-after": "60" },
+      });
+    },
+  }));
+
+  await assert.rejects(
+    runtime.call(request(), {
+      correlationId: "doomed-recovery",
+      idempotencyKey: "doomed-recovery",
+      maxAttempts: 2,
+    }),
+    (error) => {
+      assert.equal(errorCode(error), "rate_limit");
+      const diagnostic = (error as ModelProviderError).diagnostic;
+      assert.ok(diagnostic);
+      assert.equal(diagnostic.attemptsStarted, 1);
+      assert.equal(diagnostic.retryCount, 0);
+      assert.equal(diagnostic.providerStatus, 429);
+      assert.equal(diagnostic.rateLimitWaitMs, 0);
+      return true;
+    },
+  );
+  assert.equal(fetches, 1);
+  assert.equal(waits, 0);
+});
+
 test("Groq recovery windows extend monotonically and different credential scopes remain isolated", async () => {
   const coordinator = new MemoryGroqRateLimitCoordinator();
   const scopeA = groqRateLimitScopeId(KEY_A, GROQ_KNOWLEDGE_SIMPLIFIER_MODEL);
@@ -232,16 +321,12 @@ test("caller cancellation while waiting behind the Groq recovery gate sends no u
   assert.equal(fetches, 0);
 });
 
-test("the unchanged ModelRuntime logical timeout bounds a recovery gate longer than the remaining budget", async () => {
-  let waiting!: () => void;
-  const waitingPromise = new Promise<void>((resolve) => { waiting = resolve; });
-  const wait: GroqRateLimitWait = async (_delayMs, signal) => {
-    waiting();
-    await new Promise<void>((_resolve, reject) => {
-      signal.addEventListener("abort", () => reject(signal.reason), { once: true });
-    });
-  };
-  const coordinator = new MemoryGroqRateLimitCoordinator(Date.now, wait);
+test("known Groq recovery beyond the logical deadline is rejected before waiting or sending upstream", async () => {
+  let waits = 0;
+  const coordinator = new MemoryGroqRateLimitCoordinator(
+    Date.now,
+    async () => { waits += 1; },
+  );
   const scope = groqRateLimitScopeId(KEY_A, GROQ_KNOWLEDGE_SIMPLIFIER_MODEL);
   await coordinator.extendBlockedUntil(scope, Date.now() + 10_000);
   let fetches = 0;
@@ -254,13 +339,19 @@ test("the unchanged ModelRuntime logical timeout bounds a recovery gate longer t
     },
   }), 15);
 
-  const pending = runtime.call(request(), {
-    correlationId: "timeout-wait",
-    idempotencyKey: "timeout-wait",
-    maxAttempts: 2,
-  });
-  await waitingPromise;
-  await assert.rejects(pending, (error) => errorCode(error) === "timeout");
+  await assert.rejects(
+    runtime.call(request(), {
+      correlationId: "deadline-admission",
+      idempotencyKey: "deadline-admission",
+      maxAttempts: 2,
+    }),
+    (error) => {
+      assert.equal(errorCode(error), "rate_limit");
+      assert.equal((error as ModelProviderError).retryable, false);
+      return true;
+    },
+  );
+  assert.equal(waits, 0);
   assert.equal(fetches, 0);
 });
 

@@ -558,6 +558,7 @@ export class ModelRuntime {
       requestBytes,
       request.maxOutputTokens ?? null,
     );
+    const deadlineAtMs = Date.now() + this.timeoutMs;
     const timeoutController = new AbortController();
     const timer = setTimeout(
       () => timeoutController.abort(new Error("Model call timeout.")),
@@ -587,6 +588,7 @@ export class ModelRuntime {
               correlationId,
               requestIdentity,
               attempt,
+              deadlineAtMs,
               signal,
               diagnosticSink: diagnostic.observeProvider,
             });
@@ -626,8 +628,18 @@ export class ModelRuntime {
                 diagnostic.snapshot(),
               )
               : asModelProviderError(error);
-            if (signal.aborted || !classified.retryable || logicalAttempt + 1 >= maxAttempts) {
-              throw withModelFailureDiagnostic(classified, diagnostic.snapshot());
+            const failureDiagnostic = diagnostic.snapshot();
+            const remainingLogicalMs = Math.max(0, this.timeoutMs - failureDiagnostic.totalMs);
+            const recoveryCannotFit = classified.code === "rate_limit"
+              && failureDiagnostic.rateLimitRecoveryMs !== null
+              && failureDiagnostic.rateLimitRecoveryMs >= remainingLogicalMs;
+            if (
+              signal.aborted
+              || !classified.retryable
+              || recoveryCannotFit
+              || logicalAttempt + 1 >= maxAttempts
+            ) {
+              throw withModelFailureDiagnostic(classified, failureDiagnostic);
             }
             diagnostic.retryStarted();
           }

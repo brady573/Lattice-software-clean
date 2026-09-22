@@ -181,8 +181,15 @@ export class GroqKnowledgeSimplifierModelProvider implements ModelProvider {
       );
     }
 
-    context.diagnosticSink?.({ kind: "rate_limit_wait_start" });
     try {
+      const blockedUntilMs = await this.rateLimitCoordinator.blockedUntil(this.rateLimitScopeId, context.signal);
+      if (context.deadlineAtMs !== undefined && blockedUntilMs >= context.deadlineAtMs) {
+        throw new ModelProviderError(
+          "rate_limit",
+          "Groq Knowledge simplifier capacity cannot recover within the current model-call deadline.",
+        );
+      }
+      context.diagnosticSink?.({ kind: "rate_limit_wait_start" });
       await this.rateLimitCoordinator.waitUntilReady(this.rateLimitScopeId, context.signal);
       context.diagnosticSink?.({ kind: "rate_limit_wait_complete" });
     } catch (error) {
@@ -234,15 +241,25 @@ export class GroqKnowledgeSimplifierModelProvider implements ModelProvider {
       );
     }
 
+    const rateLimitLimitTokens = nonNegativeHeaderInteger(response.headers.get("x-ratelimit-limit-tokens"));
+    const rateLimitRemainingTokens = nonNegativeHeaderInteger(response.headers.get("x-ratelimit-remaining-tokens"));
+    const rateLimitResetTokensMs = groqDurationMilliseconds(response.headers.get("x-ratelimit-reset-tokens"));
     context.diagnosticSink?.({
       kind: "provider_response_headers",
       statusCode: response.status,
-      rateLimitLimitTokens: nonNegativeHeaderInteger(response.headers.get("x-ratelimit-limit-tokens")),
-      rateLimitRemainingTokens: nonNegativeHeaderInteger(response.headers.get("x-ratelimit-remaining-tokens")),
-      rateLimitResetTokensMs: groqDurationMilliseconds(response.headers.get("x-ratelimit-reset-tokens")),
+      rateLimitLimitTokens,
+      rateLimitRemainingTokens,
+      rateLimitResetTokensMs,
     });
     const text = await readBoundedText(response, this.maxResponseBytes);
     context.diagnosticSink?.({ kind: "provider_request_complete" });
+    if (response.ok && rateLimitRemainingTokens === 0 && rateLimitResetTokensMs !== null && rateLimitResetTokensMs > 0) {
+      await this.rateLimitCoordinator.extendBlockedUntil(
+        this.rateLimitScopeId,
+        this.now() + rateLimitResetTokensMs,
+        context.signal,
+      );
+    }
     if (!response.ok) {
       if (response.status === 429) {
         const delayMs = recoveryDelayMilliseconds(response, text);
@@ -340,9 +357,9 @@ export class GroqKnowledgeSimplifierModelProvider implements ModelProvider {
         promptTokens,
         completionTokens,
         totalTokens,
-        rateLimitLimitTokens: nonNegativeHeaderInteger(response.headers.get("x-ratelimit-limit-tokens")),
-        rateLimitRemainingTokens: nonNegativeHeaderInteger(response.headers.get("x-ratelimit-remaining-tokens")),
-        rateLimitResetTokensMs: groqDurationMilliseconds(response.headers.get("x-ratelimit-reset-tokens")),
+        rateLimitLimitTokens,
+        rateLimitRemainingTokens,
+        rateLimitResetTokensMs,
       },
       route: {
         actualProvider: GROQ_KNOWLEDGE_SIMPLIFIER_PROVIDER,

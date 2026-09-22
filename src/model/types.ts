@@ -175,6 +175,8 @@ export interface ModelCallContext {
   readonly correlationId: string;
   readonly requestIdentity: string;
   readonly attempt: number;
+  /** Absolute wall-clock deadline for the current logical model call when known. */
+  readonly deadlineAtMs?: number;
   readonly signal: AbortSignal;
   /**
    * Metadata-only operational timing/status observation. Providers must never
