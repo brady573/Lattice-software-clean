@@ -152,6 +152,14 @@ def test_workflow_keeps_baseline_automatic_behavior_and_isolates_historical_owne
     assert "steps.freshness.outputs.should_run == 'true'" in workflow
     assert "cancel-in-progress: ${{ github.event_name == 'deployment_status' }}" in workflow
 
+    bootstrap_step = workflow.split("- name: Initialize historical canary evidence", 1)[1].split(
+        "- name: Install deployed validation dependencies",
+        1,
+    )[0]
+    assert "test-results/historical-canaries/evidence.json" in bootstrap_step
+    assert "test -z \"${LATTICE_OWNER_ACCESS_TOKEN+x}\"" in bootstrap_step
+    assert "secrets.LATTICE_OWNER_ACCESS_TOKEN" not in bootstrap_step
+
     historical_step = workflow.split("- name: Run historical user-facing canaries", 1)[1].split(
         "- name: Upload historical canary evidence",
         1,

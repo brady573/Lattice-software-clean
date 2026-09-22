@@ -78,6 +78,62 @@ jobs:
         run: |
           echo "PRODUCT_VALIDATION=SKIPPED reason=${{ steps.resolve.outputs.skip_reason }}"
 
+      - name: Initialize historical canary evidence
+        if: ${{ github.event_name == 'workflow_dispatch' && steps.resolve.outputs.should_run == 'true' && steps.resolve.outputs.validation_profile == 'historical-canaries' }}
+        env:
+          DEPLOYED_BASE_URL: ${{ steps.resolve.outputs.product_target }}
+          EXPECTED_PRODUCT_SHA: 6ef1d7ab6110cec0197fc93fb7c71ac17c6902a6
+          HISTORICAL_CASES_JSON: ${{ inputs.historical_cases_json }}
+          VALIDATOR_DEPLOY_ID_BEFORE: ${{ inputs.validator_deploy_id_before }}
+        run: |
+          set -euo pipefail
+          test -z "${LATTICE_OWNER_ACCESS_TOKEN+x}"
+          python - <<'PY'
+          from datetime import datetime, timezone
+          import json
+          import os
+          from pathlib import Path
+          import subprocess
+
+          cases = json.loads(os.environ["HISTORICAL_CASES_JSON"])
+          path = Path("test-results/historical-canaries/evidence.json")
+          path.parent.mkdir(parents=True, exist_ok=True)
+          workflow_url = (
+              f"{os.environ.get('GITHUB_SERVER_URL', '')}/{os.environ.get('GITHUB_REPOSITORY', '')}"
+              f"/actions/runs/{os.environ.get('GITHUB_RUN_ID', '')}"
+          )
+          payload = {
+              "schemaVersion": 1,
+              "evidenceKind": "historical-user-facing-canaries",
+              "startedAt": datetime.now(timezone.utc).isoformat(),
+              "completedAt": None,
+              "observationStatus": "BLOCKED",
+              "harnessBlocker": "Product journey did not start or did not overwrite bootstrap evidence.",
+              "validatorHarness": {
+                  "branch": os.environ.get("GITHUB_REF_NAME") or None,
+                  "sha": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
+                  "tree": subprocess.check_output(["git", "rev-parse", "HEAD^{tree}"], text=True).strip(),
+                  "workflowRunId": os.environ.get("GITHUB_RUN_ID") or None,
+                  "workflowUrl": workflow_url,
+              },
+              "canonicalProductTarget": os.environ["DEPLOYED_BASE_URL"],
+              "expectedProductSha": os.environ["EXPECTED_PRODUCT_SHA"],
+              "deployment": {
+                  "idBefore": os.environ.get("VALIDATOR_DEPLOY_ID_BEFORE") or None,
+                  "idAfter": None,
+                  "observationState": "KNOWN" if os.environ.get("VALIDATOR_DEPLOY_ID_BEFORE") else "UNKNOWN",
+              },
+              "ownerCredentialPresent": "LATTICE_OWNER_ACCESS_TOKEN" in os.environ,
+              "casesAsExecuted": cases,
+              "cases": {
+                  case_id: {"status": "NOT_REACHED", "reason": "Product journey did not start."}
+                  for case_id in ("19", "20", "44", "47")
+              },
+              "providerModelObservation": {"state": "UNKNOWN", "values": []},
+          }
+          path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+          PY
+
       - name: Install deployed validation dependencies
         if: ${{ steps.resolve.outputs.should_run == 'true' }}
         run: |
