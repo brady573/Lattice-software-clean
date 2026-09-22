@@ -57,6 +57,7 @@ import {
   renderHistoricalSources,
 } from "./knowledge/knowledge-continuity.js";
 import type { KnowledgeRecord, KnowledgeRecordStore } from "./knowledge/knowledge-record-store.js";
+import { ModelProviderError } from "./model/errors.js";
 import { buildRunOutcome } from "./outcome.js";
 import {
   advisoryKnowledge,
@@ -91,6 +92,46 @@ const IDEMPOTENCY_RETENTION_MS = 24 * 60 * 60 * 1_000;
 const MAX_RUN_CONTEXT_ITEMS = 32;
 const MAX_COGNITIVE_HISTORY_ITEMS = 12;
 const MAX_ADVISORY_KNOWLEDGE_ROUNDS = 2;
+
+type ConsultationInterpretationFailure = Readonly<{
+  statusCode: 422 | 503;
+  error:
+    | "CONSULTATION_INTERPRETATION_FAILED"
+    | "CONSULTATION_COGNITION_TIMEOUT"
+    | "CONSULTATION_COGNITION_UNAVAILABLE";
+  message: string;
+}>;
+
+function consultationInterpretationFailure(error: unknown): ConsultationInterpretationFailure {
+  if (error instanceof ModelProviderError) {
+    if (error.code === "timeout") {
+      return {
+        statusCode: 503,
+        error: "CONSULTATION_COGNITION_TIMEOUT",
+        message: "Solandra's cognition model route did not complete within its bounded runtime budget.",
+      };
+    }
+    if (
+      error.code === "rate_limit"
+      || error.code === "unavailable"
+      || error.code === "unsupported_capability"
+    ) {
+      return {
+        statusCode: 503,
+        error: "CONSULTATION_COGNITION_UNAVAILABLE",
+        message: error.code === "unsupported_capability"
+          ? "Solandra's configured cognition model route does not provide the required capability."
+          : "Solandra's cognition model route is temporarily unavailable.",
+      };
+    }
+  }
+
+  return {
+    statusCode: 422,
+    error: "CONSULTATION_INTERPRETATION_FAILED",
+    message: error instanceof Error ? error.message : "Consultation interpretation failed.",
+  };
+}
 
 const consultationTurnSchema = z.object({
   turnId: z.string().min(1).max(200),
@@ -975,8 +1016,11 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
           });
         }
       } catch (error) {
-        const message = error instanceof Error ? error.message : "Consultation interpretation failed.";
-        return reply.status(422).send({ error: "CONSULTATION_INTERPRETATION_FAILED", message });
+        const failure = consultationInterpretationFailure(error);
+        return reply.status(failure.statusCode).send({
+          error: failure.error,
+          message: failure.message,
+        });
       }
 
       if (
