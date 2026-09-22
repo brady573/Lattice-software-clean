@@ -35,7 +35,7 @@ function success(): Response {
   }), { status: 200 });
 }
 
-test("model timeout diagnostic identifies a shared Groq recovery-gate wait without sending upstream", async () => {
+test("model diagnostic rejects a known Groq recovery window that cannot fit the logical deadline", async () => {
   const coordinator = new MemoryGroqRateLimitCoordinator();
   const scope = groqRateLimitScopeId(DIAGNOSTIC_KEY, GROQ_KNOWLEDGE_SIMPLIFIER_MODEL);
   await coordinator.extendBlockedUntil(scope, Date.now() + 500);
@@ -59,23 +59,22 @@ test("model timeout diagnostic identifies a shared Groq recovery-gate wait witho
     }),
     (error) => {
       assert.ok(error instanceof ModelProviderError);
-      assert.equal(error.code, "timeout");
+      assert.equal(error.code, "rate_limit");
+      assert.equal(error.retryable, false);
       const diagnostic = error.diagnostic;
       assert.ok(diagnostic);
-      assert.equal(diagnostic.timeoutPhase, "RATE_LIMIT_WAIT");
       assert.equal(diagnostic.attemptsStarted, 1);
       assert.equal(diagnostic.retryCount, 0);
       assert.equal(diagnostic.providerStatus, null);
       assert.equal(diagnostic.maxOutputTokens, 50);
-      assert.ok(diagnostic.rateLimitWaitMs > 0);
-      assert.ok(diagnostic.totalMs >= 35);
+      assert.ok(diagnostic.rateLimitWaitMs < 5);
       return true;
     },
   );
   assert.equal(fetches, 0);
 });
 
-test("model timeout diagnostic preserves 429 status, token headers, recovery delay, and retry count", async () => {
+test("model diagnostic preserves 429 capacity metadata when exact recovery cannot fit the logical deadline", async () => {
   const coordinator = new MemoryGroqRateLimitCoordinator();
   let fetches = 0;
   const runtime = new GroqKnowledgeSimplifierModelRuntime(
@@ -107,12 +106,12 @@ test("model timeout diagnostic preserves 429 status, token headers, recovery del
     }),
     (error) => {
       assert.ok(error instanceof ModelProviderError);
-      assert.equal(error.code, "timeout");
+      assert.equal(error.code, "rate_limit");
       const diagnostic = error.diagnostic;
       assert.ok(diagnostic);
-      assert.equal(diagnostic.timeoutPhase, "RATE_LIMIT_WAIT");
-      assert.equal(diagnostic.attemptsStarted, 2);
-      assert.equal(diagnostic.retryCount, 1);
+      assert.equal(diagnostic.timeoutPhase, "PROVIDER_RESPONSE");
+      assert.equal(diagnostic.attemptsStarted, 1);
+      assert.equal(diagnostic.retryCount, 0);
       assert.equal(diagnostic.providerStatus, 429);
       assert.equal(diagnostic.rateLimitRecoveryMs, 250);
       assert.equal(diagnostic.rateLimitLimitTokens, 8_000);
@@ -120,8 +119,7 @@ test("model timeout diagnostic preserves 429 status, token headers, recovery del
       assert.equal(diagnostic.rateLimitResetTokensMs, 250);
       assert.equal(diagnostic.maxOutputTokens, 50);
       assert.ok(diagnostic.requestBytes > 0);
-      assert.ok(diagnostic.rateLimitWaitMs > 0);
-      assert.ok(diagnostic.totalMs >= 50);
+      assert.ok(diagnostic.rateLimitWaitMs < 5);
       const serialized = JSON.stringify(diagnostic);
       assert.equal(serialized.includes(DIAGNOSTIC_KEY), false);
       assert.equal(serialized.includes("Return a short diagnostic fixture response."), false);

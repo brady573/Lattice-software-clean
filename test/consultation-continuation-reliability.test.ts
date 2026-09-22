@@ -460,7 +460,7 @@ test("ordinary governed continuations expose timeout truthfully and exact replay
   }
 });
 
-test("client timeout diagnostics redact provider recovery and quota state after a rate-limit retry wait", async () => {
+test("client diagnostics redact provider recovery and quota state when a doomed rate-limit retry is rejected", async () => {
   const provider = new RateLimitRecoveryTimeoutProvider();
   const cognition = new ModelSolandraCognitiveRuntime(
     new ModelRuntime(provider, { timeoutMs: 40 }),
@@ -485,18 +485,18 @@ test("client timeout diagnostics redact provider recovery and quota state after 
 
     assert.equal(response.statusCode, 503, response.body);
     assert.deepEqual(response.json(), {
-      error: "CONSULTATION_COGNITION_TIMEOUT",
-      message: "Solandra's cognition model route did not complete within its bounded runtime budget.",
+      error: "CONSULTATION_COGNITION_UNAVAILABLE",
+      message: "Solandra's cognition model route is temporarily unavailable.",
     });
 
     const diagnostic = clientModelCallDiagnostic(
       response.headers["x-lattice-model-call-diagnostic"],
     );
-    assert.equal(diagnostic.timeoutPhase, "RATE_LIMIT_WAIT");
+    assert.equal(diagnostic.timeoutPhase, "PROVIDER_RESPONSE");
     assert.equal(diagnostic.providerStatus, 429);
-    assert.equal(diagnostic.attemptsStarted, 2);
-    assert.equal(diagnostic.retryCount, 1);
-    assert.equal(provider.calls, 2);
+    assert.equal(diagnostic.attemptsStarted, 1);
+    assert.equal(diagnostic.retryCount, 0);
+    assert.equal(provider.calls, 1);
   } finally {
     await app.close();
   }

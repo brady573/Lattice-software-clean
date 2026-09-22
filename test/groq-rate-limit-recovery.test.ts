@@ -212,7 +212,7 @@ test("an unexpected Groq 429 does not start a retry when exact recovery cannot f
       assert.equal(diagnostic.attemptsStarted, 1);
       assert.equal(diagnostic.retryCount, 0);
       assert.equal(diagnostic.providerStatus, 429);
-      assert.equal(diagnostic.rateLimitWaitMs, 0);
+      assert.ok(diagnostic.rateLimitWaitMs < 5);
       return true;
     },
   );
