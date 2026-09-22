@@ -16,6 +16,7 @@ BASE_URL = os.environ.get("DEPLOYED_BASE_URL", "https://lattice-solandra-validat
 PRODUCT_MODEL_TIMEOUT_MS = 30_000
 TURN_RESPONSE_TIMEOUT_MS = PRODUCT_MODEL_TIMEOUT_MS + 15_000
 TURN_COMPLETION_TIMEOUT_MS = 120_000
+NORMAL_USER_INTER_TURN_DWELL_SECONDS = 20
 
 KNOWLEDGE_PROMPT = "Why does a metal spoon feel colder than a wooden spoon when both have been sitting in the same room?"
 AMBIGUITY_SETUP_PROMPT = (
@@ -327,25 +328,41 @@ def _assert_no_affirmative_execution(text: str, body: dict[str, Any]) -> None:
     inspect(body)
 
 
-def _exercise_product_journey(submit_turn: Callable[[str, str], StageResult]) -> None:
-    knowledge = submit_turn(KNOWLEDGE_PROMPT, "KNOWLEDGE")
+def _exercise_product_journey(
+    submit_turn: Callable[[str, str], StageResult],
+    wait_between_turns: Callable[[float], None] = time.sleep,
+) -> None:
+    first_turn = True
+
+    def submit_user_turn(prompt: str, label: str) -> StageResult:
+        nonlocal first_turn
+        if first_turn:
+            first_turn = False
+        else:
+            # Represent ordinary user reading/composition time between distinct turns.
+            # This is validator pacing only, not Product retry or provider recovery.
+            print(f"JOURNEY_{label}_NORMAL_USER_DWELL_SECONDS={NORMAL_USER_INTER_TURN_DWELL_SECONDS}")
+            wait_between_turns(NORMAL_USER_INTER_TURN_DWELL_SECONDS)
+        return submit_turn(prompt, label)
+
+    knowledge = submit_user_turn(KNOWLEDGE_PROMPT, "KNOWLEDGE")
     knowledge_text = _assistant_text(knowledge)
     assert knowledge_text, "Knowledge stage returned no Solandra response"
     assert not re.search(r"workerId|runId|queue|provider routing|V36|Decision Engine", knowledge_text, re.I), (
         "Knowledge journey exposed internal machinery"
     )
 
-    setup = submit_turn(AMBIGUITY_SETUP_PROMPT, "AMBIGUITY_SETUP")
+    setup = submit_user_turn(AMBIGUITY_SETUP_PROMPT, "AMBIGUITY_SETUP")
     setup_text = _assistant_text(setup)
     assert setup_text, "Ambiguity setup returned no Solandra response"
     assert not re.search(r"workerId|runId|queue|provider routing|V36|Decision Engine", setup_text, re.I), (
         "Ambiguity setup exposed internal machinery"
     )
 
-    ambiguity = submit_turn(AMBIGUITY_PROMPT, "AMBIGUITY")
+    ambiguity = submit_user_turn(AMBIGUITY_PROMPT, "AMBIGUITY")
     _assert_contextual_clarification(ambiguity)
 
-    decision = submit_turn(DECISION_PROMPT, "DECISION")
+    decision = submit_user_turn(DECISION_PROMPT, "DECISION")
     decision_body = _final_product_body(decision)
     recommendation = decision_body.get("recommendationReference")
     assert isinstance(recommendation, dict), "Decision stage did not establish a governed Recommendation"
@@ -361,7 +378,7 @@ def _exercise_product_journey(submit_turn: Callable[[str, str], StageResult]) ->
         "Decision journey exposed internal machinery"
     )
 
-    action = submit_turn(ACTION_PREPARATION_PROMPT, "ACTION_PREPARATION")
+    action = submit_user_turn(ACTION_PREPARATION_PROMPT, "ACTION_PREPARATION")
     action_body = _final_product_body(action)
     preparation = action_body.get("preparationReference")
     assert isinstance(preparation, dict), "Action-preparation stage did not establish a prepared resource"

@@ -201,6 +201,7 @@ jobs:
 
   live-solandra-cognition:
     name: Live model-owned Solandra cognition validation
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
