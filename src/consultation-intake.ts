@@ -105,6 +105,7 @@ function clientModelCallDiagnostic(
   delete clientSafe.rateLimitLimitTokens;
   delete clientSafe.rateLimitRemainingTokens;
   delete clientSafe.rateLimitResetTokensMs;
+  delete clientSafe.rateLimitRecoveryMs;
   return JSON.stringify(clientSafe);
 }
 

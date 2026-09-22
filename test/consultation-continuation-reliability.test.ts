@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
 import type { FastifyInstance } from "fastify";
+import { ModelProviderError } from "../src/model/errors.js";
 import type { ModelProvider } from "../src/model/provider.js";
 import { ModelRuntime } from "../src/model/runtime.js";
 import type {
@@ -142,6 +143,52 @@ class TimeoutThenRecoveryProvider implements ModelProvider {
   }
 }
 
+class RateLimitRecoveryTimeoutProvider implements ModelProvider {
+  readonly kind = PROVIDER;
+  calls = 0;
+
+  async generate(
+    _request: CanonicalModelRequest,
+    context: ModelCallContext,
+  ): Promise<ModelProviderResult> {
+    this.calls += 1;
+
+    if (this.calls === 1) {
+      context.diagnosticSink?.({ kind: "rate_limit_wait_start" });
+      context.diagnosticSink?.({ kind: "rate_limit_wait_complete" });
+      context.diagnosticSink?.({ kind: "provider_request_start" });
+      context.diagnosticSink?.({
+        kind: "provider_response_headers",
+        statusCode: 429,
+        rateLimitLimitTokens: 8_000,
+        rateLimitRemainingTokens: 0,
+        rateLimitResetTokensMs: 250,
+      });
+      context.diagnosticSink?.({ kind: "provider_request_complete" });
+      context.diagnosticSink?.({ kind: "rate_limit_recovery", delayMs: 250 });
+      throw new ModelProviderError(
+        "rate_limit",
+        "Simulated Groq-style rate limit.",
+        { retryable: true, statusCode: 429 },
+      );
+    }
+
+    context.diagnosticSink?.({ kind: "rate_limit_wait_start" });
+    await new Promise<void>((_resolve, reject) => {
+      const onAbort = () => {
+        context.signal.removeEventListener("abort", onAbort);
+        reject(context.signal.reason ?? new Error("Timed model fixture was aborted."));
+      };
+      if (context.signal.aborted) {
+        onAbort();
+        return;
+      }
+      context.signal.addEventListener("abort", onAbort, { once: true });
+    });
+    throw new Error("Timed model fixture unexpectedly resumed after abort.");
+  }
+}
+
 class StableKnowledgePresenter implements SolandraKnowledgePresenter {
   async present(
     _input: SolandraKnowledgePresentationInput,
@@ -206,6 +253,7 @@ function clientModelCallDiagnostic(
   assert.equal("rateLimitLimitTokens" in diagnostic, false);
   assert.equal("rateLimitRemainingTokens" in diagnostic, false);
   assert.equal("rateLimitResetTokensMs" in diagnostic, false);
+  assert.equal("rateLimitRecoveryMs" in diagnostic, false);
   return diagnostic;
 }
 
@@ -409,6 +457,48 @@ test("ordinary governed continuations expose timeout truthfully and exact replay
     } finally {
       await app.close();
     }
+  }
+});
+
+test("client timeout diagnostics redact provider recovery and quota state after a rate-limit retry wait", async () => {
+  const provider = new RateLimitRecoveryTimeoutProvider();
+  const cognition = new ModelSolandraCognitiveRuntime(
+    new ModelRuntime(provider, { timeoutMs: 40 }),
+    MODEL,
+    2,
+  );
+  const app = await createRuntimeApp(config, {
+    truthPipeline: truthPipeline(HELD_OUT_CASES[0]!),
+    solandraCognition: cognition,
+  });
+
+  try {
+    const conversationId = await createConversation(app);
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/v1/conversations/${conversationId}/turns`,
+      payload: {
+        turnId: randomUUID(),
+        message: "Compare two ordinary options for me.",
+      },
+    });
+
+    assert.equal(response.statusCode, 503, response.body);
+    assert.deepEqual(response.json(), {
+      error: "CONSULTATION_COGNITION_TIMEOUT",
+      message: "Solandra's cognition model route did not complete within its bounded runtime budget.",
+    });
+
+    const diagnostic = clientModelCallDiagnostic(
+      response.headers["x-lattice-model-call-diagnostic"],
+    );
+    assert.equal(diagnostic.timeoutPhase, "RATE_LIMIT_WAIT");
+    assert.equal(diagnostic.providerStatus, 429);
+    assert.equal(diagnostic.attemptsStarted, 2);
+    assert.equal(diagnostic.retryCount, 1);
+    assert.equal(provider.calls, 2);
+  } finally {
+    await app.close();
   }
 });
 
