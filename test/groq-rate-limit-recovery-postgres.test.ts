@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
 import { Pool } from "pg";
+import { ModelProviderError } from "../src/model/errors.js";
 import {
   GROQ_KNOWLEDGE_SIMPLIFIER_MODEL,
   GroqKnowledgeSimplifierModelProvider,
@@ -23,11 +24,12 @@ function request(): CanonicalModelRequest {
   };
 }
 
-function context(): ModelCallContext {
+function context(deadlineAtMs?: number): ModelCallContext {
   return {
     correlationId: "postgres-groq-recovery",
     requestIdentity: "postgres-groq-recovery-request",
     attempt: 0,
+    ...(deadlineAtMs === undefined ? {} : { deadlineAtMs }),
     signal: new AbortController().signal,
   };
 }
@@ -89,6 +91,68 @@ test("PostgreSQL Groq recovery state coordinates independent API/Run-worker-styl
     assert.equal(fetches, 1);
     assert.ok(waits.length >= 1);
     assert.equal(await clientA.blockedUntil(scope), laterDeadline);
+  } finally {
+    await cleanup.query("DELETE FROM groq_rate_limit_recovery WHERE scope_id=$1", [scope]);
+    await cleanup.end();
+    await clientB.close();
+    await clientA.close();
+  }
+});
+
+
+test("PostgreSQL shared recovery extension beyond the active call deadline exits rate_limit without upstream", {
+  skip: databaseUrl === undefined ? "DATABASE_URL is required for PostgreSQL integration." : false,
+}, async () => {
+  assert.ok(databaseUrl);
+  await PostgresGroqRateLimitCoordinator.migrate(databaseUrl);
+
+  const credential = `gsk_pg_deadline_race_${randomUUID().replaceAll("-", "")}`;
+  const scope = groqRateLimitScopeId(credential, GROQ_KNOWLEDGE_SIMPLIFIER_MODEL);
+  let now = Math.floor(Date.now() / 1_000) * 1_000;
+  const callDeadline = now + 200;
+  const clientA = await PostgresGroqRateLimitCoordinator.connect(databaseUrl);
+  let clientB!: PostgresGroqRateLimitCoordinator;
+  const waits: number[] = [];
+  clientB = await PostgresGroqRateLimitCoordinator.connect(databaseUrl, {
+    now: () => now,
+    wait: async (delayMs) => {
+      waits.push(delayMs);
+      assert.equal(waits.length, 1, "deadline-aware PostgreSQL wait must stop after the concurrent extension");
+      await clientA.extendBlockedUntil(scope, callDeadline + 1_000);
+      now += delayMs;
+    },
+  });
+  const cleanup = new Pool({ connectionString: databaseUrl });
+
+  try {
+    await clientA.extendBlockedUntil(scope, now + 100);
+    let fetches = 0;
+    const provider = new GroqKnowledgeSimplifierModelProvider({
+      apiKey: credential,
+      rateLimitCoordinator: clientB,
+      now: () => now,
+      fetchImpl: async () => {
+        fetches += 1;
+        return new Response(JSON.stringify({
+          id: "pg-groq-deadline-race",
+          model: GROQ_KNOWLEDGE_SIMPLIFIER_MODEL,
+          choices: [{ message: { content: "Unexpected upstream." }, finish_reason: "stop" }],
+        }), { status: 200 });
+      },
+    });
+
+    await assert.rejects(
+      provider.generate(request(), context(callDeadline)),
+      (error) => {
+        assert.ok(error instanceof ModelProviderError);
+        assert.equal(error.code, "rate_limit");
+        assert.equal(error.retryable, false);
+        return true;
+      },
+    );
+    assert.equal(fetches, 0);
+    assert.equal(waits.length, 1);
+    assert.equal(await clientA.blockedUntil(scope), callDeadline + 1_000);
   } finally {
     await cleanup.query("DELETE FROM groq_rate_limit_recovery WHERE scope_id=$1", [scope]);
     await cleanup.end();

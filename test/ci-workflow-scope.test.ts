@@ -6,6 +6,7 @@ import test from 'node:test';
 const workflowDirectory = join(process.cwd(), '.github', 'workflows');
 const coreWorkflowName = 'core-validation.yml';
 const deployedWorkflowName = 'deployed-functional-validation.yml';
+const browserWorkflowName = 'browser-lifecycle-validation.yml';
 const expectedDurableWorkflowNames = [
   'browser-lifecycle-validation.yml',
   'core-validation.yml',
@@ -51,6 +52,18 @@ test('deployed functional validation is manually dispatchable and deployment-sta
   assert.doesNotMatch(text, /^\s*push:\s*$/mu);
   assert.doesNotMatch(text, /^\s*pull_request:\s*$/mu);
   assert.doesNotMatch(text, /^\s*deployment:\s*$/mu);
+});
+
+test('Browser lifecycle stays automatic while live Groq cognition is explicit-dispatch only', () => {
+  const text = workflowText(browserWorkflowName);
+  assert.match(text, /^\s*pull_request:\s*$/mu);
+  assert.match(text, /^\s*push:\s*$/mu);
+  assert.match(text, /^\s*workflow_dispatch:\s*$/mu);
+  assert.match(text, /^\s+browser-lifecycle:\s*$/mu);
+  assert.match(
+    text,
+    /^\s+live-solandra-cognition:\s*\n\s+name: Live model-owned Solandra cognition validation\s*\n\s+if: github\.event_name == 'workflow_dispatch'\s*$/mu,
+  );
 });
 
 test('Core PR validation is the single ordinary full repository gate', () => {

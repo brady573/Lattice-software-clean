@@ -8,6 +8,9 @@ import {
 import {
   asModelProviderError,
   ModelProviderError,
+  withModelFailureDiagnostic,
+  type ModelFailureDiagnostic,
+  type ModelFailurePhase,
 } from "./errors.js";
 import type { ModelProvider } from "./provider.js";
 import type {
@@ -16,6 +19,7 @@ import type {
   ModelExecutionClass,
   ModelInvocationProvenance,
   ModelInvocationRouteRequest,
+  ModelProviderDiagnosticEvent,
   ModelProviderRouteObservation,
   ModelRouteMode,
   ModelRouteProvenanceCompleteness,
@@ -132,6 +136,145 @@ class BoundedAttemptLedger {
   }
 }
 
+function roundedElapsedMs(value: number): number {
+  return Number(Math.max(0, value).toFixed(3));
+}
+
+class ModelCallDiagnosticTracker {
+  private readonly logicalStartedAt = performance.now();
+  private queueElapsedMs: number | null = null;
+  private accumulatedRateLimitWaitMs = 0;
+  private accumulatedProviderRequestMs = 0;
+  private accumulatedRetryMs = 0;
+  private phase: ModelFailurePhase = "QUEUE";
+  private rateLimitWaitStartedAt: number | null = null;
+  private providerRequestStartedAt: number | null = null;
+  private retryStartedAt: number | null = null;
+  private attemptsStarted = 0;
+  private retryCount = 0;
+  private providerStatus: number | null = null;
+  private rateLimitRecoveryMs: number | null = null;
+  private rateLimitLimitTokens: number | null = null;
+  private rateLimitRemainingTokens: number | null = null;
+  private rateLimitResetTokensMs: number | null = null;
+
+  constructor(
+    private readonly requestBytes: number,
+    private readonly maxOutputTokens: number | null,
+  ) {}
+
+  readonly observeProvider = (event: ModelProviderDiagnosticEvent): void => {
+    const now = performance.now();
+    switch (event.kind) {
+      case "rate_limit_wait_start":
+        this.finishProviderRequest(now);
+        this.rateLimitWaitStartedAt = now;
+        this.phase = "RATE_LIMIT_WAIT";
+        return;
+      case "rate_limit_wait_complete":
+        this.finishRateLimitWait(now);
+        this.providerRequestStartedAt = now;
+        this.phase = "PROVIDER_REQUEST";
+        return;
+      case "provider_request_start":
+        if (this.providerRequestStartedAt === null) this.providerRequestStartedAt = now;
+        this.phase = "PROVIDER_REQUEST";
+        return;
+      case "provider_response_headers":
+        this.providerStatus = event.statusCode;
+        this.rateLimitLimitTokens = event.rateLimitLimitTokens;
+        this.rateLimitRemainingTokens = event.rateLimitRemainingTokens;
+        this.rateLimitResetTokensMs = event.rateLimitResetTokensMs;
+        this.phase = "PROVIDER_RESPONSE";
+        return;
+      case "provider_request_complete":
+        this.finishProviderRequest(now);
+        this.phase = "PROVIDER_RESPONSE";
+        return;
+      case "rate_limit_recovery":
+        this.rateLimitRecoveryMs = event.delayMs;
+        return;
+    }
+  };
+
+  queueAcquired(): void {
+    if (this.queueElapsedMs !== null) return;
+    const now = performance.now();
+    this.queueElapsedMs = now - this.logicalStartedAt;
+    this.phase = "UNKNOWN";
+  }
+
+  attemptStarted(): void {
+    const now = performance.now();
+    this.finishRetry(now);
+    this.attemptsStarted += 1;
+    this.providerRequestStartedAt = now;
+    this.phase = "PROVIDER_REQUEST";
+  }
+
+  providerOperationComplete(): void {
+    this.finishProviderRequest(performance.now());
+    this.phase = "PROVIDER_RESPONSE";
+  }
+
+  retryStarted(): void {
+    const now = performance.now();
+    this.finishRateLimitWait(now);
+    this.finishProviderRequest(now);
+    this.retryCount += 1;
+    this.retryStartedAt = now;
+    this.phase = "RETRY";
+  }
+
+  snapshot(): ModelFailureDiagnostic {
+    const now = performance.now();
+    const queueMs = this.queueElapsedMs
+      ?? (this.phase === "QUEUE" ? now - this.logicalStartedAt : 0);
+    const rateLimitWaitMs = this.accumulatedRateLimitWaitMs
+      + (this.rateLimitWaitStartedAt === null ? 0 : now - this.rateLimitWaitStartedAt);
+    const providerRequestMs = this.accumulatedProviderRequestMs
+      + (this.providerRequestStartedAt === null ? 0 : now - this.providerRequestStartedAt);
+    const retryMs = this.accumulatedRetryMs
+      + (this.retryStartedAt === null ? 0 : now - this.retryStartedAt);
+
+    return Object.freeze({
+      timeoutPhase: this.phase,
+      queueMs: roundedElapsedMs(queueMs),
+      rateLimitWaitMs: roundedElapsedMs(rateLimitWaitMs),
+      providerRequestMs: roundedElapsedMs(providerRequestMs),
+      retryMs: roundedElapsedMs(retryMs),
+      totalMs: roundedElapsedMs(now - this.logicalStartedAt),
+      attemptsStarted: this.attemptsStarted,
+      retryCount: this.retryCount,
+      providerStatus: this.providerStatus,
+      rateLimitRecoveryMs: this.rateLimitRecoveryMs,
+      rateLimitLimitTokens: this.rateLimitLimitTokens,
+      rateLimitRemainingTokens: this.rateLimitRemainingTokens,
+      rateLimitResetTokensMs: this.rateLimitResetTokensMs,
+      requestBytes: this.requestBytes,
+      maxOutputTokens: this.maxOutputTokens,
+    });
+  }
+
+  private finishRateLimitWait(now: number): void {
+    if (this.rateLimitWaitStartedAt === null) return;
+    this.accumulatedRateLimitWaitMs += now - this.rateLimitWaitStartedAt;
+    this.rateLimitWaitStartedAt = null;
+  }
+
+  private finishProviderRequest(now: number): void {
+    if (this.providerRequestStartedAt === null) return;
+    this.accumulatedProviderRequestMs += now - this.providerRequestStartedAt;
+    this.providerRequestStartedAt = null;
+  }
+
+  private finishRetry(now: number): void {
+    if (this.retryStartedAt === null) return;
+    this.accumulatedRetryMs += now - this.retryStartedAt;
+    this.retryStartedAt = null;
+  }
+}
+
 function requireNonEmpty(value: string, label: string): string {
   if (value.trim().length === 0) throw new Error(`${label} must be non-empty.`);
   if (value.length > 256) throw new Error(`${label} exceeds 256 characters.`);
@@ -240,17 +383,22 @@ function classifyAbort(
   callerSignal: AbortSignal | undefined,
   timeoutSignal: AbortSignal,
   cause: unknown,
+  diagnostic: ModelFailureDiagnostic,
 ): ModelProviderError {
   if (callerSignal?.aborted === true) {
-    return new ModelProviderError("cancelled", "Model call was cancelled by caller.", { cause });
+    return new ModelProviderError("cancelled", "Model call was cancelled by caller.", {
+      cause,
+      diagnostic,
+    });
   }
   if (timeoutSignal.aborted) {
     return new ModelProviderError("timeout", "Model call exceeded its timeout.", {
       retryable: true,
       cause,
+      diagnostic,
     });
   }
-  return asModelProviderError(cause);
+  return withModelFailureDiagnostic(asModelProviderError(cause), diagnostic);
 }
 
 async function raceWithAbort<T>(
@@ -338,6 +486,7 @@ export class ModelRuntime {
         correlationId,
         invocation,
         maxAttempts,
+        requestBytes,
         controller.signal,
       );
       const operation: SharedModelOperation = {
@@ -363,6 +512,7 @@ export class ModelRuntime {
       correlationId,
       invocation,
       maxAttempts,
+      requestBytes,
       options.signal,
     );
   }
@@ -401,8 +551,14 @@ export class ModelRuntime {
     correlationId: string,
     invocation: ModelInvocationRouteRequest | null,
     maxAttempts: number,
+    requestBytes: number,
     callerSignal: AbortSignal | undefined,
   ): Promise<ModelRuntimeResult> {
+    const diagnostic = new ModelCallDiagnosticTracker(
+      requestBytes,
+      request.maxOutputTokens ?? null,
+    );
+    const deadlineAtMs = Date.now() + this.timeoutMs;
     const timeoutController = new AbortController();
     const timer = setTimeout(
       () => timeoutController.abort(new Error("Model call timeout.")),
@@ -414,20 +570,30 @@ export class ModelRuntime {
 
     try {
       return await this.lock.run(logicalKey, signal, async () => {
+        diagnostic.queueAcquired();
         for (let logicalAttempt = 0; logicalAttempt < maxAttempts; logicalAttempt += 1) {
           if (signal.aborted) {
-            throw classifyAbort(callerSignal, timeoutController.signal, signal.reason);
+            throw classifyAbort(
+              callerSignal,
+              timeoutController.signal,
+              signal.reason,
+              diagnostic.snapshot(),
+            );
           }
           const attempt = this.attempts.next(logicalKey);
+          diagnostic.attemptStarted();
           const started = performance.now();
           try {
             const operation = this.provider.generate(request, {
               correlationId,
               requestIdentity,
               attempt,
+              deadlineAtMs,
               signal,
+              diagnosticSink: diagnostic.observeProvider,
             });
             const providerResult = await raceWithAbort(operation, signal);
+            diagnostic.providerOperationComplete();
             const response = validateCanonicalModelResponse(providerResult.response, request);
             const responseBytes = Buffer.byteLength(stableModelJson(response), "utf8");
             if (responseBytes > this.maxResponseBytes) {
@@ -455,18 +621,37 @@ export class ModelRuntime {
             });
           } catch (error) {
             const classified = signal.aborted
-              ? classifyAbort(callerSignal, timeoutController.signal, error)
+              ? classifyAbort(
+                callerSignal,
+                timeoutController.signal,
+                error,
+                diagnostic.snapshot(),
+              )
               : asModelProviderError(error);
-            if (signal.aborted || !classified.retryable || logicalAttempt + 1 >= maxAttempts) {
-              throw classified;
+            const failureDiagnostic = diagnostic.snapshot();
+            const remainingLogicalMs = Math.max(0, this.timeoutMs - failureDiagnostic.totalMs);
+            const recoveryCannotFit = classified.code === "rate_limit"
+              && failureDiagnostic.rateLimitRecoveryMs !== null
+              && failureDiagnostic.rateLimitRecoveryMs >= remainingLogicalMs;
+            if (
+              signal.aborted
+              || !classified.retryable
+              || recoveryCannotFit
+              || logicalAttempt + 1 >= maxAttempts
+            ) {
+              throw withModelFailureDiagnostic(classified, failureDiagnostic);
             }
+            diagnostic.retryStarted();
           }
         }
         throw new ModelProviderError("unavailable", "Model call exhausted its attempts.");
       });
     } catch (error) {
-      if (signal.aborted) throw classifyAbort(callerSignal, timeoutController.signal, error);
-      throw asModelProviderError(error);
+      const snapshot = diagnostic.snapshot();
+      if (signal.aborted) {
+        throw classifyAbort(callerSignal, timeoutController.signal, error, snapshot);
+      }
+      throw withModelFailureDiagnostic(asModelProviderError(error), snapshot);
     } finally {
       clearTimeout(timer);
     }

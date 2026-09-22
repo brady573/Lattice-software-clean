@@ -302,6 +302,12 @@ export function renderSolandraConversationPage(): string {
 
       const productFailureMessage = (status, body) => {
         if (body?.error === "RESOURCE_SCOPE_UNSUPPORTED" && typeof body.message === "string") return body.message;
+        if (body?.error === "CONSULTATION_COGNITION_TIMEOUT") {
+          return "Solandra's model service didn't complete this turn within its current time limit. Your earlier established result is unchanged, and your draft is still here so you can try again.";
+        }
+        if (body?.error === "CONSULTATION_COGNITION_UNAVAILABLE") {
+          return "Solandra's model service is temporarily unavailable for this turn. Your earlier established result is unchanged, and your draft is still here so you can try again.";
+        }
         if (status === 401 || status === 403 || status === 404) return "I can't recover that conversation for this signed-in user.";
         if (status === 409) return "That work changed before I could finish. I kept the last trustworthy result so you can revise your request and try again.";
         if (status === 422) return "I couldn't complete that request as written. Your draft is still here so you can revise it and try again.";

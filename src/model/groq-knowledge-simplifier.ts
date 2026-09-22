@@ -1,5 +1,6 @@
 import { ModelProviderError } from "./errors.js";
 import {
+  GroqRateLimitDeadlineError,
   groqRateLimitScopeId,
   sharedMemoryGroqRateLimitCoordinator,
   type GroqRateLimitCoordinator,
@@ -68,6 +69,12 @@ function secondsToMilliseconds(value: string | null): number | null {
   if (!Number.isFinite(seconds) || seconds < 0) return null;
   const milliseconds = Math.ceil(seconds * 1_000);
   return Number.isSafeInteger(milliseconds) ? milliseconds : null;
+}
+
+function nonNegativeHeaderInteger(value: string | null): number | null {
+  if (value === null || !/^\d+$/u.test(value.trim())) return null;
+  const parsed = Number(value.trim());
+  return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : null;
 }
 
 function groqDurationMilliseconds(value: string | null): number | null {
@@ -176,7 +183,13 @@ export class GroqKnowledgeSimplifierModelProvider implements ModelProvider {
     }
 
     try {
-      await this.rateLimitCoordinator.waitUntilReady(this.rateLimitScopeId, context.signal);
+      context.diagnosticSink?.({ kind: "rate_limit_wait_start" });
+      await this.rateLimitCoordinator.waitUntilReady(
+        this.rateLimitScopeId,
+        context.signal,
+        context.deadlineAtMs,
+      );
+      context.diagnosticSink?.({ kind: "rate_limit_wait_complete" });
     } catch (error) {
       if (context.signal.aborted) {
         throw new ModelProviderError(
@@ -185,10 +198,18 @@ export class GroqKnowledgeSimplifierModelProvider implements ModelProvider {
           { cause: error },
         );
       }
+      if (error instanceof GroqRateLimitDeadlineError) {
+        throw new ModelProviderError(
+          "rate_limit",
+          "Groq Knowledge simplifier capacity cannot recover within the current model-call deadline.",
+          { cause: error },
+        );
+      }
       throw error;
     }
 
     let response: Response;
+    context.diagnosticSink?.({ kind: "provider_request_start" });
     try {
       response = await this.fetchImpl(`${GROQ_KNOWLEDGE_SIMPLIFIER_BASE_URL}/chat/completions`, {
         method: "POST",
@@ -225,11 +246,30 @@ export class GroqKnowledgeSimplifierModelProvider implements ModelProvider {
       );
     }
 
+    const rateLimitLimitTokens = nonNegativeHeaderInteger(response.headers.get("x-ratelimit-limit-tokens"));
+    const rateLimitRemainingTokens = nonNegativeHeaderInteger(response.headers.get("x-ratelimit-remaining-tokens"));
+    const rateLimitResetTokensMs = groqDurationMilliseconds(response.headers.get("x-ratelimit-reset-tokens"));
+    context.diagnosticSink?.({
+      kind: "provider_response_headers",
+      statusCode: response.status,
+      rateLimitLimitTokens,
+      rateLimitRemainingTokens,
+      rateLimitResetTokensMs,
+    });
     const text = await readBoundedText(response, this.maxResponseBytes);
+    context.diagnosticSink?.({ kind: "provider_request_complete" });
+    if (response.ok && rateLimitRemainingTokens === 0 && rateLimitResetTokensMs !== null && rateLimitResetTokensMs > 0) {
+      await this.rateLimitCoordinator.extendBlockedUntil(
+        this.rateLimitScopeId,
+        this.now() + rateLimitResetTokensMs,
+        context.signal,
+      );
+    }
     if (!response.ok) {
       if (response.status === 429) {
         const delayMs = recoveryDelayMilliseconds(response, text);
         if (delayMs !== null) {
+          context.diagnosticSink?.({ kind: "rate_limit_recovery", delayMs });
           await this.rateLimitCoordinator.extendBlockedUntil(
             this.rateLimitScopeId,
             this.now() + delayMs,
@@ -322,6 +362,9 @@ export class GroqKnowledgeSimplifierModelProvider implements ModelProvider {
         promptTokens,
         completionTokens,
         totalTokens,
+        rateLimitLimitTokens,
+        rateLimitRemainingTokens,
+        rateLimitResetTokensMs,
       },
       route: {
         actualProvider: GROQ_KNOWLEDGE_SIMPLIFIER_PROVIDER,

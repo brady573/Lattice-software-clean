@@ -210,8 +210,69 @@ def test_action_preparation_is_not_submitted_after_decision_failure() -> None:
             )
         raise AssertionError(f"Unexpected stage {label}")
 
+    waits: list[float] = []
     with pytest.raises(AssertionError, match="DECISION: run outcome returned HTTP 422"):
-        validator._exercise_product_journey(submit)
+        validator._exercise_product_journey(submit, waits.append)
 
     assert labels == ["KNOWLEDGE", "AMBIGUITY_SETUP", "AMBIGUITY", "DECISION"]
+    assert waits == [
+        validator.NORMAL_USER_INTER_TURN_DWELL_SECONDS,
+        validator.NORMAL_USER_INTER_TURN_DWELL_SECONDS,
+        validator.NORMAL_USER_INTER_TURN_DWELL_SECONDS,
+    ]
     assert "ACTION_PREPARATION" not in labels
+
+
+def test_product_journey_paces_only_between_distinct_user_turns() -> None:
+    labels: list[str] = []
+    waits: list[float] = []
+
+    def submit(_prompt: str, label: str) -> validator.StageResult:
+        labels.append(label)
+        if label == "KNOWLEDGE":
+            assert waits == [], "first Product turn must not be preceded by validator dwell"
+            return _stage(label, "Knowledge response.")
+        if label == "AMBIGUITY_SETUP":
+            assert waits == [validator.NORMAL_USER_INTER_TURN_DWELL_SECONDS]
+            return _stage(label, "Setup response.")
+        if label == "AMBIGUITY":
+            return _stage(label, "Which tradeoff matters more here?", turn_body=_clarification_body())
+        if label == "DECISION":
+            return _stage(
+                label,
+                "Choose the RAM option.",
+                turn_body={
+                    "status": "CONVERSATION_COMPLETED",
+                    "recommendationReference": {
+                        "selectionAuthorized": False,
+                        "options": [{"recommended": True}],
+                    },
+                },
+            )
+        if label == "ACTION_PREPARATION":
+            return _stage(
+                label,
+                "I prepared editable material. Nothing has been sent or executed.",
+                turn_body={
+                    "status": "CONVERSATION_COMPLETED",
+                    "preparationReference": {"executionAuthorized": False},
+                    "outcome": {
+                        "resource": {
+                            "body": "Please approve the RAM-focused laptop option.",
+                            "executionAuthorized": False,
+                        }
+                    },
+                },
+            )
+        raise AssertionError(f"Unexpected stage {label}")
+
+    validator._exercise_product_journey(submit, waits.append)
+
+    assert labels == [
+        "KNOWLEDGE",
+        "AMBIGUITY_SETUP",
+        "AMBIGUITY",
+        "DECISION",
+        "ACTION_PREPARATION",
+    ]
+    assert waits == [validator.NORMAL_USER_INTER_TURN_DWELL_SECONDS] * 4

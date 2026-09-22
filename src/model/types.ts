@@ -155,11 +155,34 @@ export interface ModelProviderResult {
   readonly route?: ModelProviderRouteObservation;
 }
 
+export type ModelProviderDiagnosticEvent =
+  | Readonly<{ kind: "rate_limit_wait_start" }>
+  | Readonly<{ kind: "rate_limit_wait_complete" }>
+  | Readonly<{ kind: "provider_request_start" }>
+  | Readonly<{
+    kind: "provider_response_headers";
+    statusCode: number;
+    rateLimitLimitTokens: number | null;
+    rateLimitRemainingTokens: number | null;
+    rateLimitResetTokensMs: number | null;
+  }>
+  | Readonly<{ kind: "provider_request_complete" }>
+  | Readonly<{ kind: "rate_limit_recovery"; delayMs: number }>;
+
+export type ModelProviderDiagnosticSink = (event: ModelProviderDiagnosticEvent) => void;
+
 export interface ModelCallContext {
   readonly correlationId: string;
   readonly requestIdentity: string;
   readonly attempt: number;
+  /** Absolute wall-clock deadline for the current logical model call when known. */
+  readonly deadlineAtMs?: number;
   readonly signal: AbortSignal;
+  /**
+   * Metadata-only operational timing/status observation. Providers must never
+   * emit USER/model content, credentials, authorization data, or raw secrets.
+   */
+  readonly diagnosticSink?: ModelProviderDiagnosticSink;
 }
 
 export interface ModelCallOptions {

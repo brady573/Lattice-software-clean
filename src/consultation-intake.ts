@@ -57,6 +57,10 @@ import {
   renderHistoricalSources,
 } from "./knowledge/knowledge-continuity.js";
 import type { KnowledgeRecord, KnowledgeRecordStore } from "./knowledge/knowledge-record-store.js";
+import {
+  ModelProviderError,
+  type ModelFailureDiagnostic,
+} from "./model/errors.js";
 import { buildRunOutcome } from "./outcome.js";
 import {
   advisoryKnowledge,
@@ -78,6 +82,7 @@ import type { SolandraAdvisoryRuntime } from "./solandra/advisory.js";
 import type { SolandraActionPreparer } from "./solandra/action-preparer.js";
 import {
   isConversationalCognition,
+  type SolandraCognitionOperationalDiagnostic,
   type SolandraCognitionResult,
   type SolandraCognitiveRuntime,
   type SolandraConversationContextTurn,
@@ -91,6 +96,58 @@ const IDEMPOTENCY_RETENTION_MS = 24 * 60 * 60 * 1_000;
 const MAX_RUN_CONTEXT_ITEMS = 32;
 const MAX_COGNITIVE_HISTORY_ITEMS = 12;
 const MAX_ADVISORY_KNOWLEDGE_ROUNDS = 2;
+const MODEL_CALL_DIAGNOSTIC_HEADER = "x-lattice-model-call-diagnostic";
+
+function clientModelCallDiagnostic(
+  diagnostic: ModelFailureDiagnostic | SolandraCognitionOperationalDiagnostic,
+): string {
+  const clientSafe: Record<string, unknown> = { ...diagnostic };
+  delete clientSafe.rateLimitLimitTokens;
+  delete clientSafe.rateLimitRemainingTokens;
+  delete clientSafe.rateLimitResetTokensMs;
+  delete clientSafe.rateLimitRecoveryMs;
+  return JSON.stringify(clientSafe);
+}
+
+type ConsultationInterpretationFailure = Readonly<{
+  statusCode: 422 | 503;
+  error:
+    | "CONSULTATION_INTERPRETATION_FAILED"
+    | "CONSULTATION_COGNITION_TIMEOUT"
+    | "CONSULTATION_COGNITION_UNAVAILABLE";
+  message: string;
+}>;
+
+function consultationInterpretationFailure(error: unknown): ConsultationInterpretationFailure {
+  if (error instanceof ModelProviderError) {
+    if (error.code === "timeout") {
+      return {
+        statusCode: 503,
+        error: "CONSULTATION_COGNITION_TIMEOUT",
+        message: "Solandra's cognition model route did not complete within its bounded runtime budget.",
+      };
+    }
+    if (
+      error.code === "rate_limit"
+      || error.code === "unavailable"
+      || error.code === "unsupported_capability"
+    ) {
+      return {
+        statusCode: 503,
+        error: "CONSULTATION_COGNITION_UNAVAILABLE",
+        message: error.code === "unsupported_capability"
+          ? "Solandra's configured cognition model route does not provide the required capability."
+          : "Solandra's cognition model route is temporarily unavailable.",
+      };
+    }
+  }
+
+  return {
+    statusCode: 422,
+    error: "CONSULTATION_INTERPRETATION_FAILED",
+    message: error instanceof Error ? error.message : "Consultation interpretation failed.",
+  };
+}
 
 const consultationTurnSchema = z.object({
   turnId: z.string().min(1).max(200),
@@ -907,6 +964,9 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
               ? { pendingIntentProposal: pendingIntentProposalContext(clarificationProposal) }
               : {}),
           });
+          if (cognitionResult.operationalDiagnostic !== undefined) {
+            reply.header(MODEL_CALL_DIAGNOSTIC_HEADER, clientModelCallDiagnostic(cognitionResult.operationalDiagnostic));
+          }
           if (
             !isConversationalCognition(cognitionResult)
             && cognitionResult.proposal.requestedHelp === "CONFIRM_INTENT"
@@ -975,8 +1035,18 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
           });
         }
       } catch (error) {
-        const message = error instanceof Error ? error.message : "Consultation interpretation failed.";
-        return reply.status(422).send({ error: "CONSULTATION_INTERPRETATION_FAILED", message });
+        const failure = consultationInterpretationFailure(error);
+        if (
+          failure.statusCode === 503
+          && error instanceof ModelProviderError
+          && error.diagnostic !== null
+        ) {
+          reply.header(MODEL_CALL_DIAGNOSTIC_HEADER, clientModelCallDiagnostic(error.diagnostic));
+        }
+        return reply.status(failure.statusCode).send({
+          error: failure.error,
+          message: failure.message,
+        });
       }
 
       if (
@@ -1355,6 +1425,9 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
             knowledge: governed.map(advisoryKnowledge),
           });
         } catch (error) {
+          if (error instanceof ModelProviderError && error.diagnostic !== null) {
+            reply.header(MODEL_CALL_DIAGNOSTIC_HEADER, clientModelCallDiagnostic(error.diagnostic));
+          }
           const message = error instanceof Error ? error.message : "Solandra advisory reasoning failed.";
           return reply.status(422).send({ error: "SOLANDRA_ADVISORY_FAILED", message });
         }
@@ -1799,6 +1872,9 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
           knowledge: governedKnowledge.map(advisoryKnowledge),
         });
       } catch (error) {
+        if (error instanceof ModelProviderError && error.diagnostic !== null) {
+          reply.header(MODEL_CALL_DIAGNOSTIC_HEADER, clientModelCallDiagnostic(error.diagnostic));
+        }
         const message = error instanceof Error ? error.message : "Solandra advisory reasoning failed.";
         return reply.status(422).send({ error: "SOLANDRA_ADVISORY_FAILED", message });
       }
