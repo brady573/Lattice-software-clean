@@ -196,7 +196,7 @@ const config = resolveRuntimeConfig({
 } as NodeJS.ProcessEnv);
 
 function clientModelCallDiagnostic(
-  header: string | string[] | undefined,
+  header: string | number | string[] | undefined,
 ): Record<string, unknown> {
   assert.equal(typeof header, "string");
   if (typeof header !== "string") {
