@@ -26,6 +26,11 @@ on:
         required: false
         default: ''
         type: string
+      validator_deploy_id_before:
+        description: Optional externally verified canonical validator deploy ID immediately before the run
+        required: false
+        default: ''
+        type: string
   deployment_status:
 
 permissions:
@@ -162,6 +167,7 @@ jobs:
           DEPLOYED_BASE_URL: ${{ steps.resolve.outputs.product_target }}
           EXPECTED_PRODUCT_SHA: 6ef1d7ab6110cec0197fc93fb7c71ac17c6902a6
           HISTORICAL_CASES_JSON: ${{ inputs.historical_cases_json }}
+          VALIDATOR_DEPLOY_ID_BEFORE: ${{ inputs.validator_deploy_id_before }}
         run: |
           set -euo pipefail
           test -z "${LATTICE_OWNER_ACCESS_TOKEN+x}"

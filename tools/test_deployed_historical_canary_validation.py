@@ -147,6 +147,7 @@ def test_workflow_keeps_baseline_automatic_behavior_and_isolates_historical_owne
     workflow = Path(".github/workflows/deployed-functional-validation.yml").read_text(encoding="utf-8")
     assert "validation_profile:" in workflow
     assert "historical_cases_json:" in workflow
+    assert "validator_deploy_id_before:" in workflow
     assert "steps.resolve.outputs.validation_profile == 'baseline'" in workflow
     assert "steps.freshness.outputs.should_run == 'true'" in workflow
     assert "cancel-in-progress: ${{ github.event_name == 'deployment_status' }}" in workflow
@@ -160,6 +161,7 @@ def test_workflow_keeps_baseline_automatic_behavior_and_isolates_historical_owne
     assert "test -z \"${LATTICE_OWNER_ACCESS_TOKEN+x}\"" in historical_step
     assert "secrets.LATTICE_OWNER_ACCESS_TOKEN" not in historical_step
     assert "tools/deployed_historical_canary_validation.py" in historical_step
+    assert "VALIDATOR_DEPLOY_ID_BEFORE: ${{ inputs.validator_deploy_id_before }}" in historical_step
 
     upload_step = workflow.split("- name: Upload historical canary evidence", 1)[1]
     assert "always()" in upload_step

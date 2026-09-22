@@ -84,6 +84,10 @@ def _sanitize(value: Any) -> Any:
     return value
 
 
+def _evidence_pair(value: Any) -> dict[str, Any]:
+    return {"raw": value, "sanitized": _sanitize(value)}
+
+
 def _write_json(name: str, value: Any) -> str:
     RESULT_DIR.mkdir(parents=True, exist_ok=True)
     path = RESULT_DIR / name
@@ -426,8 +430,8 @@ def _knowledge_follow_up_case(
     seed_continuity = _continuity(page, seed.conversation_id, f"{case_id}-continuity-seed")
     result: dict[str, Any] = {
         "status": "REACHED",
-        "seed": asdict(seed),
-        "seedContinuity": seed_continuity,
+        "seed": _evidence_pair(asdict(seed)),
+        "seedContinuity": _evidence_pair(seed_continuity),
         "followUp": None,
         "limitations": [],
     }
@@ -471,10 +475,10 @@ def _knowledge_follow_up_case(
         "producedReference": produced[-1],
         "sourceProvenance": _source_provenance(knowledge_before),
         "runCountBeforeFollowUp": before_runs,
-        "knowledgeBefore": knowledge_before,
-        "followUp": asdict(follow),
+        "knowledgeBefore": _evidence_pair(knowledge_before),
+        "followUp": _evidence_pair(asdict(follow)),
         "followUpKnowledgeReference": final_reference if isinstance(final_reference, dict) else None,
-        "followUpContinuity": after_continuity,
+        "followUpContinuity": _evidence_pair(after_continuity),
         "followUpUserMessageId": follow_message_id,
         "consumedReference": consumed[-1] if consumed else None,
         "parentProducedRelationship": {
@@ -486,7 +490,7 @@ def _knowledge_follow_up_case(
             ),
         },
         "runCountAfterFollowUp": _run_count(after_continuity),
-        "knowledgeAfter": knowledge_after,
+        "knowledgeAfter": _evidence_pair(knowledge_after),
         "knowledgeJsonExactlyUnchanged": knowledge_before.get("body") == knowledge_after.get("body"),
         "solandraResponseAuthority": _solandra_authority(after_continuity, follow_message_id),
         "structuralObservations": {
@@ -522,8 +526,8 @@ def _case_44(page: Page, prompt: str) -> dict[str, Any]:
     status = "BLOCKED" if _turn_failed(turn) else ("INVALID" if knowledge or produced_knowledge else "REACHED")
     return {
         "status": status,
-        "turn": asdict(turn),
-        "continuity": continuity,
+        "turn": _evidence_pair(asdict(turn)),
+        "continuity": _evidence_pair(continuity),
         "userMessageId": user_message_id,
         "solandraResponseAuthority": _solandra_authority(continuity, user_message_id),
         "createdRuns": body.get("runs") if isinstance(body.get("runs"), list) else [],
