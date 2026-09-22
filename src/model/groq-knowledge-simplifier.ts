@@ -70,6 +70,12 @@ function secondsToMilliseconds(value: string | null): number | null {
   return Number.isSafeInteger(milliseconds) ? milliseconds : null;
 }
 
+function nonNegativeHeaderInteger(value: string | null): number | null {
+  if (value === null || !/^\d+$/u.test(value.trim())) return null;
+  const parsed = Number(value.trim());
+  return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : null;
+}
+
 function groqDurationMilliseconds(value: string | null): number | null {
   const text = value?.trim() ?? "";
   if (!text) return null;
@@ -175,8 +181,10 @@ export class GroqKnowledgeSimplifierModelProvider implements ModelProvider {
       );
     }
 
+    context.diagnosticSink?.({ kind: "rate_limit_wait_start" });
     try {
       await this.rateLimitCoordinator.waitUntilReady(this.rateLimitScopeId, context.signal);
+      context.diagnosticSink?.({ kind: "rate_limit_wait_complete" });
     } catch (error) {
       if (context.signal.aborted) {
         throw new ModelProviderError(
@@ -189,6 +197,7 @@ export class GroqKnowledgeSimplifierModelProvider implements ModelProvider {
     }
 
     let response: Response;
+    context.diagnosticSink?.({ kind: "provider_request_start" });
     try {
       response = await this.fetchImpl(`${GROQ_KNOWLEDGE_SIMPLIFIER_BASE_URL}/chat/completions`, {
         method: "POST",
@@ -225,11 +234,20 @@ export class GroqKnowledgeSimplifierModelProvider implements ModelProvider {
       );
     }
 
+    context.diagnosticSink?.({
+      kind: "provider_response_headers",
+      statusCode: response.status,
+      rateLimitLimitTokens: nonNegativeHeaderInteger(response.headers.get("x-ratelimit-limit-tokens")),
+      rateLimitRemainingTokens: nonNegativeHeaderInteger(response.headers.get("x-ratelimit-remaining-tokens")),
+      rateLimitResetTokensMs: groqDurationMilliseconds(response.headers.get("x-ratelimit-reset-tokens")),
+    });
     const text = await readBoundedText(response, this.maxResponseBytes);
+    context.diagnosticSink?.({ kind: "provider_request_complete" });
     if (!response.ok) {
       if (response.status === 429) {
         const delayMs = recoveryDelayMilliseconds(response, text);
         if (delayMs !== null) {
+          context.diagnosticSink?.({ kind: "rate_limit_recovery", delayMs });
           await this.rateLimitCoordinator.extendBlockedUntil(
             this.rateLimitScopeId,
             this.now() + delayMs,

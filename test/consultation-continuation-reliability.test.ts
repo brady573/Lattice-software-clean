@@ -309,6 +309,30 @@ test("ordinary governed continuations expose timeout truthfully and exact replay
         error: "CONSULTATION_COGNITION_TIMEOUT",
         message: "Solandra's cognition model route did not complete within its bounded runtime budget.",
       });
+      const diagnosticHeader = timedOut.headers["x-lattice-model-call-diagnostic"];
+      assert.equal(typeof diagnosticHeader, "string");
+      if (typeof diagnosticHeader !== "string") {
+        throw new Error("Expected model-call diagnostic response header.");
+      }
+      const diagnostic = JSON.parse(diagnosticHeader) as {
+        timeoutPhase: string;
+        providerRequestMs: number;
+        totalMs: number;
+        attemptsStarted: number;
+        retryCount: number;
+        requestBytes: number;
+        maxOutputTokens: number | null;
+      };
+      assert.equal(diagnostic.timeoutPhase, "PROVIDER_REQUEST");
+      assert.equal(diagnostic.attemptsStarted, 1);
+      assert.equal(diagnostic.retryCount, 0);
+      assert.equal(diagnostic.maxOutputTokens, 1_600);
+      assert.ok(diagnostic.providerRequestMs > 0);
+      assert.ok(diagnostic.totalMs >= 30);
+      assert.ok(diagnostic.requestBytes > 0);
+      const serializedDiagnostic = JSON.stringify(diagnostic);
+      assert.equal(serializedDiagnostic.includes(heldOut.followUp), false);
+      assert.equal(serializedDiagnostic.includes(heldOut.seed), false);
       assert.equal(provider.calls, 2, "logical timeout must remain terminal inside the first failed call");
 
       const afterTimeout = await continuity(app, conversationId);

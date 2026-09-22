@@ -92,6 +92,7 @@ const IDEMPOTENCY_RETENTION_MS = 24 * 60 * 60 * 1_000;
 const MAX_RUN_CONTEXT_ITEMS = 32;
 const MAX_COGNITIVE_HISTORY_ITEMS = 12;
 const MAX_ADVISORY_KNOWLEDGE_ROUNDS = 2;
+const MODEL_CALL_DIAGNOSTIC_HEADER = "x-lattice-model-call-diagnostic";
 
 type ConsultationInterpretationFailure = Readonly<{
   statusCode: 422 | 503;
@@ -1017,6 +1018,13 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
         }
       } catch (error) {
         const failure = consultationInterpretationFailure(error);
+        if (
+          failure.statusCode === 503
+          && error instanceof ModelProviderError
+          && error.diagnostic !== null
+        ) {
+          reply.header(MODEL_CALL_DIAGNOSTIC_HEADER, JSON.stringify(error.diagnostic));
+        }
         return reply.status(failure.statusCode).send({
           error: failure.error,
           message: failure.message,
