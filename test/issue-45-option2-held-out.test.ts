@@ -6,6 +6,10 @@ import type {
   KnowledgeAcquisitionRequest,
   KnowledgeAcquisitionResult,
 } from "../src/knowledge/acquisition.js";
+import {
+  ModelProviderError,
+  type ModelFailureDiagnostic,
+} from "../src/model/errors.js";
 import type { ModelInvocationProvenance } from "../src/model/types.js";
 import { createRuntimeApp } from "../src/runtime-app.js";
 import { resolveRuntimeConfig } from "../src/runtime-config.js";
@@ -89,6 +93,62 @@ class EveningTaskCognition implements SolandraCognitiveRuntime {
   }
 }
 
+function advisoryFailureDiagnostic(maxOutputTokens: 2_000 | 1_200): ModelFailureDiagnostic {
+  return Object.freeze({
+    timeoutPhase: "RATE_LIMIT_WAIT",
+    queueMs: 0.25,
+    rateLimitWaitMs: 29_500,
+    providerRequestMs: 42.5,
+    retryMs: 12.75,
+    totalMs: 30_001,
+    attemptsStarted: 2,
+    retryCount: 1,
+    providerStatus: 429,
+    rateLimitRecoveryMs: 42_285,
+    rateLimitLimitTokens: 8_000,
+    rateLimitRemainingTokens: 0,
+    rateLimitResetTokensMs: 42_285,
+    requestBytes: 4_096,
+    maxOutputTokens,
+  });
+}
+
+class FailingAdvisory implements SolandraAdvisoryRuntime {
+  constructor(private readonly diagnostic: ModelFailureDiagnostic) {}
+
+  async advise(_input: SolandraAdvisoryInput): Promise<SolandraAdvisoryRuntimeResult> {
+    throw new ModelProviderError("timeout", "Model call exceeded its timeout.", {
+      retryable: true,
+      statusCode: 429,
+      diagnostic: this.diagnostic,
+    });
+  }
+}
+
+function assertClientAdvisoryDiagnostic(
+  header: string | number | string[] | undefined,
+  maxOutputTokens: 2_000 | 1_200,
+): void {
+  assert.equal(typeof header, "string");
+  if (typeof header !== "string") throw new Error("Expected advisory diagnostic header.");
+  const diagnostic = JSON.parse(header) as Record<string, unknown>;
+  assert.equal(diagnostic.timeoutPhase, "RATE_LIMIT_WAIT");
+  assert.equal(diagnostic.queueMs, 0.25);
+  assert.equal(diagnostic.rateLimitWaitMs, 29_500);
+  assert.equal(diagnostic.providerRequestMs, 42.5);
+  assert.equal(diagnostic.retryMs, 12.75);
+  assert.equal(diagnostic.totalMs, 30_001);
+  assert.equal(diagnostic.attemptsStarted, 2);
+  assert.equal(diagnostic.retryCount, 1);
+  assert.equal(diagnostic.providerStatus, 429);
+  assert.equal(diagnostic.requestBytes, 4_096);
+  assert.equal(diagnostic.maxOutputTokens, maxOutputTokens);
+  assert.equal("rateLimitLimitTokens" in diagnostic, false);
+  assert.equal("rateLimitRemainingTokens" in diagnostic, false);
+  assert.equal("rateLimitResetTokensMs" in diagnostic, false);
+  assert.equal("rateLimitRecoveryMs" in diagnostic, false);
+}
+
 class EveningTaskAdvisory implements SolandraAdvisoryRuntime {
   async advise(input: SolandraAdvisoryInput): Promise<SolandraAdvisoryRuntimeResult> {
     assert.deepEqual(input.knowledge, []);
@@ -113,6 +173,41 @@ class EveningTaskAdvisory implements SolandraAdvisoryRuntime {
 }
 
 const EVENING_MESSAGE = "I want an easy way to decide what small household task to do after work; I care about finishing quickly and keeping the rest of the evening flexible.";
+
+test("advisory generation failure preserves 422 contract and surfaces only sanitized model diagnostics", async () => {
+  const config = resolveRuntimeConfig({
+    LATTICE_DEPLOYMENT_MODE: "development",
+    LATTICE_TRUTH_MODE: "v36-offline",
+    LATTICE_AUTHENTICATION_MODE: "development-fixture",
+    LATTICE_DEVELOPMENT_FIXTURE_SUBJECT_ID: "issue-45-advisory-generation-diagnostic-user",
+  } as NodeJS.ProcessEnv);
+  const app = await createRuntimeApp(config, {
+    memoryDispatchDelayMs: 1,
+    solandraCognition: new EveningTaskCognition(),
+    solandraAdvisory: new FailingAdvisory(advisoryFailureDiagnostic(2_000)),
+  });
+  try {
+    const created = await app.inject({ method: "POST", url: "/api/v1/conversations" });
+    const conversationId = created.json().conversation.id as string;
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/v1/conversations/${conversationId}/turns`,
+      payload: { turnId: "advisory-generation-diagnostic", message: EVENING_MESSAGE },
+    });
+
+    assert.equal(response.statusCode, 422, response.body);
+    assert.deepEqual(response.json(), {
+      error: "SOLANDRA_ADVISORY_FAILED",
+      message: "Model call exceeded its timeout.",
+    });
+    assertClientAdvisoryDiagnostic(
+      response.headers["x-lattice-model-call-diagnostic"],
+      2_000,
+    );
+  } finally {
+    await app.close();
+  }
+});
 
 test("Issue #45 Option 2 held-out: ordinary goal-only advice keeps Solandra proposal identity separate through follow-up and USER acceptance", async () => {
   const config = resolveRuntimeConfig({
@@ -260,6 +355,52 @@ async function waitForCompleted(app: FastifyInstance, runId: string): Promise<vo
   }
   throw new Error("Held-out external-Knowledge Run did not complete.");
 }
+
+test("advisory grounding failure on completed Run preserves 422 contract and surfaces only sanitized model diagnostics", async () => {
+  const acquisition = new BicycleAcquisition();
+  const config = resolveRuntimeConfig({
+    LATTICE_DEPLOYMENT_MODE: "development",
+    LATTICE_TRUTH_MODE: "v36-live",
+  } as NodeJS.ProcessEnv);
+  const app = await createRuntimeApp(config, {
+    memoryDispatchDelayMs: 1,
+    truthPipeline: new KnowledgeAcquisitionTruthPipeline(acquisition),
+    solandraCognition: new BicycleCognition(),
+    solandraAdvisory: new FailingAdvisory(advisoryFailureDiagnostic(1_200)),
+  });
+  try {
+    const created = await app.inject({ method: "POST", url: "/api/v1/conversations" });
+    const conversationId = created.json().conversation.id as string;
+    const turn = await app.inject({
+      method: "POST",
+      url: `/api/v1/conversations/${conversationId}/turns`,
+      payload: { turnId: "advisory-grounding-diagnostic", message: STORAGE_MESSAGE },
+    });
+    assert.equal(turn.statusCode, 202, turn.body);
+    const runId = turn.json().runId as string;
+    assert.ok(runId);
+    await waitForCompleted(app, runId);
+
+    let outcome;
+    for (let attempt = 0; attempt < 240; attempt += 1) {
+      outcome = await app.inject({ method: "GET", url: `/api/v1/runs/${runId}/outcome` });
+      if (outcome.statusCode !== 202) break;
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    assert.ok(outcome);
+    assert.equal(outcome.statusCode, 422, outcome.body);
+    assert.deepEqual(outcome.json(), {
+      error: "SOLANDRA_ADVISORY_FAILED",
+      message: "Model call exceeded its timeout.",
+    });
+    assertClientAdvisoryDiagnostic(
+      outcome.headers["x-lattice-model-call-diagnostic"],
+      1_200,
+    );
+  } finally {
+    await app.close();
+  }
+});
 
 test("Issue #45 Option 2 held-out: goal-only decision can use governed external Knowledge while proposal wording remains separately classified", async () => {
   const acquisition = new BicycleAcquisition();

@@ -1425,6 +1425,9 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
             knowledge: governed.map(advisoryKnowledge),
           });
         } catch (error) {
+          if (error instanceof ModelProviderError && error.diagnostic !== null) {
+            reply.header(MODEL_CALL_DIAGNOSTIC_HEADER, clientModelCallDiagnostic(error.diagnostic));
+          }
           const message = error instanceof Error ? error.message : "Solandra advisory reasoning failed.";
           return reply.status(422).send({ error: "SOLANDRA_ADVISORY_FAILED", message });
         }
@@ -1869,6 +1872,9 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
           knowledge: governedKnowledge.map(advisoryKnowledge),
         });
       } catch (error) {
+        if (error instanceof ModelProviderError && error.diagnostic !== null) {
+          reply.header(MODEL_CALL_DIAGNOSTIC_HEADER, clientModelCallDiagnostic(error.diagnostic));
+        }
         const message = error instanceof Error ? error.message : "Solandra advisory reasoning failed.";
         return reply.status(422).send({ error: "SOLANDRA_ADVISORY_FAILED", message });
       }
