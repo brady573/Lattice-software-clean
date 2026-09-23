@@ -301,7 +301,7 @@ test("A1 non-responsive acquired material is excluded before V36 and cannot beco
   }
 });
 
-test("A1 high-stakes answer requires explicit domain-authoritative source suitability", async () => {
+test("A1 source suitability metadata remains observable without wording-derived presentation authority", async () => {
   const general = source(
     "home-sale-tax",
     "Home sale tax overview",
@@ -325,12 +325,10 @@ test("A1 high-stakes answer requires explicit domain-authoritative source suitab
     const result = await outcomeFor(app, accepted);
     assert.equal(result.outcome.findings.length, 1);
     assert.equal(result.outcome.provenance[0]?.evidentiarySuitability, "GENERAL_REFERENCE");
-    assert.match(
-      result.presentation.assistantMessage,
-      /^I found relevant background material, but I need an appropriate authoritative source/iu,
-    );
+    assert.match(result.presentation.assistantMessage, /^The retrieved source material reports: A home sale can affect taxes/iu);
     assert.match(result.presentation.assistantMessage, /Home sale tax overview — Knowledge Example/u);
-    assert.doesNotMatch(result.presentation.assistantMessage, /^A home sale can affect taxes/iu);
+    assert.match(result.presentation.assistantMessage, /does not by itself independently verify the broader real-world claim/iu);
+    assert.doesNotMatch(result.presentation.assistantMessage, /authoritative source before I can answer/iu);
   } finally {
     await app.close();
   }
