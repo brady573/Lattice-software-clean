@@ -30,6 +30,9 @@ DECISION_PROMPT = (
 ACTION_PREPARATION_PROMPT = (
     "Draft a short message to my manager recommending that option and asking for approval. Do not send it."
 )
+ISSUE20_LIVE_KNOWLEDGE_PROMPT = "Please research reliable external sources and tell me what causes ocean tides."
+ISSUE20_SIMPLIFICATION_PROMPT = "Could you put that established answer into simpler language without adding new facts?"
+ISSUE20_INTER_TURN_DWELL_SECONDS = 20
 
 
 @dataclass(frozen=True)
@@ -373,6 +376,60 @@ def _exercise_product_journey(submit_turn: Callable[[str, str], StageResult]) ->
         "\n".join(part for part in (action.solandra_text, prepared) if part),
         action_body,
     )
+
+
+def test_issue20_live_historical_knowledge_simplification(page: Page) -> None:
+    page.set_viewport_size({"width": 1440, "height": 1000})
+    _open_product_surface(page)
+
+    established = _submit_turn(page, ISSUE20_LIVE_KNOWLEDGE_PROMPT, "ISSUE20_KNOWLEDGE")
+    established_body = _final_product_body(established)
+    knowledge_reference = established_body.get("knowledgeReference")
+    assert isinstance(knowledge_reference, dict), "Issue #20 live acquisition did not establish governed Knowledge"
+    knowledge_id = knowledge_reference.get("knowledgeId")
+    assert isinstance(knowledge_id, str) and knowledge_id, "Issue #20 live acquisition omitted knowledgeId"
+
+    encoded_knowledge_id = urllib.parse.quote(knowledge_id, safe="")
+    before_response = page.context.request.get(
+        f"{BASE_URL}/api/v1/knowledge/{encoded_knowledge_id}",
+        timeout=TURN_RESPONSE_TIMEOUT_MS,
+    )
+    assert before_response.status == 200, f"Issue #20 pre-transform Knowledge GET returned HTTP {before_response.status}"
+    before_knowledge = _json_object(before_response)
+    assert before_knowledge.get("knowledgeId") == knowledge_id
+    print(f"ISSUE20_ESTABLISHED_KNOWLEDGE_ID={knowledge_id}")
+
+    # Represent ordinary reading/composition time between distinct USER turns.
+    # This is validation pacing only, not Product retry or provider recovery.
+    time.sleep(ISSUE20_INTER_TURN_DWELL_SECONDS)
+
+    simplified = _submit_turn(page, ISSUE20_SIMPLIFICATION_PROMPT, "ISSUE20_SIMPLIFY")
+    assert simplified.turn_http_status == 200, "Issue #20 simplification must resolve as reference help, not a new Run"
+    assert simplified.turn_body.get("status") == "REFERENCE_RESOLVED", (
+        f"Issue #20 simplification expected REFERENCE_RESOLVED, got {simplified.turn_body.get('status')!r}"
+    )
+    simplified_reference = simplified.turn_body.get("knowledgeReference")
+    assert isinstance(simplified_reference, dict), "Issue #20 simplification omitted Knowledge reference"
+    assert simplified_reference.get("knowledgeId") == knowledge_id, "Issue #20 simplification changed Knowledge identity"
+    interpretation = simplified.turn_body.get("interpretation")
+    assert isinstance(interpretation, dict), "Issue #20 simplification omitted cognition interpretation"
+    assert interpretation.get("requestedHelp") == "SIMPLIFY_REFERENCE", (
+        f"Issue #20 ordinary follow-up did not resolve as SIMPLIFY_REFERENCE: {interpretation.get('requestedHelp')!r}"
+    )
+    assert interpretation.get("referencedKnowledgeId") == knowledge_id, (
+        "Issue #20 simplification cognition did not bind the exact historical Knowledge"
+    )
+
+    after_response = page.context.request.get(
+        f"{BASE_URL}/api/v1/knowledge/{encoded_knowledge_id}",
+        timeout=TURN_RESPONSE_TIMEOUT_MS,
+    )
+    assert after_response.status == 200, f"Issue #20 post-transform Knowledge GET returned HTTP {after_response.status}"
+    after_knowledge = _json_object(after_response)
+    assert after_knowledge == before_knowledge, "Issue #20 simplification mutated canonical governed Knowledge"
+    simplified_text = _assistant_text(simplified)
+    assert simplified_text, "Issue #20 simplification returned no visible Solandra presentation"
+    print("ISSUE20_LIVE_HISTORICAL_SIMPLIFICATION=PASS")
 
 
 def test_deployed_solandra_product_journeys(page: Page) -> None:

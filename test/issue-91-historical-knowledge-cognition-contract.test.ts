@@ -141,3 +141,48 @@ test("fresh research remains a valid governed request when new acquisition is ma
   const system = messageContent(request, "system");
   assert.match(system, /Use FRESH_RESEARCH only when the USER materially needs new, updated, or additional external factual acquisition beyond the supplied governed Knowledge/);
 });
+
+
+test("historical Knowledge transformation coreference stays on the governed reference contract", async () => {
+  const knowledgeId = "knowledge_prior_plain_language";
+  const provider = new CapturingCognitionProvider(proposal({
+    requestedHelp: "SIMPLIFY_REFERENCE",
+    referencedKnowledgeId: knowledgeId,
+  }));
+  const cognition = new ModelSolandraCognitiveRuntime(new ModelRuntime(provider), "issue-20-contract-model");
+
+  const result = await cognition.interpret({
+    conversationId: "conversation-prior-plain-language",
+    messageId: "message-prior-plain-language",
+    message: "Can you restate the result we already established so a non-specialist can follow it?",
+    currentObjective: "Understand what the external evidence established about a technical topic.",
+    recentUserMessages: [],
+    governedKnowledge: [{
+      knowledgeId,
+      objective: "Understand what the external evidence established about a technical topic.",
+      findings: [{
+        claimId: "claim-prior-plain-language",
+        status: "SUPPORTED",
+        text: "The established evidence supports the technical result under the stated conditions.",
+      }],
+      sourceCount: 1,
+      uncertainties: ["The result remains bounded to the established conditions."],
+    }],
+  });
+
+  if (isConversationalCognition(result)) assert.fail("expected governed cognition");
+  assert.equal(result.proposal.requestedHelp, "SIMPLIFY_REFERENCE");
+  assert.equal(result.proposal.referencedKnowledgeId, knowledgeId);
+
+  const request = provider.requests.at(-1);
+  assert.ok(request);
+  const system = messageContent(request, "system");
+  assert.match(system, /Historical Knowledge references may be implicit through ordinary conversational coreference/);
+  assert.match(system, /Do not use CONVERSATION to transform prior Solandra factual content when supplied governed Knowledge is the factual basis/);
+  assert.match(system, /use the matching EXPLAIN_REFERENCE or SIMPLIFY_REFERENCE mode/);
+
+  const user = messageContent(request, "user");
+  assert.match(user, new RegExp(`Knowledge ID: ${knowledgeId}`));
+  assert.match(user, /The established evidence supports the technical result under the stated conditions/);
+  assert.match(user, /The result remains bounded to the established conditions/);
+});
