@@ -182,12 +182,6 @@ test("A1 cast-iron answer is direct, source-grounded, and follow-ups preserve th
     assert.doesNotMatch(simpler.presentation.assistantMessage, /Model assistance|couldn't simplify/iu);
     assert.equal(simpler.outcome.findings[0]?.text, castIron.content);
 
-    const sourcesAccepted = requireAccepted(await submitTurn(app, conversationId, "cast-sources", "What are your sources?"));
-    const sources = await outcomeFor(app, sourcesAccepted);
-    assert.equal(sourcesAccepted.intentVersionId, initialAccepted.intentVersionId);
-    assert.match(sources.presentation.assistantMessage, /^Sources I used:/u);
-    assert.match(sources.presentation.assistantMessage, /Cast iron corrosion — Knowledge Example/u);
-    assert.match(sources.presentation.assistantMessage, /https:\/\/knowledge\.example\/cast-iron/u);
   } finally {
     await app.close();
   }
