@@ -2,15 +2,6 @@ import { isConsultationRunRequest, type LatticeRun } from "../../domain.js";
 import type { KnowledgeFinding, KnowledgeOutcome } from "../../outcome.js";
 
 const EMPTY_KNOWLEDGE_MESSAGE = "No validated external findings are sufficiently relevant to this objective.";
-const SOURCE_REQUEST_PATTERN = /\b(?:source|sources|citation|citations|evidence)\b/iu;
-/*
- * Source suitability is a real trust boundary. This lexical applicability check
- * remains isolated debt until cognition can supply the applicability decision
- * without weakening authoritative-source enforcement. Do not expand this list.
- */
-const HIGH_STAKES_SOURCE_PATTERN = /\b(?:tax|taxes|taxation|taxable|legal|law|laws|regulation|regulatory|regulated|compliance|license|licensing|permit|statute|statutory)\b/iu;
-const SOURCE_SUITABILITY_LIMITATION =
-  "I found relevant background material, but I need an appropriate authoritative source before I can answer this kind of question reliably.";
 const GENERIC_INSUFFICIENT_KNOWLEDGE_MESSAGE =
   "I couldn't establish enough relevant evidence to answer that reliably.";
 
@@ -33,22 +24,6 @@ function renderFinding(finding: KnowledgeFinding, text = finding.text): string {
     case "CONFLICTED": return `Material conflict remains: ${text}`;
     case "UNRESOLVED": return `Qualified evidence did not establish this strongly enough: ${text}`;
   }
-}
-
-function runContext(run: LatticeRun): readonly string[] {
-  return isConsultationRunRequest(run.request) ? run.request.context : [];
-}
-
-function sourceRequest(context: readonly string[]): boolean {
-  return SOURCE_REQUEST_PATTERN.test(context.at(-1)?.trim() ?? "");
-}
-
-function requiresAuthoritativeDomainSource(knowledge: KnowledgeOutcome): boolean {
-  return HIGH_STAKES_SOURCE_PATTERN.test(knowledge.objective);
-}
-
-function hasAuthoritativeDomainSource(knowledge: KnowledgeOutcome): boolean {
-  return knowledge.provenance.some((source) => source.evidentiarySuitability === "AUTHORITATIVE_DOMAIN");
 }
 
 function sourceLabel(knowledge: KnowledgeOutcome): string {
@@ -80,10 +55,7 @@ function renderSourceList(knowledge: KnowledgeOutcome): string {
     const publisher = source.publisher ? ` — ${source.publisher}` : "";
     return `- ${title}${publisher}\n  ${source.canonicalUri}`;
   });
-  const suitabilityNote = requiresAuthoritativeDomainSource(knowledge) && !hasAuthoritativeDomainSource(knowledge)
-    ? "\n\nThese are useful background sources, but I have not established an appropriate authoritative source for this kind of question."
-    : "";
-  return `Sources I used:\n${lines.join("\n")}${suitabilityNote}`;
+  return `Sources I used:\n${lines.join("\n")}`;
 }
 
 function renderEmptyKnowledge(knowledge: KnowledgeOutcome): string {
@@ -102,14 +74,6 @@ function renderEmptyKnowledge(knowledge: KnowledgeOutcome): string {
 function renderGovernedAnswer(knowledge: KnowledgeOutcome): string {
   if (knowledge.findings.length === 0) {
     return renderEmptyKnowledge(knowledge);
-  }
-
-  if (
-    knowledge.findings.length > 0
-    && requiresAuthoritativeDomainSource(knowledge)
-    && !hasAuthoritativeDomainSource(knowledge)
-  ) {
-    return [SOURCE_SUITABILITY_LIMITATION, sourceLabel(knowledge)].filter(Boolean).join("\n\n");
   }
 
   const conflicted = knowledge.findings.filter((finding) => finding.status === "CONFLICTED");
@@ -175,7 +139,11 @@ export async function renderKnowledgeResponseForRun(
   knowledge: KnowledgeOutcome,
   run: LatticeRun,
 ): Promise<string> {
-  const context = runContext(run);
-  if (sourceRequest(context)) return renderSourceList(knowledge);
+  if (
+    isConsultationRunRequest(run.request)
+    && run.request.knowledgePresentation === "SOURCES"
+  ) {
+    return renderSourceList(knowledge);
+  }
   return renderGovernedAnswer(knowledge);
 }
