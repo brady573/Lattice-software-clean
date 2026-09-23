@@ -67,7 +67,7 @@ export type ConsultationRunRequest = Omit<ConsultationRequestData, "decisionNeed
   /** Compatibility may omit this; canonical M2 advisory intake materializes it. */
   advisoryRequested?: boolean;
   /** Compatibility may omit this; canonical cognition-backed intake materializes it. */
-  knowledgePresentation?: "ANSWER" | "SOURCES";
+  knowledgePresentation?: "ANSWER" | "SOURCES" | undefined;
   decisionNeed: "NONE" | "UNRESOLVED" | "QUALIFIED";
   resourceNeed: "NONE" | "CHECKLIST" | "PREPARED_MESSAGE";
   /** Compatibility-only absent fields; consultations never require them. */
