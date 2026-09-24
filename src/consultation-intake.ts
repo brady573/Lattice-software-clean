@@ -54,8 +54,11 @@ import {
   governedKnowledgeContext,
   loadKnowledge,
   recentGovernedKnowledge,
-  renderHistoricalSources,
 } from "./knowledge/knowledge-continuity.js";
+import {
+  continueHistoricalKnowledge,
+  type HistoricalKnowledgeReferenceHelp,
+} from "./knowledge/historical-knowledge-continuation.js";
 import type { KnowledgeRecord, KnowledgeRecordStore } from "./knowledge/knowledge-record-store.js";
 import { buildRunOutcome } from "./outcome.js";
 import {
@@ -297,7 +300,7 @@ function publicCognition(result: SolandraCognitionResult | undefined): unknown {
   };
 }
 
-function isReferenceHelp(help: SolandraRequestedHelp): boolean {
+function isReferenceHelp(help: SolandraRequestedHelp): help is HistoricalKnowledgeReferenceHelp {
   return help === "SOURCES_REFERENCE"
     || help === "EXPLAIN_REFERENCE"
     || help === "SIMPLIFY_REFERENCE";
@@ -1151,74 +1154,33 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
         && cognition.proposal.materialAmbiguity === null
         && cognition.proposal.referencedKnowledgeId !== null
       ) {
-        if (!options.knowledgeStore || !options.conversationReferenceStore || !currentVersion) {
-          return reply.status(409).send({
-            error: "GOVERNED_KNOWLEDGE_REFERENCE_UNAVAILABLE",
-            message: "The referenced governed Knowledge is not available in this conversation state.",
-          });
+        const continuation = await continueHistoricalKnowledge({
+          requestedHelp: cognition.proposal.requestedHelp,
+          conversationId,
+          referencedKnowledgeId: cognition.proposal.referencedKnowledgeId,
+          governedKnowledge: cognitiveGovernedKnowledge,
+          userMessageId: sourceMessage.messageId,
+          userMessageCreatedAt: sourceMessage.createdAt,
+          intentScopeId,
+          currentIntentVersionId: currentVersion?.intentVersionId,
+          acceptedUnderstanding: currentVersion ? authoritativeObjective(currentVersion) : undefined,
+          knowledgeStore: options.knowledgeStore,
+          conversationReferenceStore: options.conversationReferenceStore,
+          solandraKnowledgePresenter: options.solandraKnowledgePresenter,
+          interpretation: publicCognition(cognition),
+        });
+        if (continuation.kind === "REFERENCE_RESOLVED") {
+          return reply.status(200).send(continuation.body);
         }
-        const loaded = cognitiveGovernedKnowledge.find((item) =>
-          item.record.knowledgeId === cognition.proposal.referencedKnowledgeId);
-        if (!loaded || loaded.record.conversationId !== conversationId) {
+        if (continuation.kind === "KNOWLEDGE_NOT_FOUND") {
           return reply.status(404).send({ error: "KNOWLEDGE_NOT_FOUND" });
         }
-
-        let assistantMessage: string;
-        if (cognition.proposal.requestedHelp === "SOURCES_REFERENCE") {
-          assistantMessage = renderHistoricalSources(loaded);
-        } else {
-          if (!options.solandraKnowledgePresenter) {
-            return reply.status(503).send({ error: "SOLANDRA_KNOWLEDGE_PRESENTATION_UNAVAILABLE" });
-          }
-          const presented = await options.solandraKnowledgePresenter.present({
-            knowledgeId: loaded.record.knowledgeId,
-            userMessageId: sourceMessage.messageId,
-            mode: cognition.proposal.requestedHelp === "SIMPLIFY_REFERENCE" ? "SIMPLIFY" : "EXPLAIN",
-            knowledge: loaded.knowledge,
-          });
-          if (presented.status === "PRESENTED") {
-            assistantMessage = presented.text;
-          } else if (presented.status === "NEEDS_NEW_KNOWLEDGE") {
-            assistantMessage = [
-              "That transformation would require additional factual Knowledge beyond what is already established. I did not start new research.",
-              "The existing governed Knowledge remains available and unchanged.",
-              renderHistoricalSources(loaded),
-            ].join("\n\n");
-          } else {
-            assistantMessage = presented.text ?? [
-              "I couldn\'t transform the established Knowledge faithfully, so I kept the original governed wording. I did not start new research.",
-              loaded.knowledge.findings.map((finding) => finding.text).join("\\n\\n"),
-              "The existing governed Knowledge remains available and unchanged.",
-              renderHistoricalSources(loaded),
-            ].filter(Boolean).join("\\n\\n");
-          }
+        if (continuation.kind === "SOLANDRA_KNOWLEDGE_PRESENTATION_UNAVAILABLE") {
+          return reply.status(503).send({ error: "SOLANDRA_KNOWLEDGE_PRESENTATION_UNAVAILABLE" });
         }
-
-        const responseId = `knowledge:${loaded.record.knowledgeId}:reference:${sourceMessage.messageId}`;
-        const reference = await recordConversationReference(options, {
-          conversationId,
-          userMessageId: sourceMessage.messageId,
-          responseId,
-          intentVersionId: currentVersion.intentVersionId,
-          targets: [{ kind: "KNOWLEDGE", targetId: loaded.record.knowledgeId, relation: "CONSUMED" }],
-          createdAt: sourceMessage.createdAt,
-        });
-        if (!reference) {
-          return reply.status(409).send({ error: "GOVERNED_KNOWLEDGE_REFERENCE_UNAVAILABLE" });
-        }
-        return reply.status(200).send({
-          status: "REFERENCE_RESOLVED",
-          acceptedUnderstanding: authoritativeObjective(currentVersion),
-          intentScopeId,
-          intentVersionId: currentVersion.intentVersionId,
-          knowledge: loaded.knowledge,
-          knowledgeReference: {
-            knowledgeId: loaded.record.knowledgeId,
-            referenceId: reference.referenceId,
-            responseId: reference.responseId,
-          },
-          presentation: { assistantMessage },
-          interpretation: publicCognition(cognition),
+        return reply.status(409).send({
+          error: "GOVERNED_KNOWLEDGE_REFERENCE_UNAVAILABLE",
+          message: "The referenced governed Knowledge is not available in this conversation state.",
         });
       }
 
