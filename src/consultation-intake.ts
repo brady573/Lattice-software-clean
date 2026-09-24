@@ -233,6 +233,7 @@ function consultationRequest(input: {
   context: readonly string[];
   investigationQueries?: readonly string[];
   advisoryRequested?: boolean;
+  knowledgePresentation?: "ANSWER" | "SOURCES";
   decisionNeed: "NONE" | "UNRESOLVED" | "QUALIFIED";
   resourceNeed: ConsultationResourceNeed;
   sourceMessageId: string;
@@ -247,6 +248,7 @@ function consultationRequest(input: {
     context: [...input.context],
     investigationQueries: [...(input.investigationQueries ?? [])],
     advisoryRequested: input.advisoryRequested ?? false,
+    knowledgePresentation: input.knowledgePresentation ?? "ANSWER",
     decisionNeed: input.decisionNeed,
     resourceNeed: input.resourceNeed,
     sourceMessageId: input.sourceMessageId,
@@ -280,6 +282,7 @@ function publicCognition(result: SolandraCognitionResult | undefined): unknown {
     objectiveRelation: result.proposal.objectiveRelation,
     proposedObjective: result.proposal.proposedObjective,
     requestedHelp: result.proposal.requestedHelp,
+    knowledgePresentation: result.proposal.knowledgePresentation ?? "ANSWER",
     entities: result.proposal.entities,
     referents: result.proposal.referents,
     constraints: result.proposal.constraints,
@@ -1430,6 +1433,13 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
         });
       }
       const advisoryRequested = cognition?.proposal.requestedHelp === "DECISION";
+      const knowledgePresentation = cognition
+        && (
+          cognition.proposal.requestedHelp === "KNOWLEDGE"
+          || cognition.proposal.requestedHelp === "FRESH_RESEARCH"
+        )
+        ? cognition.proposal.knowledgePresentation ?? "ANSWER"
+        : "ANSWER";
       const investigationQueries = cognition
         && (
           cognition.proposal.requestedHelp === "KNOWLEDGE"
@@ -1443,6 +1453,7 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
         context: runContext,
         investigationQueries,
         advisoryRequested,
+        knowledgePresentation,
         decisionNeed: qualification.decisionNeed,
         resourceNeed: interpretation.resourceNeed,
         sourceMessageId: sourceMessage.messageId,
@@ -1468,6 +1479,7 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
           context: requestBody.context,
           investigationQueries: requestBody.investigationQueries,
           advisoryRequested: requestBody.advisoryRequested,
+          knowledgePresentation: requestBody.knowledgePresentation,
           decisionNeed: requestBody.decisionNeed,
           resourceNeed: requestBody.resourceNeed,
         },

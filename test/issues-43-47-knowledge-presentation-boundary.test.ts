@@ -114,10 +114,14 @@ async function present(output: unknown, mode: "EXPLAIN" | "SIMPLIFY" = "EXPLAIN"
   });
 }
 
-function run(objective: string): LatticeRun {
+function run(
+  objective: string,
+  knowledgePresentation: "ANSWER" | "SOURCES" = "ANSWER",
+  context: string[] = [],
+): LatticeRun {
   return {
     id: "11111111-1111-4111-8111-111111111111",
-    request: { kind: "consultation", objective, context: [] },
+    request: { kind: "consultation", objective, context, knowledgePresentation },
   } as unknown as LatticeRun;
 }
 
@@ -226,4 +230,45 @@ test("#47 canonical finding order does not let first-sentence position erase a g
   const response = await renderKnowledgeResponseForRun(value, run(value.objective));
   assert.match(response, /The interface remains stable\./u);
   assert.match(response, /Compatibility is preserved only when clients rely on the documented contract\./u);
+});
+
+
+test("#47 typed source-list presentation is structural and ignores source-like context words", async () => {
+  const value = knowledge();
+  const before = structuredClone(value);
+
+  const answer = await renderKnowledgeResponseForRun(
+    value,
+    run(value.objective, "ANSWER", ["Please include sources, citations, evidence, tax, law, and permit."]),
+  );
+  const sources = await renderKnowledgeResponseForRun(
+    value,
+    run("Present the established material in the requested form.", "SOURCES", ["Lead with where the material came from."]),
+  );
+
+  assert.doesNotMatch(answer, /^Sources I used:/u);
+  assert.ok(answer.includes(GOVERNED));
+  assert.match(sources, /^Sources I used:/u);
+  assert.match(sources, /Governed source — Knowledge Example/u);
+  assert.match(sources, /https:\/\/knowledge\.example\/governed/u);
+  assert.deepEqual(value, before);
+  assert.equal(value.provenance[0]?.evidentiarySuitability, "GENERAL_REFERENCE");
+});
+
+test("#47 wording alone cannot fabricate or bypass Knowledge authority behavior", async () => {
+  const neutral = knowledge();
+  neutral.findings = [neutral.findings[0]!];
+  neutral.uncertainties = [];
+
+  const lexical = structuredClone(neutral);
+  lexical.objective = "The internal label includes source evidence tax law permit; present the governed finding.";
+  lexical.acceptedUnderstanding = lexical.objective;
+
+  const neutralResponse = await renderKnowledgeResponseForRun(neutral, run(neutral.objective));
+  const lexicalResponse = await renderKnowledgeResponseForRun(lexical, run(lexical.objective));
+
+  assert.equal(lexicalResponse, neutralResponse);
+  assert.ok(lexicalResponse.includes(GOVERNED));
+  assert.doesNotMatch(lexicalResponse, /authoritative source before I can answer|useful background sources/iu);
+  assert.equal(lexical.provenance[0]?.evidentiarySuitability, "GENERAL_REFERENCE");
 });

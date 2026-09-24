@@ -207,13 +207,14 @@ test("Issue #91: later Wikimedia rate limit preserves already retrieved source m
   let searches = 0;
   let calls = 0;
   const provider = new WikimediaKnowledgeAcquisitionProvider({
-    timeoutMs: 2_000,
+    timeoutMs: 20_000,
+    delay: async () => undefined,
     fetchImpl: async (input) => {
       calls += 1;
       const url = new URL(String(input));
       assert.equal(url.searchParams.get("generator"), "search");
       searches += 1;
-      if (searches === 2) return new Response("rate limited", { status: 429 });
+      if (searches >= 2) return new Response("rate limited", { status: 429 });
       return new Response(JSON.stringify({
         query: {
           pages: [{
@@ -239,13 +240,14 @@ test("Issue #91: later Wikimedia rate limit preserves already retrieved source m
   assert.equal(result.sources[0]?.sourceId, "page:91");
   assert.equal(result.sources[0]?.content, "Materially useful introductory source report.");
   assert.equal(result.claims.length, 1);
-  assert.equal(calls, 2, "rate limit must not trigger detail enrichment, retry, or further provider calls");
+  assert.equal(calls, 3, "interrupted search is retried at most once, then stops without detail enrichment or further calls");
 });
 
 test("Issue #91: first Wikimedia rate limit remains explicit even when no material was retrieved", async () => {
   let calls = 0;
   const provider = new WikimediaKnowledgeAcquisitionProvider({
-    timeoutMs: 2_000,
+    timeoutMs: 20_000,
+    delay: async () => undefined,
     fetchImpl: async () => {
       calls += 1;
       return new Response("rate limited", { status: 429 });
@@ -256,7 +258,7 @@ test("Issue #91: first Wikimedia rate limit remains explicit even when no materi
   assert.deepEqual(result.sources, []);
   assert.deepEqual(result.claims, []);
   assert.deepEqual(result.completion, { status: "FAILED", reason: "RATE_LIMITED" });
-  assert.equal(calls, 1);
+  assert.equal(calls, 2, "persistent rate limit stops after exactly one bounded retry");
 });
 
 test("Issue #91: full-page enrichment is batched instead of multiplying one request per page", async () => {

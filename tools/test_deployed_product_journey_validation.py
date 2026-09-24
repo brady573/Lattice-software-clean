@@ -215,3 +215,138 @@ def test_action_preparation_is_not_submitted_after_decision_failure() -> None:
 
     assert labels == ["KNOWLEDGE", "AMBIGUITY_SETUP", "AMBIGUITY", "DECISION"]
     assert "ACTION_PREPARATION" not in labels
+
+
+def _issue47_interpretation(
+    requested_help: str,
+    knowledge_presentation: str,
+    referenced: str | None = None,
+) -> dict[str, Any]:
+    return {
+        "requestedHelp": requested_help,
+        "knowledgePresentation": knowledge_presentation,
+        "referencedKnowledgeId": referenced,
+    }
+
+
+def _issue47_bodies() -> tuple[dict[str, Any], dict[str, Any], str]:
+    provenance = [{
+        "sourceId": "source-47",
+        "canonicalUri": "https://example.com/road-salt",
+        "title": "Road salt source",
+        "publisher": "Example",
+    }]
+    assistant = "Sources I used:\n- Road salt source — Example\n  https://example.com/road-salt"
+    outcome_body: dict[str, Any] = {
+        "status": "COMPLETED",
+        "knowledgeReference": {"knowledgeId": "knowledge-47"},
+        "outcome": {
+            "kind": "KNOWLEDGE",
+            "findings": [{"claimId": "claim-47"}],
+            "provenance": provenance,
+        },
+        "presentation": {"assistantMessage": assistant},
+    }
+    knowledge_body: dict[str, Any] = {
+        "knowledgeId": "knowledge-47",
+        "outcome": {"provenance": [dict(item) for item in provenance]},
+    }
+    return outcome_body, knowledge_body, assistant
+
+
+def test_issue47_interpretation_accepts_fresh_knowledge_sources() -> None:
+    validator._assert_issue47_interpretation(_issue47_interpretation("KNOWLEDGE", "SOURCES", None))
+    validator._assert_issue47_interpretation(_issue47_interpretation("FRESH_RESEARCH", "SOURCES", None))
+
+
+def test_issue47_interpretation_rejects_non_source_or_historical() -> None:
+    with pytest.raises(AssertionError, match="KNOWLEDGE or FRESH_RESEARCH"):
+        validator._assert_issue47_interpretation(_issue47_interpretation("SOURCES_REFERENCE", "SOURCES", "knowledge-1"))
+    with pytest.raises(AssertionError, match="knowledgePresentation=SOURCES"):
+        validator._assert_issue47_interpretation(_issue47_interpretation("KNOWLEDGE", "ANSWER", None))
+    with pytest.raises(AssertionError, match="new/fresh Run"):
+        validator._assert_issue47_interpretation(_issue47_interpretation("KNOWLEDGE", "SOURCES", "knowledge-1"))
+
+
+def test_issue47_persisted_run_requires_sources() -> None:
+    validator._assert_issue47_persisted_run_request({"request": {"knowledgePresentation": "SOURCES"}})
+    with pytest.raises(AssertionError, match="knowledgePresentation=SOURCES"):
+        validator._assert_issue47_persisted_run_request({"request": {"knowledgePresentation": "ANSWER"}})
+
+
+def test_issue47_source_list_outcome_accepts_governed_provenance() -> None:
+    outcome_body, knowledge_body, visible = _issue47_bodies()
+    assert validator._assert_issue47_source_list_outcome(outcome_body, knowledge_body, visible) == "knowledge-47"
+
+
+def test_issue47_source_list_outcome_rejects_answer_or_mismatched_provenance() -> None:
+    outcome_body, knowledge_body, visible = _issue47_bodies()
+
+    answer_body = dict(outcome_body)
+    assert isinstance(answer_body["presentation"], dict)
+    answer_body["presentation"] = {"assistantMessage": "Road salt lowers the freezing point."}
+    with pytest.raises(AssertionError, match="source-list presentation"):
+        validator._assert_issue47_source_list_outcome(answer_body, knowledge_body, visible)
+
+    missing_uri = dict(outcome_body)
+    assert isinstance(missing_uri["presentation"], dict)
+    missing_uri["presentation"] = {"assistantMessage": "Sources I used:\n- Other\n  https://example.com/other"}
+    with pytest.raises(AssertionError, match="omitted governed source"):
+        validator._assert_issue47_source_list_outcome(missing_uri, knowledge_body, visible)
+
+    empty_findings = dict(outcome_body)
+    empty_findings["outcome"] = {"kind": "KNOWLEDGE", "findings": [], "provenance": outcome_body["outcome"]["provenance"]}
+    with pytest.raises(AssertionError, match="findings"):
+        validator._assert_issue47_source_list_outcome(empty_findings, knowledge_body, visible)
+
+
+def test_turn_failure_evidence_preserves_bounded_fields_only() -> None:
+    error, message = validator._turn_failure_evidence({
+        "error": "SOLANDRA_ADVISORY_FAILED",
+        "message": "Groq route was rate limited.",
+        "prompt": "secret prompt",
+        "authorization": "Bearer secret",
+    })
+    assert error == "SOLANDRA_ADVISORY_FAILED"
+    assert message == "Groq route was rate limited."
+
+    error, message = validator._turn_failure_evidence({})
+    assert (error, message) == ("", "")
+
+    error, message = validator._turn_failure_evidence({"error": None, "message": None})
+    assert (error, message) == ("", "")
+
+    long_message = "m" * 500
+    _, bounded = validator._turn_failure_evidence({"error": "E", "message": long_message})
+    assert len(bounded) == 300
+    assert "secret" not in bounded
+
+
+def test_interpretation_routing_evidence_preserves_structure_only() -> None:
+    routing = validator._interpretation_routing_evidence({
+        "requestedHelp": "SIMPLIFY_REFERENCE",
+        "referencedKnowledgeId": "knowledge-1",
+        "knowledgePresentation": "ANSWER",
+        "materialAmbiguity": {"question": "Which free text must never be logged?"},
+    })
+    assert routing == {
+        "requestedHelp": "SIMPLIFY_REFERENCE",
+        "referencedKnowledgeId": "knowledge-1",
+        "knowledgePresentation": "ANSWER",
+        "materialAmbiguity": "present",
+    }
+
+    routing = validator._interpretation_routing_evidence({
+        "requestedHelp": "KNOWLEDGE",
+        "referencedKnowledgeId": None,
+        "knowledgePresentation": "SOURCES",
+        "materialAmbiguity": None,
+    })
+    assert routing["materialAmbiguity"] == "null"
+
+    routing = validator._interpretation_routing_evidence({"requestedHelp": "KNOWLEDGE"})
+    assert routing["materialAmbiguity"] == "missing"
+
+    routing = validator._interpretation_routing_evidence(None)
+    assert routing["materialAmbiguity"] == "missing"
+    assert routing["requestedHelp"] == ""

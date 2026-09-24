@@ -33,6 +33,7 @@ ACTION_PREPARATION_PROMPT = (
 ISSUE20_LIVE_KNOWLEDGE_PROMPT = "Please research reliable external sources and tell me what causes ocean tides."
 ISSUE20_SIMPLIFICATION_PROMPT = "Could you put that established answer into simpler language without adding new facts?"
 ISSUE20_INTER_TURN_DWELL_SECONDS = 20
+ISSUE47_FRESH_SOURCES_PROMPT = "I’m trying to understand why road salt melts ice. I mostly want the references you’d rely on so I can read them myself."
 
 
 @dataclass(frozen=True)
@@ -144,6 +145,45 @@ def _json_object(response) -> dict[str, Any]:
     return body if isinstance(body, dict) else {}
 
 
+def _bounded_evidence_field(value: Any, limit: int = 300) -> str:
+    if value is None:
+        return ""
+    text = value if isinstance(value, str) else str(value)
+    text = " ".join(text.split())
+    return text[:limit]
+
+
+def _turn_failure_evidence(body: Any) -> tuple[str, str]:
+    if not isinstance(body, dict):
+        return "", ""
+    return (
+        _bounded_evidence_field(body.get("error")),
+        _bounded_evidence_field(body.get("message")),
+    )
+
+
+def _interpretation_routing_evidence(interpretation: Any) -> dict[str, str]:
+    if not isinstance(interpretation, dict):
+        return {
+            "requestedHelp": "",
+            "referencedKnowledgeId": "",
+            "knowledgePresentation": "",
+            "materialAmbiguity": "missing",
+        }
+    if "materialAmbiguity" not in interpretation:
+        ambiguity = "missing"
+    elif interpretation.get("materialAmbiguity") is None:
+        ambiguity = "null"
+    else:
+        ambiguity = "present"
+    return {
+        "requestedHelp": _bounded_evidence_field(interpretation.get("requestedHelp"), 100),
+        "referencedKnowledgeId": _bounded_evidence_field(interpretation.get("referencedKnowledgeId"), 200),
+        "knowledgePresentation": _bounded_evidence_field(interpretation.get("knowledgePresentation"), 100),
+        "materialAmbiguity": ambiguity,
+    }
+
+
 def _require_successful_outcome(label: str, status: int, body: dict[str, Any]) -> None:
     if 200 <= status < 300 and not body.get("error"):
         return
@@ -192,10 +232,25 @@ def _submit_turn(page: Page, prompt: str, label: str) -> StageResult:
         composer.press("Enter")
     turn_response = pending.value
 
-    assert 200 <= turn_response.status < 300, f"{label}: turn POST returned HTTP {turn_response.status}"
     body = _json_object(turn_response)
+    if not 200 <= turn_response.status < 300:
+        error, message = _turn_failure_evidence(body)
+        print(f"JOURNEY_{label}_TURN_FAILURE")
+        print(f"status={turn_response.status}")
+        print(f"error={error}")
+        print(f"message={message}")
+    assert 200 <= turn_response.status < 300, f"{label}: turn POST returned HTTP {turn_response.status}"
     product_status = body.get("status")
     print(f"JOURNEY_{label}_TURN_RESPONSE status={turn_response.status} product_status={product_status}")
+    if isinstance(body.get("interpretation"), dict):
+        routing = _interpretation_routing_evidence(body.get("interpretation"))
+        print(
+            f"JOURNEY_{label}_INTERPRETATION "
+            f"requestedHelp={routing['requestedHelp']} "
+            f"referencedKnowledgeId={routing['referencedKnowledgeId']} "
+            f"knowledgePresentation={routing['knowledgePresentation']} "
+            f"materialAmbiguity={routing['materialAmbiguity']}"
+        )
 
     _wait_for_turn_completion(page, prior_solandra_turns, label)
     turns = page.locator("#conversation .turn.solandra")
@@ -330,6 +385,85 @@ def _assert_no_affirmative_execution(text: str, body: dict[str, Any]) -> None:
     inspect(body)
 
 
+def _assert_issue47_interpretation(interpretation: Any) -> None:
+    # Structural cognition evidence only. No keyword/phrase matching on USER wording.
+    assert isinstance(interpretation, dict), "Issue #47 fresh source request omitted cognition interpretation"
+    requested_help = interpretation.get("requestedHelp")
+    assert requested_help in ("KNOWLEDGE", "FRESH_RESEARCH"), (
+        f"Issue #47 fresh source request expected KNOWLEDGE or FRESH_RESEARCH, got {requested_help!r}"
+    )
+    assert interpretation.get("knowledgePresentation") == "SOURCES", (
+        "Issue #47 fresh source request did not select knowledgePresentation=SOURCES"
+    )
+    assert interpretation.get("referencedKnowledgeId") is None, (
+        "Issue #47 fresh source request must be a new/fresh Run, not a historical reference"
+    )
+
+
+def _assert_issue47_persisted_run_request(run_body: Any) -> None:
+    assert isinstance(run_body, dict), "Issue #47 persisted Run lookup did not return an object"
+    request = run_body.get("request")
+    assert isinstance(request, dict), "Issue #47 persisted Run omitted its ConsultationRunRequest"
+    assert request.get("knowledgePresentation") == "SOURCES", (
+        "Issue #47 persisted ConsultationRunRequest did not retain knowledgePresentation=SOURCES"
+    )
+
+
+def _assert_issue47_source_list_outcome(
+    outcome_body: Any,
+    knowledge_body: Any,
+    visible_text: str,
+) -> str:
+    assert isinstance(outcome_body, dict), "Issue #47 Run outcome did not return an object"
+    assert outcome_body.get("status") == "COMPLETED", (
+        f"Issue #47 fresh source Run did not complete, got {outcome_body.get('status')!r}"
+    )
+    knowledge_reference = outcome_body.get("knowledgeReference")
+    assert isinstance(knowledge_reference, dict), "Issue #47 Run outcome did not establish governed Knowledge"
+    knowledge_id = knowledge_reference.get("knowledgeId")
+    assert isinstance(knowledge_id, str) and knowledge_id, "Issue #47 Run outcome omitted knowledgeId"
+
+    outcome = outcome_body.get("outcome")
+    assert isinstance(outcome, dict), "Issue #47 Run outcome omitted its governed outcome"
+    assert outcome.get("kind") == "KNOWLEDGE", (
+        f"Issue #47 fresh source Run did not produce KNOWLEDGE, got {outcome.get('kind')!r}"
+    )
+    findings = outcome.get("findings")
+    assert isinstance(findings, list) and findings, "Issue #47 Run did not establish governed Knowledge findings"
+    provenance = outcome.get("provenance")
+    assert isinstance(provenance, list) and provenance, "Issue #47 Run did not establish governed provenance"
+
+    presentation = outcome_body.get("presentation")
+    assert isinstance(presentation, dict), "Issue #47 Run outcome omitted Product presentation"
+    assistant = presentation.get("assistantMessage")
+    assert isinstance(assistant, str) and assistant.strip(), "Issue #47 Run returned no visible Product presentation"
+    assert assistant.startswith("Sources I used:"), (
+        "Issue #47 final Product response did not use source-list presentation"
+    )
+    assert "Sources I used:" in visible_text, "Issue #47 visible Product response did not use source-list presentation"
+    assert not re.search(r"workerId|runId|queue|provider routing|V36|Decision Engine", visible_text, re.I), (
+        "Issue #47 journey exposed internal machinery"
+    )
+
+    assert isinstance(knowledge_body, dict), "Issue #47 Knowledge lookup did not return an object"
+    assert knowledge_body.get("knowledgeId") == knowledge_id, "Issue #47 Knowledge identity changed between outcome and store"
+    stored_outcome = knowledge_body.get("outcome")
+    assert isinstance(stored_outcome, dict), "Issue #47 stored Knowledge omitted its governed outcome"
+    stored_provenance = stored_outcome.get("provenance")
+    assert isinstance(stored_provenance, list) and stored_provenance, "Issue #47 stored Knowledge omitted provenance"
+
+    outcome_uris = [str(item.get("canonicalUri")) for item in provenance if isinstance(item, dict)]
+    stored_uris = [str(item.get("canonicalUri")) for item in stored_provenance if isinstance(item, dict)]
+    assert outcome_uris and all(uri and uri.startswith("http") for uri in outcome_uris), (
+        "Issue #47 governed provenance omitted canonical source URIs"
+    )
+    assert outcome_uris == stored_uris, "Issue #47 displayed provenance does not match governed stored provenance"
+    for uri in outcome_uris[:3]:
+        assert uri in assistant, f"Issue #47 displayed source list omitted governed source {uri}"
+    print(f"ISSUE47_GOVERNED_SOURCE_COUNT={len(outcome_uris)}")
+    return knowledge_id
+
+
 def _exercise_product_journey(submit_turn: Callable[[str, str], StageResult]) -> None:
     knowledge = submit_turn(KNOWLEDGE_PROMPT, "KNOWLEDGE")
     knowledge_text = _assistant_text(knowledge)
@@ -430,6 +564,56 @@ def test_issue20_live_historical_knowledge_simplification(page: Page) -> None:
     simplified_text = _assistant_text(simplified)
     assert simplified_text, "Issue #20 simplification returned no visible Solandra presentation"
     print("ISSUE20_LIVE_HISTORICAL_SIMPLIFICATION=PASS")
+
+
+def test_issue47_fresh_source_list_presentation(page: Page) -> None:
+    # Ordinary new/fresh source-oriented USER request. Single attempt only:
+    # preserve Product failure, no fallback wording, no retry.
+    page.set_viewport_size({"width": 1440, "height": 1000})
+    _open_product_surface(page)
+
+    result = _submit_turn(page, ISSUE47_FRESH_SOURCES_PROMPT, "ISSUE47_SOURCES")
+    assert result.turn_body.get("status") == "RUN_ACCEPTED", (
+        f"Issue #47 fresh source request must create a new Run, got {result.turn_body.get('status')!r}"
+    )
+    interpretation = result.turn_body.get("interpretation")
+    _assert_issue47_interpretation(interpretation)
+    print(
+        f"ISSUE47_OBSERVED_COGNITION requestedHelp={interpretation.get('requestedHelp')} "
+        f"knowledgePresentation={interpretation.get('knowledgePresentation')}"
+    )
+
+    run_id = result.turn_body.get("runId")
+    assert isinstance(run_id, str) and run_id, "Issue #47 RUN_ACCEPTED omitted runId"
+    encoded_run_id = urllib.parse.quote(run_id, safe="")
+    run_response = page.context.request.get(
+        f"{BASE_URL}/api/v1/runs/{encoded_run_id}",
+        timeout=TURN_RESPONSE_TIMEOUT_MS,
+    )
+    assert run_response.status == 200, f"Issue #47 persisted Run GET returned HTTP {run_response.status}"
+    run_body = _json_object(run_response)
+    _assert_issue47_persisted_run_request(run_body)
+    print(f"ISSUE47_PERSISTED_RUN_STATE knowledgePresentation={run_body.get('request', {}).get('knowledgePresentation')}")
+
+    assert result.outcome_body is not None, "Issue #47 RUN_ACCEPTED produced no terminal outcome"
+    knowledge_id = result.outcome_body.get("knowledgeReference", {}).get("knowledgeId")
+    assert isinstance(knowledge_id, str) and knowledge_id, "Issue #47 outcome omitted knowledgeId"
+    encoded_knowledge_id = urllib.parse.quote(knowledge_id, safe="")
+    knowledge_response = page.context.request.get(
+        f"{BASE_URL}/api/v1/knowledge/{encoded_knowledge_id}",
+        timeout=TURN_RESPONSE_TIMEOUT_MS,
+    )
+    assert knowledge_response.status == 200, (
+        f"Issue #47 Knowledge GET returned HTTP {knowledge_response.status}"
+    )
+    knowledge_body = _json_object(knowledge_response)
+
+    visible = _assistant_text(result)
+    checked_id = _assert_issue47_source_list_outcome(result.outcome_body, knowledge_body, visible)
+    assert checked_id == knowledge_id
+    print(f"ISSUE47_VISIBLE_SOURCE_LIST_BEGIN\n{visible}\nISSUE47_VISIBLE_SOURCE_LIST_END")
+    print(f"ISSUE47_PROVENANCE_CHECK knowledgeId={knowledge_id} CORRESPONDS_TO_GOVERNED_PROVENANCE")
+    print("ISSUE47_FRESH_SOURCE_LIST=PASS")
 
 
 def test_deployed_solandra_product_journeys(page: Page) -> None:

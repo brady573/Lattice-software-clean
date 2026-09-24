@@ -18,6 +18,9 @@ const MAX_CLAIMS_PER_SOURCE = 8;
 const MAX_TOTAL_RESULTS = 12;
 const MAX_INVESTIGATION_QUERIES = 8;
 const DETAIL_BATCH_SIZE = 4;
+const CONTACT_URL = "https://github.com/brady573/Lattice-software-clean";
+const USER_AGENT = `Lattice-Knowledge-Consultation/0.1 (${CONTACT_URL}; source retrieval; no truth authority)`;
+const FALLBACK_RATE_LIMIT_WAIT_MS = 5_000;
 
 export interface WikimediaKnowledgeAcquisitionOptions {
   readonly endpoint?: string;
@@ -25,6 +28,7 @@ export interface WikimediaKnowledgeAcquisitionOptions {
   readonly timeoutMs?: number;
   readonly fetchImpl?: typeof fetch;
   readonly clock?: () => Date;
+  readonly delay?: (ms: number, signal: AbortSignal) => Promise<void>;
 }
 
 type WikimediaPage = {
@@ -57,6 +61,40 @@ class WikimediaRequestError extends Error {
 
 function interruptionReason(error: unknown): KnowledgeAcquisitionPartialReason {
   return error instanceof WikimediaRequestError ? error.reason : "PROVIDER_FAILURE";
+}
+
+/**
+ * Provider-instructed retry delay in milliseconds, or null when the header is
+ * absent or uninterpretable (caller applies the bounded fallback instead).
+ * Supports delay-seconds and HTTP-date forms.
+ */
+function retryAfterDelayMs(value: string | null): number | null {
+  if (value === null) return null;
+  const trimmed = value.trim();
+  if (/^\d{1,6}$/.test(trimmed)) {
+    return Number(trimmed) * 1_000;
+  }
+  const when = Date.parse(trimmed);
+  if (!Number.isFinite(when)) return null;
+  return Math.max(0, when - Date.now());
+}
+
+function defaultDelay(ms: number, signal: AbortSignal): Promise<void> {
+  if (ms <= 0 || signal.aborted) {
+    if (signal.aborted) throw signal.reason ?? new Error("aborted");
+    return Promise.resolve();
+  }
+  return new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(signal.reason ?? new Error("aborted"));
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
 }
 
 function record(value: unknown): Record<string, unknown> | null {
@@ -188,6 +226,7 @@ export class WikimediaKnowledgeAcquisitionProvider implements KnowledgeAcquisiti
   private readonly timeoutMs: number;
   private readonly fetchImpl: typeof fetch;
   private readonly clock: () => Date;
+  private readonly delay: (ms: number, signal: AbortSignal) => Promise<void>;
 
   constructor(options: WikimediaKnowledgeAcquisitionOptions = {}) {
     this.endpoint = normalizeEndpoint(options.endpoint ?? DEFAULT_ENDPOINT);
@@ -195,20 +234,20 @@ export class WikimediaKnowledgeAcquisitionProvider implements KnowledgeAcquisiti
     this.timeoutMs = boundedTimeoutMs(options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
     this.fetchImpl = options.fetchImpl ?? fetch;
     this.clock = options.clock ?? (() => new Date());
+    this.delay = options.delay ?? defaultDelay;
   }
 
-  private async requestJson(url: URL, signal: AbortSignal): Promise<unknown> {
+  private async fetchOnce(url: URL, signal: AbortSignal): Promise<Response> {
     try {
-      const response = await this.fetchImpl(url, {
+      return await this.fetchImpl(url, {
         method: "GET",
         redirect: "error",
         headers: {
           accept: "application/json",
-          "user-agent": "Lattice-Knowledge-Consultation/0.1 (source retrieval; no truth authority)",
+          "user-agent": USER_AGENT,
         },
         signal,
       });
-      return await readBoundedJson(response);
     } catch (error) {
       if (signal.aborted) {
         throw new WikimediaRequestError(
@@ -217,7 +256,6 @@ export class WikimediaKnowledgeAcquisitionProvider implements KnowledgeAcquisiti
           { cause: error },
         );
       }
-      if (error instanceof WikimediaRequestError) throw error;
       throw new WikimediaRequestError(
         "PROVIDER_FAILURE",
         "Knowledge source request failed.",
@@ -226,9 +264,49 @@ export class WikimediaKnowledgeAcquisitionProvider implements KnowledgeAcquisiti
     }
   }
 
+  /**
+   * Single-request fetch with at most one retry of a 429 rate limit.
+   * Honors Retry-After (or a small bounded fallback) only when the wait fits
+   * within the existing acquisition deadline; the timeout is never extended.
+   */
+  private async requestJson(url: URL, signal: AbortSignal, deadlineMs: number): Promise<unknown> {
+    for (let attempt = 0; ; attempt += 1) {
+      const response = await this.fetchOnce(url, signal);
+      if (response.status !== 429) {
+        return readBoundedJson(response);
+      }
+      await response.body?.cancel().catch(() => undefined);
+      if (attempt >= 1) {
+        throw new WikimediaRequestError("RATE_LIMITED", "Knowledge source rate limited the request.");
+      }
+      const delayMs = retryAfterDelayMs(response.headers.get("retry-after"))
+        ?? FALLBACK_RATE_LIMIT_WAIT_MS;
+      if (delayMs > Math.max(0, deadlineMs - Date.now())) {
+        throw new WikimediaRequestError("RATE_LIMITED", "Knowledge source rate limited the request.");
+      }
+      try {
+        await this.delay(delayMs, signal);
+      } catch (error) {
+        if (signal.aborted) {
+          throw new WikimediaRequestError(
+            "TIMED_OUT",
+            `Knowledge source request exceeded ${this.timeoutMs} ms`,
+            { cause: error },
+          );
+        }
+        throw new WikimediaRequestError(
+          "PROVIDER_FAILURE",
+          "Knowledge source request failed.",
+          { cause: error },
+        );
+      }
+    }
+  }
+
   private async fullPageExtracts(
     pages: readonly WikimediaCandidatePage[],
     signal: AbortSignal,
+    deadlineMs: number,
   ): Promise<{
     extracts: Map<string, string>;
     interruption: KnowledgeAcquisitionPartialReason | null;
@@ -253,7 +331,7 @@ export class WikimediaKnowledgeAcquisitionProvider implements KnowledgeAcquisiti
       }
 
       try {
-        const root = record(await this.requestJson(url, signal));
+        const root = record(await this.requestJson(url, signal, deadlineMs));
         const query = record(root?.query);
         const returnedPages = Array.isArray(query?.pages) ? query.pages : [];
         for (const rawPage of returnedPages) {
@@ -279,6 +357,7 @@ export class WikimediaKnowledgeAcquisitionProvider implements KnowledgeAcquisiti
     const queries = retrievalQueries(request);
     const retrievedAt = this.clock().toISOString();
     const signal = AbortSignal.timeout(this.timeoutMs);
+    const deadlineMs = Date.now() + this.timeoutMs;
     const candidatePages: WikimediaCandidatePage[] = [];
     const seenPageIds = new Set<string>();
     let interruption: KnowledgeAcquisitionPartialReason | null = null;
@@ -305,7 +384,7 @@ export class WikimediaKnowledgeAcquisitionProvider implements KnowledgeAcquisiti
 
       let root: Record<string, unknown> | null;
       try {
-        root = record(await this.requestJson(url, signal));
+        root = record(await this.requestJson(url, signal, deadlineMs));
       } catch (error) {
         interruption = interruptionReason(error);
         break;
@@ -351,7 +430,7 @@ export class WikimediaKnowledgeAcquisitionProvider implements KnowledgeAcquisiti
       candidatePages.map((page) => [page.pageId, page.introExtract.slice(0, MAX_SOURCE_CONTENT_CHARS)] as const),
     );
     if (interruption === null && candidatePages.length > 0) {
-      const detail = await this.fullPageExtracts(candidatePages, signal);
+      const detail = await this.fullPageExtracts(candidatePages, signal, deadlineMs);
       extracts = detail.extracts;
       interruption = detail.interruption;
     }

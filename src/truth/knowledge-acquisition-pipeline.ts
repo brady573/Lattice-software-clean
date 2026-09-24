@@ -705,6 +705,16 @@ export class KnowledgeAcquisitionTruthPipeline implements TruthExecutionPipeline
       bundle = investigatedBundle(runId, request, acquired);
     } catch (error) {
       if (!(error instanceof KnowledgeInvestigationOperationalError)) throw error;
+      // Content-free operational evidence only: run correlation, structural
+      // phase, and bounded model-call classification. Never USER, query,
+      // source, claim, prompt, output, message, or credential content.
+      const phase = error.phase ?? "UNKNOWN";
+      const code = error.failure?.code ?? "-";
+      const statusCode = error.failure?.statusCode ?? "-";
+      const retryable = error.failure === undefined ? "-" : String(error.failure.retryable);
+      console.error(
+        `KNOWLEDGE_INVESTIGATION_UNAVAILABLE runId=${runId} phase=${phase} code=${code} statusCode=${statusCode} retryable=${retryable}`,
+      );
       bundle = unavailableBundle(runId, query, "INVESTIGATION_UNAVAILABLE");
     }
     return {

@@ -186,3 +186,34 @@ test("historical Knowledge transformation coreference stays on the governed refe
   assert.match(user, /The established evidence supports the technical result under the stated conditions/);
   assert.match(user, /The result remains bounded to the established conditions/);
 });
+
+
+test("#47 new Knowledge source-oriented presentation is a typed non-authoritative cognition proposal", async () => {
+  const provider = new CapturingCognitionProvider(proposal({
+    objectiveRelation: "NEW_OBJECTIVE",
+    requestedHelp: "KNOWLEDGE",
+    knowledgePresentation: "SOURCES",
+    knowledgeNeeds: ["the external material needed to establish the requested topic"],
+  }));
+  const cognition = new ModelSolandraCognitiveRuntime(new ModelRuntime(provider), "issue-47-presentation-contract-model");
+
+  const result = await cognition.interpret({
+    conversationId: "conversation-source-oriented-new-knowledge",
+    messageId: "message-source-oriented-new-knowledge",
+    message: "Investigate this topic, and lead the result with where the supporting material came from.",
+    recentUserMessages: [],
+    governedKnowledge: [],
+  });
+
+  if (isConversationalCognition(result)) assert.fail("expected governed cognition");
+  assert.equal(result.proposal.requestedHelp, "KNOWLEDGE");
+  assert.equal(result.proposal.knowledgePresentation, "SOURCES");
+  assert.equal(result.proposal.referencedKnowledgeId, null);
+
+  const request = provider.requests.at(-1);
+  assert.ok(request);
+  const system = messageContent(request, "system");
+  assert.match(system, /Infer this naturally from the request rather than from keywords/);
+  assert.match(system, /non-authoritative presentation form only/);
+  assert.match(system, /Historical source follow-ups remain SOURCES_REFERENCE with an exact supplied Knowledge ID/);
+});

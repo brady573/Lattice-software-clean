@@ -85,6 +85,8 @@ function proposal(input: Partial<SolandraSemanticProposal> = {}): SolandraSemant
 class StructuralCognition implements SolandraCognitiveRuntime {
   readonly inputs: SolandraCognitionInput[] = [];
 
+  constructor(private readonly knowledgePresentation: "ANSWER" | "SOURCES" = "ANSWER") {}
+
   async interpret(input: SolandraCognitionInput): Promise<SolandraCognitionResult> {
     this.inputs.push(structuredClone(input));
     const reference = input.governedKnowledge[0]?.knowledgeId ?? null;
@@ -114,6 +116,7 @@ class StructuralCognition implements SolandraCognitiveRuntime {
         objectiveRelation: input.currentObjective ? "CONTINUE" : "NEW_OBJECTIVE",
         proposedObjective: "Model-understood objective wording that is not USER-authored.",
         requestedHelp: "KNOWLEDGE",
+        knowledgePresentation: this.knowledgePresentation,
         knowledgeNeeds: ["How interface stability affects upgrade coupling"],
       }),
       invocationProvenance: PROVENANCE,
@@ -315,6 +318,52 @@ test("canonical Solandra client handles direct Knowledge reference and new-Knowl
       guardIndex >= 0 && activeWorkIndex > guardIndex,
       "Browser must reject a missing authoritative work identity before treating the response as active/successful work.",
     );
+  } finally {
+    await app.close();
+  }
+});
+
+
+test("M1 cognition presentation intent persists structurally without USER vocabulary routing", async () => {
+  const cognition = new StructuralCognition("SOURCES");
+  const app = await createRuntimeApp(config, {
+    memoryDispatchDelayMs: 1,
+    truthPipeline,
+    solandraCognition: cognition,
+  });
+  try {
+    const conversationId = await createConversation(app);
+    const userMessage = "Investigate interface stability and lead with where the supporting material came from.";
+    const turn = await app.inject({
+      method: "POST",
+      url: `/api/v1/conversations/${conversationId}/turns`,
+      payload: { turnId: randomUUID(), message: userMessage },
+    });
+    assert.equal(turn.statusCode, 202, turn.body);
+    const accepted = turn.json<{
+      status: string;
+      runId: string;
+      interpretation: { knowledgePresentation: string };
+    }>();
+    assert.equal(accepted.status, "RUN_ACCEPTED");
+    assert.equal(accepted.interpretation.knowledgePresentation, "SOURCES");
+
+    const runResponse = await app.inject({ method: "GET", url: `/api/v1/runs/${accepted.runId}` });
+    assert.equal(runResponse.statusCode, 200, runResponse.body);
+    const stored = runResponse.json<{ request: { knowledgePresentation?: string; context?: string[] } }>();
+    assert.equal(stored.request.knowledgePresentation, "SOURCES");
+    assert.deepEqual(stored.request.context, []);
+
+    await waitForCompletion(app, accepted.runId);
+    const outcome = await app.inject({ method: "GET", url: `/api/v1/runs/${accepted.runId}/outcome` });
+    assert.equal(outcome.statusCode, 200, outcome.body);
+    const body = outcome.json<{
+      outcome: { findings: unknown[] };
+      presentation: { assistantMessage: string };
+    }>();
+    assert.equal(body.outcome.findings.length, 1);
+    assert.match(body.presentation.assistantMessage, /^Sources I used:/u);
+    assert.doesNotMatch(body.presentation.assistantMessage, /A stable public interface can reduce upgrade coupling/u);
   } finally {
     await app.close();
   }
