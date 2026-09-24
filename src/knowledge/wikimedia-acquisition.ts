@@ -20,7 +20,7 @@ const MAX_INVESTIGATION_QUERIES = 8;
 const DETAIL_BATCH_SIZE = 4;
 const CONTACT_URL = "https://github.com/brady573/Lattice-software-clean";
 const USER_AGENT = `Lattice-Knowledge-Consultation/0.1 (${CONTACT_URL}; source retrieval; no truth authority)`;
-const FALLBACK_RATE_LIMIT_WAIT_MS = 1_000;
+const FALLBACK_RATE_LIMIT_WAIT_MS = 5_000;
 
 export interface WikimediaKnowledgeAcquisitionOptions {
   readonly endpoint?: string;

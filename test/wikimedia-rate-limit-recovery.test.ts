@@ -123,7 +123,7 @@ test("Wikimedia second 429 after the authorized retry stops with no third attemp
   const waits: number[] = [];
   let calls = 0;
   const provider = new WikimediaKnowledgeAcquisitionProvider({
-    timeoutMs: 5_000,
+    timeoutMs: 20_000,
     delay: async (ms) => {
       waits.push(ms);
     },
@@ -137,7 +137,53 @@ test("Wikimedia second 429 after the authorized retry stops with no third attemp
   assert.deepEqual(result.completion, { status: "FAILED", reason: "RATE_LIMITED" });
   assert.deepEqual(result.sources, []);
   assert.equal(calls, 2, "exactly one bounded retry, never a storm");
-  assert.deepEqual(waits, [1_000], "absent Retry-After uses the finite fallback once");
+  assert.deepEqual(waits, [5_000], "absent Retry-After uses the 5 s policy fallback once");
+});
+
+test("Wikimedia malformed Retry-After uses the same 5,000 ms fallback", async () => {
+  const waits: number[] = [];
+  let calls = 0;
+  const provider = new WikimediaKnowledgeAcquisitionProvider({
+    timeoutMs: 20_000,
+    delay: async (ms) => {
+      waits.push(ms);
+    },
+    fetchImpl: async () => {
+      calls += 1;
+      return new Response("rate limited", {
+        status: 429,
+        headers: { "retry-after": "not-a-delay" },
+      });
+    },
+  });
+
+  const result = await provider.acquire(request("wikimedia-malformed-retry-after"));
+  assert.deepEqual(result.completion, { status: "FAILED", reason: "RATE_LIMITED" });
+  assert.deepEqual(waits, [5_000]);
+  assert.equal(calls, 2, "malformed instruction still gets exactly one bounded retry");
+});
+
+test("Wikimedia 5,000 ms fallback is not waited out when it cannot fit the deadline", async () => {
+  const waits: number[] = [];
+  let calls = 0;
+  const provider = new WikimediaKnowledgeAcquisitionProvider({
+    timeoutMs: 200,
+    delay: async (ms) => {
+      waits.push(ms);
+    },
+    fetchImpl: async () => {
+      calls += 1;
+      return new Response("rate limited", { status: 429 });
+    },
+  });
+
+  const started = Date.now();
+  const result = await provider.acquire(request("wikimedia-fallback-deadline"));
+  const elapsed = Date.now() - started;
+  assert.deepEqual(result.completion, { status: "FAILED", reason: "RATE_LIMITED" });
+  assert.deepEqual(waits, [], "fallback must fail closed rather than exceed the deadline");
+  assert.equal(calls, 1, "no retry when the fallback cannot fit");
+  assert.ok(elapsed < 5_000, `acquisition timeout must not be extended (took ${elapsed} ms)`);
 });
 
 test("Wikimedia Retry-After beyond the remaining budget is not waited out", async () => {

@@ -207,7 +207,7 @@ test("Issue #91: later Wikimedia rate limit preserves already retrieved source m
   let searches = 0;
   let calls = 0;
   const provider = new WikimediaKnowledgeAcquisitionProvider({
-    timeoutMs: 2_000,
+    timeoutMs: 20_000,
     delay: async () => undefined,
     fetchImpl: async (input) => {
       calls += 1;
@@ -246,7 +246,7 @@ test("Issue #91: later Wikimedia rate limit preserves already retrieved source m
 test("Issue #91: first Wikimedia rate limit remains explicit even when no material was retrieved", async () => {
   let calls = 0;
   const provider = new WikimediaKnowledgeAcquisitionProvider({
-    timeoutMs: 2_000,
+    timeoutMs: 20_000,
     delay: async () => undefined,
     fetchImpl: async () => {
       calls += 1;
