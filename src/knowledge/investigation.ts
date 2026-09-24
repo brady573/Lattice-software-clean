@@ -5,6 +5,7 @@ import type {
   RetrievedKnowledgeClaim,
   RetrievedKnowledgeSource,
 } from "./acquisition.js";
+import { ModelProviderError } from "../model/errors.js";
 
 export interface KnowledgeInvestigationPlanningInput {
   readonly runId: string;
@@ -51,13 +52,52 @@ export interface KnowledgeInvestigator {
 }
 
 export class KnowledgeInvestigationOperationalError extends Error {
+  readonly phase?: KnowledgeInvestigationPhase;
+  readonly failure?: KnowledgeInvestigationFailureCause;
+
   constructor(
     message: string,
-    options?: ErrorOptions,
+    options?: ErrorOptions & {
+      phase?: KnowledgeInvestigationPhase;
+      failure?: KnowledgeInvestigationFailureCause;
+    },
   ) {
     super(message, options);
     this.name = "KnowledgeInvestigationOperationalError";
+    if (options?.phase !== undefined) this.phase = options.phase;
+    if (options?.failure !== undefined) this.failure = options.failure;
   }
+}
+
+/**
+ * Structural investigation stage that produced an operational failure.
+ * General across topics, wording, domains, and providers.
+ */
+export type KnowledgeInvestigationPhase =
+  | "PLANNING"
+  | "PLANNING_EMPTY"
+  | "RESPONSIVENESS"
+  | "SELECTION_VALIDATION";
+
+/**
+ * Bounded structural metadata for an underlying model-call failure.
+ * Never carries prompts, output, queries, sources, claims, or credentials.
+ */
+export interface KnowledgeInvestigationFailureCause {
+  readonly code: string;
+  readonly statusCode: number | null;
+  readonly retryable: boolean;
+}
+
+export function investigationFailureCause(error: unknown): KnowledgeInvestigationFailureCause | undefined {
+  if (error instanceof ModelProviderError) {
+    return {
+      code: error.code,
+      statusCode: error.statusCode,
+      retryable: error.retryable,
+    };
+  }
+  return undefined;
 }
 
 function uniqueNonBlank(values: readonly string[]): string[] {
@@ -108,15 +148,17 @@ export class RelevantKnowledgeAcquisitionProvider implements KnowledgeAcquisitio
         knowledgeNeeds,
       });
     } catch (error) {
+      const failure = investigationFailureCause(error);
       throw new KnowledgeInvestigationOperationalError(
         "Knowledge investigation cognition could not complete planning.",
-        { cause: error },
+        failure === undefined ? { cause: error, phase: "PLANNING" } : { cause: error, phase: "PLANNING", failure },
       );
     }
     const retrievalQueries = uniqueNonBlank(plan.retrievalQueries);
     if (retrievalQueries.length === 0) {
       throw new KnowledgeInvestigationOperationalError(
         "Knowledge investigation cognition produced no provider-ready retrieval work.",
+        { phase: "PLANNING_EMPTY" },
       );
     }
 
@@ -153,9 +195,12 @@ export class RelevantKnowledgeAcquisitionProvider implements KnowledgeAcquisitio
         claims: acquired.claims,
       });
     } catch (error) {
+      const failure = investigationFailureCause(error);
       throw new KnowledgeInvestigationOperationalError(
         "Knowledge investigation cognition could not complete semantic responsiveness selection.",
-        { cause: error },
+        failure === undefined
+          ? { cause: error, phase: "RESPONSIVENESS" }
+          : { cause: error, phase: "RESPONSIVENESS", failure },
       );
     }
 
@@ -169,6 +214,7 @@ export class RelevantKnowledgeAcquisitionProvider implements KnowledgeAcquisitio
       if (seenClaimIds.has(selection.claimId)) {
         throw new KnowledgeInvestigationOperationalError(
           `Solandra responsiveness selection duplicated claim ${selection.claimId}.`,
+          { phase: "SELECTION_VALIDATION" },
         );
       }
       seenClaimIds.add(selection.claimId);
@@ -176,12 +222,14 @@ export class RelevantKnowledgeAcquisitionProvider implements KnowledgeAcquisitio
       if (!claim) {
         throw new KnowledgeInvestigationOperationalError(
           `Solandra responsiveness selection referenced unknown claim ${selection.claimId}.`,
+          { phase: "SELECTION_VALIDATION" },
         );
       }
       const requestedSourceIds = new Set(uniqueNonBlank(selection.sourceIds));
       if (requestedSourceIds.size === 0) {
         throw new KnowledgeInvestigationOperationalError(
           `Solandra responsiveness selection for ${selection.claimId} requires acquired source identity.`,
+          { phase: "SELECTION_VALIDATION" },
         );
       }
 
@@ -189,6 +237,7 @@ export class RelevantKnowledgeAcquisitionProvider implements KnowledgeAcquisitio
         if (!sourceById.has(sourceId)) {
           throw new KnowledgeInvestigationOperationalError(
             `Solandra responsiveness selection referenced unknown source ${sourceId}.`,
+            { phase: "SELECTION_VALIDATION" },
           );
         }
       }
@@ -199,6 +248,7 @@ export class RelevantKnowledgeAcquisitionProvider implements KnowledgeAcquisitio
         if (!evidencedSourceIds.has(sourceId)) {
           throw new KnowledgeInvestigationOperationalError(
             `Solandra responsiveness selection referenced a source not bound to claim ${selection.claimId}.`,
+            { phase: "SELECTION_VALIDATION" },
           );
         }
       }
