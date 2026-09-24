@@ -145,6 +145,45 @@ def _json_object(response) -> dict[str, Any]:
     return body if isinstance(body, dict) else {}
 
 
+def _bounded_evidence_field(value: Any, limit: int = 300) -> str:
+    if value is None:
+        return ""
+    text = value if isinstance(value, str) else str(value)
+    text = " ".join(text.split())
+    return text[:limit]
+
+
+def _turn_failure_evidence(body: Any) -> tuple[str, str]:
+    if not isinstance(body, dict):
+        return "", ""
+    return (
+        _bounded_evidence_field(body.get("error")),
+        _bounded_evidence_field(body.get("message")),
+    )
+
+
+def _interpretation_routing_evidence(interpretation: Any) -> dict[str, str]:
+    if not isinstance(interpretation, dict):
+        return {
+            "requestedHelp": "",
+            "referencedKnowledgeId": "",
+            "knowledgePresentation": "",
+            "materialAmbiguity": "missing",
+        }
+    if "materialAmbiguity" not in interpretation:
+        ambiguity = "missing"
+    elif interpretation.get("materialAmbiguity") is None:
+        ambiguity = "null"
+    else:
+        ambiguity = "present"
+    return {
+        "requestedHelp": _bounded_evidence_field(interpretation.get("requestedHelp"), 100),
+        "referencedKnowledgeId": _bounded_evidence_field(interpretation.get("referencedKnowledgeId"), 200),
+        "knowledgePresentation": _bounded_evidence_field(interpretation.get("knowledgePresentation"), 100),
+        "materialAmbiguity": ambiguity,
+    }
+
+
 def _require_successful_outcome(label: str, status: int, body: dict[str, Any]) -> None:
     if 200 <= status < 300 and not body.get("error"):
         return
@@ -193,10 +232,25 @@ def _submit_turn(page: Page, prompt: str, label: str) -> StageResult:
         composer.press("Enter")
     turn_response = pending.value
 
-    assert 200 <= turn_response.status < 300, f"{label}: turn POST returned HTTP {turn_response.status}"
     body = _json_object(turn_response)
+    if not 200 <= turn_response.status < 300:
+        error, message = _turn_failure_evidence(body)
+        print(f"JOURNEY_{label}_TURN_FAILURE")
+        print(f"status={turn_response.status}")
+        print(f"error={error}")
+        print(f"message={message}")
+    assert 200 <= turn_response.status < 300, f"{label}: turn POST returned HTTP {turn_response.status}"
     product_status = body.get("status")
     print(f"JOURNEY_{label}_TURN_RESPONSE status={turn_response.status} product_status={product_status}")
+    if isinstance(body.get("interpretation"), dict):
+        routing = _interpretation_routing_evidence(body.get("interpretation"))
+        print(
+            f"JOURNEY_{label}_INTERPRETATION "
+            f"requestedHelp={routing['requestedHelp']} "
+            f"referencedKnowledgeId={routing['referencedKnowledgeId']} "
+            f"knowledgePresentation={routing['knowledgePresentation']} "
+            f"materialAmbiguity={routing['materialAmbiguity']}"
+        )
 
     _wait_for_turn_completion(page, prior_solandra_turns, label)
     turns = page.locator("#conversation .turn.solandra")

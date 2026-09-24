@@ -298,3 +298,55 @@ def test_issue47_source_list_outcome_rejects_answer_or_mismatched_provenance() -
     empty_findings["outcome"] = {"kind": "KNOWLEDGE", "findings": [], "provenance": outcome_body["outcome"]["provenance"]}
     with pytest.raises(AssertionError, match="findings"):
         validator._assert_issue47_source_list_outcome(empty_findings, knowledge_body, visible)
+
+
+def test_turn_failure_evidence_preserves_bounded_fields_only() -> None:
+    error, message = validator._turn_failure_evidence({
+        "error": "SOLANDRA_ADVISORY_FAILED",
+        "message": "Groq route was rate limited.",
+        "prompt": "secret prompt",
+        "authorization": "Bearer secret",
+    })
+    assert error == "SOLANDRA_ADVISORY_FAILED"
+    assert message == "Groq route was rate limited."
+
+    error, message = validator._turn_failure_evidence({})
+    assert (error, message) == ("", "")
+
+    error, message = validator._turn_failure_evidence({"error": None, "message": None})
+    assert (error, message) == ("", "")
+
+    long_message = "m" * 500
+    _, bounded = validator._turn_failure_evidence({"error": "E", "message": long_message})
+    assert len(bounded) == 300
+    assert "secret" not in bounded
+
+
+def test_interpretation_routing_evidence_preserves_structure_only() -> None:
+    routing = validator._interpretation_routing_evidence({
+        "requestedHelp": "SIMPLIFY_REFERENCE",
+        "referencedKnowledgeId": "knowledge-1",
+        "knowledgePresentation": "ANSWER",
+        "materialAmbiguity": {"question": "Which free text must never be logged?"},
+    })
+    assert routing == {
+        "requestedHelp": "SIMPLIFY_REFERENCE",
+        "referencedKnowledgeId": "knowledge-1",
+        "knowledgePresentation": "ANSWER",
+        "materialAmbiguity": "present",
+    }
+
+    routing = validator._interpretation_routing_evidence({
+        "requestedHelp": "KNOWLEDGE",
+        "referencedKnowledgeId": None,
+        "knowledgePresentation": "SOURCES",
+        "materialAmbiguity": None,
+    })
+    assert routing["materialAmbiguity"] == "null"
+
+    routing = validator._interpretation_routing_evidence({"requestedHelp": "KNOWLEDGE"})
+    assert routing["materialAmbiguity"] == "missing"
+
+    routing = validator._interpretation_routing_evidence(None)
+    assert routing["materialAmbiguity"] == "missing"
+    assert routing["requestedHelp"] == ""
