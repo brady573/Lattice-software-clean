@@ -110,6 +110,8 @@ type RunRow = {
 };
 
 type EventRow = { sequence: string | number; event_type: RunEventType };
+type EventRowWithRun = EventRow & { run_id: string };
+type TruthAssessmentRowWithRun = { run_id: string; id: string };
 type SnapshotMetadataRow = {
   phase: TruthSnapshotPhase;
   execution_contract_id: string;
@@ -450,6 +452,62 @@ export class PostgresRunStore implements RunStore {
       truthAssessmentIds: assessmentRows.rows.map((assessment) => assessment.id),
       events,
     };
+  }
+
+  async getManyByIds(runIds: readonly string[]): Promise<ReadonlyMap<string, LatticeRun>> {
+    const unique = [...new Set(runIds)];
+    if (unique.length === 0) return new Map();
+    let rows;
+    try {
+      rows = await this.pool.query<RunRow>(
+        "SELECT id,conversation_id,status,version,request_json,decision_json,explanation FROM runs WHERE id=ANY($1::text[])",
+        [unique],
+      );
+    } catch (error) {
+      if (typeof error === "object" && error !== null && "code" in error && error.code === "22P02") {
+        return new Map();
+      }
+      throw error;
+    }
+    if (rows.rows.length === 0) return new Map();
+    const foundIds = rows.rows.map((row) => row.id);
+    const [eventRows, assessmentRows] = await Promise.all([
+      this.pool.query<EventRowWithRun>(
+        "SELECT run_id,sequence,event_type FROM run_events WHERE run_id=ANY($1::text[]) ORDER BY run_id,sequence",
+        [foundIds],
+      ),
+      this.pool.query<TruthAssessmentRowWithRun>(
+        "SELECT run_id,id FROM truth_assessments WHERE run_id=ANY($1::text[]) ORDER BY run_id,created_at,id",
+        [foundIds],
+      ),
+    ]);
+    const eventsByRunId = new Map<string, RunEvent[]>();
+    for (const row of eventRows.rows) {
+      const events = eventsByRunId.get(row.run_id) ?? [];
+      events.push({ sequence: Number(row.sequence), type: row.event_type });
+      eventsByRunId.set(row.run_id, events);
+    }
+    const assessmentsByRunId = new Map<string, string[]>();
+    for (const row of assessmentRows.rows) {
+      const ids = assessmentsByRunId.get(row.run_id) ?? [];
+      ids.push(row.id);
+      assessmentsByRunId.set(row.run_id, ids);
+    }
+    const found = new Map<string, LatticeRun>();
+    for (const row of rows.rows) {
+      found.set(row.id, {
+        id: row.id,
+        conversationId: row.conversation_id,
+        status: row.status,
+        version: Number(row.version),
+        request: parsePersistedRunRequest(row.id, row.request_json),
+        decision: row.decision_json === null ? null : parsePersistedRunDecision(row.id, row.decision_json),
+        explanation: row.explanation,
+        truthAssessmentIds: assessmentsByRunId.get(row.id) ?? [],
+        events: eventsByRunId.get(row.id) ?? [],
+      });
+    }
+    return found;
   }
 
   private async readSnapshotMetadata(runId: string): Promise<SnapshotMetadataRow | undefined> {

@@ -32,6 +32,11 @@ export interface DecisionPlanStore {
     input: Omit<DurableDecisionPlan<DecisionPlanningMaterial>, "boundAt">,
   ): Promise<DurableDecisionPlan<DecisionPlanningMaterial>>;
   getByRunId(runId: string): Promise<DurableDecisionPlan<DecisionPlanningMaterial> | undefined>;
+  /**
+   * Bounded batch read of exact Run bindings. Run identities without a plan are
+   * absent from the result.
+   */
+  getManyByRunIds(runIds: readonly string[]): Promise<ReadonlyMap<string, DurableDecisionPlan<DecisionPlanningMaterial>>>;
   close(): Promise<void>;
 }
 
@@ -165,6 +170,17 @@ export class MemoryDecisionPlanStore implements DecisionPlanStore {
   async getByRunId(runId: string): Promise<DurableDecisionPlan<DecisionPlanningMaterial> | undefined> {
     const plan = this.plansByRunId.get(runId);
     return plan ? structuredClone(plan) : undefined;
+  }
+
+  async getManyByRunIds(
+    runIds: readonly string[],
+  ): Promise<ReadonlyMap<string, DurableDecisionPlan<DecisionPlanningMaterial>>> {
+    const found = new Map<string, DurableDecisionPlan<DecisionPlanningMaterial>>();
+    for (const runId of new Set(runIds)) {
+      const plan = this.plansByRunId.get(runId);
+      if (plan) found.set(runId, structuredClone(plan));
+    }
+    return found;
   }
 
   async close(): Promise<void> {
@@ -338,6 +354,35 @@ export class PostgresDecisionPlanStore implements DecisionPlanStore {
       planningMaterial: row.planning_material_json,
       boundAt: row.bound_at instanceof Date ? row.bound_at.toISOString() : new Date(row.bound_at).toISOString(),
     } : undefined;
+  }
+
+  async getManyByRunIds(
+    runIds: readonly string[],
+  ): Promise<ReadonlyMap<string, DurableDecisionPlan<DecisionPlanningMaterial>>> {
+    const unique = [...new Set(runIds)];
+    if (unique.length === 0) return new Map();
+    const result = await this.pool.query<{
+      decision_plan_id: string;
+      run_id: string;
+      intent_scope_id: string;
+      intent_version_id: string;
+      planning_material_json: DecisionPlanningMaterial;
+      bound_at: Date | string;
+    }>(
+      "SELECT decision_plan_id,run_id,intent_scope_id,intent_version_id,planning_material_json,bound_at FROM decision_plans WHERE run_id=ANY($1::text[])",
+      [unique],
+    );
+    return new Map(result.rows.map((row) => [
+      row.run_id,
+      {
+        decisionPlanId: row.decision_plan_id,
+        runId: row.run_id,
+        intentScopeId: row.intent_scope_id,
+        intentVersionId: row.intent_version_id,
+        planningMaterial: row.planning_material_json,
+        boundAt: row.bound_at instanceof Date ? row.bound_at.toISOString() : new Date(row.bound_at).toISOString(),
+      },
+    ]));
   }
 
   async close(): Promise<void> {

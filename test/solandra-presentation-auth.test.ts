@@ -106,6 +106,11 @@ function createApp() {
     async persistDecision() { return { outcome: "stale" as const }; },
     async complete() { return { outcome: "stale" as const }; },
     async get(runId: string) { return runId === completedRun.id ? structuredClone(completedRun) : undefined; },
+    async getManyByIds(runIds: readonly string[]) {
+      return new Map(runIds.flatMap((runId) => runId === completedRun.id
+        ? [[runId, structuredClone(completedRun)] as const]
+        : []));
+    },
     async getTruthSnapshot() { return undefined; },
     async getTruthBundle() { return undefined; },
     async close() {},
@@ -115,6 +120,11 @@ function createApp() {
     kind: "memory" as const,
     async bind() { throw new Error("not used"); },
     async getByRunId(runId: string) { return runId === plan.runId ? structuredClone(plan) : undefined; },
+    async getManyByRunIds(runIds: readonly string[]) {
+      return new Map(runIds.flatMap((runId) => runId === plan.runId
+        ? [[runId, structuredClone(plan)] as const]
+        : []));
+    },
     async close() {},
   } satisfies DecisionPlanStore;
 
