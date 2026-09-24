@@ -3,6 +3,7 @@ import test from "node:test";
 import Fastify from "fastify";
 import { registerAuthenticatedSubjectBoundary } from "../src/auth/authenticated-subject.js";
 import { registerConversationContinuityApi } from "../src/conversation/continuity-api.js";
+import type { ConversationReferenceRecord } from "../src/conversation/conversation-reference-store.js";
 import { MemoryConversationResponseStore } from "../src/conversation/conversation-response-store.js";
 import type { ConversationStore } from "../src/conversation/conversation-store.js";
 import type { ConversationRunIndexStore } from "../src/conversation/run-index-store.js";
@@ -117,9 +118,19 @@ function createApp() {
     async close() {},
   } satisfies DecisionPlanStore;
 
+  const conversationReferenceStore = {
+    kind: "memory" as const,
+    async getReference() { return undefined; },
+    async putReference(reference: ConversationReferenceRecord) { return reference; },
+    async latestReference() { return undefined; },
+    async listByConversation() { return []; },
+    async close() {},
+  };
+
   registerConversationContinuityApi(app, {
     conversationStore,
     conversationResponseStore,
+    conversationReferenceStore,
     userMessageStore,
     runStore,
     runIndexStore,
