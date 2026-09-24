@@ -117,7 +117,12 @@ export interface ConsultationIntakeOptions {
   intentStore: IntentAuthorityStore;
   conversationStore: ConversationStore;
   conversationResponseStore: ConversationResponseStore;
-  conversationReferenceStore?: ConversationReferenceStore;
+  /**
+   * Mandatory. Governed conversational continuity is not optional Product
+   * configuration: a composition without ConversationReference infrastructure
+   * is rejected rather than silently losing the exact reference relationship.
+   */
+  conversationReferenceStore: ConversationReferenceStore;
   userMessageStore: IntentUserMessageStore;
   apiControlStore: ApiRunControlStore;
   runStore: RunStore;
@@ -146,8 +151,10 @@ function stableUuid(...parts: string[]): `${string}-${string}-${string}-${string
 async function recordConversationReference(
   options: ConsultationIntakeOptions,
   input: Parameters<typeof appendConversationReference>[1],
-): Promise<ConversationReferenceRecord | undefined> {
-  if (!options.conversationReferenceStore) return undefined;
+): Promise<ConversationReferenceRecord> {
+  // Fail closed: a governed turn is never acknowledged as persisted because
+  // reference recording silently did nothing. appendConversationReference either
+  // records the exact relationship or throws.
   return appendConversationReference(options.conversationReferenceStore, input);
 }
 
@@ -646,6 +653,10 @@ async function confirmPendingClarification(input: {
 }
 
 export function registerConsultationIntake(app: FastifyInstance, options: ConsultationIntakeOptions): void {
+  // Composition/configuration failure, never a legitimate no-reference state.
+  if (!options.conversationReferenceStore) {
+    throw new Error("Canonical consultation intake requires ConversationReference infrastructure.");
+  }
   const interpreter = options.interpreter ?? new ConservativeConsultationInterpreter();
   const configuredApiSubject = options.apiSubject;
   const apiSubjectForRequest = typeof configuredApiSubject === "function"
@@ -748,127 +759,125 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
         return reply.status(500).send({ error: "AUTHORITATIVE_INTENT_VERSION_MISSING" });
       }
 
-      if (options.conversationReferenceStore) {
-        const choices = options.acceptedChoiceStore
-          ? (await options.acceptedChoiceStore.listAcceptedChoicesByConversation(conversationId))
-            .filter((choice) => choice.sourceMessageId === sourceMessage.messageId)
-          : [];
-        const recommendations = options.recommendationStore
-          ? (await options.recommendationStore.listRecommendationsByConversation(conversationId))
-            .filter((recommendation) =>
-              recommendation.runId === null
-              && recommendation.sourceMessageId === sourceMessage.messageId)
-          : [];
-        if (choices.length > 1 || recommendations.length > 1 || (choices.length > 0 && recommendations.length > 0)) {
-          return reply.status(409).send({
-            error: "GOVERNED_TURN_RECOVERY_CONFLICT",
-            message: "The exact USER turn resolves to conflicting governed durable state.",
-          });
-        }
+      const choices = options.acceptedChoiceStore
+        ? (await options.acceptedChoiceStore.listAcceptedChoicesByConversation(conversationId))
+          .filter((choice) => choice.sourceMessageId === sourceMessage.messageId)
+        : [];
+      const recommendations = options.recommendationStore
+        ? (await options.recommendationStore.listRecommendationsByConversation(conversationId))
+          .filter((recommendation) =>
+            recommendation.runId === null
+            && recommendation.sourceMessageId === sourceMessage.messageId)
+        : [];
+      if (choices.length > 1 || recommendations.length > 1 || (choices.length > 0 && recommendations.length > 0)) {
+        return reply.status(409).send({
+          error: "GOVERNED_TURN_RECOVERY_CONFLICT",
+          message: "The exact USER turn resolves to conflicting governed durable state.",
+        });
+      }
 
-        const replayChoice = choices[0];
-        if (replayChoice) {
-          if (!options.recommendationStore || !options.knowledgeStore) {
-            return reply.status(409).send({ error: "ACCEPTED_CHOICE_RECOVERY_UNAVAILABLE" });
-          }
-          const replayVersion = await options.intentStore.getVersion(replayChoice.intentVersionId);
-          const loaded = await loadRecommendation(
-            options.recommendationStore,
-            options.knowledgeStore,
-            options.runStore,
-            replayChoice.recommendationId,
-          );
-          const option = loaded ? recommendationOption(loaded.record, replayChoice.optionId) : undefined;
-          if (
-            !replayVersion
-            || replayVersion.intentScopeId !== sourceMessage.intentScopeId
-            || !loaded
-            || loaded.record.conversationId !== conversationId
-            || !option
-            || option.text !== replayChoice.optionText
-            || !await isProducedConversationTarget(
-              options.conversationReferenceStore,
-              conversationId,
-              "RECOMMENDATION",
-              loaded.record.recommendationId,
-            )
-          ) {
-            return reply.status(409).send({ error: "ACCEPTED_CHOICE_RECOVERY_INTEGRITY_FAILED" });
-          }
-          await recordConversationReference(options, {
+      const replayChoice = choices[0];
+      if (replayChoice) {
+        if (!options.recommendationStore || !options.knowledgeStore) {
+          return reply.status(409).send({ error: "ACCEPTED_CHOICE_RECOVERY_UNAVAILABLE" });
+        }
+        const replayVersion = await options.intentStore.getVersion(replayChoice.intentVersionId);
+        const loaded = await loadRecommendation(
+          options.recommendationStore,
+          options.knowledgeStore,
+          options.runStore,
+          replayChoice.recommendationId,
+        );
+        const option = loaded ? recommendationOption(loaded.record, replayChoice.optionId) : undefined;
+        if (
+          !replayVersion
+          || replayVersion.intentScopeId !== sourceMessage.intentScopeId
+          || !loaded
+          || loaded.record.conversationId !== conversationId
+          || !option
+          || option.text !== replayChoice.optionText
+          || !await isProducedConversationTarget(
+            options.conversationReferenceStore,
             conversationId,
-            userMessageId: sourceMessage.messageId,
-            responseId: governedResponseId("accepted-choice", sourceMessage.messageId, replayChoice.acceptedChoiceId),
-            intentVersionId: replayChoice.intentVersionId,
-            targets: [
-              { kind: "RECOMMENDATION", targetId: loaded.record.recommendationId, relation: "CONSUMED" },
-              { kind: "OPTION", targetId: option.optionId, relation: "CONSUMED" },
-              { kind: "ACCEPTED_CHOICE", targetId: replayChoice.acceptedChoiceId, relation: "PRODUCED" },
-            ],
-            createdAt: replayChoice.createdAt,
-          });
-          return reply.status(200).send({
-            status: "ACCEPTED_CHOICE_ESTABLISHED",
-            acceptedUnderstanding: authoritativeObjective(replayVersion),
-            intentScopeId: replayVersion.intentScopeId,
-            intentVersionId: replayVersion.intentVersionId,
-            recommendationReference: { recommendationId: loaded.record.recommendationId },
-            optionReference: option,
-            acceptedChoice: replayChoice,
-            presentation: {
-              assistantMessage: `You chose: ${option.text}\n\nI preserved that as your choice. It does not authorize any external action.`,
-            },
-          });
+            "RECOMMENDATION",
+            loaded.record.recommendationId,
+          )
+        ) {
+          return reply.status(409).send({ error: "ACCEPTED_CHOICE_RECOVERY_INTEGRITY_FAILED" });
         }
+        await recordConversationReference(options, {
+          conversationId,
+          userMessageId: sourceMessage.messageId,
+          responseId: governedResponseId("accepted-choice", sourceMessage.messageId, replayChoice.acceptedChoiceId),
+          intentVersionId: replayChoice.intentVersionId,
+          targets: [
+            { kind: "RECOMMENDATION", targetId: loaded.record.recommendationId, relation: "CONSUMED" },
+            { kind: "OPTION", targetId: option.optionId, relation: "CONSUMED" },
+            { kind: "ACCEPTED_CHOICE", targetId: replayChoice.acceptedChoiceId, relation: "PRODUCED" },
+          ],
+          createdAt: replayChoice.createdAt,
+        });
+        return reply.status(200).send({
+          status: "ACCEPTED_CHOICE_ESTABLISHED",
+          acceptedUnderstanding: authoritativeObjective(replayVersion),
+          intentScopeId: replayVersion.intentScopeId,
+          intentVersionId: replayVersion.intentVersionId,
+          recommendationReference: { recommendationId: loaded.record.recommendationId },
+          optionReference: option,
+          acceptedChoice: replayChoice,
+          presentation: {
+            assistantMessage: `You chose: ${option.text}\n\nI preserved that as your choice. It does not authorize any external action.`,
+          },
+        });
+      }
 
-        const replayRecommendation = recommendations[0];
-        if (replayRecommendation) {
-          if (!options.recommendationStore || !options.knowledgeStore) {
-            return reply.status(409).send({ error: "RECOMMENDATION_RECOVERY_UNAVAILABLE" });
-          }
-          const replayVersion = await options.intentStore.getVersion(replayRecommendation.intentVersionId);
-          const loaded = await loadRecommendation(
-            options.recommendationStore,
-            options.knowledgeStore,
-            options.runStore,
+      const replayRecommendation = recommendations[0];
+      if (replayRecommendation) {
+        if (!options.recommendationStore || !options.knowledgeStore) {
+          return reply.status(409).send({ error: "RECOMMENDATION_RECOVERY_UNAVAILABLE" });
+        }
+        const replayVersion = await options.intentStore.getVersion(replayRecommendation.intentVersionId);
+        const loaded = await loadRecommendation(
+          options.recommendationStore,
+          options.knowledgeStore,
+          options.runStore,
+          replayRecommendation.recommendationId,
+        );
+        if (
+          !replayVersion
+          || replayVersion.intentScopeId !== sourceMessage.intentScopeId
+          || !loaded
+          || loaded.record.conversationId !== conversationId
+        ) {
+          return reply.status(409).send({ error: "RECOMMENDATION_RECOVERY_INTEGRITY_FAILED" });
+        }
+        await recordConversationReference(options, {
+          conversationId,
+          userMessageId: sourceMessage.messageId,
+          responseId: governedResponseId(
+            "recommendation-established",
+            sourceMessage.messageId,
             replayRecommendation.recommendationId,
-          );
-          if (
-            !replayVersion
-            || replayVersion.intentScopeId !== sourceMessage.intentScopeId
-            || !loaded
-            || loaded.record.conversationId !== conversationId
-          ) {
-            return reply.status(409).send({ error: "RECOMMENDATION_RECOVERY_INTEGRITY_FAILED" });
-          }
-          await recordConversationReference(options, {
-            conversationId,
-            userMessageId: sourceMessage.messageId,
-            responseId: governedResponseId(
-              "recommendation-established",
-              sourceMessage.messageId,
-              replayRecommendation.recommendationId,
-            ),
+          ),
+          intentVersionId: replayRecommendation.intentVersionId,
+          targets: producedRecommendationTargets(replayRecommendation),
+          createdAt: replayRecommendation.createdAt,
+        });
+        return reply.status(200).send({
+          status: "RECOMMENDATION_ESTABLISHED",
+          acceptedUnderstanding: authoritativeObjective(replayVersion),
+          intentScopeId: replayVersion.intentScopeId,
+          intentVersionId: replayVersion.intentVersionId,
+          recommendationReference: {
+            recommendationId: replayRecommendation.recommendationId,
             intentVersionId: replayRecommendation.intentVersionId,
-            targets: producedRecommendationTargets(replayRecommendation),
-            createdAt: replayRecommendation.createdAt,
-          });
-          return reply.status(200).send({
-            status: "RECOMMENDATION_ESTABLISHED",
-            acceptedUnderstanding: authoritativeObjective(replayVersion),
-            intentScopeId: replayVersion.intentScopeId,
-            intentVersionId: replayVersion.intentVersionId,
-            recommendationReference: {
-              recommendationId: replayRecommendation.recommendationId,
-              intentVersionId: replayRecommendation.intentVersionId,
-              knowledgeIds: replayRecommendation.knowledgeIds,
-              claimIds: replayRecommendation.claimIds,
-              options: recommendationOptions(replayRecommendation),
-              selectionAuthorized: false,
-            },
-            presentation: { assistantMessage: renderRecommendation(replayRecommendation) },
-          });
-        }
+            knowledgeIds: replayRecommendation.knowledgeIds,
+            claimIds: replayRecommendation.claimIds,
+            options: recommendationOptions(replayRecommendation),
+            selectionAuthorized: false,
+          },
+          presentation: { assistantMessage: renderRecommendation(replayRecommendation) },
+        });
       }
 
       let cognition: SolandraGovernedCognitionResult | undefined;
@@ -876,7 +885,7 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
       let cognitiveGovernedKnowledge: Awaited<ReturnType<typeof recentGovernedKnowledge>> = [];
       try {
         if (options.solandraCognition) {
-          const governed = options.knowledgeStore && options.conversationReferenceStore
+          const governed = options.knowledgeStore
             ? await recentGovernedKnowledge(
               options.knowledgeStore,
               options.conversationReferenceStore,
@@ -888,16 +897,10 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
           const recommendations = options.recommendationStore
             ? await options.recommendationStore.listRecommendationsByConversation(conversationId)
             : [];
-          const recommendationReferences = options.conversationReferenceStore
-            ? await options.conversationReferenceStore.listByConversation(conversationId)
-            : [];
-          const committedRecommendationIds = options.conversationReferenceStore
-            ? producedTargetIds(recommendationReferences, "RECOMMENDATION")
-            : undefined;
-          const committedRecommendations = committedRecommendationIds
-            ? recommendations.filter((recommendation) =>
-              committedRecommendationIds.has(recommendation.recommendationId))
-            : recommendations;
+          const recommendationReferences = await options.conversationReferenceStore.listByConversation(conversationId);
+          const committedRecommendationIds = producedTargetIds(recommendationReferences, "RECOMMENDATION");
+          const committedRecommendations = recommendations.filter((recommendation) =>
+            committedRecommendationIds.has(recommendation.recommendationId));
           const recentMessages = [...history.map((message) => message.content)];
           if (!recentMessages.includes(sourceMessage.content)) recentMessages.push(sourceMessage.content);
           const cognitionResult = await options.solandraCognition.interpret({
@@ -1300,7 +1303,7 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
         && options.recommendationStore
         && options.solandraAdvisory
       ) {
-        const governed = options.knowledgeStore && options.conversationReferenceStore
+        const governed = options.knowledgeStore
           ? await recentGovernedKnowledge(
             options.knowledgeStore,
             options.conversationReferenceStore,
@@ -1561,15 +1564,13 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
         if (!sourceMessage || sourceMessage.conversationId !== run.conversationId) {
           return reply.status(409).send({ error: "ACTION_PREPARATION_USER_SOURCE_UNAVAILABLE" });
         }
-        const recent = options.conversationReferenceStore
-          ? await recentGovernedKnowledge(
-            options.knowledgeStore,
-            options.conversationReferenceStore,
-            options.runStore,
-            run.conversationId,
-            4,
-          )
-          : [];
+        const recent = await recentGovernedKnowledge(
+          options.knowledgeStore,
+          options.conversationReferenceStore,
+          options.runStore,
+          run.conversationId,
+          4,
+        );
         const priorGoverned = recent.filter((item) => item.record.runId !== run.id);
         const currentGoverned = priorGoverned.length === 0
           ? await loadKnowledge(options.knowledgeStore, options.runStore, established.knowledgeId)

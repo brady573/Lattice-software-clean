@@ -39,7 +39,8 @@ const RESOURCE_ID_MAX_CHARS = 256;
 export interface ConversationContinuityApiOptions {
   conversationStore: ConversationStore;
   conversationResponseStore: ConversationResponseStore;
-  conversationReferenceStore?: ConversationReferenceStore;
+  /** Mandatory: governed continuity cannot be reported without reference infrastructure. */
+  conversationReferenceStore: ConversationReferenceStore;
   userMessageStore: IntentUserMessageStore;
   runStore: RunStore;
   runIndexStore: ConversationRunIndexStore;
@@ -110,6 +111,10 @@ export function registerConversationContinuityApi(
   app: FastifyInstance,
   options: ConversationContinuityApiOptions,
 ): void {
+  // Composition/configuration failure, never a legitimate empty governed history.
+  if (!options.conversationReferenceStore) {
+    throw new Error("Canonical conversation continuity requires ConversationReference infrastructure.");
+  }
   app.get<{ Params: { conversationId: string } }>(
     "/api/v1/conversations/:conversationId/continuity",
     async (request, reply) => {
@@ -125,7 +130,7 @@ export function registerConversationContinuityApi(
       const [messages, conversationResponses, conversationReferences, runIds, knowledge, recommendations, acceptedChoices] = await Promise.all([
         options.userMessageStore.listByConversation(conversationId),
         options.conversationResponseStore.listByConversation(conversationId),
-        options.conversationReferenceStore?.listByConversation(conversationId) ?? Promise.resolve([]),
+        options.conversationReferenceStore.listByConversation(conversationId),
         options.runIndexStore.listRunIds(conversationId),
         options.knowledgeStore?.listKnowledgeByConversation(conversationId) ?? Promise.resolve([]),
         options.recommendationStore?.listRecommendationsByConversation(conversationId) ?? Promise.resolve([]),
@@ -198,22 +203,16 @@ export function registerConversationContinuityApi(
         };
       }));
 
-      const committedKnowledgeIds = options.conversationReferenceStore
-        ? producedTargetIds(conversationReferences, "KNOWLEDGE")
-        : undefined;
-      const committedRecommendationIds = options.conversationReferenceStore
-        ? producedTargetIds(conversationReferences, "RECOMMENDATION")
-        : undefined;
-      const committedAcceptedChoiceIds = options.conversationReferenceStore
-        ? producedTargetIds(conversationReferences, "ACCEPTED_CHOICE")
-        : undefined;
+      const committedKnowledgeIds = producedTargetIds(conversationReferences, "KNOWLEDGE");
+      const committedRecommendationIds = producedTargetIds(conversationReferences, "RECOMMENDATION");
+      const committedAcceptedChoiceIds = producedTargetIds(conversationReferences, "ACCEPTED_CHOICE");
 
       return reply.status(200).send({
         conversation,
         messages: conversationMessages,
         runs: runs.filter((run) => run !== undefined),
         knowledge: knowledge
-          .filter((record) => committedKnowledgeIds?.has(record.knowledgeId) ?? true)
+          .filter((record) => committedKnowledgeIds.has(record.knowledgeId))
           .map((record) => ({
           knowledgeId: record.knowledgeId,
           runId: record.runId,
@@ -237,7 +236,7 @@ export function registerConversationContinuityApi(
           createdAt: reference.createdAt,
         })),
         recommendations: recommendations
-          .filter((record) => committedRecommendationIds?.has(record.recommendationId) ?? true)
+          .filter((record) => committedRecommendationIds.has(record.recommendationId))
           .map((record) => ({
           recommendationId: record.recommendationId,
           runId: record.runId,
@@ -256,7 +255,7 @@ export function registerConversationContinuityApi(
           link: `/api/v1/recommendations/${encodeURIComponent(record.recommendationId)}`,
         })),
         acceptedChoices: acceptedChoices
-          .filter((choice) => committedAcceptedChoiceIds?.has(choice.acceptedChoiceId) ?? true)
+          .filter((choice) => committedAcceptedChoiceIds.has(choice.acceptedChoiceId))
           .map((choice) => ({ ...choice })),
       });
     },

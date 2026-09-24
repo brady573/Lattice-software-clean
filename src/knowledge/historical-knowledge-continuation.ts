@@ -35,7 +35,8 @@ export interface HistoricalKnowledgeContinuationInput {
    * continue. This operation never acquires or rebuilds Knowledge.
    */
   readonly knowledgeStore: KnowledgeRecordStore | undefined;
-  readonly conversationReferenceStore: ConversationReferenceStore | undefined;
+  /** Mandatory governed continuity infrastructure; absence is a composition failure. */
+  readonly conversationReferenceStore: ConversationReferenceStore;
   readonly solandraKnowledgePresenter: SolandraKnowledgePresenter | undefined;
   /** Public cognition payload the route already exposes for this turn. */
   readonly interpretation: unknown;
@@ -78,7 +79,6 @@ export async function continueHistoricalKnowledge(
 ): Promise<HistoricalKnowledgeContinuationResult> {
   if (
     !input.knowledgeStore
-    || !input.conversationReferenceStore
     || input.currentIntentVersionId === undefined
     || input.acceptedUnderstanding === undefined
   ) {
