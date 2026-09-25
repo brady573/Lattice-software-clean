@@ -112,6 +112,9 @@ type RunRow = {
 type EventRow = { sequence: string | number; event_type: RunEventType };
 type EventRowWithRun = EventRow & { run_id: string };
 type TruthAssessmentRowWithRun = { run_id: string; id: string };
+
+/** runs.id, run_events.run_id, and truth_assessments.run_id are uuid columns. */
+const UUID_SHAPE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
 type SnapshotMetadataRow = {
   phase: TruthSnapshotPhase;
   execution_contract_id: string;
@@ -455,12 +458,14 @@ export class PostgresRunStore implements RunStore {
   }
 
   async getManyByIds(runIds: readonly string[]): Promise<ReadonlyMap<string, LatticeRun>> {
-    const unique = [...new Set(runIds)];
+    // The batch must keep the single-record contract that a malformed identity
+    // is simply absent, so only well-formed uuid identities are ever bound.
+    const unique = [...new Set(runIds)].filter((runId) => UUID_SHAPE.test(runId));
     if (unique.length === 0) return new Map();
     let rows;
     try {
       rows = await this.pool.query<RunRow>(
-        "SELECT id,conversation_id,status,version,request_json,decision_json,explanation FROM runs WHERE id=ANY($1::text[])",
+        "SELECT id,conversation_id,status,version,request_json,decision_json,explanation FROM runs WHERE id=ANY($1::uuid[])",
         [unique],
       );
     } catch (error) {
@@ -473,11 +478,11 @@ export class PostgresRunStore implements RunStore {
     const foundIds = rows.rows.map((row) => row.id);
     const [eventRows, assessmentRows] = await Promise.all([
       this.pool.query<EventRowWithRun>(
-        "SELECT run_id,sequence,event_type FROM run_events WHERE run_id=ANY($1::text[]) ORDER BY run_id,sequence",
+        "SELECT run_id,sequence,event_type FROM run_events WHERE run_id=ANY($1::uuid[]) ORDER BY run_id,sequence",
         [foundIds],
       ),
       this.pool.query<TruthAssessmentRowWithRun>(
-        "SELECT run_id,id FROM truth_assessments WHERE run_id=ANY($1::text[]) ORDER BY run_id,created_at,id",
+        "SELECT run_id,id FROM truth_assessments WHERE run_id=ANY($1::uuid[]) ORDER BY run_id,created_at,id",
         [foundIds],
       ),
     ]);
@@ -493,9 +498,14 @@ export class PostgresRunStore implements RunStore {
       ids.push(row.id);
       assessmentsByRunId.set(row.run_id, ids);
     }
+    // Key by the requested identity spelling so a batch lookup is exactly
+    // equivalent to the corresponding per-identity reads, while identities the
+    // schema did not return stay absent.
     const found = new Map<string, LatticeRun>();
-    for (const row of rows.rows) {
-      found.set(row.id, {
+    for (const requested of unique) {
+      const row = rows.rows.find((candidate) => candidate.id.toLowerCase() === requested.toLowerCase());
+      if (!row) continue;
+      found.set(requested, {
         id: row.id,
         conversationId: row.conversation_id,
         status: row.status,

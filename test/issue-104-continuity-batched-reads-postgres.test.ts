@@ -113,6 +113,19 @@ test("Issue #104 PostgreSQL: bounded Run batch reads return the same Runs with c
       assert.deepEqual(batched.result.get(runId), await runStore.get(runId), `batched Run differs from per-identity read: ${runId}`);
     }
 
+    // A malformed identity stays absent exactly like the single-record read and
+    // must not discard the exact identities that are present.
+    const withMalformed = await countStoreQueries(() => runStore.getManyByIds([
+      ...requested,
+      "not-a-uuid",
+      "11111111-1111-1111-1111-11111111111x",
+    ]));
+    assert.deepEqual([...withMalformed.result.keys()], runIds.concat(foreignRunId));
+    assert.deepEqual(withMalformed.counts, batched.counts, "malformed identities are filtered before binding");
+    assert.equal(await runStore.getManyByIds(["not-a-uuid"]).then((result) => result.size), 0);
+    const emptyBatch = await runStore.getManyByIds([]);
+    assert.equal(emptyBatch.size, 0, "an empty batch never queries");
+
     // Query count is independent of identity count: 4 identities cost the same
     // three bounded reads as 10.
     const four = requested.slice(0, 4);

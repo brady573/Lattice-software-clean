@@ -369,6 +369,9 @@ export class PostgresDecisionPlanStore implements DecisionPlanStore {
       planning_material_json: DecisionPlanningMaterial;
       bound_at: Date | string;
     }>(
+      // decision_plans.run_id is a text column, not uuid, so this binding is
+      // deliberately text[] and must not be aligned with the runs/run_events/
+      // truth_assessments uuid columns.
       "SELECT decision_plan_id,run_id,intent_scope_id,intent_version_id,planning_material_json,bound_at FROM decision_plans WHERE run_id=ANY($1::text[])",
       [unique],
     );
