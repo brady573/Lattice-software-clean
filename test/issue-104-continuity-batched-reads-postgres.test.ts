@@ -95,13 +95,14 @@ test("Issue #104 PostgreSQL: bounded Run batch reads return the same Runs with c
   const runIds: string[] = [];
   try {
     for (let index = 1; index <= 8; index += 1) {
-      const runId = `run-${index}-${randomUUID()}` as `${string}-${string}-${string}-${string}-${string}`;
+      // runs.id is a uuid column, so the fixture identities are real uuids.
+      const runId = randomUUID();
       runIds.push(runId);
       await runStore.create(consultationRun(conversationId, runId, index));
     }
-    const foreignRunId = `run-foreign-${randomUUID()}` as `${string}-${string}-${string}-${string}-${string}`;
+    const foreignRunId = randomUUID();
     await runStore.create(consultationRun(otherConversationId, foreignRunId, 1));
-    const requested = [...runIds, `run-absent-${randomUUID()}`, foreignRunId];
+    const requested = [...runIds, randomUUID(), foreignRunId];
 
     const batched = await countStoreQueries(() => runStore.getManyByIds(requested));
     assert.equal(batched.counts.runs, 1, "one Run query for every requested identity");
