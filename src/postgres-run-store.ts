@@ -115,20 +115,40 @@ type TruthAssessmentRowWithRun = { run_id: string; id: string };
 
 /**
  * Normalizes an identity to the canonical 8-4-4-4-12 uuid text form, accepting
- * exactly the input forms PostgreSQL documents for a uuid: upper-case digits,
- * the standard form surrounded by braces, omitting some or all hyphens, and
- * adding a hyphen after any group of four digits. Returns null for anything
- * PostgreSQL would reject, so the batch binds only accepted identities and
- * never relies on a server-side cast error. PostgreSQL always outputs the
- * standard lower-case form.
+ * exactly the input forms PostgreSQL itself accepts for a uuid.
+ *
+ * This mirrors PostgreSQL 18 `string_to_uuid()`: the value is read as 16 pairs
+ * of hexadecimal digits, and a single hyphen is skipped only after every pair
+ * boundary that follows an even pair index below the last one - that is, only
+ * after 4, 8, 12, 16, 20, 24, or 28 digits. A leading brace must be matched by
+ * a trailing brace, and nothing may remain afterwards. Any other character,
+ * including a hyphen in any other position, is rejected exactly as PostgreSQL
+ * rejects it, so a batch read is never wider than the single-record read and
+ * never depends on a server-side cast error.
  */
 function canonicalUuidText(value: string): string | null {
-  const trimmed = value.trim();
-  const unwrapped = trimmed.startsWith("{") && trimmed.endsWith("}")
-    ? trimmed.slice(1, -1)
-    : trimmed;
-  const digits = unwrapped.replace(/-/gu, "");
-  if (!/^[0-9a-f]{32}$/iu.test(digits)) return null;
+  const UUID_BYTES = 16;
+  let source = value;
+  let braces = false;
+  if (source.startsWith("{")) {
+    source = source.slice(1);
+    braces = true;
+  }
+  let digits = "";
+  for (let pair = 0; pair < UUID_BYTES; pair += 1) {
+    const two = source.slice(0, 2);
+    if (two.length !== 2 || !/^[0-9a-f]{2}$/iu.test(two)) return null;
+    digits += two;
+    source = source.slice(2);
+    if (source.startsWith("-") && pair % 2 === 1 && pair < UUID_BYTES - 1) {
+      source = source.slice(1);
+    }
+  }
+  if (braces) {
+    if (!source.startsWith("}")) return null;
+    source = source.slice(1);
+  }
+  if (source !== "") return null;
   return [
     digits.slice(0, 8),
     digits.slice(8, 12),

@@ -153,19 +153,38 @@ test("Issue #104 PostgreSQL: bounded Run batch reads return the same Runs with c
     assert.deepEqual(variantBatch.counts, batched.counts, "identity spelling does not change query count");
 
     // A form PostgreSQL rejects must be absent from both paths, so the batch
-    // never accepts more than the single-record read.
-    for (const unsupported of [`urn:uuid:${target}`, "not-a-uuid"]) {
+    // never answers for an identity the single-record read rejects. The
+    // rejected set covers a misplaced hyphen, a doubled hyphen, an unsupported
+    // scheme prefix, a hyphen in the wrong position, leading/trailing
+    // punctuation, surrounding whitespace, and non-hex text.
+    const unsupported = [
+      `urn:uuid:${target}`,
+      "not-a-uuid",
+      `a-${digits.slice(1)}`,
+      `a0ee--bc${digits.slice(4)}`,
+      `a0e-bc${digits.slice(3)}`,
+      `${target}-`,
+      `-${target}`,
+      `${target}}`,
+      `{${target}`,
+      ` ${target}`,
+      `${target}x`,
+    ];
+    for (const value of unsupported) {
       assert.equal(
-        await runStore.get(unsupported),
+        await runStore.get(value),
         undefined,
-        `PostgreSQL must reject ${unsupported}`,
+        `PostgreSQL must reject ${JSON.stringify(value)}`,
       );
       assert.equal(
-        (await runStore.getManyByIds([unsupported])).get(unsupported),
+        (await runStore.getManyByIds([value])).get(value),
         undefined,
-        `the batch must not accept a form PostgreSQL rejects: ${unsupported}`,
+        `the batch must not answer for a spelling PostgreSQL rejects: ${JSON.stringify(value)}`,
       );
     }
+    const unsupportedBatch = await countStoreQueries(() => runStore.getManyByIds(unsupported));
+    assert.equal(unsupportedBatch.result.size, 0, "rejected spellings never bind a query value");
+    assert.deepEqual(unsupportedBatch.counts, {}, "a batch of only rejected spellings issues no read queries");
 
     // Query count is independent of identity count: 4 identities cost the same
     // three bounded reads as 10.
