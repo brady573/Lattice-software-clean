@@ -523,6 +523,12 @@ export class ModelRuntime {
     maxAttempts: number,
     callerSignal: AbortSignal | undefined,
   ): Promise<ModelRuntimeResult> {
+    // Validate all timer delays BEFORE scheduling any timer, so an
+    // unrepresentable budget fails fast without leaving orphaned timers.
+    const attemptBoundMs = requireTimerDelay(
+      this.timeoutMs * maxAttempts,
+      "Model attempt budget",
+    );
     const queueController = new AbortController();
     const queueTimer = setTimeout(
       () => queueController.abort(new Error("Model call queue wait exceeded its bound.")),
@@ -531,18 +537,16 @@ export class ModelRuntime {
     const queueSignal = callerSignal === undefined
       ? queueController.signal
       : AbortSignal.any([callerSignal, queueController.signal]);
-    // Validated before any work so an unrepresentable budget fails fast.
-    const attemptBoundMs = requireTimerDelay(
-      this.timeoutMs * maxAttempts,
-      "Model attempt budget",
-    );
     try {
       return await this.lock.run(logicalKey, queueSignal, async () => {
-        // The queue bound governs waiting only; once the logical key is held it
-        // must not shorten any permitted attempt's own execution window.
-        if (queueSignal.aborted) {
-          throw classifyAbort(callerSignal, queueController.signal, queueSignal.reason);
-        }
+        // Lock acquired: retire the queue timer immediately so it can never
+        // fire after lock acquisition or participate in final error classification.
+        clearTimeout(queueTimer);
+
+        const attemptBoundMs = requireTimerDelay(
+          this.timeoutMs * maxAttempts,
+          "Model attempt budget",
+        );
         const budgetController = new AbortController();
         const budgetTimer = setTimeout(
           () => budgetController.abort(new Error("Model attempt budget exceeded.")),
@@ -628,9 +632,6 @@ export class ModelRuntime {
     } catch (error) {
       if (callerSignal?.aborted === true) {
         throw new ModelProviderError("cancelled", "Model call was cancelled by caller.", { cause: error });
-      }
-      if (queueController.signal.aborted) {
-        throw classifyAbort(callerSignal, queueController.signal, error);
       }
       throw asModelProviderError(error);
     } finally {
