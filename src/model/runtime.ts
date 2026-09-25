@@ -236,6 +236,19 @@ function buildInvocationProvenance(
   });
 }
 
+/**
+ * Node's setTimeout() silently rewrites any delay above 2^31-1 ms to 1 ms, so
+ * a computed window must be rejected rather than scheduled as a false bound.
+ */
+const MAX_TIMER_DELAY_MS = 2_147_483_647;
+
+function requireTimerDelay(delayMs: number, label: string): number {
+  if (!Number.isFinite(delayMs) || delayMs <= 0 || delayMs > MAX_TIMER_DELAY_MS) {
+    throw new Error(`${label} must be a positive timer delay no greater than ${MAX_TIMER_DELAY_MS} ms.`);
+  }
+  return delayMs;
+}
+
 function classifyAbort(
   callerSignal: AbortSignal | undefined,
   timeoutSignal: AbortSignal,
@@ -283,7 +296,7 @@ export class ModelRuntime {
     private readonly provider: ModelProvider,
     options: ModelRuntimeOptions = {},
   ) {
-    this.timeoutMs = options.timeoutMs ?? 30_000;
+    this.timeoutMs = requireTimerDelay(options.timeoutMs ?? 30_000, "ModelRuntime timeoutMs");
     this.maxRequestBytes = options.maxRequestBytes ?? 256 * 1024;
     this.maxResponseBytes = options.maxResponseBytes ?? 2 * 1024 * 1024;
     const maxStateEntries = options.maxStateEntries ?? 10_000;
@@ -321,6 +334,7 @@ export class ModelRuntime {
     if (!Number.isInteger(maxAttempts) || maxAttempts < 1 || maxAttempts > 3) {
       throw new Error("maxAttempts must be an integer between 1 and 3.");
     }
+    const attemptWindowPolicy = options.attemptWindowPolicy ?? "shared";
 
     if (options.idempotencyKey !== undefined) {
       const idempotencyKey = requireNonEmpty(options.idempotencyKey, "idempotencyKey");
@@ -339,6 +353,7 @@ export class ModelRuntime {
         invocation,
         maxAttempts,
         controller.signal,
+        attemptWindowPolicy,
       );
       const operation: SharedModelOperation = {
         promise,
@@ -364,6 +379,7 @@ export class ModelRuntime {
       invocation,
       maxAttempts,
       options.signal,
+      attemptWindowPolicy,
     );
   }
 
@@ -402,7 +418,23 @@ export class ModelRuntime {
     invocation: ModelInvocationRouteRequest | null,
     maxAttempts: number,
     callerSignal: AbortSignal | undefined,
+    attemptWindowPolicy: "shared" | "per-attempt",
   ): Promise<ModelRuntimeResult> {
+    if (attemptWindowPolicy === "per-attempt") {
+      return await this.executeWithPerAttemptWindows(
+        request,
+        requestIdentity,
+        logicalKey,
+        correlationId,
+        invocation,
+        maxAttempts,
+        callerSignal,
+      );
+    }
+
+    // Shared-window policy (default): the historical behavior, where one
+    // timeoutMs budget covers queue waiting, provider readiness, and every
+    // permitted attempt together.
     const timeoutController = new AbortController();
     const timer = setTimeout(
       () => timeoutController.abort(new Error("Model call timeout.")),
@@ -469,6 +501,146 @@ export class ModelRuntime {
       throw asModelProviderError(error);
     } finally {
       clearTimeout(timer);
+    }
+  }
+
+  /**
+   * Per-attempt window policy, used only by callers that explicitly opt in.
+   *
+   * Queue waiting for the logical key is bounded separately and does not
+   * consume any attempt's execution window, so a permitted retry is never
+   * starved by an earlier attempt or by lock contention. The whole call stays
+   * explicitly finite: queue wait <= this.timeoutMs, and every permitted
+   * attempt <= this.timeoutMs, for a worst case of
+   * this.timeoutMs * (1 + maxAttempts).
+   */
+  private async executeWithPerAttemptWindows(
+    request: CanonicalModelRequest,
+    requestIdentity: string,
+    logicalKey: string,
+    correlationId: string,
+    invocation: ModelInvocationRouteRequest | null,
+    maxAttempts: number,
+    callerSignal: AbortSignal | undefined,
+  ): Promise<ModelRuntimeResult> {
+    // Validate all timer delays BEFORE scheduling any timer, so an
+    // unrepresentable budget fails fast without leaving orphaned timers.
+    const attemptBoundMs = requireTimerDelay(
+      this.timeoutMs * maxAttempts,
+      "Model attempt budget",
+    );
+    const queueController = new AbortController();
+    const queueTimer = setTimeout(
+      () => queueController.abort(new Error("Model call queue wait exceeded its bound.")),
+      this.timeoutMs,
+    );
+    const queueSignal = callerSignal === undefined
+      ? queueController.signal
+      : AbortSignal.any([callerSignal, queueController.signal]);
+    try {
+      return await this.lock.run(logicalKey, queueSignal, async () => {
+        // Lock acquired: retire the queue timer immediately so it can never
+        // fire after lock acquisition or participate in final error classification.
+        clearTimeout(queueTimer);
+        const lockAcquired = true;
+
+        const attemptBoundMs = requireTimerDelay(
+          this.timeoutMs * maxAttempts,
+          "Model attempt budget",
+        );
+        const budgetController = new AbortController();
+        const budgetTimer = setTimeout(
+          () => budgetController.abort(new Error("Model attempt budget exceeded.")),
+          attemptBoundMs,
+        );
+        const budgetSignal = callerSignal === undefined
+          ? budgetController.signal
+          : AbortSignal.any([callerSignal, budgetController.signal]);
+        try {
+          for (let logicalAttempt = 0; logicalAttempt < maxAttempts; logicalAttempt += 1) {
+            if (budgetSignal.aborted) {
+              throw classifyAbort(callerSignal, budgetController.signal, budgetSignal.reason);
+            }
+            const attemptController = new AbortController();
+            const attemptTimer = setTimeout(
+              () => attemptController.abort(new Error("Model attempt timeout.")),
+              this.timeoutMs,
+            );
+            const signal = AbortSignal.any([budgetSignal, attemptController.signal]);
+            const attempt = this.attempts.next(logicalKey);
+            const started = performance.now();
+            try {
+              const operation = this.provider.generate(request, {
+                correlationId,
+                requestIdentity,
+                attempt,
+                signal,
+              });
+              const providerResult = await raceWithAbort(operation, signal);
+              const response = validateCanonicalModelResponse(providerResult.response, request);
+              const responseBytes = Buffer.byteLength(stableModelJson(response), "utf8");
+              if (responseBytes > this.maxResponseBytes) {
+                throw new ModelProviderError(
+                  "response_too_large",
+                  `Canonical model response exceeded ${this.maxResponseBytes} bytes.`,
+                  { statusCode: 502 },
+                );
+              }
+              return Object.freeze({
+                response,
+                audit: Object.freeze({
+                  correlationId,
+                  requestIdentity,
+                  providerKind: this.provider.kind,
+                  attempt,
+                  elapsedMs: Number((performance.now() - started).toFixed(3)),
+                  providerMetadata: sanitizeProviderMetadata(providerResult.metadata),
+                  invocationProvenance: buildInvocationProvenance(
+                    request,
+                    invocation,
+                    providerResult.route,
+                  ),
+                }),
+              });
+            } catch (error) {
+              if (callerSignal?.aborted === true) {
+                throw new ModelProviderError("cancelled", "Model call was cancelled by caller.", { cause: error });
+              }
+              if (budgetSignal.aborted) {
+                throw classifyAbort(callerSignal, budgetController.signal, error);
+              }
+              const classified = attemptController.signal.aborted
+                ? new ModelProviderError(
+                  "timeout",
+                  logicalAttempt + 1 >= maxAttempts
+                    ? "Model call exceeded its timeout."
+                    : "Model call attempt exceeded its timeout.",
+                  { retryable: true, cause: error },
+                )
+                : asModelProviderError(error);
+              if (!classified.retryable || logicalAttempt + 1 >= maxAttempts) {
+                throw classified;
+              }
+            } finally {
+              clearTimeout(attemptTimer);
+            }
+          }
+          throw new ModelProviderError("unavailable", "Model call exhausted its attempts.");
+        } finally {
+          clearTimeout(budgetTimer);
+        }
+      });
+    } catch (error) {
+      if (callerSignal?.aborted === true) {
+        throw new ModelProviderError("cancelled", "Model call was cancelled by caller.", { cause: error });
+      }
+      // Classify queue timeout as timeout only if we never acquired the lock
+      if (queueController.signal.aborted) {
+        throw classifyAbort(callerSignal, queueController.signal, error);
+      }
+      throw asModelProviderError(error);
+    } finally {
+      clearTimeout(queueTimer);
     }
   }
 }
