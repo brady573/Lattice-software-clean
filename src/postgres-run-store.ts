@@ -481,20 +481,23 @@ export class PostgresRunStore implements RunStore {
   async getManyByIds(runIds: readonly string[]): Promise<ReadonlyMap<string, LatticeRun>> {
     // Keep the single-record contract that a malformed identity is simply
     // absent, while accepting every identity form PostgreSQL itself accepts.
-    // Requested spelling is preserved for the result key; only the bound value
-    // is normalized.
-    const requestedByCanonical = new Map<string, string>();
+    // The bind list is de-duplicated per canonical uuid, but every accepted
+    // spelling the caller supplied is preserved as a result key, so the batch
+    // answers exactly what the equivalent per-identity reads would answer.
+    const canonicalByRequested = new Map<string, string>();
+    const boundIds = new Set<string>();
     for (const requested of new Set(runIds)) {
       const canonical = canonicalUuidText(requested);
-      if (canonical === null || requestedByCanonical.has(canonical)) continue;
-      requestedByCanonical.set(canonical, requested);
+      if (canonical === null || canonicalByRequested.has(requested)) continue;
+      canonicalByRequested.set(requested, canonical);
+      boundIds.add(canonical);
     }
-    if (requestedByCanonical.size === 0) return new Map();
+    if (boundIds.size === 0) return new Map();
     let rows;
     try {
       rows = await this.pool.query<RunRow>(
         "SELECT id,conversation_id,status,version,request_json,decision_json,explanation FROM runs WHERE id=ANY($1::uuid[])",
-        [[...requestedByCanonical.keys()]],
+        [[...boundIds]],
       );
     } catch (error) {
       if (typeof error === "object" && error !== null && "code" in error && error.code === "22P02") {
@@ -526,12 +529,12 @@ export class PostgresRunStore implements RunStore {
       ids.push(row.id);
       assessmentsByRunId.set(row.run_id, ids);
     }
-    // One lookup map keyed by canonical uuid, then each result is keyed by the
-    // exact spelling the caller requested, so a batch lookup is equivalent to
-    // the corresponding per-identity reads without an O(n^2) scan.
+    // One lookup map keyed by canonical uuid, then one result key per accepted
+    // spelling the caller supplied: a batch lookup is equivalent to the
+    // corresponding per-identity reads without an O(n^2) scan.
     const rowsByCanonical = new Map(rows.rows.map((row) => [row.id.toLowerCase(), row]));
     const found = new Map<string, LatticeRun>();
-    for (const [canonical, requested] of requestedByCanonical) {
+    for (const [requested, canonical] of canonicalByRequested) {
       const row = rowsByCanonical.get(canonical);
       if (!row) continue;
       found.set(requested, {
