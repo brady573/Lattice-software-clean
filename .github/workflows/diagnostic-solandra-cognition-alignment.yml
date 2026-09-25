@@ -1,4 +1,9 @@
-name: Validator — Groq cognition phase attribution (temporary, do not merge)
+name: Diagnostic — Solandra Cognition Alignment (validator-only temporary reuse)
+
+# TEMPORARY VALIDATOR-ONLY REUSE of an already-registered workflow path.
+# This exists on a validator branch only so the observation can run with the
+# repository's CI-held Groq credential. It is not Product code, is not merged,
+# and performs no deployment and no database access.
 
 on:
   workflow_dispatch:
