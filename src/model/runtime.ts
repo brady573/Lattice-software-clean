@@ -542,6 +542,7 @@ export class ModelRuntime {
         // Lock acquired: retire the queue timer immediately so it can never
         // fire after lock acquisition or participate in final error classification.
         clearTimeout(queueTimer);
+        const lockAcquired = true;
 
         const attemptBoundMs = requireTimerDelay(
           this.timeoutMs * maxAttempts,
@@ -632,6 +633,10 @@ export class ModelRuntime {
     } catch (error) {
       if (callerSignal?.aborted === true) {
         throw new ModelProviderError("cancelled", "Model call was cancelled by caller.", { cause: error });
+      }
+      // Classify queue timeout as timeout only if we never acquired the lock
+      if (queueController.signal.aborted) {
+        throw classifyAbort(callerSignal, queueController.signal, error);
       }
       throw asModelProviderError(error);
     } finally {
