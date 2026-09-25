@@ -1,0 +1,43 @@
+name: Validator — Groq Longer Ceiling
+
+on:
+  push:
+    branches:
+      - validator/groq-long-ceiling-20260925
+
+permissions:
+  contents: read
+
+jobs:
+  discriminator:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+    steps:
+      - name: Checkout validator branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Provision Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+
+      - name: Prove Product source is canonical
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$GROQ_API_KEY"
+          git diff --exit-code 13d0a0c5e3be760dc8f2929a6e80587d06caa7e3 --             . ':(exclude)tools/validator-groq-long-ceiling.mjs'             ':(exclude).github/workflows/validator-groq-long-ceiling.yml'
+          echo "CANONICAL_PRODUCT_SOURCE_UNCHANGED=PASS"
+          echo "CANONICAL_SHA=13d0a0c5e3be760dc8f2929a6e80587d06caa7e3"
+          echo "CANONICAL_TREE=756dad9687b4e10b9b87c53a71f0401043a1e555"
+
+      - name: Install locked dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Run one-shot direct Groq discriminator
+        run: node --import tsx tools/validator-groq-long-ceiling.mjs
