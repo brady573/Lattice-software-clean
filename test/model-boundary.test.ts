@@ -335,7 +335,25 @@ test("queued caller cancellation is prompt and does not let a successor bypass o
   assert.deepEqual(provider.attempts, [0, 1]);
 });
 
-test("a total logical timeout stays bounded while an explicitly permitted retry gets its own window", async () => {
+test("the default shared window does not allocate or invoke a second provider attempt", async () => {
+  const provider = new TrackingProvider(100);
+  const runtime = new ModelRuntime(provider, { timeoutMs: 20 });
+
+  await assert.rejects(
+    () => runtime.call(fixtureRequest, {
+      correlationId: "timeout-no-retry",
+      maxAttempts: 2,
+    }),
+    (error: unknown) =>
+      error instanceof ModelProviderError
+      && error.code === "timeout",
+  );
+
+  assert.equal(provider.calls, 1, "callers that do not opt in keep the single shared budget");
+  assert.deepEqual(provider.attempts, [0]);
+});
+
+test("a per-attempt window keeps the whole call bounded while the permitted retry still runs", async () => {
   const provider = new TrackingProvider(100);
   const runtime = new ModelRuntime(provider, { timeoutMs: 20 });
   const started = performance.now();
@@ -344,6 +362,7 @@ test("a total logical timeout stays bounded while an explicitly permitted retry 
     () => runtime.call(fixtureRequest, {
       correlationId: "timeout-bounded-retry",
       maxAttempts: 2,
+      attemptWindowPolicy: "per-attempt",
     }),
     (error: unknown) =>
       error instanceof ModelProviderError

@@ -359,6 +359,7 @@ export class ModelSolandraAdvisoryRuntime implements SolandraAdvisoryRuntime {
       correlationId: `solandra-advisory:${input.conversationId}:${input.userMessageId}`,
       idempotencyKey: `advise:${input.userMessageId}:${basisDigest}`,
       maxAttempts: this.maxAttempts,
+      attemptWindowPolicy: "per-attempt",
     });
     if (response.response.output.length !== 1 || response.response.output[0]?.type !== "text") {
       throw new ModelProviderError("invalid_output", "Solandra advisory reasoning requires exactly one text output.");
@@ -375,6 +376,7 @@ export class ModelSolandraAdvisoryRuntime implements SolandraAdvisoryRuntime {
         correlationId: `solandra-advisory-grounding:${input.conversationId}:${input.userMessageId}`,
         idempotencyKey: `grounding:${input.userMessageId}:${basisDigest}`,
         maxAttempts: this.maxAttempts,
+        attemptWindowPolicy: "per-attempt",
       },
     );
     if (auditResponse.response.output.length !== 1 || auditResponse.response.output[0]?.type !== "text") {

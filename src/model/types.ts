@@ -166,6 +166,20 @@ export interface ModelCallOptions {
   readonly correlationId: string;
   readonly idempotencyKey?: string;
   readonly maxAttempts?: number;
+  /**
+   * Timeout window policy for permitted attempts.
+   *
+   * "shared" (default) keeps the historical behavior: one timeoutMs budget
+   * covers queue waiting, provider readiness, and every attempt together.
+   *
+   * "per-attempt" gives each permitted attempt its own timeoutMs execution
+   * window, bounds the whole call explicitly at timeoutMs * (1 + maxAttempts),
+   * and bounds queue waiting separately, so an allowed retry is not
+   * structurally starved by an earlier attempt or by lock contention. Callers
+   * whose execution is owned by a durable lease must not opt in unless that
+   * lease covers the longer operation.
+   */
+  readonly attemptWindowPolicy?: "shared" | "per-attempt";
   readonly signal?: AbortSignal;
   readonly invocation?: ModelInvocationRouteRequest;
 }
