@@ -1,0 +1,37 @@
+name: Validator — Groq cognition phase attribution (temporary, do not merge)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  groq-cognition-phase-attribution:
+    name: Groq cognition phase attribution
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact validator source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Provision Node 24
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+
+      - name: Install locked dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Run validator-only phase attribution observation
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "${GROQ_API_KEY:-}"
+          node --import tsx tools/validator-only/groq-cognition-phase-attribution.mjs
+          echo 'PRODUCT_SOURCE_UNCHANGED=true'
+          echo 'PRODUCTION_DEPLOYMENT=NOT_PERFORMED'
+          echo 'PRODUCTION_DATABASE=NOT_TOUCHED'
