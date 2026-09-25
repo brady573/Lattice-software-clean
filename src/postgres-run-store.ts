@@ -113,8 +113,29 @@ type EventRow = { sequence: string | number; event_type: RunEventType };
 type EventRowWithRun = EventRow & { run_id: string };
 type TruthAssessmentRowWithRun = { run_id: string; id: string };
 
-/** runs.id, run_events.run_id, and truth_assessments.run_id are uuid columns. */
-const UUID_SHAPE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
+/**
+ * Normalizes an identity to the canonical 8-4-4-4-12 uuid text form, accepting
+ * exactly the input forms PostgreSQL itself accepts for a uuid: an optional
+ * `urn:uuid:` prefix, optional surrounding braces, optional hyphens, and any
+ * case. Returns null for anything PostgreSQL would reject, so the batch binds
+ * only well-formed identities and never relies on a server-side cast error.
+ */
+function canonicalUuidText(value: string): string | null {
+  const trimmed = value.trim();
+  const withoutUrn = /^urn:uuid:/iu.test(trimmed) ? trimmed.slice("urn:uuid:".length) : trimmed;
+  const unwrapped = withoutUrn.startsWith("{") && withoutUrn.endsWith("}")
+    ? withoutUrn.slice(1, -1)
+    : withoutUrn;
+  const digits = unwrapped.replace(/-/gu, "");
+  if (!/^[0-9a-f]{32}$/iu.test(digits)) return null;
+  return [
+    digits.slice(0, 8),
+    digits.slice(8, 12),
+    digits.slice(12, 16),
+    digits.slice(16, 20),
+    digits.slice(20, 32),
+  ].join("-").toLowerCase();
+}
 type SnapshotMetadataRow = {
   phase: TruthSnapshotPhase;
   execution_contract_id: string;
@@ -458,15 +479,22 @@ export class PostgresRunStore implements RunStore {
   }
 
   async getManyByIds(runIds: readonly string[]): Promise<ReadonlyMap<string, LatticeRun>> {
-    // The batch must keep the single-record contract that a malformed identity
-    // is simply absent, so only well-formed uuid identities are ever bound.
-    const unique = [...new Set(runIds)].filter((runId) => UUID_SHAPE.test(runId));
-    if (unique.length === 0) return new Map();
+    // Keep the single-record contract that a malformed identity is simply
+    // absent, while accepting every identity form PostgreSQL itself accepts.
+    // Requested spelling is preserved for the result key; only the bound value
+    // is normalized.
+    const requestedByCanonical = new Map<string, string>();
+    for (const requested of new Set(runIds)) {
+      const canonical = canonicalUuidText(requested);
+      if (canonical === null || requestedByCanonical.has(canonical)) continue;
+      requestedByCanonical.set(canonical, requested);
+    }
+    if (requestedByCanonical.size === 0) return new Map();
     let rows;
     try {
       rows = await this.pool.query<RunRow>(
         "SELECT id,conversation_id,status,version,request_json,decision_json,explanation FROM runs WHERE id=ANY($1::uuid[])",
-        [unique],
+        [[...requestedByCanonical.keys()]],
       );
     } catch (error) {
       if (typeof error === "object" && error !== null && "code" in error && error.code === "22P02") {
@@ -498,12 +526,13 @@ export class PostgresRunStore implements RunStore {
       ids.push(row.id);
       assessmentsByRunId.set(row.run_id, ids);
     }
-    // Key by the requested identity spelling so a batch lookup is exactly
-    // equivalent to the corresponding per-identity reads, while identities the
-    // schema did not return stay absent.
+    // One lookup map keyed by canonical uuid, then each result is keyed by the
+    // exact spelling the caller requested, so a batch lookup is equivalent to
+    // the corresponding per-identity reads without an O(n^2) scan.
+    const rowsByCanonical = new Map(rows.rows.map((row) => [row.id.toLowerCase(), row]));
     const found = new Map<string, LatticeRun>();
-    for (const requested of unique) {
-      const row = rows.rows.find((candidate) => candidate.id.toLowerCase() === requested.toLowerCase());
+    for (const [canonical, requested] of requestedByCanonical) {
+      const row = rowsByCanonical.get(canonical);
       if (!row) continue;
       found.set(requested, {
         id: row.id,

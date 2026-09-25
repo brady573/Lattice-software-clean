@@ -127,6 +127,27 @@ test("Issue #104 PostgreSQL: bounded Run batch reads return the same Runs with c
     const emptyBatch = await runStore.getManyByIds([]);
     assert.equal(emptyBatch.size, 0, "an empty batch never queries");
 
+    // Every identity form PostgreSQL accepts resolves identically through the
+    // batch and through the single-record read.
+    const target = runIds[0]!;
+    const digits = target.replace(/-/gu, "");
+    const variants = [
+      target.toUpperCase(),
+      `{${target}}`,
+      digits,
+      `urn:uuid:${target}`,
+    ];
+    const variantBatch = await countStoreQueries(() => runStore.getManyByIds(variants));
+    assert.deepEqual([...variantBatch.result.keys()], variants, "each accepted spelling is keyed as requested");
+    for (const variant of variants) {
+      assert.deepEqual(
+        variantBatch.result.get(variant),
+        await runStore.get(variant),
+        `batch and per-identity read must agree for ${variant}`,
+      );
+    }
+    assert.deepEqual(variantBatch.counts, batched.counts, "identity spelling does not change query count");
+
     // Query count is independent of identity count: 4 identities cost the same
     // three bounded reads as 10.
     const four = requested.slice(0, 4);
