@@ -403,21 +403,34 @@ export class ModelRuntime {
     maxAttempts: number,
     callerSignal: AbortSignal | undefined,
   ): Promise<ModelRuntimeResult> {
-    const timeoutController = new AbortController();
-    const timer = setTimeout(
-      () => timeoutController.abort(new Error("Model call timeout.")),
-      this.timeoutMs,
+    // Bounded timeout policy: every permitted attempt may use this.timeoutMs as
+    // its own execution window, so an allowed retry is never structurally
+    // starved by the first attempt or by provider readiness waiting, while the
+    // whole logical operation stays explicitly finite at
+    // this.timeoutMs * maxAttempts. Callers that never retry are unaffected:
+    // with maxAttempts=1 the operation bound equals the single attempt window.
+    const operationTimeoutMs = this.timeoutMs * maxAttempts;
+    const operationController = new AbortController();
+    const operationTimer = setTimeout(
+      () => operationController.abort(new Error("Model operation timeout.")),
+      operationTimeoutMs,
     );
-    const signal = callerSignal === undefined
-      ? timeoutController.signal
-      : AbortSignal.any([callerSignal, timeoutController.signal]);
+    const operationSignal = callerSignal === undefined
+      ? operationController.signal
+      : AbortSignal.any([callerSignal, operationController.signal]);
 
     try {
-      return await this.lock.run(logicalKey, signal, async () => {
+      return await this.lock.run(logicalKey, operationSignal, async () => {
         for (let logicalAttempt = 0; logicalAttempt < maxAttempts; logicalAttempt += 1) {
-          if (signal.aborted) {
-            throw classifyAbort(callerSignal, timeoutController.signal, signal.reason);
+          if (operationSignal.aborted) {
+            throw classifyAbort(callerSignal, operationController.signal, operationSignal.reason);
           }
+          const attemptController = new AbortController();
+          const attemptTimer = setTimeout(
+            () => attemptController.abort(new Error("Model attempt timeout.")),
+            this.timeoutMs,
+          );
+          const signal = AbortSignal.any([operationSignal, attemptController.signal]);
           const attempt = this.attempts.next(logicalKey);
           const started = performance.now();
           try {
@@ -454,21 +467,37 @@ export class ModelRuntime {
               }),
             });
           } catch (error) {
-            const classified = signal.aborted
-              ? classifyAbort(callerSignal, timeoutController.signal, error)
+            if (callerSignal?.aborted === true) {
+              throw new ModelProviderError("cancelled", "Model call was cancelled by caller.", { cause: error });
+            }
+            if (operationSignal.aborted) {
+              throw classifyAbort(callerSignal, operationController.signal, error);
+            }
+            const classified = attemptController.signal.aborted
+              ? new ModelProviderError(
+                "timeout",
+                logicalAttempt + 1 >= maxAttempts
+                  ? "Model call exceeded its timeout."
+                  : "Model call attempt exceeded its timeout.",
+                { retryable: true, cause: error },
+              )
               : asModelProviderError(error);
-            if (signal.aborted || !classified.retryable || logicalAttempt + 1 >= maxAttempts) {
+            if (!classified.retryable || logicalAttempt + 1 >= maxAttempts) {
               throw classified;
             }
+          } finally {
+            clearTimeout(attemptTimer);
           }
         }
         throw new ModelProviderError("unavailable", "Model call exhausted its attempts.");
       });
     } catch (error) {
-      if (signal.aborted) throw classifyAbort(callerSignal, timeoutController.signal, error);
+      if (operationSignal.aborted) {
+        throw classifyAbort(callerSignal, operationController.signal, error);
+      }
       throw asModelProviderError(error);
     } finally {
-      clearTimeout(timer);
+      clearTimeout(operationTimer);
     }
   }
 }

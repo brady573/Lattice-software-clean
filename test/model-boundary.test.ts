@@ -335,13 +335,14 @@ test("queued caller cancellation is prompt and does not let a successor bypass o
   assert.deepEqual(provider.attempts, [0, 1]);
 });
 
-test("total logical timeout does not allocate or invoke a second provider attempt", async () => {
+test("a total logical timeout stays bounded while an explicitly permitted retry gets its own window", async () => {
   const provider = new TrackingProvider(100);
   const runtime = new ModelRuntime(provider, { timeoutMs: 20 });
+  const started = performance.now();
 
   await assert.rejects(
     () => runtime.call(fixtureRequest, {
-      correlationId: "timeout-no-retry",
+      correlationId: "timeout-bounded-retry",
       maxAttempts: 2,
     }),
     (error: unknown) =>
@@ -349,8 +350,12 @@ test("total logical timeout does not allocate or invoke a second provider attemp
       && error.code === "timeout",
   );
 
-  assert.equal(provider.calls, 1);
-  assert.deepEqual(provider.attempts, [0]);
+  assert.equal(provider.calls, 2, "the permitted retry is not starved by the first attempt's window");
+  assert.deepEqual(provider.attempts, [0, 1], "the retry count stays inside the configured maximum");
+  assert.ok(
+    performance.now() - started < 200,
+    "the whole logical operation remains explicitly finite across its permitted attempts",
+  );
 });
 
 test("caller cancellation does not allocate or invoke a second provider attempt", async () => {
