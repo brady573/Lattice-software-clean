@@ -133,11 +133,13 @@ test("Issue #104 PostgreSQL: bounded Run batch reads return the same Runs with c
     // of four digits.
     const target = runIds[0]!;
     const digits = target.replace(/-/gu, "");
+    // The documented "add a hyphen after any group of four digits" form.
+    const groupedByFour = (digits.match(/.{4}/gu) ?? []).join("-");
     const variants = [
       target.toUpperCase(),
       `{${target}}`,
       digits,
-      `${target.slice(0, 8)}-${target.slice(8, 12)}-${target.slice(12, 16)}-${target.slice(16, 20)}-${target.slice(20, 24)}-${target.slice(24, 32)}`,
+      groupedByFour,
     ];
     const variantBatch = await countStoreQueries(() => runStore.getManyByIds(variants));
     assert.deepEqual([...variantBatch.result.keys()], variants, "each accepted spelling is keyed as requested");
