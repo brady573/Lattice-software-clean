@@ -64,6 +64,11 @@ export interface RunStore {
   persistDecision(input: RunDecisionPersistence): Promise<RunTransitionResult>;
   complete(input: RunCompletion): Promise<RunTransitionResult>;
   get(runId: string): Promise<LatticeRun | undefined>;
+  /**
+   * Bounded batch read of exact Run identities. Missing identities are absent
+   * from the result; ordering and ownership remain the caller's trust concern.
+   */
+  getManyByIds(runIds: readonly string[]): Promise<ReadonlyMap<string, LatticeRun>>;
   getTruthSnapshot(runId: string): Promise<TruthSnapshot | undefined>;
   getTruthBundle(runId: string): Promise<TruthBundle | undefined>;
   close(): Promise<void>;
@@ -139,6 +144,15 @@ export class MemoryRunStore implements RunStore {
   async get(runId: string): Promise<LatticeRun | undefined> {
     const run = this.runs.get(runId);
     return run ? structuredClone(run) : undefined;
+  }
+
+  async getManyByIds(runIds: readonly string[]): Promise<ReadonlyMap<string, LatticeRun>> {
+    const found = new Map<string, LatticeRun>();
+    for (const runId of new Set(runIds)) {
+      const run = this.runs.get(runId);
+      if (run) found.set(runId, structuredClone(run));
+    }
+    return found;
   }
 
   async getTruthSnapshot(runId: string): Promise<TruthSnapshot | undefined> {

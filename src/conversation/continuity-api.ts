@@ -68,10 +68,11 @@ async function readLatestPresentationBasis(
   outcome: RunOutcome | undefined;
 }> {
   const runIds = await options.runIndexStore.listRunIds(conversationId);
+  const runsById = await options.runStore.getManyByIds(runIds);
   for (let index = runIds.length - 1; index >= 0; index -= 1) {
     const runId = runIds[index];
     if (!runId) continue;
-    const run = await options.runStore.get(runId);
+    const run = runsById.get(runId);
     if (!run || run.conversationId !== conversationId) continue;
     const decisionPlan = await options.decisionPlanStore.getByRunId(run.id);
     const intentVersionId = isConsultationRunRequest(run.request)
@@ -164,11 +165,18 @@ export function registerConversationContinuityApi(
         ];
       });
 
-      const runs = await Promise.all(runIds.map(async (runId) => {
-        const run = await options.runStore.get(runId);
-        if (!run || run.conversationId !== conversationId) return undefined;
-        const decisionPlan = await options.decisionPlanStore.getByRunId(runId);
-        return {
+      // Bounded batch reconstruction: the exact Run identities and their exact
+      // DecisionPlan bindings are read in bounded reads, then each entry keeps
+      // the same conversation-ownership and admission trust checks as before.
+      const [runsById, decisionPlansByRunId] = await Promise.all([
+        options.runStore.getManyByIds(runIds),
+        options.decisionPlanStore.getManyByRunIds(runIds),
+      ]);
+      const runs = runIds.flatMap((runId) => {
+        const run = runsById.get(runId);
+        if (!run || run.conversationId !== conversationId) return [];
+        const decisionPlan = decisionPlansByRunId.get(runId);
+        return [{
           runId: run.id,
           status: run.status,
           version: run.version,
@@ -200,8 +208,8 @@ export function registerConversationContinuityApi(
             outcome: `/api/v1/runs/${encodeURIComponent(run.id)}/outcome`,
             decisionPlan: `/api/v1/runs/${encodeURIComponent(run.id)}/decision-plan`,
           },
-        };
-      }));
+        }];
+      });
 
       const committedKnowledgeIds = producedTargetIds(conversationReferences, "KNOWLEDGE");
       const committedRecommendationIds = producedTargetIds(conversationReferences, "RECOMMENDATION");

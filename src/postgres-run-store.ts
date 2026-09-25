@@ -110,6 +110,53 @@ type RunRow = {
 };
 
 type EventRow = { sequence: string | number; event_type: RunEventType };
+type EventRowWithRun = EventRow & { run_id: string };
+type TruthAssessmentRowWithRun = { run_id: string; id: string };
+
+/**
+ * Normalizes an identity to the canonical 8-4-4-4-12 uuid text form, accepting
+ * exactly the input forms PostgreSQL itself accepts for a uuid.
+ *
+ * This mirrors PostgreSQL 18 `string_to_uuid()`: the value is read as 16 pairs
+ * of hexadecimal digits, and a single hyphen is skipped only after every pair
+ * boundary that follows an even pair index below the last one - that is, only
+ * after 4, 8, 12, 16, 20, 24, or 28 digits. A leading brace must be matched by
+ * a trailing brace, and nothing may remain afterwards. Any other character,
+ * including a hyphen in any other position, is rejected exactly as PostgreSQL
+ * rejects it, so a batch read is never wider than the single-record read and
+ * never depends on a server-side cast error.
+ */
+function canonicalUuidText(value: string): string | null {
+  const UUID_BYTES = 16;
+  let source = value;
+  let braces = false;
+  if (source.startsWith("{")) {
+    source = source.slice(1);
+    braces = true;
+  }
+  let digits = "";
+  for (let pair = 0; pair < UUID_BYTES; pair += 1) {
+    const two = source.slice(0, 2);
+    if (two.length !== 2 || !/^[0-9a-f]{2}$/iu.test(two)) return null;
+    digits += two;
+    source = source.slice(2);
+    if (source.startsWith("-") && pair % 2 === 1 && pair < UUID_BYTES - 1) {
+      source = source.slice(1);
+    }
+  }
+  if (braces) {
+    if (!source.startsWith("}")) return null;
+    source = source.slice(1);
+  }
+  if (source !== "") return null;
+  return [
+    digits.slice(0, 8),
+    digits.slice(8, 12),
+    digits.slice(12, 16),
+    digits.slice(16, 20),
+    digits.slice(20, 32),
+  ].join("-").toLowerCase();
+}
 type SnapshotMetadataRow = {
   phase: TruthSnapshotPhase;
   execution_contract_id: string;
@@ -450,6 +497,80 @@ export class PostgresRunStore implements RunStore {
       truthAssessmentIds: assessmentRows.rows.map((assessment) => assessment.id),
       events,
     };
+  }
+
+  async getManyByIds(runIds: readonly string[]): Promise<ReadonlyMap<string, LatticeRun>> {
+    // Keep the single-record contract that a malformed identity is simply
+    // absent, while accepting every identity form PostgreSQL itself accepts.
+    // The bind list is de-duplicated per canonical uuid, but every accepted
+    // spelling the caller supplied is preserved as a result key, so the batch
+    // answers exactly what the equivalent per-identity reads would answer.
+    const canonicalByRequested = new Map<string, string>();
+    const boundIds = new Set<string>();
+    for (const requested of new Set(runIds)) {
+      const canonical = canonicalUuidText(requested);
+      if (canonical === null || canonicalByRequested.has(requested)) continue;
+      canonicalByRequested.set(requested, canonical);
+      boundIds.add(canonical);
+    }
+    if (boundIds.size === 0) return new Map();
+    let rows;
+    try {
+      rows = await this.pool.query<RunRow>(
+        "SELECT id,conversation_id,status,version,request_json,decision_json,explanation FROM runs WHERE id=ANY($1::uuid[])",
+        [[...boundIds]],
+      );
+    } catch (error) {
+      if (typeof error === "object" && error !== null && "code" in error && error.code === "22P02") {
+        return new Map();
+      }
+      throw error;
+    }
+    if (rows.rows.length === 0) return new Map();
+    const foundIds = rows.rows.map((row) => row.id);
+    const [eventRows, assessmentRows] = await Promise.all([
+      this.pool.query<EventRowWithRun>(
+        "SELECT run_id,sequence,event_type FROM run_events WHERE run_id=ANY($1::uuid[]) ORDER BY run_id,sequence",
+        [foundIds],
+      ),
+      this.pool.query<TruthAssessmentRowWithRun>(
+        "SELECT run_id,id FROM truth_assessments WHERE run_id=ANY($1::uuid[]) ORDER BY run_id,created_at,id",
+        [foundIds],
+      ),
+    ]);
+    const eventsByRunId = new Map<string, RunEvent[]>();
+    for (const row of eventRows.rows) {
+      const events = eventsByRunId.get(row.run_id) ?? [];
+      events.push({ sequence: Number(row.sequence), type: row.event_type });
+      eventsByRunId.set(row.run_id, events);
+    }
+    const assessmentsByRunId = new Map<string, string[]>();
+    for (const row of assessmentRows.rows) {
+      const ids = assessmentsByRunId.get(row.run_id) ?? [];
+      ids.push(row.id);
+      assessmentsByRunId.set(row.run_id, ids);
+    }
+    // One lookup map keyed by canonical uuid, then one result key per accepted
+    // spelling the caller supplied: a batch lookup is equivalent to the
+    // corresponding per-identity reads without an O(n^2) scan.
+    const rowsByCanonical = new Map(rows.rows.map((row) => [row.id.toLowerCase(), row]));
+    const found = new Map<string, LatticeRun>();
+    for (const [requested, canonical] of canonicalByRequested) {
+      const row = rowsByCanonical.get(canonical);
+      if (!row) continue;
+      found.set(requested, {
+        id: row.id,
+        conversationId: row.conversation_id,
+        status: row.status,
+        version: Number(row.version),
+        request: parsePersistedRunRequest(row.id, row.request_json),
+        decision: row.decision_json === null ? null : parsePersistedRunDecision(row.id, row.decision_json),
+        explanation: row.explanation,
+        truthAssessmentIds: assessmentsByRunId.get(row.id) ?? [],
+        events: eventsByRunId.get(row.id) ?? [],
+      });
+    }
+    return found;
   }
 
   private async readSnapshotMetadata(runId: string): Promise<SnapshotMetadataRow | undefined> {

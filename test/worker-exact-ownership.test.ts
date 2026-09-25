@@ -78,6 +78,11 @@ class EpochRaceRunStore implements RunStore {
   async get(runId: string): Promise<LatticeRun | undefined> {
     return runId === this.run.id ? structuredClone(this.run) : undefined;
   }
+  async getManyByIds(runIds: readonly string[]): Promise<ReadonlyMap<string, LatticeRun>> {
+    return new Map(runIds.flatMap((runId) => runId === this.run.id
+      ? [[runId, structuredClone(this.run)] as const]
+      : []));
+  }
   async getTruthSnapshot(_runId: string): Promise<TruthSnapshot | undefined> { return undefined; }
   async getTruthBundle(_runId: string): Promise<TruthBundle | undefined> { return undefined; }
   async close(): Promise<void> {}
@@ -309,6 +314,14 @@ class TerminalRunStore implements RunStore {
       status: "COMPLETED",
       version: 8,
     };
+  }
+  async getManyByIds(runIds: readonly string[]) {
+    const found = new Map<string, LatticeRun>();
+    for (const runId of runIds) {
+      const run = await this.get(runId);
+      if (run) found.set(runId, run);
+    }
+    return found;
   }
   async getTruthSnapshot(): Promise<TruthSnapshot | undefined> { return undefined; }
   async getTruthBundle(): Promise<TruthBundle | undefined> { return undefined; }
