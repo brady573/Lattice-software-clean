@@ -115,17 +115,18 @@ type TruthAssessmentRowWithRun = { run_id: string; id: string };
 
 /**
  * Normalizes an identity to the canonical 8-4-4-4-12 uuid text form, accepting
- * exactly the input forms PostgreSQL itself accepts for a uuid: an optional
- * `urn:uuid:` prefix, optional surrounding braces, optional hyphens, and any
- * case. Returns null for anything PostgreSQL would reject, so the batch binds
- * only well-formed identities and never relies on a server-side cast error.
+ * exactly the input forms PostgreSQL documents for a uuid: upper-case digits,
+ * the standard form surrounded by braces, omitting some or all hyphens, and
+ * adding a hyphen after any group of four digits. Returns null for anything
+ * PostgreSQL would reject, so the batch binds only accepted identities and
+ * never relies on a server-side cast error. PostgreSQL always outputs the
+ * standard lower-case form.
  */
 function canonicalUuidText(value: string): string | null {
   const trimmed = value.trim();
-  const withoutUrn = /^urn:uuid:/iu.test(trimmed) ? trimmed.slice("urn:uuid:".length) : trimmed;
-  const unwrapped = withoutUrn.startsWith("{") && withoutUrn.endsWith("}")
-    ? withoutUrn.slice(1, -1)
-    : withoutUrn;
+  const unwrapped = trimmed.startsWith("{") && trimmed.endsWith("}")
+    ? trimmed.slice(1, -1)
+    : trimmed;
   const digits = unwrapped.replace(/-/gu, "");
   if (!/^[0-9a-f]{32}$/iu.test(digits)) return null;
   return [
