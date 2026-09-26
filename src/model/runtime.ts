@@ -249,6 +249,22 @@ function requireTimerDelay(delayMs: number, label: string): number {
   return delayMs;
 }
 
+/**
+ * A provider that has already reported a known rate-limit/recovery boundary
+ * knows more about the failure than a window expiry does, and that knowledge
+ * must survive the abort. This is what keeps a request that never reached
+ * provider HTTP because the route was inside a known recovery block from being
+ * reported as an undifferentiated model timeout.
+ *
+ * Deliberately narrow: only an explicit rate_limit/recovery boundary is
+ * preserved, and it is returned unchanged so its own retryable semantics are
+ * the caller's. A post-fetch stall, an ordinary attempt timeout, and caller
+ * cancellation all still classify exactly as before.
+ */
+function knownProviderRecoveryBoundary(error: unknown): ModelProviderError | null {
+  return error instanceof ModelProviderError && error.code === "rate_limit" ? error : null;
+}
+
 function classifyAbort(
   callerSignal: AbortSignal | undefined,
   timeoutSignal: AbortSignal,
@@ -256,6 +272,12 @@ function classifyAbort(
 ): ModelProviderError {
   if (callerSignal?.aborted === true) {
     return new ModelProviderError("cancelled", "Model call was cancelled by caller.", { cause });
+  }
+  // Preserved after caller cancellation so cancellation still wins, and before
+  // the timeout so a known recovery boundary is never flattened into one.
+  const recoveryBoundary = knownProviderRecoveryBoundary(cause);
+  if (recoveryBoundary !== null) {
+    return recoveryBoundary;
   }
   if (timeoutSignal.aborted) {
     return new ModelProviderError("timeout", "Model call exceeded its timeout.", {
@@ -266,20 +288,44 @@ function classifyAbort(
   return asModelProviderError(cause);
 }
 
+/**
+ * Resolves one provider attempt against the attempt window.
+ *
+ * The attempt window is a runtime fact, so it is always able to explain an
+ * abort. The provider, however, may know strictly more about *why* it stopped:
+ * for example that provider HTTP was never reached because the route was inside
+ * a known rate-limit recovery block. Discarding the provider's account in favour
+ * of the runtime's is what turns a known recovery boundary into an
+ * undifferentiated model timeout, so the provider is given one bounded grace
+ * turn to report its own outcome after the window aborts.
+ *
+ * The grace is a single event-loop turn. It is finite, never repeated, never
+ * extends the call's bound beyond the attempt window plus that one turn, and it
+ * is cleared as soon as the attempt settles. A provider that has not reported
+ * within it — for example a post-fetch stall that is still waiting on a socket —
+ * still produces the ordinary model timeout.
+ */
 async function raceWithAbort<T>(
   operation: Promise<T>,
   signal: AbortSignal,
 ): Promise<T> {
   if (signal.aborted) throw signal.reason ?? new Error("Aborted.");
   let abortHandler: (() => void) | null = null;
+  let graceTimer: ReturnType<typeof setTimeout> | null = null;
   const aborted = new Promise<never>((_, reject) => {
-    abortHandler = () => reject(signal.reason ?? new Error("Aborted."));
+    abortHandler = () => {
+      graceTimer = setTimeout(
+        () => reject(signal.reason ?? new Error("Aborted.")),
+        0,
+      );
+    };
     signal.addEventListener("abort", abortHandler, { once: true });
   });
   try {
     return await Promise.race([operation, aborted]);
   } finally {
     if (abortHandler !== null) signal.removeEventListener("abort", abortHandler);
+    if (graceTimer !== null) clearTimeout(graceTimer);
     void operation.catch(() => undefined);
   }
 }
@@ -609,7 +655,8 @@ export class ModelRuntime {
               if (budgetSignal.aborted) {
                 throw classifyAbort(callerSignal, budgetController.signal, error);
               }
-              const classified = attemptController.signal.aborted
+              const knownBoundary = knownProviderRecoveryBoundary(error);
+              const classified = attemptController.signal.aborted && knownBoundary === null
                 ? new ModelProviderError(
                   "timeout",
                   logicalAttempt + 1 >= maxAttempts
@@ -617,7 +664,7 @@ export class ModelRuntime {
                     : "Model call attempt exceeded its timeout.",
                   { retryable: true, cause: error },
                 )
-                : asModelProviderError(error);
+                : knownBoundary ?? asModelProviderError(error);
               if (!classified.retryable || logicalAttempt + 1 >= maxAttempts) {
                 throw classified;
               }
