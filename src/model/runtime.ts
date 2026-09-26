@@ -288,6 +288,10 @@ function classifyAbort(
   return asModelProviderError(cause);
 }
 
+type ProviderOutcome<T> =
+  | { readonly kind: "fulfilled"; readonly value: T }
+  | { readonly kind: "rejected"; readonly error: unknown };
+
 /**
  * Resolves one provider attempt against the attempt window.
  *
@@ -296,33 +300,74 @@ function classifyAbort(
  * for example that provider HTTP was never reached because the route was inside
  * a known rate-limit recovery block. Discarding the provider's account in favour
  * of the runtime's is what turns a known recovery boundary into an
- * undifferentiated model timeout, so the provider is given one bounded grace
- * turn to report its own outcome after the window aborts.
+ * undifferentiated model timeout, so once the signal has fired the provider is
+ * given one bounded grace turn to report a more-specific rejection.
+ *
+ * The grace is deliberately asymmetric, and that is the whole point of it:
+ *
+ * - An abort is never overwritten by a provider *success*. A provider that
+ *   resolves from its own abort listener has not produced a trustworthy answer
+ *   to a call the caller has already abandoned or the window has already closed,
+ *   so the abort stands and its reason is thrown.
+ * - Only a more specific rejected provider boundary is preserved, so caller
+ *   cancellation still wins over any post-abort success and the attempt timeout
+ *   still wins over any post-timeout success.
+ * - Ordinary timeout and stall semantics are otherwise untouched: a provider
+ *   that reports nothing more specific within the grace yields the ordinary
+ *   model timeout.
  *
  * The grace is a single event-loop turn. It is finite, never repeated, never
  * extends the call's bound beyond the attempt window plus that one turn, and it
- * is cleared as soon as the attempt settles. A provider that has not reported
- * within it — for example a post-fetch stall that is still waiting on a socket —
- * still produces the ordinary model timeout.
+ * is cleared as soon as the attempt settles.
  */
 async function raceWithAbort<T>(
   operation: Promise<T>,
   signal: AbortSignal,
 ): Promise<T> {
   if (signal.aborted) throw signal.reason ?? new Error("Aborted.");
+
+  // The provider's terminal outcome is recorded separately so that a
+  // fulfillment can be told apart from a rejection after the abort fires.
+  let record: ((outcome: ProviderOutcome<T>) => void) | null = null;
+  const providerOutcome = new Promise<ProviderOutcome<T>>((resolve) => {
+    record = resolve;
+  });
+  void operation.then(
+    (value) => record?.({ kind: "fulfilled", value }),
+    (error: unknown) => record?.({ kind: "rejected", error }),
+  );
+
   let abortHandler: (() => void) | null = null;
-  let graceTimer: ReturnType<typeof setTimeout> | null = null;
-  const aborted = new Promise<never>((_, reject) => {
-    abortHandler = () => {
-      graceTimer = setTimeout(
-        () => reject(signal.reason ?? new Error("Aborted.")),
-        0,
-      );
-    };
+  const aborted = new Promise<"aborted">((resolve) => {
+    abortHandler = () => resolve("aborted");
     signal.addEventListener("abort", abortHandler, { once: true });
   });
+
+  let graceTimer: ReturnType<typeof setTimeout> | null = null;
   try {
-    return await Promise.race([operation, aborted]);
+    const first = await Promise.race([
+      providerOutcome.then((outcome) => ({ source: "provider" as const, outcome })),
+      aborted.then(() => ({ source: "signal" as const })),
+    ]);
+    if (first.source === "provider") {
+      if (first.outcome.kind === "fulfilled") return first.outcome.value;
+      throw first.outcome.error;
+    }
+
+    // The signal has fired, so the attempt is over. Only a more specific
+    // provider rejection may still change the reported boundary, and only
+    // within one bounded turn. A provider success is ignored here on purpose.
+    const preserved = await Promise.race([
+      providerOutcome,
+      new Promise<"expired">((resolve) => {
+        graceTimer = setTimeout(() => resolve("expired"), 0);
+      }),
+    ]);
+    if (preserved !== "expired" && preserved.kind === "rejected") {
+      const recoveryBoundary = knownProviderRecoveryBoundary(preserved.error);
+      if (recoveryBoundary !== null) throw recoveryBoundary;
+    }
+    throw signal.reason ?? new Error("Aborted.");
   } finally {
     if (abortHandler !== null) signal.removeEventListener("abort", abortHandler);
     if (graceTimer !== null) clearTimeout(graceTimer);
