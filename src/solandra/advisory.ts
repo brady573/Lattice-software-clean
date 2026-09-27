@@ -4,6 +4,10 @@ import type { IntentVersion } from "../intent/types.js";
 import { ModelProviderError } from "../model/errors.js";
 import { ModelRuntime } from "../model/runtime.js";
 import type { CanonicalModelRequest, ModelInvocationProvenance } from "../model/types.js";
+import {
+  canonicalUncertaintySet,
+  canonicalUncertaintyArraysEqual,
+} from "../string/uncertainty-canonical.js";
 
 const advisoryBasisSchema = z.object({
   knowledgeId: z.string().min(1).max(128),
@@ -269,7 +273,7 @@ function buildGroundingAuditRequest(
   };
 }
 
-function validateAndProjectRecommendationBasis(
+export function validateAndProjectRecommendationBasis(
   input: SolandraAdvisoryInput,
   result: SolandraRecommendationResult,
 ): GroundingFinding[] {
@@ -277,7 +281,7 @@ function validateAndProjectRecommendationBasis(
     knowledge.knowledgeId,
     {
       findings: new Map(knowledge.findings.map((finding) => [finding.claimId, finding])),
-      uncertainties: new Set(knowledge.uncertainties),
+      uncertainties: canonicalUncertaintySet(knowledge.uncertainties),
     },
   ]));
   const usedUncertainties = new Set<string>();
@@ -303,17 +307,10 @@ function validateAndProjectRecommendationBasis(
     }
     for (const uncertainty of knowledge.uncertainties) usedUncertainties.add(uncertainty);
   }
+  const usedArray = [...usedUncertainties];
 
-  const preserved = new Set(result.preservedUncertainties);
-  for (const uncertainty of preserved) {
-    if (!usedUncertainties.has(uncertainty)) {
-      throw new ModelProviderError("invalid_output", "Solandra advisory reasoning invented an uncertainty reference that was not supplied by Lattice.");
-    }
-  }
-  for (const uncertainty of usedUncertainties) {
-    if (!preserved.has(uncertainty)) {
-      throw new ModelProviderError("invalid_output", "Solandra advisory reasoning dropped material governed uncertainty from its recommendation basis.");
-    }
+  if (!canonicalUncertaintyArraysEqual(result.preservedUncertainties, usedArray)) {
+    throw new ModelProviderError("invalid_output", "Solandra advisory reasoning invented or dropped material governed uncertainty from its recommendation basis.");
   }
 
   return governedFindings;
