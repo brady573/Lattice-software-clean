@@ -232,7 +232,7 @@ test("caller cancellation while waiting behind the Groq recovery gate sends no u
   assert.equal(fetches, 0);
 });
 
-test("the unchanged ModelRuntime logical timeout bounds a recovery gate longer than the remaining budget", async () => {
+test("a recovery gate longer than the remaining budget keeps its rate-limit boundary and sends no upstream request", async () => {
   let waiting!: () => void;
   const waitingPromise = new Promise<void>((resolve) => { waiting = resolve; });
   const wait: GroqRateLimitWait = async (_delayMs, signal) => {
@@ -260,7 +260,14 @@ test("the unchanged ModelRuntime logical timeout bounds a recovery gate longer t
     maxAttempts: 2,
   });
   await waitingPromise;
-  await assert.rejects(pending, (error) => errorCode(error) === "timeout");
+  // The attempt window expired while the route was inside a known recovery
+  // block. The runtime must not flatten that known boundary into a generic
+  // model timeout, and must not spend a second attempt on the same block.
+  await assert.rejects(pending, (error) => {
+    assert.equal(errorCode(error), "rate_limit");
+    assert.equal((error as ModelProviderError).retryable, false);
+    return true;
+  });
   assert.equal(fetches, 0);
 });
 

@@ -52,7 +52,8 @@ function textResult(id: string, text: string): ModelProviderResult {
   } as ModelProviderResult;
 }
 
-type Step = "hang" | "answer" | "json-answer" | "retryable" | "non-retryable" | "ready-then-answer" | "hold";
+type Step = "hang" | "answer" | "json-answer" | "retryable" | "non-retryable" | "ready-then-answer" | "hold"
+  | "fulfill-on-abort" | "reject-rate-limit-on-abort";
 
 class ScriptedProvider implements ModelProvider {
   readonly kind = "runtime-retry-window-provider";
@@ -97,6 +98,39 @@ class ScriptedProvider implements ModelProvider {
       // Occupies the logical key for longer than one attempt window.
       await delay(this.holdMs);
       return textResult(`hold-${this.calls}`, "held the logical key");
+    }
+    if (step === "fulfill-on-abort") {
+      // A provider that answers from its own abort listener. Its answer arrives
+      // after the caller has cancelled or the attempt window has already closed,
+      // so it must never be accepted as this call's result.
+      return await new Promise<ModelProviderResult>((resolve) => {
+        const safety = setTimeout(() => resolve(textResult(`late-${this.calls}`, "late answer")), 5_000);
+        safety.unref();
+        context.signal.addEventListener(
+          "abort",
+          () => {
+            clearTimeout(safety);
+            resolve(textResult(`late-${this.calls}`, "answered after the abort fired"));
+          },
+          { once: true },
+        );
+      });
+    }
+    if (step === "reject-rate-limit-on-abort") {
+      // A provider that reports a known recovery boundary from its abort
+      // listener. This is the one post-abort report the runtime may preserve.
+      return await new Promise<ModelProviderResult>((_resolve, reject) => {
+        const safety = setTimeout(() => reject(new Error("scripted recovery safety")), 5_000);
+        safety.unref();
+        context.signal.addEventListener(
+          "abort",
+          () => {
+            clearTimeout(safety);
+            reject(new ModelProviderError("rate_limit", "known recovery window", { retryable: false }));
+          },
+          { once: true },
+        );
+      });
     }
     if (step === "retryable") {
       throw new ModelProviderError("rate_limit", "controlled transient 429", {
@@ -348,4 +382,164 @@ test("Solandra cognition and advisory opt in, while the durable-lease investigat
 
   // Advisory: also opted in.
   assert.ok(ModelSolandraAdvisoryRuntime !== undefined);
+});
+
+/**
+ * Abort precedence. Once the caller's signal or the attempt window has fired,
+ * that abort is final: the runtime must never accept a provider answer that
+ * arrives afterwards, and must never let a post-abort success mask a
+ * cancellation or a timeout. The single exception is a more specific rejected
+ * provider recovery boundary, which carries strictly more information than the
+ * runtime's own abort reason.
+ */
+
+test("a provider that answers from its abort listener cannot satisfy a cancelled call", async () => {
+  const provider = new ScriptedProvider(["fulfill-on-abort"]);
+  const model = runtime(provider, 1_000);
+  const controller = new AbortController();
+
+  const pending = model.call(
+    request("caller cancelled before any answer"),
+    {
+      correlationId: "cancel-precedence",
+      maxAttempts: 1,
+      signal: controller.signal,
+    },
+  );
+  await delay(10);
+  controller.abort(new Error("caller cancelled"));
+
+  await assert.rejects(pending, (error: unknown) => {
+    assert.ok(error instanceof ModelProviderError, "cancellation must stay a provider error");
+    assert.equal(error.code, "cancelled");
+    return true;
+  });
+  assert.equal(provider.calls, 1);
+});
+
+test("a provider that answers from its abort listener cannot satisfy a call whose attempt window closed", async () => {
+  const provider = new ScriptedProvider(["fulfill-on-abort"]);
+  const model = runtime(provider, 25);
+
+  await assert.rejects(
+    model.call(
+      request("attempt window closed before any answer"),
+      { correlationId: "timeout-precedence", maxAttempts: 1, ...PER_ATTEMPT },
+    ),
+    (error: unknown) => {
+      assert.ok(error instanceof ModelProviderError);
+      assert.equal(error.code, "timeout", "a post-timeout success must not be accepted");
+      return true;
+    },
+  );
+  assert.equal(provider.calls, 1);
+});
+
+test("a post-abort success does not mask cancellation in the per-attempt policy", async () => {
+  const provider = new ScriptedProvider(["fulfill-on-abort", "fulfill-on-abort"]);
+  const model = runtime(provider, 1_000);
+  const controller = new AbortController();
+
+  const pending = model.call(
+    request("caller cancelled during the first attempt"),
+    {
+      correlationId: "cancel-precedence-per-attempt",
+      maxAttempts: 2,
+      signal: controller.signal,
+      ...PER_ATTEMPT,
+    },
+  );
+  await delay(10);
+  controller.abort(new Error("caller cancelled"));
+
+  await assert.rejects(pending, (error: unknown) => {
+    assert.ok(error instanceof ModelProviderError);
+    assert.equal(error.code, "cancelled");
+    return true;
+  });
+  assert.equal(provider.calls, 1, "cancellation must not buy a second attempt");
+});
+
+test("a post-abort provider success leaves the ordinary attempt timeout intact", async () => {
+  const provider = new ScriptedProvider(["fulfill-on-abort", "fulfill-on-abort"]);
+  const model = runtime(provider, 25);
+
+  const started = Date.now();
+  await assert.rejects(
+    model.call(
+      request("timeout then a post-abort success"),
+      { correlationId: "timeout-then-success", maxAttempts: 2, ...PER_ATTEMPT },
+    ),
+    (error: unknown) => {
+      assert.ok(error instanceof ModelProviderError);
+      assert.equal(error.code, "timeout");
+      return true;
+    },
+  );
+  assert.equal(
+    provider.calls,
+    2,
+    "neither post-abort success became a result, so the permitted retry was still spent",
+  );
+  assert.ok(Date.now() - started < 1_000, "the grace must not extend the call bound");
+});
+
+test("a post-abort success is discarded but a genuine later attempt may still answer", async () => {
+  const provider = new ScriptedProvider(["fulfill-on-abort", "answer"]);
+  const model = runtime(provider, 25);
+
+  const result = await model.call(
+    request("first attempt answers too late, second answers in time"),
+    { correlationId: "late-then-real", maxAttempts: 2, ...PER_ATTEMPT },
+  );
+
+  assert.equal(assistantText(result.response), "answered within its window");
+  assert.equal(
+    provider.calls,
+    2,
+    "the late answer from the aborted attempt must not be the returned result",
+  );
+});
+
+test("a known recovery rejection from the abort listener is still preserved as rate_limit", async () => {
+  const provider = new ScriptedProvider(["reject-rate-limit-on-abort"]);
+  const model = runtime(provider, 25);
+
+  await assert.rejects(
+    model.call(
+      request("known recovery boundary survives the window"),
+      { correlationId: "recovery-preserved", maxAttempts: 2, ...PER_ATTEMPT },
+    ),
+    (error: unknown) => {
+      assert.ok(error instanceof ModelProviderError);
+      assert.equal(error.code, "rate_limit", "a more specific provider rejection must survive the abort");
+      assert.equal(error.retryable, false, "an unchanged known block must not buy a second attempt");
+      return true;
+    },
+  );
+  assert.equal(provider.calls, 1);
+});
+
+test("a known recovery rejection still loses to caller cancellation", async () => {
+  const provider = new ScriptedProvider(["reject-rate-limit-on-abort"]);
+  const model = runtime(provider, 1_000);
+  const controller = new AbortController();
+
+  const pending = model.call(
+    request("caller cancelled while a known block was active"),
+    {
+      correlationId: "recovery-then-cancel",
+      maxAttempts: 2,
+      signal: controller.signal,
+    },
+  );
+  await delay(10);
+  controller.abort(new Error("caller cancelled"));
+
+  await assert.rejects(pending, (error: unknown) => {
+    assert.ok(error instanceof ModelProviderError);
+    assert.equal(error.code, "cancelled", "caller cancellation must still win");
+    return true;
+  });
+  assert.equal(provider.calls, 1);
 });

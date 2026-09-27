@@ -1,5 +1,6 @@
 import { ModelProviderError } from "./errors.js";
 import {
+  GroqRecoveryWaitInterruptedError,
   groqRateLimitScopeId,
   sharedMemoryGroqRateLimitCoordinator,
   type GroqRateLimitCoordinator,
@@ -178,7 +179,21 @@ export class GroqKnowledgeSimplifierModelProvider implements ModelProvider {
     try {
       await this.rateLimitCoordinator.waitUntilReady(this.rateLimitScopeId, context.signal);
     } catch (error) {
+      // The wait was interrupted while a known recovery block was still being
+      // waited out, so this request never reached provider HTTP. The truthful
+      // boundary is a known rate-limit recovery condition, and it is reported
+      // as non-retryable because an immediate retry would face the very same
+      // unchanged block and still not reach the provider.
+      if (error instanceof GroqRecoveryWaitInterruptedError) {
+        throw new ModelProviderError(
+          "rate_limit",
+          "Groq Knowledge simplifier route is in a known rate-limit recovery window.",
+          { cause: error },
+        );
+      }
       if (context.signal.aborted) {
+        // Aborted outside a known recovery block, so nothing is known beyond the
+        // abort itself.
         throw new ModelProviderError(
           "cancelled",
           "Groq Knowledge simplifier request was cancelled while waiting for provider recovery.",

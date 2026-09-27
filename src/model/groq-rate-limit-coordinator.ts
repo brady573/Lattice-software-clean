@@ -8,6 +8,30 @@ const SCOPE_PREFIX = "groq-rate-limit:v1:";
 
 export type GroqRateLimitWait = (delayMs: number, signal: AbortSignal) => Promise<void>;
 
+/**
+ * Raised when a recovery wait is interrupted by the caller's signal while the
+ * route is inside a known recovery block.
+ *
+ * The coordinator is the only component that knows the request was bounded by a
+ * known recovery delay, and it knows it without any further read: the wait was
+ * only entered because a positive delay was already recorded. Carrying that
+ * evidence on the error keeps the truthful recovery boundary reportable after
+ * the signal has aborted, without re-reading coordinator state that may be an
+ * unavailable database.
+ */
+export class GroqRecoveryWaitInterruptedError extends Error {
+  readonly recoveryDelayMs: number;
+
+  constructor(recoveryDelayMs: number, options: { readonly cause?: unknown } = {}) {
+    super(
+      "Groq rate-limit recovery wait was interrupted by the caller.",
+      options.cause === undefined ? undefined : { cause: options.cause },
+    );
+    this.name = "GroqRecoveryWaitInterruptedError";
+    this.recoveryDelayMs = recoveryDelayMs;
+  }
+}
+
 export interface GroqRateLimitCoordinator {
   readonly kind: "memory" | "postgres";
   blockedUntil(scopeId: string, signal?: AbortSignal): Promise<number>;
@@ -84,7 +108,12 @@ async function waitReady(
     if (signal.aborted) throw signal.reason ?? new Error("Aborted.");
     const delayMs = (await read()) - now();
     if (delayMs <= 0) return;
-    await wait(delayMs, signal);
+    try {
+      await wait(delayMs, signal);
+    } catch (error) {
+      // Interrupted while a known recovery block was still being waited out.
+      throw new GroqRecoveryWaitInterruptedError(delayMs, { cause: error });
+    }
   }
 }
 
