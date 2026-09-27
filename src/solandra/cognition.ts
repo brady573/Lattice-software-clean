@@ -35,8 +35,18 @@ export const solandraSemanticProposalSchema = z.object({
   objectiveRelation: solandraObjectiveRelationSchema,
   proposedObjective: z.string().min(1).max(8_000).nullable(),
   requestedHelp: solandraRequestedHelpSchema,
-  /** Non-authoritative form preference for a newly created Knowledge Run. */
-  knowledgePresentation: z.enum(["ANSWER", "SOURCES"]).optional(),
+  /**
+   * Non-authoritative form preference for a newly created Knowledge Run.
+   *
+   * Absent and null both mean "no preference was stated", which Lattice resolves
+   * to ANSWER at the point of use. Null is accepted because the cognition
+   * contract instructs the model to use null for absent values, and because
+   * Lattice discards this field entirely for every requestedHelp other than
+   * KNOWLEDGE and FRESH_RESEARCH. Rejecting a null here would fail an otherwise
+   * valid interpretation over a value the Product never reads, which is the
+   * live-confirmed failure this replaces.
+   */
+  knowledgePresentation: z.enum(["ANSWER", "SOURCES"]).nullish(),
   relevantContext: z.array(z.string().min(1).max(1_000)).max(16),
   entities: z.array(z.string().min(1).max(300)).max(24),
   referents: z.array(z.string().min(1).max(300)).max(16),
