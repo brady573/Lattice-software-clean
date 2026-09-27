@@ -12,6 +12,9 @@ import type {
   SolandraRecommendationResult,
 } from "../solandra/advisory.js";
 import {
+  canonicalUncertaintyArraysEqual,
+} from "../string/uncertainty-canonical.js";
+import {
   buildRecommendationRecord,
   type RecommendationBasis,
   type RecommendationRecord,
@@ -148,11 +151,12 @@ function assertPreservedGovernedUncertainty(
   advisory: SolandraRecommendationResult,
   governedUncertainties: readonly string[],
 ): void {
-  const preserved = [...new Set(advisory.preservedUncertainties)];
-  if (!equalSet(preserved, governedUncertainties)) {
+  if (!canonicalUncertaintyArraysEqual(advisory.preservedUncertainties, governedUncertainties)) {
     throw new Error("Solandra advisory reasoning dropped or invented material governed uncertainty from its Recommendation basis.");
   }
 }
+
+export { assertPreservedGovernedUncertainty };
 
 function runUserMaterial(run: LatticeRun): string[] {
   if (!isConsultationRunRequest(run.request)) return [];
