@@ -48,8 +48,12 @@ const runtime = new GroqKnowledgeSimplifierModelRuntime(provider, ATTEMPT_WINDOW
 const cognition = new ModelSolandraCognitiveRuntime(runtime, GROQ_KNOWLEDGE_SIMPLIFIER_MODEL, MAX_ATTEMPTS);
 
 const CASES = [
+  // The exact Current USER message from the live cognition proof that failed at
+  // this head with a cognition schema rejection, followed by fresh ordinary
+  // cases. Reproducing a specific observed failure is the point here; this is
+  // not a wording matrix.
+  'I’m comparing two ways to keep a small local project recoverable. What tradeoffs should I think about?',
   'I am weighing two ways to keep a small home project recoverable. What tradeoffs should I think about?',
-  'My team keeps arguing about who owns the shared on-call list. How would you untangle that?',
   'What is a sensible way to compare two backup services for a small business?',
   'Explain why some people find running errands early in the morning easier.',
 ];

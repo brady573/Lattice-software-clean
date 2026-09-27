@@ -30,6 +30,17 @@ jobs:
       - name: Install locked dependencies
         run: npm ci --no-audit --no-fund
 
+      - name: Reproduce the exact live cognition proof that failed at this head
+        continue-on-error: true
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+        run: |
+          set -uo pipefail
+          test -n "${GROQ_API_KEY:-}"
+          node --import tsx tools/issue-91-live-solandra-cognition.mjs \
+            && echo 'EXACT_LIVE_PROOF=PASS' \
+            || echo 'EXACT_LIVE_PROOF=FAIL'
+
       - name: Run validator-only cognition schema conformance observation
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
