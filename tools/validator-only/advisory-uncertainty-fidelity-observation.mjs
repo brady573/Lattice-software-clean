@@ -48,12 +48,15 @@ const SUPPLIED_UNCERTAINTIES = [
 
 const USER_MESSAGE = "Help me decide between a small monthly subscription and a one-off purchase for my photo backups.";
 
-let rawContent = null;
+// The advisory boundary may make more than one model call (the recommendation
+// itself, then a grounding audit with its own GROUNDED vocabulary). Collect every
+// completion so the recommendation is not lost behind a later one.
+const rawCompletions = [];
 const provider = new GroqKnowledgeSimplifierModelProvider({
   apiKey: API_KEY,
   rateLimitCoordinator: new MemoryGroqRateLimitCoordinator(),
   diagnosticSink: (diagnostic) => {
-    rawContent = diagnostic.content;
+    rawCompletions.push(diagnostic.content);
   },
 });
 const runtime = new GroqKnowledgeSimplifierModelRuntime(provider, ATTEMPT_WINDOW_MS);
@@ -139,30 +142,35 @@ try {
     message: String(error?.message ?? error).slice(0, 300),
   };
 }
-console.log(`SUMMARY ${JSON.stringify({ ...outcome, elapsed_s: Math.round((Date.now() - started) / 100) / 10 })}`);
+console.log(`SUMMARY ${JSON.stringify({ ...outcome, completions: rawCompletions.length, elapsed_s: Math.round((Date.now() - started) / 100) / 10 })}`);
 
-if (typeof rawContent === 'string') {
-  console.log(`RAW content=${JSON.stringify(rawContent)}`);
-  try {
-    const parsed = JSON.parse(rawContent);
-    const preserved = Array.isArray(parsed?.preservedUncertainties) ? parsed.preservedUncertainties : null;
-    console.log(`MODEL_STATUS ${JSON.stringify(parsed?.status ?? null)}`);
-    console.log(`PRESERVED_COUNT ${JSON.stringify(preserved === null ? null : preserved.length)}`);
+if (rawCompletions.length === 0) {
+  console.log('RAW content=null (the provider did not complete)');
+  console.log('PROBE_COMPLETE');
+} else {
+  for (const [callIndex, content] of rawCompletions.entries()) {
+    console.log(`RAW call=${callIndex} content=${JSON.stringify(content)}`);
+    let parsed = null;
+    try {
+      parsed = JSON.parse(content);
+    } catch {
+      console.log(`MODEL_JSON call=${callIndex} NOT_PARSEABLE`);
+    }
+    if (parsed === null) continue;
+    console.log(`MODEL_STATUS call=${callIndex} ${JSON.stringify(parsed.status ?? null)}`);
+    const preserved = Array.isArray(parsed.preservedUncertainties) ? parsed.preservedUncertainties : null;
+    console.log(`PRESERVED_COUNT call=${callIndex} ${JSON.stringify(preserved === null ? null : preserved.length)}`);
     if (preserved !== null) {
       for (const [index, entry] of preserved.entries()) {
         const verdict = typeof entry === 'string'
           ? classify(entry)
           : { match: 'NOT_A_STRING', type: typeof entry };
-        console.log(`ENTRY ${JSON.stringify({ index, verdict, value: entry })}`);
+        console.log(`ENTRY call=${callIndex} ${JSON.stringify({ index, verdict, value: entry })}`);
       }
     }
-    // Also report any verbatim-looking uncertainty the model wrote into the
-    // advisory prose fields, which the contract says is drafting material only.
-    console.log(`ADVISORY_UNCERTAINTIES ${JSON.stringify(parsed?.uncertainties ?? null)}`);
-  } catch {
-    console.log('MODEL_JSON NOT_PARSEABLE');
+    if (parsed.uncertainties !== undefined) {
+      console.log(`ADVISORY_UNCERTAINTIES call=${callIndex} ${JSON.stringify(parsed.uncertainties)}`);
+    }
   }
-} else {
-  console.log('RAW content=null (the provider did not complete)');
 }
 console.log('PROBE_COMPLETE');
