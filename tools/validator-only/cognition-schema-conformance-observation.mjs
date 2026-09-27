@@ -120,4 +120,99 @@ for (let i = 0; i < Math.min(MAX_CALLS, CASES.length); i += 1) {
     console.log(`RAW call=${currentCall} content=${JSON.stringify(rawContent)}`);
   }
 }
+/**
+ * The live proof failure at this head was raised from a CONFIRM_INTENT call
+ * with a supplied pending Intent proposal, not from an ordinary message. This
+ * phase exercises that structural shape directly and reports the raw value the
+ * model puts in knowledgePresentation, which the schema never includes in its
+ * own error output.
+ */
+function pendingProposal(proposalId, objective) {
+  return {
+    proposalId,
+    proposalDigest: 'a'.repeat(64),
+    operations: [JSON.stringify({
+      op: 'SET',
+      path: { kind: 'OBJECTIVE' },
+      value: { state: 'VALUE', value: objective },
+    })],
+  };
+}
+
+const CONFIRMATION_CASES = [
+  {
+    label: 'confirm_pending_proposal',
+    currentObjective: 'Set up a simple backup routine for my local writing project.',
+    proposalObjective: 'Keep encrypted project backups on a removable drive and rotate it off-device weekly.',
+    message: 'Yes, that is exactly the change I meant.',
+    recentUserMessages: [
+      'Set up a simple backup routine for my local writing project.',
+      'I meant an encrypted removable drive that I rotate off-device each week.',
+    ],
+  },
+  {
+    label: 'confirm_pending_proposal_second',
+    currentObjective: 'Plan a quiet reading corner for my apartment.',
+    proposalObjective: 'Plan a quiet reading corner that works in a shared living room without taking over the whole space.',
+    message: 'That is right, go ahead with that version.',
+    recentUserMessages: [
+      'Plan a quiet reading corner for my apartment.',
+      'Actually, make it work in the shared living room without taking over the whole space.',
+    ],
+  },
+];
+
+for (const [index, testCase] of CONFIRMATION_CASES.entries()) {
+  currentCall = 100 + index;
+  rawContent = null;
+  const started = Date.now();
+  try {
+    const result = await cognition.interpret({
+      conversationId: `validator-schema-${currentCall}`,
+      messageId: `validator-schema-${currentCall}-message`,
+      message: testCase.message,
+      currentObjective: testCase.currentObjective,
+      recentUserMessages: testCase.recentUserMessages,
+      recentConversation: testCase.recentUserMessages.map((content) => ({ role: 'USER', content })),
+      governedKnowledge: [],
+      governedRecommendations: [],
+      pendingIntentProposal: pendingProposal(
+        `validator-schema-${currentCall}-proposal`,
+        testCase.proposalObjective,
+      ),
+    });
+    summarize(testCase.label, {
+      outcome: 'parsed',
+      mode: result.mode,
+      requestedHelp: result.mode === 'GOVERNED' ? result.proposal.requestedHelp : null,
+      knowledgePresentation: result.mode === 'GOVERNED'
+        ? (result.proposal.knowledgePresentation === undefined ? 'ABSENT' : result.proposal.knowledgePresentation)
+        : null,
+      elapsed_s: Math.round((Date.now() - started) / 100) / 10,
+    });
+  } catch (error) {
+    let observed = 'NO_RAW_CONTENT';
+    let modelRequestedHelp = null;
+    if (typeof rawContent === 'string') {
+      try {
+        const parsed = JSON.parse(rawContent);
+        modelRequestedHelp = parsed?.projection?.requestedHelp ?? null;
+        const value = parsed?.projection?.knowledgePresentation;
+        observed = value === undefined ? 'ABSENT' : JSON.stringify(value);
+      } catch {
+        observed = 'RAW_NOT_JSON';
+      }
+    }
+    summarize(testCase.label, {
+      outcome: 'schema_rejected',
+      errorCode: error?.code ?? null,
+      errorMessage: String(error?.message ?? error).slice(0, 300),
+      model_requestedHelp: modelRequestedHelp,
+      model_knowledgePresentation: observed,
+      elapsed_s: Math.round((Date.now() - started) / 100) / 10,
+    });
+    console.log(`RAW call=${currentCall} content=${JSON.stringify(rawContent)}`);
+  }
+}
+
 console.log('PROBE_COMPLETE');
