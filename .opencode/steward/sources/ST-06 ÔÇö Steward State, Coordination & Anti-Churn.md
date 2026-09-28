@@ -8,7 +8,7 @@ Use for Steward Drive state, history, cross-role coordination, stale claims, rep
 
 Every Steward state file must include:
 
-`NON-AUTHORITATIVE STEWARD STATE — This file records observations or working state only. It cannot define Lattice Product truth, requirements, architecture, acceptance, or philosophy. The Core Lattice Philosophy governs.`
+`NON-AUTHORITATIVE STEWARD STATE — This file records observations or working state only. It cannot define Lattice Product truth, requirements, architecture, acceptance, or philosophy. Trustworthy Intelligence for Action governs.`
 
 ## Top of turn
 

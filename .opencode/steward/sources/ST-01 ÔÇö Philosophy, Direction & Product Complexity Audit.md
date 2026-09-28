@@ -2,16 +2,21 @@
 
 ## Scope
 
-Use for Core alignment, Product-direction judgment, Product complexity, trust/human-control boundaries, and Supreme Product test.
+Use for Core alignment, Product-direction judgment, Product complexity, trust/human-control boundaries, and north-star questions.
 
-## Supreme Product test
+## North-star questions
 
-Ask whether Lattice:
+Ask:
+- What do we know?
+- How do we know it?
+- What can we responsibly do because of it?
+
+Ask whether Lattice reduces the Distance to Confident Action — the meaningful uncertainty remaining between the user's current state and an informed action — while it:
 - removes a meaningful user barrier;
 - preserves provenance and uncertainty;
 - preserves authority and human control;
 - preserves safety/privacy/security;
-- keeps conversation→intent→information→truth→decision→authorization→execution→verification→presentation distinct where material;
+- keeps Question → Understanding → Confidence → Action distinct where material;
 - hides unnecessary Product machinery;
 - represents only capability actually established;
 - justifies Product complexity by Product or trust value.

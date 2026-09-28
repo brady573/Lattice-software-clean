@@ -57,7 +57,7 @@ At minimum, an Alpha candidate must establish that:
 - at least one real model/service capability can be authorized and genuinely used through a valid Lattice-controlled route;
 - conditional decision support can work end to end when the user's need is actually a decision;
 - bounded Action Preparation can produce useful editable material without falsely claiming execution;
-- conversation, intent, truth, decision, authorization, execution, verification, and presentation boundaries remain distinct where material;
+- Question, Understanding, Confidence, and Action boundaries — including the governed distinctions within them (intent authority, knowledge, truth, decision, authorization, execution, verification, and presentation) — remain distinct where material;
 - ordinary interruption, failure, cancellation, continuation, and recovery do not corrupt authority or user understanding;
 - internal providers, models, workers, Run state, proof-state machinery, and workflow stages do not become work the ordinary user must operate.
 
@@ -495,11 +495,11 @@ PR #33 is the bounded candidate for that repair. Independent Product-first revie
 
 ---
 
-# Supreme Product test
+# North-star questions
 
 Before accepting any roadmap item, implementation, retained mechanism, or Alpha promotion, ask:
 
-> **Does this use knowledge to remove a meaningful barrier for the user, preserve the boundaries required for trust and human control, keep authority where it belongs, and reduce rather than transfer unnecessary complexity?**
+> **What do we know? How do we know it? What can we responsibly do because of it?**
 
 For this single-owner project also ask:
 

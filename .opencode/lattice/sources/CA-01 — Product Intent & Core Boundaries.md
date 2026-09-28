@@ -15,9 +15,9 @@ The user does not operate the machinery.
 
 Preserve where material:
 
-conversation → intent → information → truth → decision → authorization → execution → verification → presentation
+Question → Understanding → Confidence → Action
 
-Do not collapse:
+Do not collapse adjacent stages or the governed distinctions within them:
 - model interpretation into canonical USER intent;
 - retrieval into trustworthy knowledge;
 - proposal into decision;
