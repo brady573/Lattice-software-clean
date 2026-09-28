@@ -189,7 +189,7 @@ A1 must include black-box scenarios covering at least:
 - user intent is not silently expanded;
 - semantic ambiguity is not guessed away when material;
 - fail-closed behavior remains intact;
-- no one-off dictionary rule is accepted as the general solution to terminology barriers;
+- no one-off dictionary rule is accepted as the general solution to terminology barriers; a repair counts when it shortens Distance to Confident Action across unseen wording, not when it silences a supplied example;
 - no generalized new orchestration stack is introduced without evidence that existing seams cannot support the capability.
 
 ### A1 exit condition
@@ -382,7 +382,7 @@ Potential post-Alpha work may include, only when justified by observed need:
 - retention/purge policy completion;
 - additional recovery automation;
 - accessibility/usability polish;
-- expanded benchmarks driven by observed Product barriers;
+- expanded benchmarks driven by observed Product barriers, framed as remaining Distance to Confident Action;
 - selective architecture simplification where Alpha exposes unnecessary maintenance burden.
 
 Post-Alpha refinement must not retroactively excuse an incomplete Alpha capability.
@@ -448,10 +448,10 @@ When a vertical encounters a genuine Product decision rather than an engineering
 
 For every substantial proposed work item, answer:
 
-1. **Which observable Alpha barrier does this remove?**
+1. **Which observable Alpha barrier does this remove — what Distance to Confident Action does it shorten?**
 2. **Which necessary trust/control boundary would fail without it?**
 
-At least one answer must be concrete.
+At least one answer must be concrete. A barrier answer should name the north-star movement: what the user knows, how they know it, or what they can responsibly do because of it.
 
 Also apply:
 
