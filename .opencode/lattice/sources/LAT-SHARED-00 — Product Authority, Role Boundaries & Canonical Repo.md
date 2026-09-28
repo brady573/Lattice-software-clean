@@ -61,7 +61,7 @@ It determines Product-behavior evidence within its observed scope. It does not e
 
 Preserve material separation:
 
-conversation → intent → information → truth → decision → authorization → execution → verification → presentation
+Question → Understanding → Confidence → Action
 
 Also preserve evidence-layer separation:
 
