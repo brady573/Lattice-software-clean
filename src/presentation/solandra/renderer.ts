@@ -15,12 +15,12 @@ export function renderCanonicalExplanation(plan: SolandraExplanationPlan): strin
     const excluded = plan.candidates.filter((candidate) => !candidate.eligible);
     const eligible = plan.candidates.filter((candidate) => candidate.eligible);
     const hardRequirementExplanation = excluded.length > 0
-      ? ` ${excluded.map((candidate) => candidate.label).join(", ")} ${excluded.length === 1 ? "was" : "were"} excluded because admitted evidence did not satisfy every confirmed hard requirement.`
+      ? ` ${excluded.map((candidate) => candidate.label).join(", ")} didn't meet every must-have requirement you confirmed, so I set it aside.`
       : "";
     const preferenceExplanation = eligible.length > 1
-      ? ` Among the eligible alternatives, the qualified preference comparison favors ${plan.winnerLabel}.`
+      ? ` Among the options that meet your requirements, ${plan.winnerLabel} fits your stated priorities best.`
       : "";
-    return `Solandra recommends ${plan.winnerLabel}. The admitted evidence supports that recommendation under the requirements and priorities you confirmed.${hardRequirementExplanation}${preferenceExplanation}`;
+    return `I recommend ${plan.winnerLabel}, based on the evidence and the requirements and priorities you confirmed.${hardRequirementExplanation}${preferenceExplanation}`;
   }
 
   switch (plan.outcome) {

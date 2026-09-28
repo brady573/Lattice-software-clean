@@ -42,7 +42,7 @@ test("Solandra preserves the current deterministic canonical explanation", () =>
   const { plan } = authoritativeState();
   assert.equal(
     renderCanonicalExplanation(plan),
-    "Solandra recommends Nova Air. The admitted evidence supports that recommendation under the requirements and priorities you confirmed. Atlas Pro, Forge 15 were excluded because admitted evidence did not satisfy every confirmed hard requirement.",
+    "I recommend Nova Air, based on the evidence and the requirements and priorities you confirmed. Atlas Pro, Forge 15 didn't meet every must-have requirement you confirmed, so I set it aside.",
   );
 });
 

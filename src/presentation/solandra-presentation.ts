@@ -344,7 +344,7 @@ export function composeSolandraPresentation(input: {
   const materialUncertainty: MaterialUncertainty[] = run?.status === "AWAITING_CLARIFICATION"
     ? [{
         id: `clarification:${run.id}:${run.version}`,
-        description: "More accepted information is required before the current decision can progress responsibly.",
+        description: "I need a bit more information before I can move this decision forward responsibly.",
         provenance: [{ authority: "execution_runtime", ref: `${run.id}@${run.version}` }],
       }]
     : actionPreparationUncertainty(run, outcome);
@@ -434,7 +434,7 @@ export function hydrateSolandraResource(input: {
       `Outcome: ${decision.outcome}`,
       ...(decision.outcome === "RECOMMENDATION" ? [`Winner: ${decision.winnerCandidateId}`] : []),
       ...(decision.frontierCandidateIds.length > 0
-        ? [`Frontier: ${decision.frontierCandidateIds.join(", ")}`]
+        ? [`Close alternatives still in play: ${decision.frontierCandidateIds.join(", ")}`]
         : []),
       ...(decision.tiedCandidateIds.length > 0
         ? [`Tied options: ${decision.tiedCandidateIds.join(", ")}`]

@@ -3,7 +3,7 @@ import type { KnowledgeFinding, KnowledgeOutcome } from "../../outcome.js";
 
 const EMPTY_KNOWLEDGE_MESSAGE = "No validated external findings are sufficiently relevant to this objective.";
 const GENERIC_INSUFFICIENT_KNOWLEDGE_MESSAGE =
-  "I couldn't establish enough relevant evidence to answer that reliably.";
+  "Nothing I found holds up well enough to answer this.";
 
 function renderSourceReportFinding(finding: KnowledgeFinding, text = finding.text): string {
   const statusLabel: Record<KnowledgeFinding["status"], string> = {
@@ -19,10 +19,10 @@ function renderFinding(finding: KnowledgeFinding, text = finding.text): string {
   if (finding.basis === "SOURCE_REPORT") return renderSourceReportFinding(finding, text);
 
   switch (finding.status) {
-    case "SUPPORTED": return `Supported: ${text}`;
-    case "REFUTED": return `Refuted: ${text}`;
-    case "CONFLICTED": return `Material conflict remains: ${text}`;
-    case "UNRESOLVED": return `Qualified evidence did not establish this strongly enough: ${text}`;
+    case "SUPPORTED": return `The available evidence supports this: ${text}`;
+    case "REFUTED": return `The available evidence weighs against this: ${text}`;
+    case "CONFLICTED": return `The evidence here genuinely disagrees, so there is no single settled answer: ${text}`;
+    case "UNRESOLVED": return `This isn't established strongly enough yet: ${text}`;
   }
 }
 
@@ -45,7 +45,7 @@ function isInternalKnowledgeLimitation(item: string): boolean {
 function uncertaintyLabel(knowledge: KnowledgeOutcome): string {
   const uncertainties = knowledge.uncertainties.filter((item) => !isInternalKnowledgeLimitation(item));
   if (uncertainties.length === 0) return "";
-  return `Known uncertainty:\n${uncertainties.map((item) => `- ${item}`).join("\n")}`;
+  return `What remains uncertain:\n${uncertainties.map((item) => `- ${item}`).join("\n")}`;
 }
 
 function renderSourceList(knowledge: KnowledgeOutcome): string {
@@ -88,7 +88,7 @@ function renderGovernedAnswer(knowledge: KnowledgeOutcome): string {
   const refuted = knowledge.findings.filter((finding) => finding.status === "REFUTED");
   if (refuted.length > 0) {
     return [
-      `The available governed evidence refutes this claim: ${refuted.map((finding) => finding.text).join(" ")}`,
+      `The available evidence weighs against this claim: ${refuted.map((finding) => finding.text).join(" ")}`,
       uncertaintyLabel(knowledge),
       sourceLabel(knowledge),
     ].filter(Boolean).join("\n\n");
@@ -108,17 +108,23 @@ function renderGovernedAnswer(knowledge: KnowledgeOutcome): string {
 
   const sourceReportOnly = answerable.every((finding) => finding.basis === "SOURCE_REPORT");
   const answer = sourceReportOnly
-    ? `The retrieved source material reports: ${answerable.map((finding) => finding.text).join(" ")}`
+    ? `What the retrieved sources report: ${answerable.map((finding) => finding.text).join(" ")}`
     : answerable.map((finding) => finding.text).join(" ");
   const qualification = sourceReportOnly
     ? "That establishes what the cited source reports; it does not by itself independently verify the broader real-world claim."
+    : "";
+  const presentedUncertainty = uncertaintyLabel(knowledge);
+  const presentedSources = sourceLabel(knowledge);
+  const absentBasisNote = !sourceReportOnly && presentedUncertainty === "" && presentedSources === ""
+    ? "No supporting basis is shown for this answer."
     : "";
 
   return [
     answer,
     qualification,
-    uncertaintyLabel(knowledge),
-    sourceLabel(knowledge),
+    presentedUncertainty,
+    presentedSources,
+    absentBasisNote,
   ].filter(Boolean).join("\n\n");
 }
 
