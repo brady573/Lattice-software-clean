@@ -1,8 +1,10 @@
 import { isConsultationRunRequest, type LatticeRun } from "../../domain.js";
 import type { KnowledgeFinding, KnowledgeOutcome } from "../../outcome.js";
 
-const EMPTY_KNOWLEDGE_MESSAGE = "No validated external findings are sufficiently relevant to this objective.";
-const GENERIC_INSUFFICIENT_KNOWLEDGE_MESSAGE =
+// Exported so browser/CI acceptance harnesses bind to the governed wording
+// instead of copying it. Wording calibration must not require editing a second place.
+export const EMPTY_KNOWLEDGE_MESSAGE = "No validated external findings are sufficiently relevant to this objective.";
+export const GENERIC_INSUFFICIENT_KNOWLEDGE_MESSAGE =
   "Nothing I found holds up well enough to answer this.";
 
 function renderSourceReportFinding(finding: KnowledgeFinding, text = finding.text): string {
