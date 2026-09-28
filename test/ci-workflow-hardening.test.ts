@@ -8,7 +8,7 @@ const workflowDirectory = join(process.cwd(), '.github', 'workflows');
 const expectedActionPins = new Map<string, string>([
   ['actions/checkout', '3d3c42e5aac5ba805825da76410c181273ba90b1'],
   ['actions/setup-node', '820762786026740c76f36085b0efc47a31fe5020'],
-  ['actions/setup-python', 'a26af69be951a213d495a4c3e4e4022e16d87065'],
+  ['actions/setup-python', '5fda3b95a4ea91299a34e894583c3862153e4b97'],
   ['actions/upload-artifact', '043fb46d1a93c77aae656e7c1c64a875d1fc6a0a'],
 ]);
 
@@ -16,6 +16,7 @@ const expectedRunners = new Map<string, string>([
   ['core-validation.yml', 'windows-latest'],
   ['postgres-integration-validation.yml', 'ubuntu-latest'],
   ['browser-lifecycle-validation.yml', 'ubuntu-latest'],
+  ['live-solandra-cognition-validation.yml', 'ubuntu-latest'],
   ['render-blueprint-validation.yml', 'ubuntu-latest'],
   ['deployed-functional-validation.yml', 'ubuntu-latest'],
 ]);
@@ -80,7 +81,7 @@ test('database workflows use an isolated PostgreSQL 18.6 service', () => {
   }
 });
 
-test('browser lane preserves M7 material coverage and separates live cognition proof', () => {
+test('browser lane preserves M7 material coverage without live cognition coupling', () => {
   const text = workflowText('browser-lifecycle-validation.yml');
   assert.equal(
     text.split(/\r?\n/u).map((line) => line.trim()).filter((line) => line === 'npm run check' || line === 'run: npm run check').length,
@@ -94,10 +95,28 @@ test('browser lane preserves M7 material coverage and separates live cognition p
   assert.match(text, /BROWSER_COGNITION_COMPOSITION=EXPLICIT_NONCANONICAL_INTERPRETER/u);
   assert.match(text, /M7_BASE_URL:\s*http:\/\/127\.0\.0\.1:3107/u);
   assert.match(text, /PORT:\s*'3108'/u);
-  assert.match(text, /name:\s*Live model-owned Solandra cognition validation/u);
-  assert.match(text, /node --import tsx tools\/issue-91-live-solandra-cognition\.mjs/u);
+  assert.doesNotMatch(text, /name:\s*Live model-owned Solandra cognition validation/u);
+  assert.doesNotMatch(text, /tools\/issue-91-live-solandra-cognition\.mjs/u);
   assert.match(text, /actions\/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a\s+# v7\.0\.1/u);
   assert.match(text, /retention-days:\s*7/u);
+});
+
+test('live provider lane owns isolated Groq cognition proof', () => {
+  const text = workflowText('live-solandra-cognition-validation.yml');
+  assert.equal(
+    text.split(/\r?\n/u).map((line) => line.trim()).filter((line) => line === 'npm run check' || line === 'run: npm run check').length,
+    0,
+  );
+  assert.match(text, /name:\s*Live model-owned Solandra cognition validation/u);
+  assert.match(text, /node --import tsx tools\/issue-91-live-solandra-cognition\.mjs/u);
+  assert.match(text, /GROQ_API_KEY/u);
+  assert.doesNotMatch(text, /^\s*pull_request:\s*$/mu);
+  assert.match(text, /^\s*push:\s*$/mu);
+  assert.match(text, /^\s*workflow_dispatch:\s*$/mu);
+  assert.match(text, /group:\s*live-solandra-cognition-groq/u);
+  assert.match(text, /cancel-in-progress:\s*false/u);
+  assert.match(text, /github\.ref == 'refs\/heads\/main'/u);
+  assert.doesNotMatch(text, /m7-browser-lifecycle\.mjs/u);
 });
 
 test('Render lane is static, zero-cost, and credential-free', () => {

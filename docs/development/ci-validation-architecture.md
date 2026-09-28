@@ -13,7 +13,10 @@ This repository is public, so ordinary automated validation uses standard GitHub
 | Core validation | `.github/workflows/core-validation.yml` | `windows-latest` | Node/runtime preflight, locked dependency install, one `npm run check` |
 | PostgreSQL integration | `.github/workflows/postgres-integration-validation.yml` | `ubuntu-latest` + isolated `postgres:18.6` service | database-dependent integration behavior |
 | Browser lifecycle | `.github/workflows/browser-lifecycle-validation.yml` | `ubuntu-latest` + isolated `postgres:18.6` service + hosted Chrome/Chromium | real-browser lifecycle behavior |
+| Live Solandra cognition | `.github/workflows/live-solandra-cognition-validation.yml` | `ubuntu-latest` | bounded real-Groq cognition proof on `main`/manual dispatch only |
 | Render blueprint | `.github/workflows/render-blueprint-validation.yml` | `ubuntu-latest` | static zero-cost `render.yaml` contract |
+
+The live cognition lane is external-provider dependent, credential-bearing (`GROQ_API_KEY` only in its proof step), and nondeterministic relative to repository-only validation. It is isolated from deterministic browser lifecycle status, runs only on `push` to `main` and `workflow_dispatch` constrained to `refs/heads/main` (never `pull_request` or `pull_request_target`), and serializes provider use through a provider-wide concurrency group. Successful live-provider execution remains bounded evidence for that revision and surface; it is not Product acceptance. This additional workflow satisfies invariant 8 because its execution surface, trust boundary, failure domain, and external provider dependency are materially different from browser lifecycle validation.
 
 The local-model A/B benchmark remains available through the repository tooling, but it is intentionally not a GitHub Actions workflow. GPU/model experiments run manually on hardware the Owner chooses rather than on public pull-request infrastructure.
 
