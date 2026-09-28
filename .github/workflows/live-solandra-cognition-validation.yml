@@ -16,16 +16,15 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: live-solandra-cognition-groq
-  cancel-in-progress: false
-
 jobs:
   live-solandra-cognition:
     name: Live model-owned Solandra cognition validation
     runs-on: ubuntu-latest
     timeout-minutes: 10
     if: github.ref == 'refs/heads/main'
+    concurrency:
+      group: live-solandra-cognition-groq
+      cancel-in-progress: false
     steps:
       - name: Checkout exact subject source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
