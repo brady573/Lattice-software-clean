@@ -110,7 +110,7 @@ test("runtime canonical conversation API routes material clarification through I
     assert.equal(outcome.kind, "DECISION_SUPPORT");
     assert.equal(outcome.decision.outcome, "RECOMMENDATION");
     assert.equal(outcome.decision.winnerCandidateId, "cedar");
-    assert.match(outcome.explanation ?? "", /Solandra recommends/);
+    assert.match(outcome.explanation ?? "", /I recommend/);
   } finally {
     await app.close();
   }

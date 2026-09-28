@@ -51,21 +51,21 @@ async function waitForCompletedRun(app: FastifyInstance, runId: string, timeoutM
 test("SUPPORTED finding is projected as supported governed knowledge", () => {
   assert.equal(
     renderKnowledgeResponse(knowledge([finding()])),
-    "Supported: The governed finding text.",
+    "The available evidence supports this: The governed finding text.",
   );
 });
 
 test("REFUTED finding preserves refutation", () => {
   assert.equal(
     renderKnowledgeResponse(knowledge([finding({ status: "REFUTED" })])),
-    "Refuted: The governed finding text.",
+    "The available evidence weighs against this: The governed finding text.",
   );
 });
 
 test("CONFLICTED finding preserves material conflict", () => {
   assert.equal(
     renderKnowledgeResponse(knowledge([finding({ status: "CONFLICTED" })])),
-    "Material conflict remains: The governed finding text.",
+    "The evidence here genuinely disagrees, so there is no single settled answer: The governed finding text.",
   );
 });
 
@@ -90,7 +90,7 @@ test("SOURCE_REPORT qualification is preserved for every finding status", () => 
 test("ordinary UNRESOLVED finding does not overstate qualified evidence", () => {
   assert.equal(
     renderKnowledgeResponse(knowledge([finding({ status: "UNRESOLVED", basis: "CLAIM" })])),
-    "Qualified evidence did not establish this strongly enough: The governed finding text.",
+    "This isn't established strongly enough yet: The governed finding text.",
   );
 });
 
@@ -108,9 +108,9 @@ test("multiple findings remain concise and preserve each governed disposition", 
   assert.equal(
     response,
     [
-      "Supported: Supported material.",
-      "Refuted: Refuted material.",
-      "Material conflict remains: Conflicted material.",
+      "The available evidence supports this: Supported material.",
+      "The available evidence weighs against this: Refuted material.",
+      "The evidence here genuinely disagrees, so there is no single settled answer: Conflicted material.",
     ].join("\n\n"),
   );
 });
@@ -152,7 +152,7 @@ test("completed canonical Knowledge response adds downstream assistantMessage wi
     assert.equal("decision" in body.outcome, false);
     assert.equal(
       body.presentation.assistantMessage,
-      "I couldn't establish enough relevant evidence to answer that reliably.",
+      "Nothing I found holds up well enough to answer this.",
     );
     assert.doesNotMatch(body.presentation.assistantMessage, /I found \d+ supported source report/u);
   } finally {

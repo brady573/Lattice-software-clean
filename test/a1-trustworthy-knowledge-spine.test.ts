@@ -160,7 +160,7 @@ test("A1 cast-iron answer is direct, source-grounded, and follow-ups preserve th
     assert.equal(initial.outcome.objective, objective);
     assert.equal(initial.outcome.findings.length, 1);
     assert.equal(initial.outcome.findings[0]?.basis, "SOURCE_REPORT");
-    assert.match(initial.presentation.assistantMessage, /^The retrieved source material reports: Cast iron rusts because/iu);
+    assert.match(initial.presentation.assistantMessage, /^What the retrieved sources report: Cast iron rusts because/iu);
     assert.match(initial.presentation.assistantMessage, /Cast iron corrosion — Knowledge Example/u);
     assert.match(initial.presentation.assistantMessage, /does not by itself independently verify/u);
     assert.doesNotMatch(initial.presentation.assistantMessage, /V36|proof obligation|provider|worker|UNRESOLVED/iu);
@@ -176,7 +176,7 @@ test("A1 cast-iron answer is direct, source-grounded, and follow-ups preserve th
     const simpler = await outcomeFor(app, simplerAccepted);
     assert.equal(simplerAccepted.intentVersionId, initialAccepted.intentVersionId);
     assert.equal(simplerAccepted.acceptedUnderstanding, objective);
-    assert.match(simpler.presentation.assistantMessage, /^The retrieved source material reports:/u);
+    assert.match(simpler.presentation.assistantMessage, /^What the retrieved sources report:/u);
     assert.match(simpler.presentation.assistantMessage, /Cast iron rusts because iron reacts with oxygen and water/iu);
     assert.match(simpler.presentation.assistantMessage, /does not by itself independently verify/u);
     assert.doesNotMatch(simpler.presentation.assistantMessage, /Model assistance|couldn't simplify/iu);
@@ -319,7 +319,7 @@ test("A1 source suitability metadata remains observable without wording-derived 
     const result = await outcomeFor(app, accepted);
     assert.equal(result.outcome.findings.length, 1);
     assert.equal(result.outcome.provenance[0]?.evidentiarySuitability, "GENERAL_REFERENCE");
-    assert.match(result.presentation.assistantMessage, /^The retrieved source material reports: A home sale can affect taxes/iu);
+    assert.match(result.presentation.assistantMessage, /^What the retrieved sources report: A home sale can affect taxes/iu);
     assert.match(result.presentation.assistantMessage, /Home sale tax overview — Knowledge Example/u);
     assert.match(result.presentation.assistantMessage, /does not by itself independently verify the broader real-world claim/iu);
     assert.doesNotMatch(result.presentation.assistantMessage, /authoritative source before I can answer/iu);

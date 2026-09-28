@@ -53,7 +53,7 @@ test("A1 direct causal response carries no factual words absent from governed fi
   const response = await renderKnowledgeResponseForRun(knowledge(objective, finding), run(objective));
 
   assert.match(response, new RegExp(finding.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"));
-  assert.match(response, /retrieved source material reports/iu);
+  assert.match(response, /What the retrieved sources report/iu);
   assert.match(response, /does not by itself independently verify/iu);
   assert.doesNotMatch(response, /therefore|so you should|usually|always|safe|recommended/iu);
 });

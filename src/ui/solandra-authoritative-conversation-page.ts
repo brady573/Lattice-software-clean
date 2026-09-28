@@ -128,6 +128,10 @@ const directConversationHandling = `        if (body.status === "CONVERSATION_CO
             ? body.presentation.assistantMessage.trim()
             : "";
           if (!assistantMessage) throw new Error("Solandra returned no usable response.");
+          if (body.conversationResponse?.factualAuthority === false || body.interpretation?.factualAuthority === false) {
+            appendSolandraTurn(assistantMessage + "\\n\\nGeneral knowledge — not verified.");
+            return;
+          }
           appendSolandraTurn(assistantMessage);
           return;
         }
