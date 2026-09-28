@@ -9,6 +9,7 @@ const deployedWorkflowName = 'deployed-functional-validation.yml';
 const expectedDurableWorkflowNames = [
   'browser-lifecycle-validation.yml',
   'core-validation.yml',
+  'live-solandra-cognition-validation.yml',
   'postgres-integration-validation.yml',
   'render-blueprint-validation.yml',
 ];
@@ -36,12 +37,23 @@ const workflowNames = readdirSync(workflowDirectory)
   .sort();
 const workflowEntries = workflowNames.map((name) => ({ name, text: workflowText(name) }));
 
-test('CI retains four durable hosted lanes plus one separate deployed-validation lane', () => {
+test('CI retains five durable hosted lanes plus one separate deployed-validation lane', () => {
   assert.deepEqual(workflowNames, expectedWorkflowNames);
   assert.deepEqual(
     workflowNames.filter((name) => name !== deployedWorkflowName),
     [...expectedDurableWorkflowNames].sort(),
   );
+});
+
+test('live cognition is main/manual provider evidence separate from deterministic browser status', () => {
+  const live = workflowText('live-solandra-cognition-validation.yml');
+  const browser = workflowText('browser-lifecycle-validation.yml');
+  assert.doesNotMatch(live, /^\s*pull_request:\s*$/mu);
+  assert.match(live, /^\s*push:\s*$/mu);
+  assert.match(live, /^\s*workflow_dispatch:\s*$/mu);
+  assert.match(live, /GROQ_API_KEY/u);
+  assert.doesNotMatch(browser, /GROQ_API_KEY/u);
+  assert.doesNotMatch(browser, /tools\/issue-91-live-solandra-cognition\.mjs/u);
 });
 
 test('deployed functional validation is manually dispatchable and deployment-status driven', () => {
