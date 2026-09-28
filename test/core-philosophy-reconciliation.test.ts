@@ -6,54 +6,30 @@ async function source(path: string): Promise<string> {
   return readFile(path, "utf8");
 }
 
-test("Core philosophy controls the current Product-design read order and 1.0 definition", async () => {
-  const [readme, living, foundational, roadmap, integrity, intentDecision, solandra] = await Promise.all([
+test("adopted Core philosophy controls the current Product-design read order", async () => {
+  const [core, readme] = await Promise.all([
+    source("docs/design/The-Core-Lattice-Philosophy.md"),
     source("README.md"),
-    source("docs/design/Lattice-Living-Software-Design-to-1.0.md"),
-    source("docs/design/Lattice-Foundational-Design-Principle.md"),
-    source("docs/ROADMAP.md"),
-    source("docs/design/Lattice-Architecture-Integrity.md"),
-    source("docs/design/Lattice-Intent-and-Decision-Architecture.md"),
-    source("docs/design/solandra/DESIGN.md"),
   ]);
 
-  assert.match(readme, /^# Lattice Software\r?\n\r?\nLattice makes trustworthy knowledge and conditional decision capability/u);
+  assert.match(core, /# Trustworthy Intelligence for Action/u);
+  assert.match(core, /Question → Understanding → Confidence → Action/u);
+  assert.match(core, /What do we know/u);
+  assert.match(core, /How do we know it/u);
+  assert.match(core, /What can we responsibly do because of it/u);
+  assert.match(core, /ILLUSTRATIVE and NON-NORMATIVE/u);
+  assert.match(core, /Make trustworthy intelligence usable by anyone/u);
 
-  assert.match(living, /`The-Core-Lattice-Philosophy\.md` remains unchanged and highest authority/u);
-  assert.match(living, /This living design is subordinate to the Core/u);
-  assert.match(living, /Lattice 1\.0 is a trustworthy conversational Product/u);
-  assert.match(living, /the person talks naturally with Solandra/u);
-  assert.match(living, /Lattice preserves intent integrity and turns information into governed Knowledge/u);
-  assert.match(living, /Recommendation is not Authorization/u);
-  assert.match(
-    living,
-    /The primary experience remains:[\s\S]*\*\*Conversation\*\*[\s\S]*\*\*free-form ConversationInput\*\*[\s\S]*\*\*adaptive Composer\*\*/u,
-  );
-  assert.match(living, /Do not use generated prose, telemetry, or presentation state as a second authority/u);
-  assert.doesNotMatch(living, /Lattice 1\.0 is a Trusted Decision Product/u);
+  assert.match(readme, /^# Lattice Software\r?\n\r?\nLattice makes trustworthy intelligence usable by anyone/u);
+  assert.match(readme, /Trustworthy Intelligence for Action/u);
+  assert.match(readme, /Question → Understanding → Confidence → Action/u);
 
-  assert.match(foundational, /`The-Core-Lattice-Philosophy\.md` remains unchanged and is the highest Product authority/u);
-  assert.match(foundational, /must never be used to override it/u);
-  assert.match(foundational, /natural relationship with Solandra, not a control panel/u);
-  assert.match(foundational, /conversation != canonical intent/u);
-  assert.match(foundational, /information != Knowledge/u);
-  assert.match(foundational, /Knowledge != Recommendation/u);
-  assert.match(foundational, /Recommendation != Authorization/u);
-  assert.match(foundational, /Authorization != Execution/u);
-  assert.match(foundational, /ExecutionReceipt != Verification/u);
-
-  assert.match(roadmap, /SUBORDINATE TO THE CORE LATTICE PHILOSOPHY/u);
-  assert.match(roadmap, /The-Core-Lattice-Philosophy\.md[^\n]+highest Product philosophy authority/u);
-  assert.match(integrity, /`The-Core-Lattice-Philosophy\.md` remains unchanged and highest authority/u);
-  assert.match(integrity, /This document is subordinate to the Core/u);
-
-  assert.match(intentDecision, /Recommendation is not the person's decision/u);
-  assert.match(intentDecision, /the person's decision is not action Authorization/u);
-  assert.match(intentDecision, /No `DecisionPlan` or formal Decision Engine is required on this ordinary path/u);
-
-  assert.match(solandra, /This visual design is subordinate to the Core/u);
-  assert.match(solandra, /No visual layer may strengthen upstream trust state/u);
-  assert.match(solandra, /These are rendering capabilities, not stages/u);
+  for (const doc of [core, readme]) {
+    assert.doesNotMatch(doc, /Supreme Product test/u);
+    assert.doesNotMatch(doc, /Use knowledge to break down barriers/u);
+    assert.doesNotMatch(doc, /intent -> understanding -> informed decision -> authorized action/u);
+    assert.doesNotMatch(doc, /serve that journey/u);
+  }
 });
 
 test("canonical RuntimeApp composition names only the canonical HTTP builder", async () => {

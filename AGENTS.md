@@ -10,21 +10,19 @@ Before substantive implementation work, inspect the checked-out revision and the
 
 Primary Product sources, in repository-design order:
 
-- `docs/design/The-Core-Lattice-Philosophy.md` — Owner-approved highest Product philosophy authority and exclusion test. Every subordinate Product source, architecture, implementation, feature, workflow, interface, and retained mechanism must conform to it; conflicting elements must be changed, removed, or explicitly reconciled by the Owner.
-- `docs/design/Lattice-Foundational-Design-Principle.md` — Owner-approved foundational Product design intent subordinate to the Core philosophy. It elaborates the Core and may add precision only where that detail remains aligned with it.
-- `docs/design/Lattice-Living-Software-Design-to-1.0.md` — canonical living Product design and forward 1.0 roadmap. Respect its item-level status: Confirmed items govern; Working assumptions remain reversible; Proposed/Open items do not independently authorize Product mutation.
-- `docs/design/Lattice-System-Registry-and-Naming.md` — Owner-approved canonical names and authority-boundary vocabulary for Lattice Product systems.
-- `docs/design/Lattice-Architecture-Integrity.md` — Owner-approved cross-cutting Product-semantic integrity constraints.
+- `docs/design/The-Core-Lattice-Philosophy.md` — Owner-adopted highest Product philosophy authority (**Trustworthy Intelligence for Action**). Every subordinate Product source, architecture, implementation, feature, workflow, interface, and retained mechanism must conform to it; conflicting elements must be changed, removed, or explicitly reconciled by the Owner.
 - `docs/specifications/Lattice-Product-Concept.txt` — Product concept and intent source.
-- `docs/specifications/SPEC-1-Lattice-Rebuilt/` — detailed qualified implementation specification for confirmed contracts not explicitly superseded by the living design.
+- `docs/specifications/SPEC-1-Lattice-Rebuilt/` — detailed qualified implementation specification for confirmed contracts not explicitly superseded by a live Owner decision.
 - `docs/specifications/V36-Truth-Layer/` — protected V36 truth-core contract; `claim-proof-contracts.json` is the exact proof-obligation contract.
-- `docs/ROADMAP.md` — derived execution/status view of the living roadmap; it is not independent design authority.
+- `docs/ROADMAP.md` — derived execution/status view; it is not independent design authority.
 - current implementation under `src/`;
 - current tests under `test/`;
 - `README.md` for the currently supported prototype surface; and
 - `package.json` plus `package-lock.json` for executable scripts, runtime requirements, and dependency resolution.
 
-When an older SPEC-1 roadmap/build-sequence label conflicts with the living design's forward M0-M12 sequencing, use the living design for forward sequencing. Preserve detailed confirmed SPEC-1 and V36 behavioral contracts unless an authoritative source explicitly supersedes them, but no subordinate Product source may override `The-Core-Lattice-Philosophy.md`.
+Preserve detailed confirmed SPEC-1 and V36 behavioral contracts unless an authoritative source explicitly supersedes them, but no subordinate Product source may override `The-Core-Lattice-Philosophy.md`.
+
+Superseded design elaborations (foundational principle, living design, registries, integrity notes, Solandra prototype design) are preserved under `docs/design/archive/` as historical provenance only. They are not Product authority; do not cite them as governing requirements.
 
 Use canonical system vocabulary where the distinction is material: **Lattice Product**, **Lattice Intent Authority**, **Lattice Execution Runtime**, **Lattice Model Gateway**, **V36 Truth Core**, **Lattice Decision Engine**, **Solandra Experience**, and the external **V7 LLM Simulation Lab**. Process-role/module names such as `run-worker`, `research-worker`, `product/intent`, or `presentation/solandra` describe implementation organization; they do not independently redefine Product authority.
 
@@ -36,18 +34,24 @@ Apply `docs/design/The-Core-Lattice-Philosophy.md` **first**, before every other
 
 Every AI assistant, coding agent, and automated code workflow must use the Core philosophy as its first Product-design filter. Instructions, tests, existing code, and lower-level documents may constrain an aligned implementation, but they may not justify creating or retaining Product behavior that fails the Core test.
 
-The first question is whether the proposed or retained element belongs in Lattice at all:
+The adopted Core is **Trustworthy Intelligence for Action**: help a person move through Question → Understanding → Confidence → Action by reducing the Distance to Confident Action — the meaningful uncertainty remaining between the user's current state and an informed action.
 
-> **Does this use knowledge to remove a meaningful barrier for the user, preserve the boundaries required for trust and human control, keep authority where it belongs, and reduce rather than transfer unnecessary complexity?**
+The first questions for any proposal or retained element are the north-star triple:
+
+> **What do we know? How do we know it? What can we responsibly do because of it?**
+
+followed by: does this move the user closer to justified action, or protect a necessary trust boundary, without making the user operate the machinery?
+
+Concrete scenarios, numbers, sample phrasings, and metric sketches in the Core are illustrative and non-normative. They must never become implementation rules, test fixtures, or acceptance thresholds. If an example conflicts with a principle, the principle governs.
 
 If the answer is no, the element does not belong in the software unless the Owner explicitly amends or supersedes the Core philosophy. Historical presence, lower-level specification, partial implementation, architectural convenience, sunk cost, or prior approval are not reasons to retain a conflict.
 
-Only after a proposal passes the Core check should `docs/design/Lattice-Foundational-Design-Principle.md` and the other subordinate Product sources be applied for additional precision, qualification, architecture, sequencing, implementation, and validation requirements.
+Only after a proposal passes the Core check should the remaining live subordinate sources (`docs/specifications/Lattice-Product-Concept.txt`, `docs/specifications/SPEC-1-Lattice-Rebuilt/`, `docs/specifications/V36-Truth-Layer/`) be applied for additional precision, qualification, architecture, sequencing, implementation, and validation requirements.
 
 For every material Product change that passes the Core check, establish:
 
-1. the meaningful user barrier being removed or reduced;
-2. the trustworthy knowledge, understanding, or decision capability made easier to reach;
+1. the meaningful uncertainty being reduced — the Distance to Confident Action it shortens;
+2. the trustworthy understanding or decision capability made easier to reach;
 3. the trust, semantic-authority, and human-control boundaries that must remain intact;
 4. why the proposed complexity earns its place versus a simpler governed design; and
 5. the cheapest Product-observable evidence that can show the intended improvement.

@@ -1,10 +1,10 @@
 # Lattice Software
 
-Lattice makes trustworthy knowledge and conditional decision capability easier to reach, understand, and use—while it manages the machinery.
+Lattice makes trustworthy intelligence usable by anyone — helping a person move from Question through Understanding and Confidence to Action while Lattice absorbs the machinery.
 
-That mission comes from [`docs/design/The-Core-Lattice-Philosophy.md`](docs/design/The-Core-Lattice-Philosophy.md), the highest Product-design authority and first filter for every Product, architecture, code, AI, workflow, UI, and validation decision. The current repository is a zero-cost implementation of that mission with Intent Authority, durable Runtime coordination, V36 truth adjudication, conditional decision support, Action Preparation, and a fidelity-bound Conversation + Composer Solandra experience.
+That mission comes from [`docs/design/The-Core-Lattice-Philosophy.md`](docs/design/The-Core-Lattice-Philosophy.md) (`Trustworthy Intelligence for Action`), the highest Product-design authority and first filter for every Product, architecture, code, AI, workflow, UI, and validation decision. The current repository is a zero-cost implementation of that mission with Intent Authority, durable Runtime coordination, V36 truth adjudication, conditional decision support, Action Preparation, and a fidelity-bound Conversation + Composer Solandra experience.
 
-Read the Core first. For the concise current implementation map afterward, read `docs/design/Lattice-System-Architecture.md`.
+Read the Core first. For the current implementation structure afterward, read `src/` within the live contracts in `docs/specifications/`; superseded design elaborations are preserved under `docs/design/archive/` for historical provenance only.
 
 ## Canonical Product slice
 
@@ -16,7 +16,7 @@ No paid provider, queue service, or cloud service is required for local Knowledg
 
 ## Solandra conversation UI
 
-The Owner-approved offline-prototype Solandra design is installed under `docs/design/solandra/`.
+The Owner-approved offline-prototype Solandra design is preserved under `docs/design/archive/solandra/` as historical provenance.
 
 Start the application and open:
 
@@ -145,21 +145,21 @@ The repository PostgreSQL validation lane exercises restart survival, Run epoch/
 - M7 durable Conversation/USER-message/continuity/reconnect behavior and M8 authenticated-subject ownership, derived-graph isolation, subject-scoped idempotency, explicit USER-controlled preference continuity, historical immutability, historical-fact non-reuse, and deletion-state enforcement are implemented in their accepted scopes. Generalized memory, retention duration, and purge execution remain outside those acceptance claims.
 - PostgreSQL-backed Run/truth/decision/intent/conversation/planning/preference persistence exists for the durable development runtime; in-memory storage remains available for local fixture development.
 - Production deployment, production database mutation, production-provider acceptance, paid infrastructure, and production readiness are not implied by repository state or development validation.
-- Browser/usability/accessibility acceptance remains separate from repository build/test success; see `docs/design/solandra/ACCEPTANCE.md` for the Solandra UI acceptance surface.
+- Browser/usability/accessibility acceptance remains separate from repository build/test success; see `docs/design/archive/solandra/ACCEPTANCE.md` for the Solandra UI acceptance surface.
 - `package-lock.json` is committed and validated on the approved Node 24/npm 11 surface; use `npm ci` so local and CI dependency resolution follows that lockfile.
 
 ## Governing Product design and specifications
 
-The highest Product philosophy authority and first Product-design filter is `docs/design/The-Core-Lattice-Philosophy.md`. Every subordinate Product design, architecture, specification, implementation convention, workflow, UI structure, validation model, roadmap artifact, and retained mechanism must conform to it. If any subordinate source or software behavior conflicts with the Core philosophy, **the Core philosophy governs and the conflicting element must be changed, removed, or explicitly reconciled by the Owner**.
+The highest Product philosophy authority and first Product-design filter is `docs/design/The-Core-Lattice-Philosophy.md` (`Trustworthy Intelligence for Action`: Question → Understanding → Confidence → Action). Every subordinate Product design, architecture, specification, implementation convention, workflow, UI structure, validation model, roadmap artifact, and retained mechanism must conform to it. If any subordinate source or software behavior conflicts with the Core philosophy, **the Core philosophy governs and the conflicting element must be changed, removed, or explicitly reconciled by the Owner**.
 
-Future AI-assisted design and code work must read and apply the Core philosophy before treating existing architecture, specifications, tests, implementation, or UI structure as a reason to preserve a Product direction.
+Future AI-assisted design and code work must read and apply the Core philosophy before treating existing architecture, specifications, tests, implementation, or UI structure as a reason to preserve a Product direction. Concrete scenarios, numbers, and sample phrasings in the Core are illustrative and non-normative — never implementation rules or test fixtures.
 
-Only after a Product direction passes the Core check should the subordinate design sources be used for additional precision and implementation guidance. `docs/design/Lattice-Foundational-Design-Principle.md` elaborates the Core philosophy and is subordinate to it. The canonical living Product design and forward 1.0 roadmap is `docs/design/Lattice-Living-Software-Design-to-1.0.md`; its item-level status vocabulary controls subordinate Product direction and sequencing except where a later explicit Owner decision supersedes an older item for the same bounded scope, and always subject to the Core philosophy.
+Only after a Product direction passes the Core check should the remaining live subordinate sources be used for additional precision and implementation guidance: `docs/specifications/Lattice-Product-Concept.txt`, `docs/specifications/SPEC-1-Lattice-Rebuilt/`, and `docs/specifications/V36-Truth-Layer/` within their qualified boundaries, always subject to the Core philosophy. Superseded design elaborations live under `docs/design/archive/` as historical provenance, not authority.
 
-For the **current structural implementation map**, including subsystem ownership, conditional decision machinery, authoritative/durable/derived state, and trust boundaries, read `docs/design/Lattice-System-Architecture.md`.
+For the **current implementation structure**, including subsystem ownership, conditional decision machinery, authoritative/durable/derived state, and trust boundaries, read the implementation under `src/` within the live contracts in `docs/specifications/`.
 
-Canonical system vocabulary is defined by `docs/design/Lattice-System-Registry-and-Naming.md`; cross-cutting semantic ownership constraints are protected by `docs/design/Lattice-Architecture-Integrity.md`; and the Owner-approved offline-prototype Solandra UI design/approval is installed under `docs/design/solandra/`. All remain subordinate to `The-Core-Lattice-Philosophy.md`.
+The canonical system vocabulary (**Lattice Product**, **Lattice Intent Authority**, **Lattice Execution Runtime**, **Lattice Model Gateway**, **V36 Truth Core**, **Lattice Decision Engine**, **Solandra Experience**, external **V7 LLM Simulation Lab**) is used as implemented; the earlier registry and integrity elaborations are preserved under `docs/design/archive/` for provenance only.
 
-`docs/specifications/SPEC-1-Lattice-Rebuilt/` remains the detailed qualified implementation specification for confirmed contracts that the living design has not explicitly superseded. The protected V36 truth-core revision and machine-readable proof obligations remain under `docs/specifications/V36-Truth-Layer/`; `claim-proof-contracts.json` is the exact proof-obligation contract. These detailed contracts constrain implementation within their qualified boundaries but do not supersede the Core philosophy.
+`docs/specifications/SPEC-1-Lattice-Rebuilt/` remains the detailed qualified implementation specification for confirmed contracts not explicitly superseded by a live Owner decision. The protected V36 truth-core revision and machine-readable proof obligations remain under `docs/specifications/V36-Truth-Layer/`; `claim-proof-contracts.json` is the exact proof-obligation contract. These detailed contracts constrain implementation within their qualified boundaries but do not supersede the Core philosophy.
 
 For the current execution view of the living roadmap, see `docs/ROADMAP.md`.

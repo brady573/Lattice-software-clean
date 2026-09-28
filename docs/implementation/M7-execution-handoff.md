@@ -18,6 +18,8 @@ This handoff records bounded M7 execution provenance. It does not create Product
 
 M7 is the Conversation + Progress API milestone. The confirmed Product journey remains ordinary-language USER input -> Lattice Intent Authority -> exact IntentVersion -> DecisionPlan / Execution Runtime -> V36 Truth Core -> Lattice Decision Engine -> faithful Solandra Experience -> conversational continuation.
 
+> Status correction (2026-09-28): the 8-node sequence above records the M7 module topology, not the normative Product journey. Under the adopted Core (`Trustworthy Intelligence for Action`), the normative Product journey is Question → Understanding → Confidence → Action. The M7 topology record is preserved as history.
+
 The living design's M7 exit criterion is controlling: reconnectable progress + polling + history must work across restart; the user-visible lifecycle must be coherent; and the development-only simulated conversation does not satisfy the gate.
 
 M7 preserves established semantic authorities. Transcript text remains context/provenance rather than canonical intent; client-local reconnect state is not Product authority; V36 owns epistemic admission/judgment; the Decision Engine owns authoritative decision/frontier semantics; Solandra is presentation and USER advocacy, not truth or decision authority.
