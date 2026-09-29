@@ -1,5 +1,6 @@
 import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
 import { MemoryApiRunControlStore, type ApiRunControlStore } from "./api-control-store.js";
+import { resolveBuildInfo } from "./build-info.js";
 import { MemoryRunStore, type RunStore } from "./run-store.js";
 import {
   composedTruthMode,
@@ -54,6 +55,12 @@ export function createHttpCore(options: HttpCoreOptions = {}): HttpCore {
     truth: composedTruthMode(truthPipeline),
     lifecycle: apiControlStore ? "async-dispatch" : "persisted-transitions",
   }));
+
+  // Unauthenticated read-only served-revision surface. It deliberately lives
+  // outside the `/api/v1/` authenticated-subject boundary so any observer can
+  // attribute validation evidence to the exact built revision. Existing routes
+  // are untouched.
+  app.get("/api/version", async () => resolveBuildInfo());
 
   app.post<{ Params: { runId: string } }>("/api/v1/runs/:runId/cancel", async (request, reply) => {
     const current = await runStore.get(request.params.runId);
