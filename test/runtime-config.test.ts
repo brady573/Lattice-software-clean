@@ -285,3 +285,29 @@ test("DATABASE_URL normalizes non-secret surrounding whitespace and treats blank
   });
   assert.equal(durable.databaseUrl, databaseUrl);
 });
+
+test("intake subject rate limit defaults to a safe per-minute budget", () => {
+  const config = resolveRuntimeConfig({});
+  assert.equal(config.intakeSubjectRateLimitMaxRequests, 30);
+  assert.equal(config.intakeSubjectRateLimitWindowMs, 60_000);
+});
+
+test("intake subject rate limit is deployment-configurable through the environment", () => {
+  const config = resolveRuntimeConfig({
+    LATTICE_INTAKE_SUBJECT_RATE_LIMIT_MAX_REQUESTS: "5",
+    LATTICE_INTAKE_SUBJECT_RATE_LIMIT_WINDOW_MS: "120000",
+  });
+  assert.equal(config.intakeSubjectRateLimitMaxRequests, 5);
+  assert.equal(config.intakeSubjectRateLimitWindowMs, 120_000);
+});
+
+test("intake subject rate limit rejects non-positive budgets", () => {
+  assert.throws(
+    () => resolveRuntimeConfig({ LATTICE_INTAKE_SUBJECT_RATE_LIMIT_MAX_REQUESTS: "0" }),
+    /LATTICE_INTAKE_SUBJECT_RATE_LIMIT_MAX_REQUESTS/,
+  );
+  assert.throws(
+    () => resolveRuntimeConfig({ LATTICE_INTAKE_SUBJECT_RATE_LIMIT_WINDOW_MS: "999" }),
+    /LATTICE_INTAKE_SUBJECT_RATE_LIMIT_WINDOW_MS/,
+  );
+});

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { FastifyInstance, FastifyRequest } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { createApiRequestHash, type ApiRunControlStore } from "./api-control-store.js";
 import {
@@ -89,6 +89,7 @@ import {
   type SolandraRequestedHelp,
 } from "./solandra/cognition.js";
 import type { SolandraKnowledgePresenter } from "./solandra/knowledge-presenter.js";
+import type { SubjectRateLimiter } from "./ratelimit/subject-limiter.js";
 
 const IDEMPOTENCY_RETENTION_MS = 24 * 60 * 60 * 1_000;
 const MAX_RUN_CONTEXT_ITEMS = 32;
@@ -137,6 +138,14 @@ export interface ConsultationIntakeOptions {
   solandraActionPreparer?: SolandraActionPreparer;
   solandraKnowledgePresenter?: SolandraKnowledgePresenter;
   apiSubject?: string | ((request: FastifyRequest) => string);
+  /**
+   * Optional per-authenticated-subject fixed-window limiter shared by the two
+   * expensive intake routes. Omitted compositions keep existing behavior.
+   * The limiter runs inside the route handlers, after the
+   * authenticated-subject boundary, so unauthenticated requests still receive
+   * the existing 401 without consuming budget or changing auth semantics.
+   */
+  subjectRateLimiter?: SubjectRateLimiter;
 }
 
 function digestHex(...parts: string[]): string {
@@ -665,10 +674,32 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
   const apiSubjectForRequest = typeof configuredApiSubject === "function"
     ? configuredApiSubject
     : () => configuredApiSubject ?? "fixture-user";
+  const subjectRateLimiter = options.subjectRateLimiter;
+
+  /**
+   * Reject flooded subjects before any intake work. Runs inside the route
+   * handlers so the authenticated-subject boundary (which 401s first) keeps
+   * its existing behavior and auth semantics are untouched. Returns the sent
+   * 429 reply when limited, otherwise undefined.
+   */
+  function intakeRateLimitReply(
+    request: FastifyRequest,
+    reply: FastifyReply,
+  ): FastifyReply | undefined {
+    if (subjectRateLimiter === undefined) return undefined;
+    const verdict = subjectRateLimiter.check(apiSubjectForRequest(request));
+    if (verdict.allowed) return undefined;
+    const retryAfterSeconds = Math.max(1, Math.ceil(verdict.retryAfterMs / 1_000));
+    return reply.status(429)
+      .header("Retry-After", String(retryAfterSeconds))
+      .send({ error: "INTAKE_RATE_LIMITED" });
+  }
 
   app.post<{ Params: { conversationId: string } }>(
     "/api/v1/conversations/:conversationId/turns",
     async (request, reply) => {
+      const limited = intakeRateLimitReply(request, reply);
+      if (limited !== undefined) return limited;
       const parsed = consultationTurnSchema.safeParse(request.body);
       if (!parsed.success) {
         return reply.status(400).send({ error: "INVALID_CONSULTATION_TURN", details: parsed.error.flatten() });
@@ -1480,6 +1511,8 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
   app.post<{ Params: { conversationId: string; proposalId: string } }>(
     "/api/v1/conversations/:conversationId/clarifications/:proposalId/confirm",
     async (request, reply) => {
+      const limited = intakeRateLimitReply(request, reply);
+      if (limited !== undefined) return limited;
       const parsed = clarificationTurnSchema.safeParse(request.body);
       if (!parsed.success) {
         return reply.status(400).send({ error: "INVALID_CONSULTATION_CLARIFICATION", details: parsed.error.flatten() });
