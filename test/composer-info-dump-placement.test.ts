@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import vm from "node:vm";
+import { solandraPresentationPlacementSchema } from "../src/solandra/cognition.js";
 import { renderSolandraAuthoritativeConversationPage } from "../src/ui/solandra-authoritative-conversation-page.js";
 
 const POINTER = "I’ve put the full answer in the Composer. It’s general knowledge, not verified.";
+const SUFFIX = "General knowledge — not verified.";
 
 interface Turn {
   role: "user" | "solandra";
@@ -35,15 +37,18 @@ function conversationScript(): string {
 }
 
 type AuthorityMode = "realistic" | "authoritative" | "absent";
+/** "absent" models a replayed or legacy turn that carries no placement decision. */
+type PlacementDecision = "TURN" | "COMPOSER_FULL_ANSWER" | "absent";
 
 // Realistic authority fields for the conversation path, matching
-// src/consultation-intake.ts:951-956: the persisted conversation response carries
-// factualAuthority:false and the public cognition reports factualAuthority:false.
-// The "authoritative" variant is synthetic (real conversation responses are always
-// non-authoritative per conversation-response-store.ts); "absent" is the legacy
-// stub shape with no authority fields at all.
+// src/consultation-intake.ts: the persisted conversation response carries
+// factualAuthority:false and the public cognition report carries
+// factualAuthority:false alongside the turn-scoped presentationPlacement.
+// The "authoritative" variant is synthetic (real conversation responses are
+// always non-authoritative per conversation-response-store.ts); "absent" is the
+// legacy stub shape with no authority fields at all.
 function authorityFields(mode: AuthorityMode): Record<string, unknown> {
-  if (mode === "absent") return {};
+  if (mode === "absent") return { interpretation: {} };
   const factualAuthority = mode === "realistic" ? false : true;
   return {
     interpretation: {
@@ -62,7 +67,32 @@ function authorityFields(mode: AuthorityMode): Record<string, unknown> {
   };
 }
 
-function createHarness(assistantMessage: unknown, mode: AuthorityMode = "realistic"): Harness {
+function turnBody(
+  assistantMessage: unknown,
+  mode: AuthorityMode,
+  placement: PlacementDecision,
+): Record<string, unknown> {
+  const authority = authorityFields(mode);
+  return {
+    status: "CONVERSATION_COMPLETED",
+    presentation: { assistantMessage },
+    ...authority,
+    ...(placement === "absent"
+      ? {}
+      : {
+        interpretation: {
+          ...(authority.interpretation as Record<string, unknown>),
+          presentationPlacement: placement,
+        },
+      }),
+  };
+}
+
+function createHarness(
+  assistantMessage: unknown,
+  mode: AuthorityMode = "realistic",
+  placement: PlacementDecision = "absent",
+): Harness {
   const turns: Turn[] = [];
   const composerWrites: string[] = [];
   let submitHandler: ((event: { preventDefault(): void }) => void) | null = null;
@@ -137,11 +167,7 @@ function createHarness(assistantMessage: unknown, mode: AuthorityMode = "realist
       return {
         ok: true,
         status: 200,
-        json: async () => ({
-          status: "CONVERSATION_COMPLETED",
-          presentation: { assistantMessage },
-          ...authorityFields(mode),
-        }),
+        json: async () => turnBody(assistantMessage, mode, placement),
       };
     }
     throw new Error(`unexpected fetch: ${target}`);
@@ -169,8 +195,12 @@ function createHarness(assistantMessage: unknown, mode: AuthorityMode = "realist
   };
 }
 
-async function runTurn(assistantMessage: unknown, mode: AuthorityMode = "realistic"): Promise<Harness> {
-  const harness = createHarness(assistantMessage, mode);
+async function runTurn(
+  assistantMessage: unknown,
+  mode: AuthorityMode = "realistic",
+  placement: PlacementDecision = "absent",
+): Promise<Harness> {
+  const harness = createHarness(assistantMessage, mode, placement);
   await new Promise((resolve) => setImmediate(resolve));
   await new Promise((resolve) => setImmediate(resolve));
   harness.setInput("Please explain this topic.");
@@ -185,26 +215,49 @@ async function runTurn(assistantMessage: unknown, mode: AuthorityMode = "realist
 
 const solandraTurns = (harness: Harness): Turn[] => harness.turns.filter((turn) => turn.role === "solandra");
 
-function buildLongGuide(): string {
+// A short ordinary answer. Nothing about its length or shape qualifies it for
+// the Composer, so only an explicit COMPOSER_FULL_ANSWER decision can move it.
+const SHORT_ANSWER = "A quieter espresso shot usually wants a finer grind and a slightly cooler basket.";
+
+// A long, heavily structured reference. This is exactly the shape a lexical
+// heuristic used to move, so it proves the decision — not the shape — controls
+// placement in both directions.
+function buildLongChecklist(): string {
   const steps = [
-    "Clean the chain with a stiff brush and a little degreaser, working one section at a time, then wipe it down until the rag comes away mostly clean and no grit remains between the plates.",
-    "Check each link for stiff pivots by slowly backpedalling and watching closely for links that skip or hesitate as they travel over the rear teeth under light tension.",
-    "Measure chain wear with a gauge on three different spans; replace the chain before it stretches past the marked limit on the tool, since a worn chain quietly damages the cassette.",
-    "Apply one drop of lubricant to every roller while turning the cranks backward at a steady pace, keeping oil off the braking surfaces and away from the tire sidewalls.",
-    "Let the lubricant soak for several minutes so it can work down into the rollers instead of sitting on the outside plates where it only attracts dust from the road.",
-    "Wipe the outside of the chain thoroughly with a clean rag, since excess surface oil only collects grit and turns into grinding paste that wears the drivetrain faster.",
-    "Shift through every gear once under gentle load to confirm smooth movement, then recheck the quick link or connecting pin seating before calling the job finished.",
-    "Log the date and distance in your maintenance notes so the next inspection happens on schedule, well before wear starts damaging the cassette and chainrings.",
+    "Book the van for a morning slot rather than a full day, because loading and unloading together is the part that eats the clock on a two-bedroom move.",
+    "Sort everything into keep, donate, and rubbish before the van arrives, and get rid of the rubbish early, because anything still in a box on the day is a box you carry twice.",
+    "Label each box by room and by floor rather than by contents, because the people carrying them rarely know what a box marked kitchen things actually holds.",
+    "Protect the breakables in the middle of each box with towels or paper, since weight settles downward and the corners are what give way first in a hard stop.",
+    "Disassemble the bed frame and the wardrobe if either has a large flat panel, because those pieces are far safer to move flat than trying to walk them through a doorway upright.",
+    "Measure the fridge before you move it and again at the new place, since a fridge that will not fit through the hall is the one problem that cannot be solved on the day.",
+    "Change the water filter and run the tap for a couple of minutes once the kitchen is connected, because the pipes will taste of everything that has been sitting in them.",
+    "Unpack the kitchen and the bathroom first so the first evening in the new place is workable, and leave the books and the decor until the rooms are actually live.",
   ];
-  const intro = "Here is a full maintenance routine you can follow at home. It takes about half an hour, keeps metal parts <dry>, and avoids the common mistakes that shorten drivetrain life. Work through each part in order and do not skip the final check.";
+  const intro = "Here is a moving routine that usually fits in a single morning. It assumes a two-bedroom flat, a stair on the way out, and no lift on the way in. Work through the parts in order and do not leave the final check until the boxes are unpacked.";
   return `${intro}\n\n${steps.map((step, index) => `${index + 1}. ${step}`).join("\n")}`;
 }
 
-test("long ordinary answer moves to the Composer with a one-line pointer in the turn", async () => {
-  const message = buildLongGuide();
-  assert.ok(message.length > 1500, `long fixture must exceed the info-dump length rule (was ${message.length})`);
+test("placement is a closed enum", () => {
+  assert.equal(solandraPresentationPlacementSchema.options.length, 2);
+  assert.equal(solandraPresentationPlacementSchema.parse("TURN"), "TURN");
+  assert.equal(solandraPresentationPlacementSchema.parse("COMPOSER_FULL_ANSWER"), "COMPOSER_FULL_ANSWER");
+  // Any other decision space, including the lexical shape words the removed
+  // heuristic used, is rejected so placement can never be inferred.
+  for (const rejected of ["INFO_DUMP", "COMPOSER", "composer_full_answer", "AUTO", ""]) {
+    assert.throws(
+      () => solandraPresentationPlacementSchema.parse(rejected),
+      `placement must reject ${JSON.stringify(rejected)}`,
+    );
+  }
+});
 
-  const harness = await runTurn(message);
+test("the rendered conversation script carries no lexical placement heuristic", () => {
+  const script = conversationScript();
+  assert.doesNotMatch(script, /isInfoDumpMessage|INFO_DUMP_LENGTH_THRESHOLD|INFO_DUMP_SECTION_THRESHOLD|infoDumpSectionPattern/iu);
+});
+
+test("an explicit COMPOSER_FULL_ANSWER decision moves a short answer to the Composer with a one-line pointer in the turn", async () => {
+  const harness = await runTurn(SHORT_ANSWER, "realistic", "COMPOSER_FULL_ANSWER");
   const solandra = solandraTurns(harness);
 
   assert.equal(solandra.length, 1, "the turn must keep a single Solandra message");
@@ -215,72 +268,91 @@ test("long ordinary answer moves to the Composer with a one-line pointer in the 
   const composer = harness.composerWrites[0] ?? "";
   assert.ok(composer.includes("General knowledge — not verified"), "Composer frame must stay clearly tentative");
   assert.ok(composer.includes("not established fact"), "Composer frame must carry zero authority cues");
-  assert.ok(composer.includes("Clean the chain with a stiff brush"), "Composer must carry the full answer text");
-  assert.ok(composer.includes("Log the date and distance"), "Composer must carry the closing answer text");
-  assert.ok(composer.includes("&lt;dry&gt;"), "Composer answer text must be escaped");
-  assert.ok(!composer.includes("<dry>"), "Composer must not inject raw answer markup");
+  assert.ok(composer.includes("finer grind"), "Composer must carry the full answer text");
+  assert.ok(!composer.includes("<textarea"), "ordinary answers are presentation, not editable drafts");
+});
+
+test("an explicit COMPOSER_FULL_ANSWER decision moves a long reference with the full answer escaped and framed as tentative", async () => {
+  const message = `${buildLongChecklist()}\n\nKeep the fridge upright and avoid <strong>tilting</strong> it on the way.`;
+
+  const harness = await runTurn(message, "realistic", "COMPOSER_FULL_ANSWER");
+  const solandra = solandraTurns(harness);
+
+  assert.equal(solandra.length, 1);
+  assert.equal(solandra[0]?.text, POINTER);
+
+  assert.equal(harness.composerWrites.length, 1, "the full answer must be written to the Composer once");
+  const composer = harness.composerWrites[0] ?? "";
+  assert.ok(composer.includes("Book the van for a morning slot"), "Composer must carry the opening answer text");
+  assert.ok(composer.includes("leave the books and the decor"), "Composer must carry the closing answer text");
+  assert.ok(composer.includes("&lt;strong&gt;"), "Composer answer text must be escaped");
+  assert.ok(!composer.includes("<strong>"), "Composer must not inject raw answer markup");
   // Scoped to the prepared-resource evidence vocabulary (the
   // preparedResourceTrustRendering headings named in
   // solandra-authoritative-conversation-page.ts), not the tentative-answer frame.
   assert.doesNotMatch(composer, /Established support|Evidence refutes|Evidence remains conflicted|No external evidence/iu);
-  assert.ok(!composer.includes("<textarea"), "ordinary answers are presentation, not editable drafts");
 });
 
-test("structured short answer with step-like sections moves to the Composer regardless of topic", async () => {
-  const message = "A simple evening tea routine:\n1. Warm the pot with a quick rinse of hot water.\n2. Add one spoon of leaves per cup.\n3. Steep for three minutes, then pour fully so it never overbrews.\n4. Rinse the pot and leave the lid off while it dries.";
-  assert.ok(message.length < 1500, "structured fixture must stay below the length rule to isolate the section rule");
+test("a TURN decision keeps a long structured answer in the turn: shape alone never moves it", async () => {
+  const message = buildLongChecklist();
+  assert.ok(message.length > 1500, "the long fixture must exceed any length a lexical rule could have used");
 
-  const harness = await runTurn(message);
+  const harness = await runTurn(message, "realistic", "TURN");
   const solandra = solandraTurns(harness);
 
   assert.equal(solandra.length, 1);
-  assert.equal(solandra[0]?.text, POINTER);
-  assert.equal(harness.composerWrites.length, 1);
-  assert.ok((harness.composerWrites[0] ?? "").includes("General knowledge — not verified"));
-  assert.ok((harness.composerWrites[0] ?? "").includes("Steep for three minutes"));
+  assert.equal(solandra[0]?.text, `${message}\n\n${SUFFIX}`);
+  assert.equal(harness.composerWrites.length, 0, "a TURN decision must leave the Composer untouched");
 });
 
-test("short ordinary answer stays in the turn with the non-authoritative suffix", async () => {
-  const message = "Yes — I can help with that.";
+test("a turn carrying no placement decision stays in the turn even when long and structured", async () => {
+  // Replayed and legacy turns carry no decision because the decision is
+  // turn-scoped and never persisted. They must render exactly as before.
+  const message = buildLongChecklist();
 
-  const harness = await runTurn(message);
+  const harness = await runTurn(message, "realistic", "absent");
   const solandra = solandraTurns(harness);
 
   assert.equal(solandra.length, 1);
-  assert.equal(solandra[0]?.text, `${message}\n\nGeneral knowledge — not verified.`);
-  assert.equal(harness.composerWrites.length, 0, "short answers must not touch the Composer");
+  assert.equal(solandra[0]?.text, `${message}\n\n${SUFFIX}`);
+  assert.equal(harness.composerWrites.length, 0, "an absent decision must not reach the Composer");
 });
 
-test("short two-item list stays in the turn with the non-authoritative suffix", async () => {
-  const message = "Two options worth comparing:\n- repair the part\n- replace the part";
-
-  const harness = await runTurn(message);
+test("a TURN decision keeps a short answer in the turn with the non-authoritative suffix", async () => {
+  const harness = await runTurn(SHORT_ANSWER, "realistic", "TURN");
   const solandra = solandraTurns(harness);
 
   assert.equal(solandra.length, 1);
-  assert.equal(solandra[0]?.text, `${message}\n\nGeneral knowledge — not verified.`);
-  assert.equal(harness.composerWrites.length, 0, "below-threshold structure must not touch the Composer");
+  assert.equal(solandra[0]?.text, `${SHORT_ANSWER}\n\n${SUFFIX}`);
+  assert.equal(harness.composerWrites.length, 0, "turn answers must not touch the Composer");
 });
 
-test("empty answer keeps the existing error path", async () => {
-  const harness = await runTurn("   ");
-  const solandra = solandraTurns(harness);
+test("a COMPOSER_FULL_ANSWER decision never moves an authoritative or authority-absent answer", async () => {
+  // Behavior decision: placement changes only for known-non-authoritative
+  // content. An authoritative (or authority-absent) answer keeps legacy
+  // placement even when Solandra asks for the Composer.
+  const message = buildLongChecklist();
 
-  assert.equal(solandra.length, 1);
-  assert.equal(solandra[0]?.text, "Solandra returned no usable response.");
-  assert.equal(harness.composerWrites.length, 0, "the error path must not write to the Composer");
+  for (const mode of ["authoritative", "absent"] as const) {
+    const harness = await runTurn(message, mode, "COMPOSER_FULL_ANSWER");
+    const solandra = solandraTurns(harness);
+
+    assert.equal(solandra.length, 1, `mode ${mode}: the turn must keep a single Solandra message`);
+    assert.equal(solandra[0]?.text, message, `mode ${mode}: placement alone must not move the answer`);
+    assert.equal(harness.composerWrites.length, 0, `mode ${mode}: the Composer must stay untouched`);
+  }
 });
 
-test("long non-authoritative answer moves once: frame plus pointer, full text out of the turn", async () => {
-  const message = buildLongGuide();
+test("a moved answer is marked once: frame in the Composer, pointer turn without the suffix", async () => {
+  const message = buildLongChecklist();
 
-  const harness = await runTurn(message, "realistic");
+  const harness = await runTurn(message, "realistic", "COMPOSER_FULL_ANSWER");
   const solandra = solandraTurns(harness);
 
   assert.equal(solandra.length, 1, "the turn must keep a single Solandra message");
   assert.equal(solandra[0]?.text, POINTER);
-  assert.ok(!(solandra[0]?.text ?? "").includes("Clean the chain with a stiff brush"), "full answer text must stay out of the turn");
-  assert.ok(!(solandra[0]?.text ?? "").includes("Log the date and distance"), "closing answer text must stay out of the turn");
+  assert.ok(!(solandra[0]?.text ?? "").includes("Book the van for a morning slot"), "full answer text must stay out of the turn");
+  assert.ok(!(solandra[0]?.text ?? "").includes("leave the books and the decor"), "closing answer text must stay out of the turn");
 
   assert.equal(harness.composerWrites.length, 1, "the full answer must be written to the Composer once");
   const composer = harness.composerWrites[0] ?? "";
@@ -288,20 +360,14 @@ test("long non-authoritative answer moves once: frame plus pointer, full text ou
   assert.equal(stemCount, 1, "the stem must mark the Composer frame exactly once");
   const turnStemCount = (solandra[0]?.text ?? "").split("General knowledge — not verified").length - 1;
   assert.equal(turnStemCount, 0, "the pointer turn bypasses the suffix stem");
+  assert.ok(!(solandra[0]?.text ?? "").endsWith(SUFFIX), "the Composer path must bypass the turn suffix");
 });
 
-test("long answer with authoritative or absent flags stays in the turn: shape alone never moves it", async () => {
-  // Behavior decision: placement changes only for known-non-authoritative content.
-  // An authoritative (or authority-absent) long answer keeps legacy placement even
-  // when it qualifies on shape alone.
-  const message = buildLongGuide();
+test("empty answer keeps the existing error path", async () => {
+  const harness = await runTurn("   ", "realistic", "COMPOSER_FULL_ANSWER");
+  const solandra = solandraTurns(harness);
 
-  for (const mode of ["authoritative", "absent"] as const) {
-    const harness = await runTurn(message, mode);
-    const solandra = solandraTurns(harness);
-
-    assert.equal(solandra.length, 1, `mode ${mode}: the turn must keep a single Solandra message`);
-    assert.equal(solandra[0]?.text, message, `mode ${mode}: shape alone must not move the answer`);
-    assert.equal(harness.composerWrites.length, 0, `mode ${mode}: the Composer must stay untouched`);
-  }
+  assert.equal(solandra.length, 1);
+  assert.equal(solandra[0]?.text, "Solandra returned no usable response.");
+  assert.equal(harness.composerWrites.length, 0, "the error path must not write to the Composer");
 });

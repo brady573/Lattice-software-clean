@@ -285,6 +285,9 @@ function publicCognition(result: SolandraCognitionResult | undefined): unknown {
       authority: "NON_AUTHORITATIVE_CONVERSATION",
       factualAuthority: false,
       mode: "CONVERSATION",
+      // Ephemeral, turn-scoped presentation decision. It is deliberately not
+      // written to conversation_responses, so it never becomes durable state.
+      presentationPlacement: result.presentationPlacement ?? "TURN",
     };
   }
   return {
@@ -739,6 +742,9 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
       const conversationResponses = await options.conversationResponseStore.listByConversation(conversationId);
       const replayedConversationResponse = conversationResponses.find((response) => response.sourceMessageId === sourceMessage.messageId);
       if (replayedConversationResponse) {
+        // A replayed turn carries no presentationPlacement: the decision is
+        // turn-scoped and never persisted, so the response resolves to the TURN
+        // default and the full answer renders in the turn.
         return reply.status(200).send({
           status: "CONVERSATION_COMPLETED",
           presentation: { assistantMessage: replayedConversationResponse.content },

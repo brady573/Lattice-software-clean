@@ -130,12 +130,14 @@ const directConversationHandling = `        if (body.status === "CONVERSATION_CO
           if (!assistantMessage) throw new Error("Solandra returned no usable response.");
           // Single marking per surface: the Composer frame header marks the Composer
           // surface and the turn suffix marks the turn surface, so the Composer
-          // pointer turn carries no suffix. Long qualifying turns move first; the
-          // suffix below applies to short non-authoritative turns only. Shape alone
-          // never moves an authoritative (or authority-absent) answer.
+          // pointer turn carries no suffix. Solandra's explicit placement decision
+          // moves the full answer first; the suffix below applies to short
+          // non-authoritative turns only. A placement decision never moves an
+          // authoritative (or authority-absent) answer, and an absent decision is
+          // the pre-existing TURN placement.
           const isNonAuthoritative = body.conversationResponse?.factualAuthority === false
             || body.interpretation?.factualAuthority === false;
-          if (isNonAuthoritative && isInfoDumpMessage(assistantMessage)) {
+          if (isNonAuthoritative && body.interpretation?.presentationPlacement === "COMPOSER_FULL_ANSWER") {
             renderTentativeAnswer(assistantMessage);
             appendSolandraTurn("I’ve put the full answer in the Composer. It’s general knowledge, not verified.");
             return;
@@ -153,21 +155,7 @@ const tentativeAnswerStyles = `
     .tentative-body { white-space: pre-wrap; line-height: 1.58; margin: 8px 0; }
 `;
 
-const infoDumpPresentation = `      const INFO_DUMP_LENGTH_THRESHOLD = 1500;
-      const INFO_DUMP_SECTION_THRESHOLD = 3;
-      const infoDumpSectionPattern = /^\\s*(?:\\d{1,2}\\s*[.)\\]:]\\s+|[-*•]\\s+)\\S/u;
-      const isInfoDumpMessage = (message) => {
-        if (message.length > INFO_DUMP_LENGTH_THRESHOLD) return true;
-        let sections = 0;
-        for (const line of message.split(/\\r?\\n/)) {
-          if (infoDumpSectionPattern.test(line)) {
-            sections += 1;
-            if (sections >= INFO_DUMP_SECTION_THRESHOLD) return true;
-          }
-        }
-        return false;
-      };
-      const renderTentativeAnswer = (message) => {
+const tentativeAnswerRendering = `      const renderTentativeAnswer = (message) => {
         composerHasProductContent = true;
         composer.innerHTML = '<div class="tentative-answer"><div class="finding-status">General knowledge — not verified</div>'
           + '<p class="muted">This is my general answer, not established fact. Check anything that matters before relying on it.</p>'
@@ -219,7 +207,7 @@ export function renderSolandraAuthoritativeConversationPage(): string {
     .replace(legacyPreparedResourceRendering, preparedResourceTrustRendering)
     .replace(
       "      const renderOutcome = (outcome, presentation, options = {}) => {",
-      `${infoDumpPresentation}      const renderOutcome = (outcome, presentation, options = {}) => {`,
+      `${tentativeAnswerRendering}      const renderOutcome = (outcome, presentation, options = {}) => {`,
     )
     .replace(
       '          renderPreparedResource(outcome.resource.title, options.preparedBody ?? outcome.resource.body);',
