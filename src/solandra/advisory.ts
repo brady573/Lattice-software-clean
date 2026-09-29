@@ -200,6 +200,7 @@ function buildAdvisoryRequest(model: string, input: SolandraAdvisoryInput): Cano
           "Every external factual basis reference must use only supplied Knowledge IDs and claim IDs. Lattice renders factual support later from those exact governed claims; recommendation, alternatives, rationale, tradeoffs, assumptions, and uncertainties never establish factual support or source provenance.",
           "If no external factual premise is needed, a Recommendation may use an empty Knowledge basis and reason only from authoritative USER intent/current USER context. If an external fact is genuinely required but not supplied, return NEEDS_KNOWLEDGE instead of inventing it.",
           "Use NEEDS_CLARIFICATION only for genuine USER ambiguity that materially prevents responsible advice, not for missing pre-authored candidate options.",
+          "Surface any material unsupported dependency of your recommendation as an uncertainty rather than filling the gap silently.",
           "Do not make supplied uncertainty disappear. For RECOMMENDATION, copy every material supplied uncertainty that affects the recommendation verbatim into preservedUncertainties. Any natural-language uncertainty explanation is drafting material only; Lattice persists governed uncertainty, not generated uncertainty prose.",
           "rationale and tradeoffs are transient drafting/advisory judgment only. They are not durable Recommendation factual support.",
           "Return exactly one top-level JSON object and no prose.",
