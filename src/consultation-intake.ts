@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { createApiRequestHash, type ApiRunControlStore } from "./api-control-store.js";
+import { guardAdvisoryConclusion } from "./assumption/hook.js";
 import {
   buildPreparedResourceRecord,
   preparedResourceFromRecord,
@@ -1364,6 +1365,25 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
           return reply.status(422).send({ error: "SOLANDRA_ADVISORY_FAILED", message });
         }
         if (advisory.result.status === "RECOMMENDATION") {
+          // Assumption Guard (DP-002/DP-004): REQUIRED Confidence-stage gate
+          // before this conclusion stands. Clears invisibly on the common
+          // path; escalates only a Solandra-flagged user-resolvable blocker
+          // as a single natural question. Reads the advisory shape additively.
+          const assumptionScreening = guardAdvisoryConclusion({
+            recommendation: advisory.result,
+            governedUncertainties: governed.flatMap((item) => item.knowledge.uncertainties),
+          });
+          if (!assumptionScreening.cleared && assumptionScreening.question !== undefined) {
+            return reply.status(202).send({
+              status: "NEEDS_CLARIFICATION",
+              acceptedUnderstanding: authoritativeObjective(version),
+              intentScopeId,
+              intentVersionId: version.intentVersionId,
+              question: assumptionScreening.question,
+              confirmationExample: null,
+              interpretation: publicCognition(cognition),
+            });
+          }
           const recommendation = await establishConversationalRecommendation({
             store: options.recommendationStore,
             conversationId,
@@ -1861,6 +1881,28 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
           knowledgeReference,
           advisory: advisory.result,
           presentation: { assistantMessage },
+        });
+      }
+
+      // Assumption Guard (DP-002/DP-004): same REQUIRED Confidence-stage gate
+      // as the conversational path. Additive read of the advisory shape.
+      const continuationScreening = guardAdvisoryConclusion({
+        recommendation: advisory.result,
+        governedUncertainties: governedKnowledge.flatMap((item) => item.knowledge.uncertainties),
+      });
+      if (!continuationScreening.cleared && continuationScreening.question !== undefined) {
+        const guardQuestion = continuationScreening.question;
+        return reply.send({
+          runId: run.id,
+          status: run.status,
+          outcome,
+          knowledgeReference,
+          advisory: {
+            status: "NEEDS_CLARIFICATION",
+            question: guardQuestion,
+            reason: "The draft recommendation depends on something only you can confirm, so I asked before standing by it.",
+          },
+          presentation: { assistantMessage: guardQuestion },
         });
       }
 
