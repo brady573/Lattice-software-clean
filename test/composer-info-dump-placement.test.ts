@@ -30,7 +30,7 @@ function createStorage(): { getItem(key: string): string | null; setItem(key: st
 
 function conversationScript(): string {
   const html = renderSolandraAuthoritativeConversationPage();
-  const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((match) => match[1] ?? "");
+  const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/gi)].map((match) => match[1] ?? "");
   const script = scripts.find((source) => source.includes('body.status === "CONVERSATION_COMPLETED"'));
   assert.ok(script, "Expected the canonical conversation browser script.");
   return script as string;
