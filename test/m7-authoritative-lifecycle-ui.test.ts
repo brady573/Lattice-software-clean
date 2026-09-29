@@ -50,7 +50,7 @@ test("authoritative Solandra surface is Conversation + free-form input + adaptiv
   assert.doesNotMatch(html, /Accepted understanding|What you said|Interpreting against|One clarification|Conversation \+ adaptive Composer|Confidence:|<h2>Provenance<\/h2>/i);
   assert.doesNotMatch(html, /Atlas Pro|Nova Air|Forge 15|batteryHours|price\.max\.usd|performance\.relativeToBattery/i);
 
-  const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((match) => match[1] ?? "");
+  const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/gi)].map((match) => match[1] ?? "");
   assert.ok(scripts.length >= 1, "Expected canonical Conversation browser script.");
   for (const source of scripts) new Script(source);
 
