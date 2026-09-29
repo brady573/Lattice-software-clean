@@ -5,6 +5,14 @@ import { once } from "node:events";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+// Bound to the built presentation constants so wording calibration in src/ cannot
+// silently desynchronise this harness. The browser lane already requires `npm run build`
+// before this script runs, and the compiled module is plain JavaScript, so this needs
+// no loader and no new build dependency.
+import {
+  EMPTY_KNOWLEDGE_MESSAGE,
+  GENERIC_INSUFFICIENT_KNOWLEDGE_MESSAGE,
+} from "../dist/src/presentation/solandra/knowledge-response.js";
 
 const baseUrl = process.env.M7_BASE_URL ?? "http://127.0.0.1:3107";
 const subjectSha = process.env.SUBJECT_SOURCE_SHA ?? process.env.GITHUB_SHA ?? null;
@@ -378,6 +386,9 @@ async function main() {
     })()`));
     assert.equal(baseline.pageOverflow, false);
     assert.equal(baseline.prototypeSurface, false);
+    // Product wording owned by the canonical composer input placeholder in
+    // src/ui/solandra-conversation-page.ts. Not an exported constant, so the literal
+    // is kept deliberately: this asserts the real rendered placeholder attribute.
     assert.equal(baseline.placeholder, "What do you need to figure out?");
     assert.doesNotMatch(baseline.bodyText, /Atlas Pro|Nova Air|Forge 15/i);
     assert.doesNotMatch(baseline.bodyText, /Conversation \+ adaptive Composer|Accepted understanding|semantic status/i);
@@ -536,6 +547,8 @@ async function main() {
     assert.equal(preAuthority.userTurn, knowledgeMessage);
     assert.equal(preAuthority.composerText.trim(), "");
     assert.equal(preAuthority.composerText.includes(knowledgeMessage), false);
+    // Absence check for retired Composer wording. Deliberately not bound to any
+    // exported constant: these strings must stay independent of current src/ wording.
     assert.doesNotMatch(preAuthority.composerText, /Accepted understanding|What you said|Interpreting/);
     evidence.browser.preAuthority = preAuthority;
     await cdp.send("Fetch.continueRequest", { requestId: pausedRequestId });
@@ -566,8 +579,8 @@ async function main() {
       if(input.disabled)return null;
       const text=composer.innerText;
       const conversationText=document.getElementById('conversation').innerText;
-      const composerLimitation='No validated external findings are sufficiently relevant to this objective.';
-      const conversationLimitation="I couldn't establish enough relevant evidence to answer that reliably.";
+      const composerLimitation=${JSON.stringify(EMPTY_KNOWLEDGE_MESSAGE)};
+      const conversationLimitation=${JSON.stringify(GENERIC_INSUFFICIENT_KNOWLEDGE_MESSAGE)};
       return text.includes(composerLimitation)&&conversationText.includes(conversationLimitation) ? {
         text,
         conversationText,
@@ -578,6 +591,9 @@ async function main() {
     assert.equal(renderedKnowledge.conversationTurns, 1);
     assert.equal(renderedKnowledge.pageOverflow, false);
     assert.equal(renderedKnowledge.text.includes(knowledgeMessage), false);
+    // Absence checks for retired/internal Composer and Knowledge wording. Deliberately
+    // not bound to any exported constant: they must stay independent of current src/
+    // wording, otherwise the checks would become vacuous.
     assert.doesNotMatch(renderedKnowledge.text, /Accepted understanding|What you said|Interpreting|Confidence:|Provenance/i);
     assert.doesNotMatch(renderedKnowledge.text, /winner|Atlas Pro|Nova Air|Forge 15/i);
     assert.doesNotMatch(renderedKnowledge.conversationText, /I found \d+ supported source report|I couldn’t establish supported knowledge/u);
@@ -608,7 +624,17 @@ async function main() {
       return {
         editable:!prepared.disabled&&!prepared.readOnly,
         title:composer.innerText.includes('Prepared checklist'),
+        // Absence check: neither the uncertainty heading nor the empty-Knowledge
+        // limitation may be stacked onto the resource Composer. Wording owners are
+        // inline literals, not exported constants:
+        //   'What remains uncertain'      -> <h2> in src/ui/solandra-conversation-page.ts
+        //   'No validated external findings' -> EMPTY_KNOWLEDGE_MESSAGE prefix in
+        //                                   src/presentation/solandra/knowledge-response.ts
+        // Kept as literals: this asserts a substring fragment and an absence, so binding
+        // to the full constants would change what is verified.
         stackedKnowledge:composer.innerText.includes('What remains uncertain')||composer.innerText.includes('No validated external findings'),
+        // Product wording owned by the prepared-material acknowledgement in
+        // src/ui/solandra-conversation-page.ts. Not an exported constant.
         solandraAcknowledgement:document.getElementById('conversation').innerText.includes('Nothing has been sent or executed.'),
         conversationTurns:document.querySelectorAll('#conversation .turn.user').length,
         pageOverflow:document.documentElement.scrollWidth>document.documentElement.clientWidth,
