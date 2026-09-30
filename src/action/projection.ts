@@ -7,9 +7,12 @@
  * Pure, deterministic, dependency-free. No model call, no persistence.
  */
 
+import { evaluate } from "./evaluate.js";
 import type {
   ActionCalibration,
   ActionCalibrationSource,
+  ActionCandidate,
+  ActionDecision,
   GovernedFactSource,
   StructuredActionFact,
 } from "./types.js";
@@ -133,4 +136,41 @@ export function collectPermittedActionFacts(input: {
     }
   }
   return Object.freeze([...result]) as readonly StructuredActionFact[];
+}
+
+/**
+ * The single shared finalization pipeline both orchestration sites call, so
+ * semantics cannot drift by path (DP-012 §2/§5).
+ *
+ * `projectActionCalibration(screening)` → `collectPermittedActionFacts(...)`
+ * → candidate-gated `evaluate(...)`. `candidate === undefined` (no structured
+ * candidate; pure Knowledge turns ordinarily bypass) yields
+ * `decision: undefined` — never WAIT. Runs after F6 even on WEAKEN_AND_ASK
+ * paths that reach finalization; the F6 signal fact preserves the
+ * clarification without suppressing or reinterpreting it. Pure,
+ * deterministic, dependency-free beyond the sibling `evaluate` composition.
+ */
+export function decideActionForFinalization(input: {
+  readonly screening: ActionCalibrationSource;
+  readonly candidate: ActionCandidate | undefined;
+  readonly governedFacts: readonly StructuredActionFact[];
+}): {
+  readonly calibration: ActionCalibration;
+  readonly qualifiedFacts: readonly StructuredActionFact[];
+  readonly decision: ActionDecision | undefined;
+} {
+  const calibration = projectActionCalibration(input.screening);
+  const qualifiedFacts = collectPermittedActionFacts({
+    calibration,
+    governedFacts: input.governedFacts,
+  });
+  if (input.candidate === undefined) {
+    return Object.freeze({ calibration, qualifiedFacts, decision: undefined });
+  }
+  const decision = evaluate({
+    candidate: input.candidate,
+    calibration,
+    qualifiedFacts,
+  });
+  return Object.freeze({ calibration, qualifiedFacts, decision });
 }
