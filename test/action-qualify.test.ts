@@ -216,3 +216,25 @@ test("runtime-smuggled source cannot qualify inside qualifyAction", () => {
   const q = qualifyAction({ candidate: cand("Proceed."), qualifiedFacts: [smuggled] });
   assert.equal(q.consequence, "UNKNOWN");
 });
+
+test("smuggled out-of-contract consequence string throws [RF-5]", () => {
+  const smuggled = {
+    source: "KNOWLEDGE_V36",
+    consequence: "CATASTROPHIC",
+  } as unknown as StructuredActionFact;
+  assert.throws(
+    () => qualifyAction({ candidate: cand("Proceed."), qualifiedFacts: [smuggled] }),
+    /consequence/,
+  );
+});
+
+test("smuggled out-of-contract reversibility string throws [RF-5]", () => {
+  const smuggled = {
+    source: "KNOWLEDGE_V36",
+    reversibility: "SOMETIMES",
+  } as unknown as StructuredActionFact;
+  assert.throws(
+    () => qualifyAction({ candidate: cand("Proceed."), qualifiedFacts: [smuggled] }),
+    /reversibility/,
+  );
+});

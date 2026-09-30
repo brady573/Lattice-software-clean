@@ -29,9 +29,51 @@ const PERMITTED_SOURCES: ReadonlySet<string> = new Set<string>([
   "CAPABILITY_EFFECT",
 ]);
 
+/** The fixed contract members per dimension. Anything else is corrupt input. */
+const CONSEQUENCE_VALUES: ReadonlySet<string> = new Set<string>([
+  "LOW",
+  "MATERIAL",
+  "HIGH",
+  "UNKNOWN",
+]);
+
+const REVERSIBILITY_VALUES: ReadonlySet<string> = new Set<string>([
+  "REVERSIBLE",
+  "PARTIALLY_REVERSIBLE",
+  "IRREVERSIBLE",
+  "UNKNOWN",
+]);
+
+const SUPPORT_VALUES: ReadonlySet<string> = new Set<string>([
+  "SUFFICIENT",
+  "PARTIAL",
+  "INSUFFICIENT",
+  "UNKNOWN",
+]);
+
 function requireAction(action: string): void {
   if (action.trim().length === 0) {
     throw new Error("Action candidate action must be a non-empty string.");
+  }
+}
+
+/**
+ * RF-5: corrupt dimension values throw loudly. TypeScript types alone cannot
+ * stop a runtime-smuggled string via unchecked cast from winning its
+ * dimension, so every allowlisted fact's defined dimension value must be a
+ * member of its contract union before classification.
+ */
+function requireGovernedDimensionValues(facts: readonly StructuredActionFact[]): void {
+  for (const fact of facts) {
+    if (fact.consequence !== undefined && !CONSEQUENCE_VALUES.has(fact.consequence)) {
+      throw new Error("Action fact consequence must be a member of ConsequenceLevel.");
+    }
+    if (fact.reversibility !== undefined && !REVERSIBILITY_VALUES.has(fact.reversibility)) {
+      throw new Error("Action fact reversibility must be a member of ReversibilityStatus.");
+    }
+    if (fact.support !== undefined && !SUPPORT_VALUES.has(fact.support)) {
+      throw new Error("Action fact support must be a member of ActionSupport.");
+    }
   }
 }
 
@@ -63,6 +105,7 @@ function classifyDimension<T extends string>(values: readonly (T | undefined)[])
 export function qualifyAction(input: QualifyActionInput): ActionQualification {
   requireAction(input.candidate.action);
   const facts = [...input.candidate.facts, ...input.qualifiedFacts].filter(isPermittedFact);
+  requireGovernedDimensionValues(facts);
 
   const consequence: ConsequenceLevel = classifyDimension(
     facts.map((fact) => fact.consequence),
