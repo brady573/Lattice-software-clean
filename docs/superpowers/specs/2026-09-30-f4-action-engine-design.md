@@ -40,7 +40,7 @@ Missing material input fails toward the less-consequential mode; ties prefer mor
 
 ## 5. Orchestration integration (§3)
 
-At both F6 finalization sites: assumptionScreening = guardAdvisoryConclusion(...) → actionDecision = candidate !== undefined ? actionEngine.evaluate({candidate, calibratedState: assumptionScreening, governedContext}) : undefined → finalize({recommendation, actionDecision}). Runs after F6 even on WEAKEN_AND_ASK without suppressing/answering/reinterpreting the clarification. Presentation consumes only; RecommendationStore never invokes.
+At both F6 finalization sites: assumptionScreening = guardAdvisoryConclusion(...) → actionCalibration = projectActionCalibration(assumptionScreening) → qualifiedFacts = collectPermittedActionFacts(...) → actionDecision = candidate !== undefined ? actionEngine.evaluate({ candidate, actionCalibration, qualifiedFacts }) : undefined → finalize({recommendation, actionDecision}). F4 receives only the bounded projection (actionCalibration + qualifiedFacts), never F6 internals or a general context bag. Helper names are illustrative; implementation naming belongs to the later plan. Runs after F6 even on WEAKEN_AND_ASK without suppressing/answering/reinterpreting the clarification. Presentation consumes only; RecommendationStore never invokes.
 
 ## 6. Candidate sourcing (§4, structured requirement)
 
