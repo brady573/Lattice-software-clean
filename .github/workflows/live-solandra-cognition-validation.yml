@@ -19,7 +19,7 @@ permissions:
 jobs:
   live-solandra-cognition:
     name: Live model-owned Solandra cognition validation
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     if: github.ref == 'refs/heads/main'
     concurrency:

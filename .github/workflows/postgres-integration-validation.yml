@@ -31,7 +31,7 @@ concurrency:
 jobs:
   postgres-integration:
     name: PostgreSQL integration validation
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:
       DATABASE_URL: postgresql://lattice:lattice@127.0.0.1:55433/lattice_test
