@@ -123,10 +123,22 @@ function findFileByName(directory: string, name: string, depth = 0): string | nu
   return null;
 }
 
+/**
+ * Read a repository text file with line endings normalized to LF.
+ *
+ * Checkouts are not line-ending stable: GitHub's Windows runners materialize
+ * CRLF, Linux and macOS checkouts stay LF. Asserting on raw bytes would make
+ * this guard pass or fail purely on the runner's platform. Normalizing here
+ * keeps every downstream pattern platform-independent.
+ */
+function readNormalized(path: string): string {
+  return readFileSync(path, 'utf8').replace(/\r\n/gu, '\n');
+}
+
 function promptText(name: string): string {
   const path = join(agentsDirectory, name);
   assert.ok(existsSync(path), `${name} must be committed under .opencode/agents/ so its sources are reviewable`);
-  return readFileSync(path, 'utf8');
+  return readNormalized(path);
 }
 
 /** Directories a prompt declares, discovered from its own text rather than hardcoded. */
@@ -262,7 +274,7 @@ test('the steward state surface exists with all six non-authoritative files', ()
   for (const name of stewardStateFiles) {
     const path = join(absolute, name);
     assert.ok(existsSync(path), `${stewardStateDirectory}/${name} must exist`);
-    const firstLine = readFileSync(path, 'utf8').split(/\r?\n/u)[0] ?? '';
+    const firstLine = readNormalized(path).split('\n')[0] ?? '';
     assert.equal(
       firstLine.trim(),
       `> ${nonAuthoritativeBanner}`,
