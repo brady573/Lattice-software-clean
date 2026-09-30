@@ -1,8 +1,8 @@
 # Core Realignment Roadmap: every piece of code looked at against Trustworthy Intelligence for Action
 
 Status: DRAFT roadmap only. No code changes authorized by this document.
-Authority: `docs/design/The-Core-Lattice-Philosophy.md` (Owner-adopted 2026-09-28).
-Base inventoried: `origin/main` @ `f7652ff09d6b55b8571845a571c592f4d16e6f59` (fetched 2026-09-28, clean tree).
+Authority: `docs/design/The-Core-Lattice-Philosophy.md` (Owner-adopted 2026-09-28) — highest durable Product authority — as reconciled by Design Partner amendment DP-007 (branch NOT APPROVED FOR MERGE AS-IS; reconciliation + re-review required). This document stays working guidance, never Product authority.
+Base inventoried: `origin/main` @ `c9bd1770cfa6eb2948f4a1957b6647565ff75199` (reconciled 2026-09-30 on `governance/realignment-roadmap`; prior stamp `f7652ff09d6b55b8571845a571c592f4d16e6f59` dated 2026-09-28, see §3 delta note).
 
 ## 1. Authority & non-goals
 
@@ -11,36 +11,39 @@ Base inventoried: `origin/main` @ `f7652ff09d6b55b8571845a571c592f4d16e6f59` (fe
 | A1 | The adopted Core (`docs/design/The-Core-Lattice-Philosophy.md`, **Trustworthy Intelligence for Action**) is the highest durable Product authority. Every area below is audited against it: Question → Understanding → Confidence → Action, the north-star triple (*What do we know? How do we know it? What can we responsibly do because of it?*), the 21 design principles (§47), and the anti-goals (§46). |
 | A2 | All concrete examples in the Core (scenarios, numbers, sample phrasings, metric sketches) are ILLUSTRATIVE and NON-NORMATIVE. They must never become implementation rules, test fixtures, or acceptance thresholds. Principle governs on conflict. |
 | A3 | No architecture replacement without explicit Owner authority. Slices that would require a new major subsystem/service or replacement of otherwise sound architecture STOP under CA-05 and escalate — they do not proceed as implementation. |
-| A4 | OD-001-to-OD-004 re-mapping is an **Owner-input gate, not an implementation task**. No slice depending on re-mapped Owner Decisions proceeds past audit until the Owner supplies the mapping. Gaps are recorded as Owner questions, never filled by inference. |
+| A4 | OD-001-to-OD-004 is **CLOSED per DP-007**: the governed stage sequence is Question → Understanding → Confidence → Action, with legacy mechanics nested beneath those four stages. Presentation and continuation are explicitly **not** stages. OD-002–OD-004 keep their bounded authority semantics; they are not converted into stages. No slice proceeds on any remapped reading beyond this closed mapping. |
 | A5 | This roadmap invents zero Product requirements. Anything that looks like a missing requirement is recorded as an Owner question in the slice's stop conditions. |
 | A6 | Normative Core sections cited per phase use the adopted Core's numbering (§5, §9–§21, §31–§48). If the Core is amended, section references must be re-validated before use. |
 
-**Non-goals:** merge/deploy/production changes; new CI lanes; benchmark campaigns; prompt-engineering tooling; exposing internal machinery (workers, providers, proof, routing, V36 vocabulary) to the user; re-auditing seeded findings F1–F8 (carried forward as-is).
+**Non-goals:** merge/deploy/production changes; new CI lanes; benchmark campaigns; prompt-engineering tooling; exposing internal machinery (workers, providers, proof, routing, V36 vocabulary) to the user; re-auditing seeded findings F1–F8 (carried forward as-is except DP-007 scope updates to F4/F8 and the main-merged resolutions noted in §2).
 
 ## 2. Seeded findings (carry forward, do not re-audit)
 
-Slice-1 status: **PAUSED by Owner.** Nothing below re-opens slice-1 scope.
+Slice-1 status: **PAUSED by Owner.** Nothing below re-opens slice-1 scope. Note: wording-calibration slice merged on main (`feb8e82` / `46fc15c`, covering F1–F3 surfaces: short-turn non-authority marking, calibrated confidence language, absent-basis surfacing); slices audit the merged behavior as-is on resume.
 
 | ID | Finding | Kind |
 |----|---------|------|
 | F1 | Short-turn non-authority marking (top) — short-turn outputs must be marked non-authoritative at the top | Trust-surface gap |
 | F2 | Raw confidence labels — uncalibrated confidence labels reach the user | Language-calibration gap |
 | F3 | Bare supported claims + trustworthy self-labels — claims presented as supported without shown basis; system self-labels as trustworthy | Trust-surface gap |
-| F4 | Action Engine absence — no §41 Action Engine; next-action reasoning has no owned home | **Architecture gate** (Owner authority required before building) |
-| F5 | Composer-frame dead end — unmerged `ada22fa` ("Move long ordinary answers to the Composer with a tentative frame") parked; composer direction unresolved | Frozen/deferred (see §5) |
-| F6 | Assumption-guard absence — no §37 Assumption Guard; unsupported dependencies can stand silently | **Architecture gate** (Owner authority required before building) |
+| F4 | Action Engine — **SCOPED per DP-007 / READY FOR IMPLEMENTATION PLANNING** (no building authorized by this document). Approved contract: modes INVESTIGATE / TEST / ACT / WAIT / ESCALATE; consequence-sensitive behavior; boundary constraints including v1 recommends-only. Acceptance criteria: **[REVIEWER DECISION — confirm the DP-007 acceptance-criteria list before implementation planning; not reproduced here to avoid inventing content]** | Scoped architecture (was: architecture gate) |
+| F5 | Composer-frame — RESOLVED in evolved form on main (#161 `c5714dd`): long ordinary answers render in the Composer inside a tentative, non-authoritative frame via explicit Solandra placement decision (supersedes parked `ada22fa` framing) | Resolved on main; slices audit the merged behavior as-is |
+| F6 | Assumption Guard — REQUIRED Confidence-stage machinery, IMPLEMENTED on main in ephemeral turn-scoped form (#164 `0973c54`, DP-002/DP-004: deterministic gate before advisory conclusion finalization; materiality classification; WEAKEN + WEAKEN_AND_ASK; no persistence/migration). Retained as-is; this roadmap does not re-scope it | Implemented Confidence machinery (was: architecture-gate absence) |
 | F7 | Unknown-roadmaps — unknowns have no governed roadmap (ask/research/test/verify routing per §42 loop missing) | Design gap; Owner questions expected |
-| F8 | Trust-outcome telemetry — no §45 outcome telemetry (unsupported-claim catch rate, assumption surfacing rate, revision-after-evidence rate, action success rate) | Measurement gap; no new CI lane without Owner approval |
+| F8 | Trust-outcome telemetry — **SCOPED per DP-007 (DP-009)**: behavioral telemetry with governed event families **[REVIEWER DECISION — confirm the DP-009 event-family list]**; explicit non-goals including no trust scores. Schema work may proceed; implementation is sequenced behind stable behavior | Measurement scope (was: measurement gap); no new CI lane without Owner approval |
 
-## 3. Coverage backbone: full code-surface inventory (read-only, inspected 2026-09-28)
+## 3. Coverage backbone: full code-surface inventory (read-only; inspected 2026-09-28 at `f7652ff`, reconciled 2026-09-30 to `c9bd177`)
 
-Base: `f7652ff`. Counts are file counts from direct listing.
+Base: `c9bd177`. Counts are file counts from direct listing.
 
-### 3.1 `src/` subdirectories (19 dirs, 139 files)
+**Reconciliation delta `f7652ff`→`c9bd177` (9 commits):** wording-calibration slice (`46fc15c`, F1–F3 surfaces); harness assertions bound to presentation constants (#160); Composer placement merged in evolved form (#161); per-subject intake rate limiting (#163); ephemeral Assumption Guard gate (#164); `GET /api/version` (#165); agent-chain source-integrity repair (#166); Ubuntu CI runner pins (#167). Net new files: `src/assumption/` (4), `src/build-info.ts`, `src/ratelimit/subject-limiter.ts`, 6 new test files — reflected in the counts below; all other delta files are modifications of already-inventoried paths.
+
+### 3.1 `src/` subdirectories (21 dirs, 144 files)
 
 | Dir | Files | One-line responsibility (from direct inspection) |
 |-----|------|--------------------------------------------------|
 | `src/action-preparation/` | 1 | Prepared-resource (draft/checklist/message) store with Solandra draft authority marked non-factual, non-user-authored |
+| `src/assumption/` | 4 | Ephemeral turn-scoped Assumption Guard gate (Confidence stage; #164 on main — guard/hook/index/types, no persistence) |
 | `src/auth/` | 3 | Authenticated-subject identity normalization; single-owner token gate; neutral session-proof endpoint (no capability semantics) |
 | `src/capabilities/` | 3 | Capability contracts (cognitive-only, non-authoritative effects), broker with authorization guards, grant/invocation evidence store |
 | `src/conversation/` | 11 | Conversation CRUD API + membership guard, reference store/backfill/upgrade, governed reference admission, response store, run-index control |
@@ -52,6 +55,7 @@ Base: `f7652ff`. Counts are file counts from direct listing.
 | `src/model/` | 14 | Model Gateway: canonical request/response validation + identity, runtime with retry/provenance, provider interface, Groq/OpenAI-compatible/local-offline/fixture providers, rate-limit coordinator |
 | `src/presentation/` | 7 (1 + 6 in `solandra/`) | Run/outcome → user-facing rendering: knowledge-response strings, explanation renderer, fidelity/plan/types (see §3.4) |
 | `src/progress/` | 1 | Server-sent run-event stream (poll-based, terminal-status aware) |
+| `src/ratelimit/` | 1 | Per-subject rate limiting for expensive intake routes (#163 on main) |
 | `src/prototype/` | 1 | Android model prototype app (token-gated, specialist-guidance driven) |
 | `src/recommendation/` | 3 | Recommendation record store, option derivation, continuity with governed-uncertainty preservation checks |
 | `src/solandra/` | 6 | Solandra cognition: governed knowledge context, advisory runtime, action preparer, knowledge presenter/investigator, provider composition |
@@ -60,11 +64,11 @@ Base: `f7652ff`. Counts are file counts from direct listing.
 | `src/truth/` | 33 | V36 Truth Core: pipeline, orchestrator, admission (branded admitted-evidence boundary), adjudication/atomic-core, provenance, corroboration/falsification, contracts, snapshots, durable validation, research controller/enrichment, execution pipeline |
 | `src/ui/` | 7 | Server-rendered Solandra HTML pages: base conversation page + authoritative/validator/prototype/relocation/local-model variants (see §3.4) |
 
-### 3.2 `src/` root files (35 files, grouped)
+### 3.2 `src/` root files (36 files, grouped)
 
 | Group | Files | Count |
 |-------|-------|-------|
-| Composition / entry | `index.ts` (canonical runtime assembly), `app.ts`, `runtime-app.ts`, `migrate.ts`, `runtime-config.ts`, `runtime-schema-readiness.ts` | 6 |
+| Composition / entry | `index.ts` (canonical runtime assembly), `app.ts`, `runtime-app.ts`, `migrate.ts`, `runtime-config.ts`, `runtime-schema-readiness.ts`, `build-info.ts` (served revision, #165) | 7 |
 | Run pipeline | `domain.ts` (schemas), `engine.ts`, `outcome.ts` (knowledge/decision outcome builders), `run-execution.ts`, `run-store.ts`, `run-worker.ts`, `run-worker-process.ts`, `run-worker-main.ts`, `research-worker.ts`, `research-worker-process.ts`, `research-worker-main.ts`, `orchestration-store.ts`, `api-control-store.ts` | 13 |
 | HTTP surface | `http-app.ts`, `http-core.ts`, `consultation-intake.ts` | 3 |
 | Postgres stores | `postgres-run-store.ts`, `postgres-orchestration-store.ts`, `postgres-api-control-store.ts`, `postgres-run-json.ts` | 4 |
@@ -80,11 +84,11 @@ Base: `f7652ff`. Counts are file counts from direct listing.
 | `src/specialist-guidance/resources/` | 2 | `budgeting-guidance.v1.json`, `specialist-guidance-profile.schema.json` |
 | `src/ui/` (of §3.1) | 7 | `solandra-conversation-page.ts` (base), `solandra-authoritative-conversation-page.ts`, `solandra-validator-conversation-page.ts`, `solandra-prototype-page.ts`, `solandra-conversation-prototype-page.ts`, `solandra-relocation-prototype-page.ts`, `solandra-local-model-prototype-page.ts` |
 | `tools/` | 20 | 13 `.mjs` (live-provider qualification, blackbox/render probes, AB benchmark, browser-lifecycle/issue harnesses, android worker) + 1 `.d.mts` pair set + 5 `.py` (deployed journey/owner-auth/event validation + tests) |
-| `test/` | 209 `.test.ts` + 7 support | Support: `helpers/durable-run-worker-main.ts`, 6 `fixtures/` (foundational + legacy-bounded). Largest clusters: v36-* (19), issue-91-* (18), intent-* (11), issue-4x (10), m7-*/m8-*/solandra-*/live-* (8 each), knowledge-*/issue-1x (7 each) |
+| `test/` | 215 `.test.ts` + 7 support | Support: `helpers/durable-run-worker-main.ts`, 6 `fixtures/` (foundational + legacy-bounded). New on main: `assumption-guard`, `composer-info-dump-placement`, `intake-subject-rate-limit`, `served-revision`, `subject-rate-limiter`, `agent-source-integrity`. Largest clusters: v36-* (19), issue-91-* (18), intent-* (11), issue-4x (10), m7-*/m8-*/solandra-*/live-* (8 each), knowledge-*/issue-1x (7 each) |
 | `.github/workflows/` | 6 | `core-validation.yml` (durable core lane), `postgres-integration-validation.yml`, `browser-lifecycle-validation.yml`, `live-solandra-cognition-validation.yml`, `deployed-functional-validation.yml`, `render-blueprint-validation.yml` |
 | `migrations/` | 40 | `005`–`032` series (runs, run-events, dispatch outbox + leases, truth sources/claims/evidence/proofs/assessments/snapshots, V36 research continuations + rounds, intent authority/lineage/clarifications/messages, conversations + ownership/deletion, decision-plan binding, preferences, prepared resources, capability authorizations, recommendations) |
 
-**Exhaustiveness totals: 174 `src` + 20 `tools` + 216 `test` (209 + 7) + 6 workflows + 40 migrations = 456 files. Every row above appears in exactly one phase below.**
+**Exhaustiveness totals: 180 `src` + 20 `tools` + 222 `test` (215 + 7) + 6 workflows + 40 migrations = 468 files. Every row above appears in exactly one phase below.**
 
 ## 4. Phase plan (ordered by consequence: user-facing trust surfaces first)
 
@@ -112,7 +116,7 @@ Audit lanes: **C** = correctness (does it do what it claims) · **T** = trust-bo
 
 | Slice | Areas (files) | Core sections applied | Lanes | Completion evidence (exact checks) | Stop conditions |
 |-------|---------------|----------------------|-------|------------------------------------|-----------------|
-| 3.1 | `src/truth/` (33): pipeline, admission, adjudication, provenance, snapshots, durable validation | §34–§38; principles 1, 2, 5, 12; Epistemic State statuses; anti-goals (Consensus Machine, Perfect Truth Machine) | T, C | `npm run check`; full v36-* cluster (19 files) + `truth.test.ts`; branded admission boundary intact (no raw-evidence bypass) | Weakening admission/verification → stop; needs Assumption Guard build → F6 architecture gate |
+| 3.1 | `src/truth/` (33): pipeline, admission, adjudication, provenance, snapshots, durable validation | §34–§38; principles 1, 2, 5, 12; Epistemic State statuses; anti-goals (Consensus Machine, Perfect Truth Machine) | T, C | `npm run check`; full v36-* cluster (19 files) + `truth.test.ts`; branded admission boundary intact (no raw-evidence bypass) | Weakening admission/verification → stop; Assumption Guard changes beyond the merged #164 gate → Owner decision (F6 retained, not re-scoped) |
 | 3.2 | `src/decision/` (12) + `src/engine.ts`, `src/domain.ts` | §33, §42; principles 5, 6, 9, 20; Problem Decomposition | T, C, R | `npm run check`; decision/generalized-engine/frontier/coverage tests; decisions traceable to admitted evidence only | New decision criteria without qualified adapter + Owner basis → stop |
 | 3.3 | `src/auth/` (3), `src/capabilities/` (3), `capability-execution-policy.ts`, `model-assistance-store.ts` | §20; principle 19; decision→authorization→execution separation (CA-01) | T, C | `npm run check`; auth/capability tests; no capability gains authority semantics | Authorization-semantics change → Owner decision required, stop |
 | 3.4 | `src/conversation/` (11), `src/action-preparation/` (1) | §5, §15; principles 1, 12; governed admission before presentation | T, C | `npm run check`; conversation/reference/membership tests; prepared drafts stay non-factual, non-user-authored | Draft authority upgrade (factual/user-authored) → Owner decision, stop |
@@ -134,9 +138,9 @@ Audit lanes: **C** = correctness (does it do what it claims) · **T** = trust-bo
 | 5.1 | `tools/` (20) | Tools are evidence/working state, not Product authority (LAT-SHARED-00) | C | Changed harness runs green on its documented invocation; no `src/` coupling introduced | Tool output cited as Product PASS → stop and relabel scope |
 | 5.2 | `test/` support (7) + per-area regression additions | CA-04: tests establish tested contracts only; Core examples never become fixtures | C | `npm run check`; new tests target changed boundary; held-out inputs kept out of implementation | Fixture derived from Core illustration → remove, stop slice |
 | 5.3 | `.github/workflows/` (6) | CI proves tested contracts only (CA-04); one durable core lane owns ordinary validation | C | `test/ci-workflow-scope.test.ts` passes; no new required lanes; no paid-capacity assumptions | New permanent lane for milestone/incident/experiment → stop (needs Owner approval) |
-| 5.4 | F8 trust-outcome telemetry (design only until gated) | §44 Distance to Confident Action; §45 outcome signals | — | Design note + Owner questions; zero code until Owner authorizes measurement surface | Implementation without Owner authorization → stop |
+| 5.4 | F8 trust-outcome telemetry — SCOPED per DP-007/DP-009 (schema may proceed; implementation sequenced behind stable behavior) | §44 Distance to Confident Action; §45 outcome signals | — | Schema + Owner questions; zero implementation until behavior is stable and Owner authorizes the measurement surface | Implementation ahead of stable behavior or without Owner authorization → stop |
 
-**Owner-question backlog (no inferred requirements):** OD-001–OD-004 re-mapping values; F4 Action Engine scope/home; F6 Assumption Guard scope/blocking policy; F7 unknown-roadmap routing (ask vs research vs verify thresholds); F5 composer-frame keep/kill; F8 telemetry surface and storage.
+**Owner-question backlog (no inferred requirements):** F7 unknown-roadmap routing (ask vs research vs verify thresholds). Closed or resolved — not backlog: OD-001–OD-004 (closed mapping per DP-007, A4); F4 (scoped, ready for implementation planning); F5 (resolved on main, #161); F6 (implemented on main, #164; retained); F8 (scoped per DP-007/DP-009). **[REVIEWER DECISIONS before downstream planning: F4 acceptance-criteria list; F8/DP-009 event-family list.]**
 
 ## 5. Per-slice validation rule
 
@@ -157,7 +161,7 @@ Green CI / `NO_MATERIAL_FINDINGS` never equals Product PASS, merge authorization
 | Evidence bound to SHAs | Every claim cites repo + branch + SHA + exact command; old evidence is not current evidence after code/dependency/requirement/model changes (LAT-SHARED-01 freshness). |
 | Claim states | Use `KNOWN` / `CLAIMED` / `INFERRED` / `UNKNOWN` / `DECISIVE_UNKNOWN` precisely; repetition never promotes a claim; contradictions preserved, unsupported claims downgraded. |
 | Recurring-failure guard | Before repeating a repair in the same failure class, classify by example/symptom/mechanism/owning boundary; after two materially related local cognition repairs without held-out generalization, presume the boundary is wrong and escalate under CA-05. |
-| Frozen / deferred list | (a) Composer branch `ada22fa` + `fix/composer-info-dump-placement` — parked, no action; (b) OD-001–OD-004 gate — Owner input pending; (c) F4/F6 architecture flags — no building without explicit Owner authority; (d) slice-1 — PAUSED by Owner; (e) slices 5.x tooling/CI — no new lanes, benchmarks, or paid capacity. |
+| Frozen / deferred list | (a) Composer `ada22fa` framing — SUPERSEDED by merged #161, no action; (b) OD-001–OD-004 gate — CLOSED per DP-007 (A4); (c) F4 scoped — implementation planning only, no building without explicit Owner authority; F6 implemented (#164) and retained, not re-scoped; (d) slice-1 — PAUSED by Owner (wording slice `feb8e82` merged on main; audited as-is on resume); (e) slices 5.x tooling/CI — no new lanes, benchmarks, or paid capacity. |
 | Handoff contract | Per-slice reports use LAT-SHARED-02 fields (`STATUS/BASE/CANDIDATE/USER-FACING OUTCOME/CHANGED BOUNDARY/IMPLEMENTATION CLAIMS/VALIDATION/DEPENDENCY/CORE BOUNDARIES/LIMITATIONS/DEVIATIONS`); validator handoff ends with the fenced complete context block. |
 
 ---
