@@ -1,0 +1,20 @@
+# Normalize text files so repository checks behave identically on every platform.
+#
+# GitHub's Windows runners check out CRLF while Linux/macOS checkouts stay LF.
+# Text assertions that read committed files must not depend on which runner
+# produced the checkout, so committed text is stored and checked out as LF.
+* text=auto eol=lf
+
+# Shell/Python tooling is executed directly by CI; keep it LF-only and executable.
+*.sh text eol=lf
+*.mjs text eol=lf
+*.py text eol=lf
+
+# Binary assets must never be line-ending translated.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.woff binary
+*.woff2 binary

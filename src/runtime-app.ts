@@ -26,6 +26,10 @@ import {
   type AcceptedChoiceStore,
 } from "./intent/accepted-choice-store.js";
 import { registerConsultationIntake } from "./consultation-intake.js";
+import {
+  createSubjectRateLimiter,
+  type SubjectRateLimiter,
+} from "./ratelimit/subject-limiter.js";
 import { buildCanonicalApp } from "./http-app.js";
 import { registerConversationApi } from "./conversation/conversation-api.js";
 import { backfillLegacyConversationKnowledgeReferences } from "./conversation/conversation-reference-backfill.js";
@@ -129,6 +133,12 @@ export interface RuntimeAppOptions {
   solandraAdvisory?: SolandraAdvisoryRuntime;
   solandraActionPreparer?: SolandraActionPreparer;
   solandraKnowledgePresenter?: SolandraKnowledgePresenter;
+  /**
+   * Override for the per-authenticated-subject intake rate limiter. Defaults
+   * to a limiter resolved from runtime config (deployment-configurable with
+   * safe defaults), so the canonical app always rate-limits intake.
+   */
+  subjectRateLimiter?: SubjectRateLimiter;
 }
 
 function nonNegativeDelay(value: number | undefined, fallback: number, name: string): number {
@@ -525,6 +535,11 @@ export async function createRuntimeApp(
   const authenticatedApiSubject = (request: Parameters<typeof getAuthenticatedSubject>[0]): string =>
     getAuthenticatedSubject(request).subjectId;
 
+  const subjectRateLimiter = options.subjectRateLimiter ?? createSubjectRateLimiter({
+    maxRequests: config.intakeSubjectRateLimitMaxRequests,
+    windowMs: config.intakeSubjectRateLimitWindowMs,
+  });
+
   const app = buildCanonicalApp({
     runStore,
     truthPipeline,
@@ -561,6 +576,7 @@ export async function createRuntimeApp(
     ...(options.solandraActionPreparer ? { solandraActionPreparer: options.solandraActionPreparer } : {}),
     ...(options.solandraKnowledgePresenter ? { solandraKnowledgePresenter: options.solandraKnowledgePresenter } : {}),
     apiSubject: authenticatedApiSubject,
+    subjectRateLimiter,
   });
   registerRunEventStream(app, { runStore });
   registerDecisionPlanApi(app, { decisionPlanStore });

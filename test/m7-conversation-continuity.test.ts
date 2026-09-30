@@ -20,6 +20,8 @@ function config(database: string | undefined, autoMigrate: boolean): RuntimeConf
     androidModelRelayToken: undefined,
     androidModelRelayModel: "android-local-prototype",
     androidModelRelayTimeoutMs: 45_000,
+    intakeSubjectRateLimitMaxRequests: 30,
+    intakeSubjectRateLimitWindowMs: 60_000,
   };
 }
 

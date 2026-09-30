@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
-import type { FastifyInstance, FastifyRequest } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { createApiRequestHash, type ApiRunControlStore } from "./api-control-store.js";
+import { guardAdvisoryConclusion } from "./assumption/hook.js";
 import {
   buildPreparedResourceRecord,
   preparedResourceFromRecord,
@@ -89,6 +90,7 @@ import {
   type SolandraRequestedHelp,
 } from "./solandra/cognition.js";
 import type { SolandraKnowledgePresenter } from "./solandra/knowledge-presenter.js";
+import type { SubjectRateLimiter } from "./ratelimit/subject-limiter.js";
 
 const IDEMPOTENCY_RETENTION_MS = 24 * 60 * 60 * 1_000;
 const MAX_RUN_CONTEXT_ITEMS = 32;
@@ -137,6 +139,14 @@ export interface ConsultationIntakeOptions {
   solandraActionPreparer?: SolandraActionPreparer;
   solandraKnowledgePresenter?: SolandraKnowledgePresenter;
   apiSubject?: string | ((request: FastifyRequest) => string);
+  /**
+   * Optional per-authenticated-subject fixed-window limiter shared by the two
+   * expensive intake routes. Omitted compositions keep existing behavior.
+   * The limiter runs inside the route handlers, after the
+   * authenticated-subject boundary, so unauthenticated requests still receive
+   * the existing 401 without consuming budget or changing auth semantics.
+   */
+  subjectRateLimiter?: SubjectRateLimiter;
 }
 
 function digestHex(...parts: string[]): string {
@@ -285,6 +295,9 @@ function publicCognition(result: SolandraCognitionResult | undefined): unknown {
       authority: "NON_AUTHORITATIVE_CONVERSATION",
       factualAuthority: false,
       mode: "CONVERSATION",
+      // Ephemeral, turn-scoped presentation decision. It is deliberately not
+      // written to conversation_responses, so it never becomes durable state.
+      presentationPlacement: result.presentationPlacement ?? "TURN",
     };
   }
   return {
@@ -662,10 +675,32 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
   const apiSubjectForRequest = typeof configuredApiSubject === "function"
     ? configuredApiSubject
     : () => configuredApiSubject ?? "fixture-user";
+  const subjectRateLimiter = options.subjectRateLimiter;
+
+  /**
+   * Reject flooded subjects before any intake work. Runs inside the route
+   * handlers so the authenticated-subject boundary (which 401s first) keeps
+   * its existing behavior and auth semantics are untouched. Returns the sent
+   * 429 reply when limited, otherwise undefined.
+   */
+  function intakeRateLimitReply(
+    request: FastifyRequest,
+    reply: FastifyReply,
+  ): FastifyReply | undefined {
+    if (subjectRateLimiter === undefined) return undefined;
+    const verdict = subjectRateLimiter.check(apiSubjectForRequest(request));
+    if (verdict.allowed) return undefined;
+    const retryAfterSeconds = Math.max(1, Math.ceil(verdict.retryAfterMs / 1_000));
+    return reply.status(429)
+      .header("Retry-After", String(retryAfterSeconds))
+      .send({ error: "INTAKE_RATE_LIMITED" });
+  }
 
   app.post<{ Params: { conversationId: string } }>(
     "/api/v1/conversations/:conversationId/turns",
     async (request, reply) => {
+      const limited = intakeRateLimitReply(request, reply);
+      if (limited !== undefined) return limited;
       const parsed = consultationTurnSchema.safeParse(request.body);
       if (!parsed.success) {
         return reply.status(400).send({ error: "INVALID_CONSULTATION_TURN", details: parsed.error.flatten() });
@@ -739,6 +774,9 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
       const conversationResponses = await options.conversationResponseStore.listByConversation(conversationId);
       const replayedConversationResponse = conversationResponses.find((response) => response.sourceMessageId === sourceMessage.messageId);
       if (replayedConversationResponse) {
+        // A replayed turn carries no presentationPlacement: the decision is
+        // turn-scoped and never persisted, so the response resolves to the TURN
+        // default and the full answer renders in the turn.
         return reply.status(200).send({
           status: "CONVERSATION_COMPLETED",
           presentation: { assistantMessage: replayedConversationResponse.content },
@@ -1327,6 +1365,25 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
           return reply.status(422).send({ error: "SOLANDRA_ADVISORY_FAILED", message });
         }
         if (advisory.result.status === "RECOMMENDATION") {
+          // Assumption Guard (DP-002/DP-004): REQUIRED Confidence-stage gate
+          // before this conclusion stands. Clears invisibly on the common
+          // path; escalates only a Solandra-flagged user-resolvable blocker
+          // as a single natural question. Reads the advisory shape additively.
+          const assumptionScreening = guardAdvisoryConclusion({
+            recommendation: advisory.result,
+            governedUncertainties: governed.flatMap((item) => item.knowledge.uncertainties),
+          });
+          if (!assumptionScreening.cleared && assumptionScreening.question !== undefined) {
+            return reply.status(202).send({
+              status: "NEEDS_CLARIFICATION",
+              acceptedUnderstanding: authoritativeObjective(version),
+              intentScopeId,
+              intentVersionId: version.intentVersionId,
+              question: assumptionScreening.question,
+              confirmationExample: null,
+              interpretation: publicCognition(cognition),
+            });
+          }
           const recommendation = await establishConversationalRecommendation({
             store: options.recommendationStore,
             conversationId,
@@ -1474,6 +1531,8 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
   app.post<{ Params: { conversationId: string; proposalId: string } }>(
     "/api/v1/conversations/:conversationId/clarifications/:proposalId/confirm",
     async (request, reply) => {
+      const limited = intakeRateLimitReply(request, reply);
+      if (limited !== undefined) return limited;
       const parsed = clarificationTurnSchema.safeParse(request.body);
       if (!parsed.success) {
         return reply.status(400).send({ error: "INVALID_CONSULTATION_CLARIFICATION", details: parsed.error.flatten() });
@@ -1822,6 +1881,28 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
           knowledgeReference,
           advisory: advisory.result,
           presentation: { assistantMessage },
+        });
+      }
+
+      // Assumption Guard (DP-002/DP-004): same REQUIRED Confidence-stage gate
+      // as the conversational path. Additive read of the advisory shape.
+      const continuationScreening = guardAdvisoryConclusion({
+        recommendation: advisory.result,
+        governedUncertainties: governedKnowledge.flatMap((item) => item.knowledge.uncertainties),
+      });
+      if (!continuationScreening.cleared && continuationScreening.question !== undefined) {
+        const guardQuestion = continuationScreening.question;
+        return reply.send({
+          runId: run.id,
+          status: run.status,
+          outcome,
+          knowledgeReference,
+          advisory: {
+            status: "NEEDS_CLARIFICATION",
+            question: guardQuestion,
+            reason: "The draft recommendation depends on something only you can confirm, so I asked before standing by it.",
+          },
+          presentation: { assistantMessage: guardQuestion },
         });
       }
 

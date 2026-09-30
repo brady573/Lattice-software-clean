@@ -14,11 +14,11 @@ const expectedActionPins = new Map<string, string>([
 
 const expectedRunners = new Map<string, string>([
   ['core-validation.yml', 'windows-latest'],
-  ['postgres-integration-validation.yml', 'ubuntu-latest'],
-  ['browser-lifecycle-validation.yml', 'ubuntu-latest'],
-  ['live-solandra-cognition-validation.yml', 'ubuntu-latest'],
-  ['render-blueprint-validation.yml', 'ubuntu-latest'],
-  ['deployed-functional-validation.yml', 'ubuntu-latest'],
+  ['postgres-integration-validation.yml', 'ubuntu-24.04'],
+  ['browser-lifecycle-validation.yml', 'ubuntu-24.04'],
+  ['live-solandra-cognition-validation.yml', 'ubuntu-24.04'],
+  ['render-blueprint-validation.yml', 'ubuntu-24.04'],
+  ['deployed-functional-validation.yml', 'ubuntu-24.04'],
 ]);
 
 const workflowNames = readdirSync(workflowDirectory)

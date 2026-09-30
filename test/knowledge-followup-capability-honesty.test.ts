@@ -188,7 +188,7 @@ test("limited follow-ups preserve intent and expose exact v0.1 capability bounda
       simpler.outcome.uncertainties.some((item: string) => item.includes("does not perform genuine language simplification")),
       false,
     );
-    assert.match(simpler.presentation.assistantMessage, /^The retrieved source material reports:/u);
+    assert.match(simpler.presentation.assistantMessage, /^What the retrieved sources report:/u);
     assert.match(simpler.presentation.assistantMessage, /stable source-grounded statement/iu);
     assert.match(simpler.presentation.assistantMessage, /does not by itself independently verify/u);
     assert.doesNotMatch(simpler.presentation.assistantMessage, /Model assistance|couldn't simplify/iu);

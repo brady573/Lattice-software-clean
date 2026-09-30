@@ -326,7 +326,7 @@ test("decision-rationale Resources hydrate frontier, tie, unresolved, and winner
         tiedCandidateIds: [],
         materialUnknowns: [],
       },
-      expected: /Frontier: candidate-a, candidate-b/u,
+      expected: /Close alternatives still in play: candidate-a, candidate-b/u,
     },
     {
       decision: {

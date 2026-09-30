@@ -125,7 +125,7 @@ test("Issue #91: partial source material still reaches V36 while incompleteness 
   assert.equal(knowledge.provenance.length, 1);
   assert.ok(knowledge.uncertainties.some((item) => item.includes("source provider limited further requests")));
   const message = await renderKnowledgeResponseForRun(knowledge, run("issue-91-partial-v36"));
-  assert.match(message, /retrieved source material reports/iu);
+  assert.match(message, /What the retrieved sources report/iu);
   assert.match(message, /source provider limited further requests/iu);
 });
 
@@ -145,7 +145,7 @@ test("Issue #91: zero-source partial acquisition is distinct from complete no-re
     run("issue-91-empty-partial"),
   );
   assert.match(partialMessage, /source request timed out/iu);
-  assert.doesNotMatch(partialMessage, /couldn't establish enough relevant evidence/iu);
+  assert.doesNotMatch(partialMessage, /Nothing I found holds up well enough to answer this/iu);
 
   const completePipeline = new KnowledgeAcquisitionTruthPipeline(new FixedProvider({
     sources: [],

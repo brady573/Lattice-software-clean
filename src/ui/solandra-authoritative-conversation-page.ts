@@ -128,10 +128,40 @@ const directConversationHandling = `        if (body.status === "CONVERSATION_CO
             ? body.presentation.assistantMessage.trim()
             : "";
           if (!assistantMessage) throw new Error("Solandra returned no usable response.");
+          // Single marking per surface: the Composer frame header marks the Composer
+          // surface and the turn suffix marks the turn surface, so the Composer
+          // pointer turn carries no suffix. Solandra's explicit placement decision
+          // moves the full answer first; the suffix below applies to short
+          // non-authoritative turns only. A placement decision never moves an
+          // authoritative (or authority-absent) answer, and an absent decision is
+          // the pre-existing TURN placement.
+          const isNonAuthoritative = body.conversationResponse?.factualAuthority === false
+            || body.interpretation?.factualAuthority === false;
+          if (isNonAuthoritative && body.interpretation?.presentationPlacement === "COMPOSER_FULL_ANSWER") {
+            renderTentativeAnswer(assistantMessage);
+            appendSolandraTurn("I’ve put the full answer in the Composer. It’s general knowledge, not verified.");
+            return;
+          }
+          if (isNonAuthoritative) {
+            appendSolandraTurn(assistantMessage + "\\n\\nGeneral knowledge — not verified.");
+            return;
+          }
           appendSolandraTurn(assistantMessage);
           return;
         }
         if (!body.runId) throw new Error("I couldn't establish the requested work safely.");`;
+
+const tentativeAnswerStyles = `
+    .tentative-body { white-space: pre-wrap; line-height: 1.58; margin: 8px 0; }
+`;
+
+const tentativeAnswerRendering = `      const renderTentativeAnswer = (message) => {
+        composerHasProductContent = true;
+        composer.innerHTML = '<div class="tentative-answer"><div class="finding-status">General knowledge — not verified</div>'
+          + '<p class="muted">This is my general answer, not established fact. Check anything that matters before relying on it.</p>'
+          + '<div class="tentative-body">' + escapeHtml(message) + '</div></div>';
+      };
+`;
 
 const legacyPreparedResourceRendering = `      const renderPreparedResource = (title, body) => {
         composerHasProductContent = true;
@@ -173,8 +203,12 @@ const preparedResourceTrustRendering = `      const renderPreparedResource = (re
 export function renderSolandraAuthoritativeConversationPage(): string {
   return renderSolandraConversationPage()
     .replaceAll("fetch(", "window.ownerFetch(")
-    .replace("</style>", `${ownerAccessStyles}</style>`)
+    .replace("</style>", `${ownerAccessStyles}${tentativeAnswerStyles}</style>`)
     .replace(legacyPreparedResourceRendering, preparedResourceTrustRendering)
+    .replace(
+      "      const renderOutcome = (outcome, presentation, options = {}) => {",
+      `${tentativeAnswerRendering}      const renderOutcome = (outcome, presentation, options = {}) => {`,
+    )
     .replace(
       '          renderPreparedResource(outcome.resource.title, options.preparedBody ?? outcome.resource.body);',
       '          renderPreparedResource(outcome.resource, outcome.knowledge, options.preparedBody ?? outcome.resource.body);',

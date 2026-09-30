@@ -125,7 +125,7 @@ test("investigation cognition failure remains a capability failure instead of no
   assert.deepEqual(knowledge.findings, []);
   const message = await renderKnowledgeResponseForRun(knowledge, run("knowledge-investigation-failure"));
   assert.match(message, /couldn't complete the external investigation/iu);
-  assert.doesNotMatch(message, /couldn't establish enough relevant evidence/iu);
+  assert.doesNotMatch(message, /Nothing I found holds up well enough to answer this/iu);
   assert.doesNotMatch(JSON.stringify(execution.bundle), /injected model runtime failure/iu);
 });
 
@@ -169,7 +169,7 @@ test("raw source acquisition failure remains distinct from completed search insu
   assert.deepEqual(knowledge.findings, []);
   const message = await renderKnowledgeResponseForRun(knowledge, run("knowledge-source-failure"));
   assert.match(message, /couldn't reach the external information source/iu);
-  assert.doesNotMatch(message, /couldn't establish enough relevant evidence/iu);
+  assert.doesNotMatch(message, /Nothing I found holds up well enough to answer this/iu);
 });
 
 test("actual Wikimedia source failure crosses as source-unavailable", async () => {
@@ -346,7 +346,7 @@ test("fresh general-reference material is presented only as a source report, not
   );
 
   assert.equal(knowledge.provenance[0]?.evidentiarySuitability, "GENERAL_REFERENCE");
-  assert.match(message, /retrieved source material reports/iu);
+  assert.match(message, /What the retrieved sources report/iu);
   assert.match(message, /does not by itself independently verify the broader real-world claim/iu);
   assert.doesNotMatch(message, /^The observatory opens to the public at 7 p\.m\./iu);
 });

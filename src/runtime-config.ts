@@ -32,6 +32,10 @@ export interface RuntimeConfig {
   androidModelRelayToken: string | undefined;
   androidModelRelayModel: string;
   androidModelRelayTimeoutMs: number;
+  /** Per-authenticated-subject fixed-window budget shared by the expensive intake routes. */
+  intakeSubjectRateLimitMaxRequests: number;
+  /** Fixed window length in milliseconds for the intake subject budget. */
+  intakeSubjectRateLimitWindowMs: number;
 }
 
 function parseBoolean(value: string | undefined, fallback: boolean): boolean {
@@ -169,6 +173,26 @@ function parseAndroidRelayTimeout(value: string | undefined): number {
   );
 }
 
+function parseIntakeSubjectRateLimitMaxRequests(value: string | undefined): number {
+  return parseInteger(
+    value,
+    30,
+    "LATTICE_INTAKE_SUBJECT_RATE_LIMIT_MAX_REQUESTS",
+    1,
+    100_000,
+  );
+}
+
+function parseIntakeSubjectRateLimitWindowMs(value: string | undefined): number {
+  return parseInteger(
+    value,
+    60_000,
+    "LATTICE_INTAKE_SUBJECT_RATE_LIMIT_WINDOW_MS",
+    1_000,
+    3_600_000,
+  );
+}
+
 function parseAuthenticationMode(
   value: string | undefined,
   deploymentMode: DeploymentMode,
@@ -296,5 +320,11 @@ export function resolveRuntimeConfig(
       "LATTICE_ANDROID_MODEL_RELAY_MODEL",
     ),
     androidModelRelayTimeoutMs: parseAndroidRelayTimeout(env.LATTICE_ANDROID_MODEL_RELAY_TIMEOUT_MS),
+    intakeSubjectRateLimitMaxRequests: parseIntakeSubjectRateLimitMaxRequests(
+      env.LATTICE_INTAKE_SUBJECT_RATE_LIMIT_MAX_REQUESTS,
+    ),
+    intakeSubjectRateLimitWindowMs: parseIntakeSubjectRateLimitWindowMs(
+      env.LATTICE_INTAKE_SUBJECT_RATE_LIMIT_WINDOW_MS,
+    ),
   };
 }

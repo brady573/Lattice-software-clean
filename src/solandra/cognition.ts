@@ -67,9 +67,38 @@ export const solandraSemanticProposalSchema = z.object({
 }).strict();
 export type SolandraSemanticProposal = z.infer<typeof solandraSemanticProposalSchema>;
 
+/**
+ * Solandra's explicit presentation-placement decision for a conversational turn.
+ *
+ * TURN keeps the full answer in the conversation turn. COMPOSER_FULL_ANSWER asks
+ * Lattice to carry the full answer in the Composer beside the conversation,
+ * because the answer is a substantial reference the USER benefits from having
+ * available while the conversation continues.
+ *
+ * This is presentation only. It carries no truth, evidence, provenance,
+ * uncertainty, decision, authorization, execution, or verification authority, and
+ * it never changes what Solandra asserted or what Lattice established.
+ */
+export const solandraPresentationPlacementSchema = z.enum([
+  "TURN",
+  "COMPOSER_FULL_ANSWER",
+]);
+export type SolandraPresentationPlacement = z.infer<typeof solandraPresentationPlacementSchema>;
+
+const DEFAULT_PRESENTATION_PLACEMENT: SolandraPresentationPlacement = "TURN";
+
 const solandraConversationOutputSchema = z.object({
   mode: z.literal("CONVERSATION"),
   response: z.string().min(1).max(16_000),
+  /**
+   * Ephemeral, turn-scoped placement decision. Absent and null both mean Solandra
+   * expressed no preference, which Lattice resolves to TURN. Null is accepted for
+   * the same reason as the rest of the cognition contract's absent values: the
+   * default is defined and safe, so an undecided placement must not fail an
+   * otherwise valid answer. Any other value is rejected, so the decision space
+   * stays closed.
+   */
+  presentationPlacement: solandraPresentationPlacementSchema.nullish(),
 }).strict();
 
 const solandraGovernedOutputSchema = z.object({
@@ -130,6 +159,11 @@ export interface SolandraCognitionInput {
 export type SolandraConversationCognitionResult = Readonly<{
   mode: "CONVERSATION";
   response: string;
+  /**
+   * Resolved presentation-placement decision. Omitted by legacy injected
+   * runtimes; absence means the default TURN placement.
+   */
+  presentationPlacement?: SolandraPresentationPlacement;
   invocationProvenance: ModelInvocationProvenance;
 }>;
 
@@ -241,7 +275,8 @@ function buildCognitionRequest(model: string, input: SolandraCognitionInput): Ca
           "A conversational answer may contain ordinary explanatory prose. Do not claim that conversational prose is verified or governed Knowledge. Do not add repetitive authority warnings unless they are useful to the USER's request.",
           "Use GOVERNED only when the current request materially requires a framework trust boundary: establishing or refreshing trustworthy external factual Knowledge; exact historical Knowledge provenance or transformation; a durable Recommendation or exact option/choice reference; confirmation of an exact pending Intent proposal; material meaning that must enter Intent Integrity for downstream governed work; or preparation of a governed resource/action boundary.",
           "Do not route to governed Knowledge merely because an ordinary answer could contain factual language. Use it when factual establishment, freshness, sourcing, or downstream reliance materially matters.",
-          "When mode is CONVERSATION, return exactly JSON {\"mode\":\"CONVERSATION\",\"response\":\"natural response\"} and no other fields.",
+          "When mode is CONVERSATION, set presentationPlacement to COMPOSER_FULL_ANSWER when your full answer is a substantial reference the USER benefits from having alongside the conversation, such as a procedure, a reference, or a checklist, and TURN otherwise. Judge it by what the answer is for the USER, not by its length, formatting, or subject. It is a presentation choice only and never changes what the answer asserts.",
+          "When mode is CONVERSATION, return exactly JSON {\"mode\":\"CONVERSATION\",\"response\":\"natural response\",\"presentationPlacement\":\"TURN|COMPOSER_FULL_ANSWER\"} and no other fields.",
           "When mode is GOVERNED, do not answer the user's factual question in projection. Project only the minimum structure required by the existing Lattice boundary.",
           "For a governed projection, classify objectiveRelation by comparing the Current USER message with the Current canonical objective. Being in the same Conversation or sharing generic words is not evidence that the USER is continuing the same objective.",
           "Use NEW_OBJECTIVE when governed downstream work would target a materially different question, task, goal, or decision. Use CONTINUE when the current governed request materially depends on the current objective or supplied governed context. Use CORRECTION when the USER revises the meaning of the same governed objective.",
@@ -398,6 +433,7 @@ export class ModelSolandraCognitiveRuntime implements SolandraCognitiveRuntime {
       return Object.freeze({
         mode: "CONVERSATION" as const,
         response: parsed.response.trim(),
+        presentationPlacement: parsed.presentationPlacement ?? DEFAULT_PRESENTATION_PLACEMENT,
         invocationProvenance: result.audit.invocationProvenance,
       });
     }
