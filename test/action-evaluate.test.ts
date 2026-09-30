@@ -128,6 +128,26 @@ function escalateCase(): ActionEngineInput {
   };
 }
 
+function investigateCase(): ActionEngineInput {
+  return {
+    candidate: cand("Approve the refund for the duplicate charge."),
+    calibration: clearCal(),
+    qualifiedFacts: [
+      fact({ source: "KNOWLEDGE_V36", consequence: "LOW", reversibility: "REVERSIBLE", support: "INSUFFICIENT", infoStepAvailable: true }),
+    ],
+  };
+}
+
+function testCase(): ActionEngineInput {
+  return {
+    candidate: cand("Migrate the archive server overnight."),
+    calibration: clearCal(),
+    qualifiedFacts: [
+      fact({ source: "KNOWLEDGE_V36", consequence: "LOW", reversibility: "REVERSIBLE", support: "PARTIAL", diagnosticStepAvailable: true }),
+    ],
+  };
+}
+
 test("evaluate composes qualification to selection and echoes action plus reversibility", () => {
   const d = evaluate({ candidate: cand("Approve the refund."),
     calibration: clearCal(), qualifiedFacts: [fact({ source: "KNOWLEDGE_V36", consequence: "LOW", reversibility: "REVERSIBLE", support: "SUFFICIENT" })] });
@@ -144,7 +164,17 @@ test("identical governed inputs give identical decisions; model labels change no
 });
 
 test("user-facing strings carry no internal vocabulary", () => {
-  for (const d of [evaluate(actCase()), evaluate(waitCase()), evaluate(escalateCase())])
+  const act = evaluate(actCase());
+  const wait = evaluate(waitCase());
+  const escalate = evaluate(escalateCase());
+  const investigate = evaluate(investigateCase());
+  const boundedTest = evaluate(testCase());
+  assert.equal(act.mode, "ACT");
+  assert.equal(wait.mode, "WAIT");
+  assert.equal(escalate.mode, "ESCALATE");
+  assert.equal(investigate.mode, "INVESTIGATE");
+  assert.equal(boundedTest.mode, "TEST");
+  for (const d of [act, wait, escalate, investigate, boundedTest])
     assertUserVisibleClean([d.reason, d.expectedOutcome, d.risk, d.verification]);
 });
 
@@ -157,7 +187,8 @@ test("runtime-smuggled step flags cannot move the mode [RF-3 companion]", () => 
   const smuggledInfo = { source: "MODEL_RISK_LABEL", infoStepAvailable: true } as unknown as StructuredActionFact;
   const smuggledOversight = { source: "MODEL_RISK_LABEL", oversightRequired: true } as unknown as StructuredActionFact;
   assert.equal(evaluate({ ...waitCase(), qualifiedFacts: [smuggledInfo] }).mode, "WAIT");
-  assert.notEqual(evaluate({ ...waitCase(), qualifiedFacts: [smuggledOversight] }).mode, "ESCALATE");
+  // Smuggled source is dropped by the allowlist → no oversight → base WAIT path.
+  assert.equal(evaluate({ ...waitCase(), qualifiedFacts: [smuggledOversight] }).mode, "WAIT");
 });
 
 test("evaluate output is frozen", () => {
