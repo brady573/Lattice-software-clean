@@ -39,6 +39,7 @@ test("revision surface reports the exact built commit SHA", async () => {
     try {
       const response = await app.inject({ method: "GET", url: "/api/version" });
       assert.equal(response.statusCode, 200);
+      assert.equal(response.headers["cache-control"], "no-store");
       assert.equal(response.json().commit, head);
     } finally {
       await app.close();
@@ -80,6 +81,45 @@ test("revision surface stays outside the authenticated-subject boundary", async 
       assert.equal(version.json().commit, "boundary-probe-sha");
       const guarded = await app.inject({ method: "GET", url: "/api/v1/runs/missing" });
       assert.equal(guarded.statusCode, 401);
+    } finally {
+      await app.close();
+    }
+  } finally {
+    restoreRevisionEnv(snapshot);
+  }
+});
+
+test("revision surface falls back to the platform-provided commit when no explicit SHA was injected", async () => {
+  const snapshot = snapshotRevisionEnv();
+  delete process.env.LATTICE_BUILD_SHA;
+  delete process.env.LATTICE_BUILD_TIME;
+  process.env.RENDER_GIT_COMMIT = "render-sha";
+  try {
+    const app = buildApp();
+    try {
+      const response = await app.inject({ method: "GET", url: "/api/version" });
+      assert.equal(response.statusCode, 200);
+      assert.equal(response.json().commit, "render-sha");
+    } finally {
+      await app.close();
+    }
+  } finally {
+    restoreRevisionEnv(snapshot);
+  }
+});
+
+test("revision surface serves the construction-time snapshot, immune to later env mutation", async () => {
+  const snapshot = snapshotRevisionEnv();
+  process.env.LATTICE_BUILD_SHA = "construction-time-sha";
+  delete process.env.LATTICE_BUILD_TIME;
+  delete process.env.RENDER_GIT_COMMIT;
+  try {
+    const app = buildApp();
+    try {
+      process.env.LATTICE_BUILD_SHA = "mutated-after-construction";
+      const response = await app.inject({ method: "GET", url: "/api/version" });
+      assert.equal(response.statusCode, 200);
+      assert.equal(response.json().commit, "construction-time-sha");
     } finally {
       await app.close();
     }

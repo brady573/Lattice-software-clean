@@ -58,9 +58,16 @@ export function createHttpCore(options: HttpCoreOptions = {}): HttpCore {
 
   // Unauthenticated read-only served-revision surface. It deliberately lives
   // outside the `/api/v1/` authenticated-subject boundary so any observer can
-  // attribute validation evidence to the exact built revision. Existing routes
-  // are untouched.
-  app.get("/api/version", async () => resolveBuildInfo());
+  // attribute validation evidence to the exact built revision. The revision is
+  // snapshotted once here at construction so the served value is immune to
+  // mid-process environment mutation, and responses are marked `no-store` so
+  // no cache can serve a previous deployment's revision as current evidence.
+  // Existing routes are untouched.
+  const buildInfo = resolveBuildInfo();
+  app.get("/api/version", async (_request, reply) => {
+    reply.header("cache-control", "no-store");
+    return buildInfo;
+  });
 
   app.post<{ Params: { runId: string } }>("/api/v1/runs/:runId/cancel", async (request, reply) => {
     const current = await runStore.get(request.params.runId);
