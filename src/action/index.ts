@@ -7,3 +7,4 @@ export * from "./types.js";
 export * from "./projection.js";
 export * from "./qualify.js";
 export * from "./select.js";
+export * from "./evaluate.js";
