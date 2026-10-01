@@ -3,7 +3,7 @@
  *
  * The ONLY F6-touching surface. Reads a narrow structural projection of the
  * calibrated state — never the F6 implementation type, never a context bag —
- * and filters governed facts through the fixed 6-member source allowlist.
+ * and filters governed facts through the fixed 7-member source allowlist.
  * Pure, deterministic, dependency-free. No model call, no persistence.
  */
 
