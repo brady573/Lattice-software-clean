@@ -27,6 +27,31 @@ const recommendationSchema = z.object({
   alternatives: z.array(z.string().min(1).max(2_000)).max(16),
 }).strict();
 
+const recommendationEnvelopeSchema = recommendationSchema.extend({ actionCandidate: z.unknown().optional() }).strict();
+
+export const actionCandidateProposalSchema = z.object({
+  action: z.string().min(1).max(2_000),
+  expectedOutcome: z.string().min(1).max(2_000).optional(),
+  verification: z.string().min(1).max(2_000).optional(),
+}).strict();
+export type ActionCandidateProposal = z.infer<typeof actionCandidateProposalSchema>;
+
+export function admitActionCandidate(raw: unknown): ActionCandidateProposal | undefined {
+  try {
+    if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return undefined;
+    const record: Record<string, unknown> = raw as Record<string, unknown>;
+    const stripped: Record<string, unknown> = {};
+    if (record["action"] !== undefined) stripped["action"] = record["action"];
+    if (record["expectedOutcome"] !== undefined) stripped["expectedOutcome"] = record["expectedOutcome"];
+    if (record["verification"] !== undefined) stripped["verification"] = record["verification"];
+    const parsed = actionCandidateProposalSchema.safeParse(stripped);
+    if (!parsed.success) return undefined;
+    return Object.freeze({ ...parsed.data });
+  } catch {
+    return undefined;
+  }
+}
+
 const needsKnowledgeSchema = z.object({
   status: z.literal("NEEDS_KNOWLEDGE"),
   knowledgeNeeds: z.array(z.string().min(1).max(1_000)).min(1).max(16),
@@ -46,7 +71,7 @@ const insufficientBasisSchema = z.object({
 }).strict();
 
 export const solandraAdvisoryResultSchema = z.discriminatedUnion("status", [
-  recommendationSchema,
+  recommendationEnvelopeSchema,
   needsKnowledgeSchema,
   needsClarificationSchema,
   insufficientBasisSchema,
@@ -102,6 +127,7 @@ export interface SolandraAdvisoryInput {
 export interface SolandraAdvisoryRuntimeResult {
   readonly result: SolandraAdvisoryResult;
   readonly invocationProvenance: ModelInvocationProvenance;
+  readonly actionCandidate?: ActionCandidateProposal;
 }
 
 export interface SolandraAdvisoryRuntime {
@@ -367,9 +393,12 @@ export class ModelSolandraAdvisoryRuntime implements SolandraAdvisoryRuntime {
       return Object.freeze({ result, invocationProvenance: response.audit.invocationProvenance });
     }
 
-    const governedFindings = validateAndProjectRecommendationBasis(input, result);
+    const { actionCandidate: rawCandidate, ...strippedResult } = result;
+    const admitted = admitActionCandidate(rawCandidate);
+
+    const governedFindings = validateAndProjectRecommendationBasis(input, strippedResult);
     const auditResponse = await this.runtime.call(
-      buildGroundingAuditRequest(this.model, input, result, governedFindings),
+      buildGroundingAuditRequest(this.model, input, strippedResult, governedFindings),
       {
         correlationId: `solandra-advisory-grounding:${input.conversationId}:${input.userMessageId}`,
         idempotencyKey: `grounding:${input.userMessageId}:${basisDigest}`,
@@ -385,9 +414,18 @@ export class ModelSolandraAdvisoryRuntime implements SolandraAdvisoryRuntime {
       "Solandra advisory grounding verification",
     ));
     const needsKnowledge = needsKnowledgeFromAudit(audit);
+    const finalResult = needsKnowledge ?? strippedResult;
+    const frozenResult = Object.freeze(finalResult);
+    if (needsKnowledge !== undefined || admitted === undefined) {
+      return Object.freeze({
+        result: frozenResult,
+        invocationProvenance: response.audit.invocationProvenance,
+      });
+    }
     return Object.freeze({
-      result: needsKnowledge ?? result,
+      result: frozenResult,
       invocationProvenance: response.audit.invocationProvenance,
+      actionCandidate: admitted,
     });
   }
 }
