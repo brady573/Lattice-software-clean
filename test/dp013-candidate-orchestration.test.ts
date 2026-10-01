@@ -16,6 +16,7 @@ import test from "node:test";
 import { decideActionForFinalization } from "../src/action/projection.js";
 import type { ActionCalibrationSource } from "../src/action/types.js";
 import { projectCandidateToAction } from "../src/solandra/action-candidate.js";
+import { admitActionCandidate } from "../src/solandra/advisory.js";
 
 function clearScreening(): ActionCalibrationSource {
   return {
@@ -96,4 +97,48 @@ test("dp013_orch_weaken_and_ask_preserved_with_candidate", () => {
   });
   assert.equal(r.calibration.resolution, "WEAKEN_AND_ASK");
   assert.ok(r.decision === undefined || r.decision.mode !== "ACT");
+});
+
+/**
+ * DP-013 Task 5 held-out generalization evidence (CA-04).
+ *
+ * Domains/phrasings below were never used in Tasks 1–4 implementation or
+ * tests (cooking, domestic-repair with conversational hedging, freezer
+ * defrosting). Evidence only: these inputs must not shape implementation.
+ */
+test("dp013_heldout_ordinary_prose_action_admits", () => {
+  for (const action of [
+    "Simmer the stock for twenty minutes",
+    "Could you tighten the loose hinge on the garden gate, if you have a moment?",
+  ]) {
+    const admitted = admitActionCandidate({ action });
+    assert.notEqual(admitted, undefined);
+    assert.equal(admitted?.action, action);
+    const candidate = projectCandidateToAction(admitted);
+    assert.notEqual(candidate, undefined);
+    assert.equal(candidate?.action, action);
+    assert.deepEqual(candidate?.facts, []);
+    const r = decideActionForFinalization({
+      screening: clearScreening(),
+      candidate,
+      governedFacts: [],
+    });
+    assert.notEqual(r.decision, undefined);
+    assert.equal(r.decision?.action, action);
+  }
+});
+
+test("dp013_heldout_empty_optional_field_drops_candidate", () => {
+  // Empty-string optional field fails the min(1) bound, so admission fails
+  // atomically: no field-level repair, candidate absent end-to-end.
+  const admitted = admitActionCandidate({ action: "Defrost the freezer", verification: "" });
+  assert.equal(admitted, undefined);
+  const candidate = projectCandidateToAction(admitted);
+  assert.equal(candidate, undefined);
+  const r = decideActionForFinalization({
+    screening: clearScreening(),
+    candidate,
+    governedFacts: [],
+  });
+  assert.equal(r.decision, undefined);
 });
