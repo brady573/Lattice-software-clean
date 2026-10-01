@@ -37,19 +37,9 @@ export const actionCandidateProposalSchema = z.object({
 export type ActionCandidateProposal = z.infer<typeof actionCandidateProposalSchema>;
 
 export function admitActionCandidate(raw: unknown): ActionCandidateProposal | undefined {
-  try {
-    if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return undefined;
-    const record: Record<string, unknown> = raw as Record<string, unknown>;
-    const stripped: Record<string, unknown> = {};
-    if (record["action"] !== undefined) stripped["action"] = record["action"];
-    if (record["expectedOutcome"] !== undefined) stripped["expectedOutcome"] = record["expectedOutcome"];
-    if (record["verification"] !== undefined) stripped["verification"] = record["verification"];
-    const parsed = actionCandidateProposalSchema.safeParse(stripped);
-    if (!parsed.success) return undefined;
-    return Object.freeze({ ...parsed.data });
-  } catch {
-    return undefined;
-  }
+  const parsed = actionCandidateProposalSchema.safeParse(raw);
+  if (!parsed.success) return undefined;
+  return Object.freeze({ ...parsed.data });
 }
 
 const needsKnowledgeSchema = z.object({

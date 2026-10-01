@@ -46,14 +46,24 @@ test("dp013_schema_strictness_preserved_for_unrelated_fields", () => {
   assert.throws(() => solandraAdvisoryResultSchema.parse(validEnvelope({ confidence: 0.9 })));
 });
 
-test("dp013_schema_strips_authority_bearing_candidate_keys", () => {
-  const admitted = admitActionCandidate({
+test("dp013_schema_authority_bearing_candidate_keys_mean_absent_recommendation_preserved", () => {
+  const rawAuthorityBearing = {
     action: "Call back",
     consequence: "LOW",
     support: "SUFFICIENT",
     claimIds: ["c1"],
-  });
-  assert.deepEqual(admitted, { action: "Call back" });
+  };
+  const parsedAuthority = solandraAdvisoryResultSchema.parse(
+    validEnvelope({ actionCandidate: rawAuthorityBearing }),
+  );
+  assert.equal(parsedAuthority.status, "RECOMMENDATION");
+  assert.equal(admitActionCandidate(rawAuthorityBearing), undefined);
+  const rawUnknownKey = { action: "Call back", notebook: "ring twice" };
+  const parsedUnknown = solandraAdvisoryResultSchema.parse(
+    validEnvelope({ actionCandidate: rawUnknownKey }),
+  );
+  assert.equal(parsedUnknown.status, "RECOMMENDATION");
+  assert.equal(admitActionCandidate(rawUnknownKey), undefined);
 });
 
 test("dp013_FAILURE_BOUNDARY_invalid_required_rejects_AND_invalid_candidate_only_removes_eligibility", () => {
