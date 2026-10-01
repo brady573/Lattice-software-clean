@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { emptyIntentState } from "../src/intent/types.js";
 import {
   admitActionCandidate,
+  buildAdvisoryRequest,
   solandraAdvisoryResultSchema,
+  type SolandraAdvisoryInput,
 } from "../src/solandra/advisory.js";
 
 function validEnvelope(overrides: Record<string, unknown> = {}): Record<string, unknown> {
@@ -71,4 +74,66 @@ test("dp013_schema_absent_candidate_identical_behavior", () => {
   const parsed = solandraAdvisoryResultSchema.parse(validEnvelope());
   assert.equal(parsed.status, "RECOMMENDATION");
   assert.equal("actionCandidate" in parsed, false);
+});
+
+function minimalAdvisoryInput(): SolandraAdvisoryInput {
+  return {
+    conversationId: "conv-test",
+    userMessageId: "msg-test",
+    authoritativeIntent: {
+      intentScopeId: "scope-test",
+      intentVersionId: "v-test",
+      version: 1,
+      predecessorIntentVersionId: null,
+      transitionId: "t-test",
+      lineageKind: "INITIAL",
+      lineageTargetIntentVersionId: null,
+      state: emptyIntentState(),
+      createdAt: "2026-10-01T00:00:00.000Z",
+    },
+    authoritativeObjective: "Decide the follow-up plan.",
+    userContext: [],
+    knowledge: [],
+  };
+}
+
+function advisorySystemContent(): string {
+  const request = buildAdvisoryRequest("test-model", minimalAdvisoryInput());
+  const system = request.messages[0];
+  assert.ok(system !== undefined && system.role === "system");
+  assert.equal(typeof system.content, "string");
+  return system.content;
+}
+
+test("dp013_prompt_describes_candidate_as_optional_proposal_only", () => {
+  const content = advisorySystemContent();
+  assert.ok(content.includes("proposal material only"));
+  assert.ok(content.includes("naturally follows the recommendation"));
+});
+
+test("dp013_prompt_prohibits_authorization_classification_mode", () => {
+  const content = advisorySystemContent();
+  assert.ok(content.includes("must not state whether Lattice should authorize or execute it"));
+  assert.ok(content.includes("must not classify its safety, consequence, or reversibility"));
+  assert.ok(content.includes("must not select a mode"));
+});
+
+test("dp013_prompt_has_no_f4_vocabulary", () => {
+  const content = advisorySystemContent();
+  for (const token of ["INVESTIGATE", "TEST", "ACT", "WAIT", "ESCALATE"]) {
+    assert.equal(content.includes(token), false, `system content must not contain ${token}`);
+  }
+});
+
+test("dp013_prompt_contract_shows_optional_candidate_shape", () => {
+  const content = advisorySystemContent();
+  const contractLine = content.split("\n").find((line) => line.startsWith("["));
+  assert.ok(contractLine !== undefined);
+  const contract = JSON.parse(contractLine) as Array<Record<string, unknown>>;
+  assert.ok(Array.isArray(contract));
+  const first = contract[0];
+  assert.ok(first !== undefined);
+  const candidate = first["actionCandidate"] as Record<string, unknown> | undefined;
+  assert.ok(candidate !== undefined && typeof candidate === "object");
+  assert.deepEqual(Object.keys(candidate).sort(), ["action", "expectedOutcome", "verification"]);
 });

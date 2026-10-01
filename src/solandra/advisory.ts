@@ -183,7 +183,7 @@ function parseJsonObject(text: string, label = "Solandra advisory reasoning"): u
   );
 }
 
-function buildAdvisoryRequest(model: string, input: SolandraAdvisoryInput): CanonicalModelRequest {
+export function buildAdvisoryRequest(model: string, input: SolandraAdvisoryInput): CanonicalModelRequest {
   const knowledge = input.knowledge.length === 0
     ? "No governed Knowledge was supplied."
     : input.knowledge.map((item) => [
@@ -205,6 +205,11 @@ function buildAdvisoryRequest(model: string, input: SolandraAdvisoryInput): Cano
       uncertainties: ["drafting explanation of uncertainty; never factual authority"],
       preservedUncertainties: ["copy each material supplied uncertainty used by the recommendation verbatim"],
       alternatives: ["other concise advisory proposal or option"],
+      actionCandidate: {
+        action: "one optional prospective next move as proposal material only",
+        expectedOutcome: "optional expected outcome",
+        verification: "optional verification",
+      },
     },
     { status: "NEEDS_KNOWLEDGE", knowledgeNeeds: ["external fact needed"], reason: "why it is required" },
     { status: "NEEDS_CLARIFICATION", question: "material USER ambiguity that prevents responsible advice", reason: "why it changes the advice" },
@@ -219,6 +224,8 @@ function buildAdvisoryRequest(model: string, input: SolandraAdvisoryInput): Cano
         content: [
           "You are Solandra's advisory reasoning boundary. Provide decision support over authoritative USER intent and governed Knowledge supplied by Lattice.",
           "You are non-authoritative. You may formulate options, compare, evaluate tradeoffs, expose assumptions and uncertainty, recommend, or decline to recommend.",
+          "You may include one optional actionCandidate: a single prospective next move that naturally follows the recommendation, as proposal material only.",
+          "The candidate must not state whether Lattice should authorize or execute it, must not classify its safety, consequence, or reversibility, and must not select a mode.",
           "Do not create or modify canonical USER intent. Do not establish new factual Knowledge. Do not authorize a selection or action. Do not claim execution occurred.",
           "For RECOMMENDATION, recommendation and alternatives are concise advisory proposals. You may originate them when the USER states a decision goal or preferences without already supplying candidate options. Do not return NEEDS_CLARIFICATION merely because the USER did not pre-author the option you would recommend.",
           "Keep recommendation and alternatives as option/proposal text rather than factual support: do not append external factual rationale, source claims, or claims of established performance to those fields. USER-supplied options may be reused naturally when present.",
