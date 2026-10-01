@@ -45,7 +45,8 @@ export type GovernedFactSource =
   | "INTENT_AUTHORITY"
   | "KNOWLEDGE_V36"
   | "DECISION_ENGINE_RESULT"
-  | "CAPABILITY_EFFECT";
+  | "CAPABILITY_EFFECT"
+  | "ACTION_SUPPORT_RULE";
 
 /** Fixed tokens for qualification gaps that block justified action. */
 export type BlockingUnknown =
