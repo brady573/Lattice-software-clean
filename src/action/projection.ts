@@ -3,7 +3,7 @@
  *
  * The ONLY F6-touching surface. Reads a narrow structural projection of the
  * calibrated state — never the F6 implementation type, never a context bag —
- * and filters governed facts through the fixed 6-member source allowlist.
+ * and filters governed facts through the fixed 7-member source allowlist.
  * Pure, deterministic, dependency-free. No model call, no persistence.
  */
 
@@ -17,7 +17,7 @@ import type {
   StructuredActionFact,
 } from "./types.js";
 
-/** The fixed 6-member source allowlist. Anything else is dropped. */
+/** The fixed 7-member source allowlist. Anything else is dropped. */
 const PERMITTED_SOURCES: ReadonlySet<string> = new Set<string>([
   "CANDIDATE_PROPOSAL",
   "F6_CALIBRATED_SIGNAL",
@@ -25,6 +25,7 @@ const PERMITTED_SOURCES: ReadonlySet<string> = new Set<string>([
   "KNOWLEDGE_V36",
   "DECISION_ENGINE_RESULT",
   "CAPABILITY_EFFECT",
+  "ACTION_SUPPORT_RULE",
 ]);
 
 function requireAdjustedConfidence(value: number): number {

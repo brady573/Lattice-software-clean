@@ -19,7 +19,7 @@ import type {
   StructuredActionFact,
 } from "./types.js";
 
-/** The fixed 6-member source allowlist (Tasks 1–2 contract, reused verbatim). */
+/** The fixed 7-member source allowlist (Tasks 1–2 contract plus DP-014 ACTION_SUPPORT_RULE, reused verbatim). */
 const PERMITTED_SOURCES: ReadonlySet<string> = new Set<string>([
   "CANDIDATE_PROPOSAL",
   "F6_CALIBRATED_SIGNAL",
@@ -27,6 +27,7 @@ const PERMITTED_SOURCES: ReadonlySet<string> = new Set<string>([
   "KNOWLEDGE_V36",
   "DECISION_ENGINE_RESULT",
   "CAPABILITY_EFFECT",
+  "ACTION_SUPPORT_RULE",
 ]);
 
 /**
