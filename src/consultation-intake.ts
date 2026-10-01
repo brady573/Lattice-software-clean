@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { createApiRequestHash, type ApiRunControlStore } from "./api-control-store.js";
+import { decideActionForFinalization } from "./action/projection.js";
 import { guardAdvisoryConclusion } from "./assumption/hook.js";
 import {
   buildPreparedResourceRecord,
@@ -1384,6 +1385,22 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
               interpretation: publicCognition(cognition),
             });
           }
+          // F4 Action Engine (DP-010/DP-012): shared candidate-gated pipeline.
+          // No structured candidate source exists yet — advisory prose is not
+          // parsed and no prompt fields are added — so this honestly bypasses
+          // with candidate undefined (never WAIT). No owner supplies
+          // StructuredActionFact here yet, so governedFacts is []. Runs after
+          // F6 even on WEAKEN paths that reach finalization; presentation
+          // consumes only and the RecommendationStore is never invoked.
+          const actionForFinalization = decideActionForFinalization({
+            screening: {
+              cleared: assumptionScreening.cleared,
+              resolution: assumptionScreening.guard.resolution,
+              guard: assumptionScreening.guard,
+            },
+            candidate: undefined,
+            governedFacts: [],
+          });
           const recommendation = await establishConversationalRecommendation({
             store: options.recommendationStore,
             conversationId,
@@ -1414,6 +1431,7 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
               selectionAuthorized: false,
             },
             presentation: { assistantMessage: renderRecommendation(recommendation) },
+            ...(actionForFinalization.decision !== undefined ? { actionDecision: actionForFinalization.decision } : {}),
             interpretation: publicCognition(cognition),
           });
         }
@@ -1906,6 +1924,22 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
         });
       }
 
+      // F4 Action Engine (DP-010/DP-012): same shared candidate-gated pipeline
+      // as the conversational path, so semantics cannot drift by path. Same
+      // honest bypass: candidate undefined (never WAIT), governedFacts [].
+      // Runs after F6 even on WEAKEN paths that reach finalization without
+      // suppressing or reinterpreting the clarification; presentation consumes
+      // only and the RecommendationStore is never invoked.
+      const continuationAction = decideActionForFinalization({
+        screening: {
+          cleared: continuationScreening.cleared,
+          resolution: continuationScreening.guard.resolution,
+          guard: continuationScreening.guard,
+        },
+        candidate: undefined,
+        governedFacts: [],
+      });
+
       const recommendation = await establishRecommendation({
         store: options.recommendationStore,
         run,
@@ -1935,6 +1969,7 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
           selectionAuthorized: recommendation.selectionAuthorized,
         },
         presentation: { assistantMessage: renderRecommendation(recommendation) },
+        ...(continuationAction.decision !== undefined ? { actionDecision: continuationAction.decision } : {}),
       });
     }
 
