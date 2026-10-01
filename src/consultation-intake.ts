@@ -80,6 +80,7 @@ import type { RecommendationStore } from "./recommendation/recommendation-store.
 import { createPendingRun } from "./run-execution.js";
 import type { RunStore } from "./run-store.js";
 import type { SolandraAdvisoryRuntime } from "./solandra/advisory.js";
+import { projectCandidateToAction } from "./solandra/action-candidate.js";
 import type { SolandraActionPreparer } from "./solandra/action-preparer.js";
 import {
   isConversationalCognition,
@@ -1385,20 +1386,19 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
               interpretation: publicCognition(cognition),
             });
           }
-          // F4 Action Engine (DP-010/DP-012): shared candidate-gated pipeline.
-          // No structured candidate source exists yet — advisory prose is not
-          // parsed and no prompt fields are added — so this honestly bypasses
-          // with candidate undefined (never WAIT). No owner supplies
-          // StructuredActionFact here yet, so governedFacts is []. Runs after
-          // F6 even on WEAKEN paths that reach finalization; presentation
-          // consumes only and the RecommendationStore is never invoked.
+          // F4 Action Engine (DP-010/DP-012/DP-013): shared candidate-gated pipeline.
+          // Threads the validated advisory candidate when present; absent means
+          // no ActionDecision (never WAIT). governedFacts is still [] (the
+          // candidate adds no references). Runs after F6; presentation consumes
+          // only and the RecommendationStore and Decision Engine are untouched.
+          const actionCandidate = projectCandidateToAction(advisory.actionCandidate);
           const actionForFinalization = decideActionForFinalization({
             screening: {
               cleared: assumptionScreening.cleared,
               resolution: assumptionScreening.guard.resolution,
               guard: assumptionScreening.guard,
             },
-            candidate: undefined,
+            candidate: actionCandidate,
             governedFacts: [],
           });
           const recommendation = await establishConversationalRecommendation({
@@ -1924,19 +1924,22 @@ export function registerConsultationIntake(app: FastifyInstance, options: Consul
         });
       }
 
-      // F4 Action Engine (DP-010/DP-012): same shared candidate-gated pipeline
-      // as the conversational path, so semantics cannot drift by path. Same
-      // honest bypass: candidate undefined (never WAIT), governedFacts [].
-      // Runs after F6 even on WEAKEN paths that reach finalization without
-      // suppressing or reinterpreting the clarification; presentation consumes
-      // only and the RecommendationStore is never invoked.
+      // F4 Action Engine (DP-010/DP-012/DP-013): same shared candidate-gated
+      // pipeline as the conversational path, so semantics cannot drift by path.
+      // Threads the validated advisory candidate when present; absent means
+      // no ActionDecision (never WAIT). governedFacts is still [] (the
+      // candidate adds no references). Runs after F6 even on WEAKEN paths
+      // that reach finalization without suppressing or reinterpreting the
+      // clarification; presentation consumes only and the RecommendationStore
+      // and Decision Engine are untouched.
+      const continuationCandidate = projectCandidateToAction(advisory.actionCandidate);
       const continuationAction = decideActionForFinalization({
         screening: {
           cleared: continuationScreening.cleared,
           resolution: continuationScreening.guard.resolution,
           guard: continuationScreening.guard,
         },
-        candidate: undefined,
+        candidate: continuationCandidate,
         governedFacts: [],
       });
 

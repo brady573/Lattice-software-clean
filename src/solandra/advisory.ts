@@ -27,6 +27,21 @@ const recommendationSchema = z.object({
   alternatives: z.array(z.string().min(1).max(2_000)).max(16),
 }).strict();
 
+const recommendationEnvelopeSchema = recommendationSchema.extend({ actionCandidate: z.unknown().optional() }).strict();
+
+export const actionCandidateProposalSchema = z.object({
+  action: z.string().min(1).max(2_000),
+  expectedOutcome: z.string().min(1).max(2_000).optional(),
+  verification: z.string().min(1).max(2_000).optional(),
+}).strict();
+export type ActionCandidateProposal = z.infer<typeof actionCandidateProposalSchema>;
+
+export function admitActionCandidate(raw: unknown): ActionCandidateProposal | undefined {
+  const parsed = actionCandidateProposalSchema.safeParse(raw);
+  if (!parsed.success) return undefined;
+  return Object.freeze({ ...parsed.data });
+}
+
 const needsKnowledgeSchema = z.object({
   status: z.literal("NEEDS_KNOWLEDGE"),
   knowledgeNeeds: z.array(z.string().min(1).max(1_000)).min(1).max(16),
@@ -46,7 +61,7 @@ const insufficientBasisSchema = z.object({
 }).strict();
 
 export const solandraAdvisoryResultSchema = z.discriminatedUnion("status", [
-  recommendationSchema,
+  recommendationEnvelopeSchema,
   needsKnowledgeSchema,
   needsClarificationSchema,
   insufficientBasisSchema,
@@ -102,6 +117,7 @@ export interface SolandraAdvisoryInput {
 export interface SolandraAdvisoryRuntimeResult {
   readonly result: SolandraAdvisoryResult;
   readonly invocationProvenance: ModelInvocationProvenance;
+  readonly actionCandidate?: ActionCandidateProposal;
 }
 
 export interface SolandraAdvisoryRuntime {
@@ -157,7 +173,7 @@ function parseJsonObject(text: string, label = "Solandra advisory reasoning"): u
   );
 }
 
-function buildAdvisoryRequest(model: string, input: SolandraAdvisoryInput): CanonicalModelRequest {
+export function buildAdvisoryRequest(model: string, input: SolandraAdvisoryInput): CanonicalModelRequest {
   const knowledge = input.knowledge.length === 0
     ? "No governed Knowledge was supplied."
     : input.knowledge.map((item) => [
@@ -179,6 +195,11 @@ function buildAdvisoryRequest(model: string, input: SolandraAdvisoryInput): Cano
       uncertainties: ["drafting explanation of uncertainty; never factual authority"],
       preservedUncertainties: ["copy each material supplied uncertainty used by the recommendation verbatim"],
       alternatives: ["other concise advisory proposal or option"],
+      actionCandidate: {
+        action: "one optional prospective next move as proposal material only",
+        expectedOutcome: "optional expected outcome",
+        verification: "optional verification",
+      },
     },
     { status: "NEEDS_KNOWLEDGE", knowledgeNeeds: ["external fact needed"], reason: "why it is required" },
     { status: "NEEDS_CLARIFICATION", question: "material USER ambiguity that prevents responsible advice", reason: "why it changes the advice" },
@@ -193,6 +214,8 @@ function buildAdvisoryRequest(model: string, input: SolandraAdvisoryInput): Cano
         content: [
           "You are Solandra's advisory reasoning boundary. Provide decision support over authoritative USER intent and governed Knowledge supplied by Lattice.",
           "You are non-authoritative. You may formulate options, compare, evaluate tradeoffs, expose assumptions and uncertainty, recommend, or decline to recommend.",
+          "You may include one optional actionCandidate: a single prospective next move that naturally follows the recommendation, as proposal material only.",
+          "The candidate must not state whether Lattice should authorize or execute it, must not classify its safety, consequence, or reversibility, and must not select a mode.",
           "Do not create or modify canonical USER intent. Do not establish new factual Knowledge. Do not authorize a selection or action. Do not claim execution occurred.",
           "For RECOMMENDATION, recommendation and alternatives are concise advisory proposals. You may originate them when the USER states a decision goal or preferences without already supplying candidate options. Do not return NEEDS_CLARIFICATION merely because the USER did not pre-author the option you would recommend.",
           "Keep recommendation and alternatives as option/proposal text rather than factual support: do not append external factual rationale, source claims, or claims of established performance to those fields. USER-supplied options may be reused naturally when present.",
@@ -367,9 +390,12 @@ export class ModelSolandraAdvisoryRuntime implements SolandraAdvisoryRuntime {
       return Object.freeze({ result, invocationProvenance: response.audit.invocationProvenance });
     }
 
-    const governedFindings = validateAndProjectRecommendationBasis(input, result);
+    const { actionCandidate: rawCandidate, ...strippedResult } = result;
+    const admitted = admitActionCandidate(rawCandidate);
+
+    const governedFindings = validateAndProjectRecommendationBasis(input, strippedResult);
     const auditResponse = await this.runtime.call(
-      buildGroundingAuditRequest(this.model, input, result, governedFindings),
+      buildGroundingAuditRequest(this.model, input, strippedResult, governedFindings),
       {
         correlationId: `solandra-advisory-grounding:${input.conversationId}:${input.userMessageId}`,
         idempotencyKey: `grounding:${input.userMessageId}:${basisDigest}`,
@@ -385,9 +411,18 @@ export class ModelSolandraAdvisoryRuntime implements SolandraAdvisoryRuntime {
       "Solandra advisory grounding verification",
     ));
     const needsKnowledge = needsKnowledgeFromAudit(audit);
+    const finalResult = needsKnowledge ?? strippedResult;
+    const frozenResult = Object.freeze(finalResult);
+    if (needsKnowledge !== undefined || admitted === undefined) {
+      return Object.freeze({
+        result: frozenResult,
+        invocationProvenance: response.audit.invocationProvenance,
+      });
+    }
     return Object.freeze({
-      result: needsKnowledge ?? result,
+      result: frozenResult,
       invocationProvenance: response.audit.invocationProvenance,
+      actionCandidate: admitted,
     });
   }
 }
