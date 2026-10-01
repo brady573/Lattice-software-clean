@@ -23,6 +23,9 @@ permissions:
   - action: edit
     resource: "*"
     effect: deny
+  - action: edit
+    resource: ".opencode/steward-state/*"
+    effect: allow
   - action: shell
     resource: "*"
     effect: deny
