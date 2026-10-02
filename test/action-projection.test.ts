@@ -60,3 +60,45 @@ test("F6 signal fact emitted only for WEAKEN_AND_ASK plus affectsAction", () => 
   const facts = collectPermittedActionFacts({ calibration: weakenAskCal(), governedFacts: [] });
   assert.equal(facts.some((f) => f.source === "F6_CALIBRATED_SIGNAL" && f.materialBlocker === true), true);
 });
+
+test("dp015_incoming_effect_source_is_dropped_at_projection", () => {
+  const facts = collectPermittedActionFacts({
+    calibration: clearCal(),
+    governedFacts: [{ source: "ACTION_EFFECT_RULE", consequence: "LOW", reversibility: "REVERSIBLE" }],
+  });
+  assert.deepEqual(facts, []);
+});
+
+test("dp015_effect_source_unauthorized_and_shadowing_fields_are_dropped", () => {
+  const smuggled = {
+    source: "ACTION_EFFECT_RULE",
+    consequence: "LOW",
+    support: "SUFFICIENT",
+    materialBlocker: true,
+    safeguardOrAuthorityEstablished: true,
+    diagnosticStepAvailable: true,
+    infoStepAvailable: true,
+    oversightRequired: true,
+  } as unknown as StructuredActionFact;
+  const facts = collectPermittedActionFacts({ calibration: clearCal(), governedFacts: [smuggled] });
+  assert.deepEqual(facts, []);
+  const flagsOnly = {
+    source: "ACTION_EFFECT_RULE",
+    support: "SUFFICIENT",
+    infoStepAvailable: true,
+  } as unknown as StructuredActionFact;
+  assert.deepEqual(
+    collectPermittedActionFacts({ calibration: clearCal(), governedFacts: [flagsOnly] }),
+    [],
+  );
+});
+
+test("dp015_non_effect_sources_keep_governed_premise_fields", () => {
+  const premise = {
+    source: "KNOWLEDGE_V36",
+    consequence: "LOW",
+    support: "SUFFICIENT",
+  } as unknown as StructuredActionFact;
+  const facts = collectPermittedActionFacts({ calibration: clearCal(), governedFacts: [premise] });
+  assert.deepEqual(facts, [premise]);
+});

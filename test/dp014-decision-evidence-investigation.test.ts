@@ -38,6 +38,8 @@ import {
 } from "../src/action/support/decision-evidence-investigation.js";
 import { qualifySupportFacts } from "../src/action/support/qualify-support.js";
 import { ruleForClass } from "../src/action/support/registry.js";
+import { ACTION_EFFECT_REGISTRY } from "../src/action/effects/registry.js";
+import { qualifyActionEffects } from "../src/action/effects/qualify-effects.js";
 import { projectCandidateToAction } from "../src/solandra/action-candidate.js";
 import type { StructuredDecision } from "../src/domain.js";
 
@@ -436,4 +438,55 @@ test("dp014_authority_no_authorization_or_execution_state", () => {
   const result = evaluate({ candidate, calibration: clearCalibration(), qualifiedFacts: facts });
   assert.equal(result.mode, "INVESTIGATE");
   assert.notEqual(result.mode, "ACT");
+});
+
+// --- DP-015 effect-qualification locks ---
+
+test("dp015_investigation_class_has_no_registered_effect_rule", () => {
+  assert.equal(ACTION_EFFECT_REGISTRY.ruleFor("DECISION_EVIDENCE_INVESTIGATION"), undefined);
+  assert.deepEqual(
+    qualifyActionEffects({ actionClass: "DECISION_EVIDENCE_INVESTIGATION", facts: [] }),
+    [],
+  );
+  const decision = insufficientDecision("Choose the contractor.", ["unknown-x"]);
+  const actionClass = qualifyDecisionEvidenceInvestigationClass(classInput(decision));
+  assert.deepEqual(qualifyActionEffects({ actionClass, facts: qualifySupportFacts(actionClass) }), []);
+});
+
+test("dp015_investigation_path_stays_unknown_unknown_investigate_never_test_or_act", () => {
+  const decision = insufficientDecision("Choose the contractor.", ["unknown-x"]);
+  const actionClass = qualifyDecisionEvidenceInvestigationClass(classInput(decision));
+  const candidate = projectDecisionEvidenceInvestigation({ decision, actionClass });
+  assert.notEqual(candidate, undefined);
+  if (candidate === undefined) return;
+  const facts = qualifySupportFacts(actionClass);
+  const qualification = qualifyAction({ candidate, qualifiedFacts: facts });
+  assert.equal(qualification.support, "PARTIAL");
+  assert.equal(qualification.consequence, "UNKNOWN");
+  assert.equal(qualification.reversibility, "UNKNOWN");
+  const result = evaluate({ candidate, calibration: clearCalibration(), qualifiedFacts: facts });
+  assert.equal(result.mode, "INVESTIGATE");
+  assert.notEqual(result.mode, "TEST");
+  assert.notEqual(result.mode, "ACT");
+});
+
+test("dp015_authority_recommendation_and_intent_match_alone_establish_no_effect", () => {
+  // A Decision RECOMMENDATION (with matching intent) establishes no class,
+  // hence no support and no effect dimensions.
+  const winnerClass = qualifyDecisionEvidenceInvestigationClass(
+    classInput(recommendationDecision()),
+  );
+  assert.equal(winnerClass, undefined);
+  const winnerQualification = qualifyAction({
+    candidate: { action: "Select the vendor.", facts: [], factRefs: [] },
+    qualifiedFacts: qualifySupportFacts(winnerClass),
+  });
+  assert.equal(winnerQualification.consequence, "UNKNOWN");
+  assert.equal(winnerQualification.reversibility, "UNKNOWN");
+  // Matching intent alone (non-qualifying origin) establishes no class.
+  const nonQualified = qualifyDecisionEvidenceInvestigationClass(
+    classInput(insufficientDecision("Choose the contractor.", ["unknown-x"]), { decisionNeed: "NONE" }),
+  );
+  assert.equal(nonQualified, undefined);
+  assert.deepEqual(qualifySupportFacts(nonQualified), []);
 });

@@ -3,7 +3,7 @@
  *
  * The ONLY F6-touching surface. Reads a narrow structural projection of the
  * calibrated state — never the F6 implementation type, never a context bag —
- * and filters governed facts through the fixed 7-member source allowlist.
+ * and filters governed facts through the fixed 8-member source allowlist.
  * Pure, deterministic, dependency-free. No model call, no persistence.
  */
 
@@ -17,7 +17,7 @@ import type {
   StructuredActionFact,
 } from "./types.js";
 
-/** The fixed 7-member source allowlist. Anything else is dropped. */
+/** The fixed 8-member source allowlist. Anything else is dropped. */
 const PERMITTED_SOURCES: ReadonlySet<string> = new Set<string>([
   "CANDIDATE_PROPOSAL",
   "F6_CALIBRATED_SIGNAL",
@@ -26,6 +26,7 @@ const PERMITTED_SOURCES: ReadonlySet<string> = new Set<string>([
   "DECISION_ENGINE_RESULT",
   "CAPABILITY_EFFECT",
   "ACTION_SUPPORT_RULE",
+  "ACTION_EFFECT_RULE",
 ]);
 
 function requireAdjustedConfidence(value: number): number {
@@ -92,6 +93,11 @@ function factKey(fact: StructuredActionFact): string {
  * no dimension/flag set, dedupes identical facts, and emits one
  * `{ source: "F6_CALIBRATED_SIGNAL", materialBlocker: true }` fact IFF the
  * calibration resolution is WEAKEN_AND_ASK and material affects action.
+ * DP-015: ACTION_EFFECT_RULE facts never cross the ingress boundary —
+ * caller-supplied ones are dropped (the only authoritative effect facts
+ * are produced inside the Action boundary by qualifyActionEffects());
+ * all other sources cross with their governed fields as premises for
+ * future effect rules.
  */
 export function collectPermittedActionFacts(input: {
   readonly calibration: ActionCalibration;
@@ -103,6 +109,11 @@ export function collectPermittedActionFacts(input: {
     if (fact === null || typeof fact !== "object") continue;
     const source: unknown = (fact as { source?: unknown }).source;
     if (typeof source !== "string" || !PERMITTED_SOURCES.has(source)) continue;
+    // DP-015 authority: caller-supplied ACTION_EFFECT_RULE facts are
+    // rejected at the ingress boundary. Only qualifyActionEffects()
+    // output may authoritatively carry that source; incoming ones are
+    // dropped, never forwarded or stripped into partial facts.
+    if (source === "ACTION_EFFECT_RULE") continue;
     const typed: StructuredActionFact = {
       source: source as GovernedFactSource,
       ...(fact.consequence !== undefined ? { consequence: fact.consequence } : {}),
