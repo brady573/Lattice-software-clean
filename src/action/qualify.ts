@@ -9,10 +9,17 @@
  * max/min pick. Pure, deterministic, dependency-free.
  *
  * DP-015 effect authority: consequence/reversibility classify ONLY from
- * ACTION_EFFECT_RULE facts (the single lawful effect route). All other
- * allowlisted sources are premises only for those dimensions and never
- * classify them directly. Conversely, ACTION_EFFECT_RULE facts never
- * establish support, blockers, safeguards, or step/oversight flags.
+ * ACTION_EFFECT_RULE facts produced by `qualifyActionEffects()`/the
+ * registry (the single lawful effect route). All other allowlisted sources
+ * are premises only for those dimensions and never classify them directly.
+ * Conversely, ACTION_EFFECT_RULE facts never establish support, blockers,
+ * safeguards, or step/oversight flags.
+ *
+ * Caller-supplied ACTION_EFFECT_RULE facts are NEVER authoritative: an
+ * ACTION_EFFECT_RULE dimension that arrives through
+ * `candidate.facts`/`qualifiedFacts` is ignored for classification. The
+ * only classifying channel is `input.effectFacts`, which the shared F4
+ * `evaluate()` populates exclusively from `qualifyActionEffects()`.
  */
 
 import type {
@@ -106,19 +113,34 @@ function classifyDimension<T extends string>(values: readonly (T | undefined)[])
 }
 
 /**
- * Structured-facts-only classification. Considers ONLY `candidate.facts +
- * qualifiedFacts` with allowlisted sources; ignores `modelRiskLabel` and
- * the action string entirely (beyond non-empty validation). DP-015: effect
- * dimensions read ONLY ACTION_EFFECT_RULE facts; support and flags read
- * ONLY non-effect facts.
+ * Structured-facts-only classification. Considers ONLY
+ * `candidate.facts + qualifiedFacts` (non-effect allowlisted sources) for
+ * support/flags, plus the separate `effectFacts` channel for effect
+ * dimensions; ignores `modelRiskLabel` and the action string entirely
+ * (beyond non-empty validation). DP-015: effect dimensions read ONLY
+ * registry-produced ACTION_EFFECT_RULE facts from `effectFacts`; an
+ * ACTION_EFFECT_RULE fact smuggled into `candidate.facts` or
+ * `qualifiedFacts` classifies nothing. Support and flags read ONLY
+ * non-effect facts.
  */
 export function qualifyAction(input: QualifyActionInput): ActionQualification {
   requireAction(input.candidate.action);
   const facts = [...input.candidate.facts, ...input.qualifiedFacts].filter(isPermittedFact);
   requireGovernedDimensionValues(facts);
 
-  const effectFacts = facts.filter((fact) => fact.source === "ACTION_EFFECT_RULE");
   const nonEffectFacts = facts.filter((fact) => fact.source !== "ACTION_EFFECT_RULE");
+
+  const rawEffectFacts = (input.effectFacts ?? [])
+    .filter(isPermittedFact)
+    .filter((fact) => fact.source === "ACTION_EFFECT_RULE");
+  requireGovernedDimensionValues(rawEffectFacts);
+  // Normalize: effect facts classify only consequence/reversibility; any
+  // smuggled support/flag fields can never classify through this channel.
+  const effectFacts = rawEffectFacts.map((fact) => ({
+    source: fact.source,
+    ...(fact.consequence !== undefined ? { consequence: fact.consequence } : {}),
+    ...(fact.reversibility !== undefined ? { reversibility: fact.reversibility } : {}),
+  }));
 
   const consequence: ConsequenceLevel = classifyDimension(
     effectFacts.map((fact) => fact.consequence),

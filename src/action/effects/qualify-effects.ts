@@ -32,6 +32,21 @@ const PERMITTED_SOURCES: ReadonlySet<string> = new Set<string>([
   "ACTION_EFFECT_RULE",
 ]);
 
+/**
+ * Non-circular premise filter: rules evaluate non-effect governed
+ * premises only. A pre-existing ACTION_EFFECT_RULE fact is never fed
+ * back into another effect rule; the rule emits the effect fact itself.
+ */
+function isNonEffectPremise(fact: StructuredActionFact): boolean {
+  if (fact === null || typeof fact !== "object") return false;
+  const source: unknown = (fact as { source?: unknown }).source;
+  return (
+    typeof source === "string"
+    && PERMITTED_SOURCES.has(source)
+    && source !== "ACTION_EFFECT_RULE"
+  );
+}
+
 /** Established values a rule verdict may project. Anything else is ignored. */
 const KNOWN_CONSEQUENCE: ReadonlySet<string> = new Set<string>([
   "LOW",
@@ -54,17 +69,13 @@ export interface QualifyActionEffectsInput {
   readonly facts: readonly StructuredActionFact[];
 }
 
-function isPermittedFact(fact: StructuredActionFact): boolean {
-  if (fact === null || typeof fact !== "object") return false;
-  const source: unknown = (fact as { source?: unknown }).source;
-  return typeof source === "string" && PERMITTED_SOURCES.has(source);
-}
-
 /**
  * Evaluate the exact registry match (default: the governed v1 registry)
  * and project only present, valid, non-UNKNOWN dimensions into a single
  * frozen ACTION_EFFECT_RULE fact. Miss, empty verdict, or fully invalid
- * verdict yields the empty frozen set.
+ * verdict yields the empty frozen set. Rules receive non-effect
+ * governed premises only; a pre-existing ACTION_EFFECT_RULE fact is
+ * never fed back into a rule.
  */
 export function qualifyActionEffects(
   input: QualifyActionEffectsInput,
@@ -73,7 +84,7 @@ export function qualifyActionEffects(
   if (input.actionClass === undefined) return NO_FACTS;
   const rule = registry.ruleFor(input.actionClass);
   if (rule === undefined) return NO_FACTS;
-  const governed = input.facts.filter(isPermittedFact);
+  const governed = input.facts.filter(isNonEffectPremise);
   const verdict = rule.evaluate({ actionClass: input.actionClass, facts: governed });
   const consequence = verdict.consequence !== undefined && KNOWN_CONSEQUENCE.has(verdict.consequence)
     ? verdict.consequence

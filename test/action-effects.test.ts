@@ -164,6 +164,26 @@ test("dp015_effects_rule_receives_only_governed_structured_facts", () => {
   assert.deepEqual(Object.keys(seen ?? {}).sort(), ["actionClass", "facts"]);
 });
 
+test("dp015_effects_pre_existing_effect_facts_never_feed_a_rule", () => {
+  let seen: ActionEffectQualificationInput | undefined;
+  const registry = createActionEffectRegistry([
+    testOnlyRule({
+      onEvaluate: (input) => {
+        seen = input;
+        return {};
+      },
+    }),
+  ]);
+  const injected = { source: "ACTION_EFFECT_RULE", consequence: "LOW" } as unknown as StructuredActionFact;
+  const premise: StructuredActionFact = { source: "ACTION_SUPPORT_RULE", support: "PARTIAL" };
+  qualifyActionEffects(
+    { actionClass: "DECISION_EVIDENCE_INVESTIGATION", facts: [injected, premise] },
+    registry,
+  );
+  assert.notEqual(seen, undefined);
+  assert.deepEqual(seen?.facts, [premise]);
+});
+
 test("dp015_effects_output_is_frozen", () => {
   const registry = createActionEffectRegistry([
     testOnlyRule({ verdict: { consequence: "HIGH", reversibility: "IRREVERSIBLE" } }),

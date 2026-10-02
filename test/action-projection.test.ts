@@ -61,17 +61,15 @@ test("F6 signal fact emitted only for WEAKEN_AND_ASK plus affectsAction", () => 
   assert.equal(facts.some((f) => f.source === "F6_CALIBRATED_SIGNAL" && f.materialBlocker === true), true);
 });
 
-test("dp015_effect_source_crosses_projection_with_effect_dimensions_only", () => {
+test("dp015_incoming_effect_source_is_dropped_at_projection", () => {
   const facts = collectPermittedActionFacts({
     calibration: clearCal(),
     governedFacts: [{ source: "ACTION_EFFECT_RULE", consequence: "LOW", reversibility: "REVERSIBLE" }],
   });
-  assert.deepEqual(facts, [
-    { source: "ACTION_EFFECT_RULE", consequence: "LOW", reversibility: "REVERSIBLE" },
-  ]);
+  assert.deepEqual(facts, []);
 });
 
-test("dp015_effect_source_unauthorized_fields_are_rejected", () => {
+test("dp015_effect_source_unauthorized_and_shadowing_fields_are_dropped", () => {
   const smuggled = {
     source: "ACTION_EFFECT_RULE",
     consequence: "LOW",
@@ -83,7 +81,7 @@ test("dp015_effect_source_unauthorized_fields_are_rejected", () => {
     oversightRequired: true,
   } as unknown as StructuredActionFact;
   const facts = collectPermittedActionFacts({ calibration: clearCal(), governedFacts: [smuggled] });
-  assert.deepEqual(facts, [{ source: "ACTION_EFFECT_RULE", consequence: "LOW" }]);
+  assert.deepEqual(facts, []);
   const flagsOnly = {
     source: "ACTION_EFFECT_RULE",
     support: "SUFFICIENT",

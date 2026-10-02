@@ -127,6 +127,13 @@ export interface ActionCalibrationSource {
 export interface QualifyActionInput {
   readonly candidate: ActionCandidate;
   readonly qualifiedFacts: readonly StructuredActionFact[];
+  /**
+   * The sole classifying channel for ACTION_EFFECT_RULE facts. Populated
+   * ONLY from `qualifyActionEffects()` output inside the Action boundary;
+   * ACTION_EFFECT_RULE facts arriving through `candidate.facts` or
+   * `qualifiedFacts` are ignored for consequence/reversibility.
+   */
+  readonly effectFacts?: readonly StructuredActionFact[];
 }
 
 /** Categorical qualification of a candidate from structured facts. */

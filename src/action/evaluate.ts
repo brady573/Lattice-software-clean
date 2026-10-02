@@ -5,15 +5,17 @@
  * qualification and no new selection rules beyond the SUFFICIENT
  * unknown-effect veto owned by `selectMode`:
  * effect facts for the candidate's governed class (empty in v1) +
- * `qualifyAction({candidate, qualifiedFacts})` → derive the three selection
- * step flags from non-effect allowlisted governed-fact flags →
- * `selectMode(...)` → assemble the frozen 8-field `ActionDecision` with the
- * action echoed verbatim and user-facing strings from fixed categorical
- * templates. Deterministic; no model call; no numbers; no prose parsing.
+ * `qualifyAction({candidate, qualifiedFacts, effectFacts})` → derive the
+ * three selection step flags from non-effect allowlisted governed-fact
+ * flags → `selectMode(...)` → assemble the frozen 8-field
+ * `ActionDecision` with the action echoed verbatim and user-facing
+ * strings from fixed categorical templates. Deterministic; no model call;
+ * no numbers; no prose parsing.
  */
 
 import { qualifyAction } from "./qualify.js";
 import { qualifyActionEffects } from "./effects/qualify-effects.js";
+import { ACTION_EFFECT_REGISTRY, type ActionEffectRegistry } from "./effects/registry.js";
 import { selectMode } from "./select.js";
 import type {
   ActionDecision,
@@ -97,23 +99,35 @@ function verificationFor(mode: ActionMode): string {
 
 /**
  * Qualify → select → assemble. Effect facts for the candidate's governed
- * class are derived first (empty under the v1 empty registry) and combined
- * with existing facts for qualification/selection. The action is echoed
- * verbatim from `candidate.action`; `reversibility`/`blockingUnknowns`
- * come from qualification; `reason` comes from selection; the remaining
- * user-facing strings come from fixed categorical templates.
+ * class are derived first (empty under the v1 empty registry) and fed to
+ * qualification through the dedicated effect-facts channel — the only
+ * place ACTION_EFFECT_RULE can authoritatively enter F4. The action is
+ * echoed verbatim from `candidate.action`; `reversibility`/
+ * `blockingUnknowns` come from qualification; `reason` comes from
+ * selection; the remaining user-facing strings come from fixed
+ * categorical templates.
  */
-export function evaluate(input: ActionEngineInput): ActionDecision {
-  const effectFacts = qualifyActionEffects({
-    actionClass: input.candidate.actionClass,
-    facts: [...input.candidate.facts, ...input.qualifiedFacts],
-  });
-  const qualifiedFacts = [...input.qualifiedFacts, ...effectFacts];
+export function evaluate(
+  input: ActionEngineInput,
+  effectRegistry: ActionEffectRegistry = ACTION_EFFECT_REGISTRY,
+): ActionDecision {
+  // Registry-produced effect facts are the only ACTION_EFFECT_RULE input
+  // allowed into qualification, via the dedicated effectFacts channel.
+  // Caller-supplied ACTION_EFFECT_RULE facts in qualifiedFacts classify
+  // nothing and can never move step flags.
+  const effectFacts = qualifyActionEffects(
+    {
+      actionClass: input.candidate.actionClass,
+      facts: [...input.candidate.facts, ...input.qualifiedFacts],
+    },
+    effectRegistry,
+  );
   const qualification = qualifyAction({
     candidate: input.candidate,
-    qualifiedFacts,
+    qualifiedFacts: input.qualifiedFacts,
+    effectFacts,
   });
-  const governedFacts = qualifiedFacts.filter(isPermittedFact);
+  const governedFacts = input.qualifiedFacts.filter(isPermittedFact);
   const stepFacts = governedFacts.filter(isPermittedStepFact);
   const selection = selectMode({
     qualification,

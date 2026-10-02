@@ -93,10 +93,11 @@ function factKey(fact: StructuredActionFact): string {
  * no dimension/flag set, dedupes identical facts, and emits one
  * `{ source: "F6_CALIBRATED_SIGNAL", materialBlocker: true }` fact IFF the
  * calibration resolution is WEAKEN_AND_ASK and material affects action.
- * DP-015: ACTION_EFFECT_RULE facts cross the boundary with ONLY
- * consequence/reversibility (unauthorized support/flag fields are rejected,
- * never accepted); all other sources cross with their governed fields as
- * premises for future effect rules.
+ * DP-015: ACTION_EFFECT_RULE facts never cross the ingress boundary —
+ * caller-supplied ones are dropped (the only authoritative effect facts
+ * are produced inside the Action boundary by qualifyActionEffects());
+ * all other sources cross with their governed fields as premises for
+ * future effect rules.
  */
 export function collectPermittedActionFacts(input: {
   readonly calibration: ActionCalibration;
@@ -108,25 +109,24 @@ export function collectPermittedActionFacts(input: {
     if (fact === null || typeof fact !== "object") continue;
     const source: unknown = (fact as { source?: unknown }).source;
     if (typeof source !== "string" || !PERMITTED_SOURCES.has(source)) continue;
-    const typed: StructuredActionFact = source === "ACTION_EFFECT_RULE"
-      ? {
-        source: "ACTION_EFFECT_RULE" as const,
-        ...(fact.consequence !== undefined ? { consequence: fact.consequence } : {}),
-        ...(fact.reversibility !== undefined ? { reversibility: fact.reversibility } : {}),
-      }
-      : {
-        source: source as GovernedFactSource,
-        ...(fact.consequence !== undefined ? { consequence: fact.consequence } : {}),
-        ...(fact.reversibility !== undefined ? { reversibility: fact.reversibility } : {}),
-        ...(fact.support !== undefined ? { support: fact.support } : {}),
-        ...(fact.materialBlocker === true ? { materialBlocker: true as const } : {}),
-        ...(fact.safeguardOrAuthorityEstablished === true
-          ? { safeguardOrAuthorityEstablished: true as const }
-          : {}),
-        ...(fact.diagnosticStepAvailable === true ? { diagnosticStepAvailable: true as const } : {}),
-        ...(fact.infoStepAvailable === true ? { infoStepAvailable: true as const } : {}),
-        ...(fact.oversightRequired === true ? { oversightRequired: true as const } : {}),
-      };
+    // DP-015 authority: caller-supplied ACTION_EFFECT_RULE facts are
+    // rejected at the ingress boundary. Only qualifyActionEffects()
+    // output may authoritatively carry that source; incoming ones are
+    // dropped, never forwarded or stripped into partial facts.
+    if (source === "ACTION_EFFECT_RULE") continue;
+    const typed: StructuredActionFact = {
+      source: source as GovernedFactSource,
+      ...(fact.consequence !== undefined ? { consequence: fact.consequence } : {}),
+      ...(fact.reversibility !== undefined ? { reversibility: fact.reversibility } : {}),
+      ...(fact.support !== undefined ? { support: fact.support } : {}),
+      ...(fact.materialBlocker === true ? { materialBlocker: true as const } : {}),
+      ...(fact.safeguardOrAuthorityEstablished === true
+        ? { safeguardOrAuthorityEstablished: true as const }
+        : {}),
+      ...(fact.diagnosticStepAvailable === true ? { diagnosticStepAvailable: true as const } : {}),
+      ...(fact.infoStepAvailable === true ? { infoStepAvailable: true as const } : {}),
+      ...(fact.oversightRequired === true ? { oversightRequired: true as const } : {}),
+    };
     if (!hasSignal(typed)) continue;
     const key = factKey(typed);
     if (seen.has(key)) continue;
