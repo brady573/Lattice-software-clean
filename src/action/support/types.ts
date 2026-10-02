@@ -19,12 +19,9 @@
 import type { ActionCandidate, StructuredActionFact } from "../types.js";
 import type { StructuredDecision } from "../../domain.js";
 
-/**
- * Governed Action classes with an approved deterministic support rule.
- * V1 carries exactly one member. Future classes require a new approved rule
- * and registry entry; unknown strings never qualify.
- */
-export type QualifiedActionClass = "DECISION_EVIDENCE_INVESTIGATION";
+/** Shared F4 governed-class authority (single member in V1). */
+export type { QualifiedActionClass } from "../types.js";
+import type { QualifiedActionClass } from "../types.js";
 
 /** Approved deterministic support-rule identities. V1 carries exactly one. */
 export type ActionSupportRuleId = "DECISION_EVIDENCE_INVESTIGATION_V1";

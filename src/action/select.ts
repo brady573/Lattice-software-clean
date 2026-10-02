@@ -1,5 +1,5 @@
 /**
- * F4 deterministic mode selection (DP-010/DP-012).
+ * F4 deterministic mode selection (DP-010/DP-012/DP-015).
  *
  * Top-down precedence over qualified categorical states — first match wins.
  * Missing material input fails toward the less-consequential mode; ties
@@ -21,9 +21,12 @@ function freeze(selection: ModeSelection): ModeSelection {
  * (3) INSUFFICIENT/UNKNOWN support → INVESTIGATE when an information step exists, else WAIT;
  * (4) PARTIAL support → TEST when a diagnostic step exists AND reversibility is
  *     REVERSIBLE/PARTIALLY_REVERSIBLE, else INVESTIGATE/WAIT on the info step;
- * (5) SUFFICIENT support → ACT unless vetoed (WEAKEN_AND_ASK with material
+ * (5a) SUFFICIENT support with either effect dimension UNKNOWN → never ACT:
+ *     INVESTIGATE when an information step exists, else WAIT (DP-015);
+ * (5b) SUFFICIENT support → vetoed ACT (WEAKEN_AND_ASK with material
  *     affectsAction, or HIGH/IRREVERSIBLE without established safeguard or
  *     authority), in which case INVESTIGATE/WAIT on the info step;
+ * (5c) SUFFICIENT support otherwise → ACT;
  * (6) default WAIT. Reasons are fixed templates over categorical state names only.
  */
 export function selectMode(input: ModeSelectionInput): ModeSelection {
@@ -73,6 +76,16 @@ export function selectMode(input: ModeSelectionInput): ModeSelection {
 
   const calibrationVeto
     = calibration.resolution === "WEAKEN_AND_ASK" && calibration.materialAffectsAction;
+  const unknownEffectVeto
+    = qualification.support === "SUFFICIENT"
+    && (qualification.consequence === "UNKNOWN" || qualification.reversibility === "UNKNOWN");
+  if (unknownEffectVeto) {
+    return freeze(
+      input.infoStepAvailable
+        ? { mode: "INVESTIGATE", reason: "INVESTIGATE: ACTION_EFFECT_UNKNOWN with INFO_STEP_AVAILABLE" }
+        : { mode: "WAIT", reason: "WAIT: ACTION_EFFECT_UNKNOWN with no INFO_STEP_AVAILABLE" },
+    );
+  }
   const safeguardVeto
     = (qualification.consequence === "HIGH" || qualification.reversibility === "IRREVERSIBLE")
     && !qualification.safeguardOrAuthorityEstablished;

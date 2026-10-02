@@ -46,7 +46,16 @@ export type GovernedFactSource =
   | "KNOWLEDGE_V36"
   | "DECISION_ENGINE_RESULT"
   | "CAPABILITY_EFFECT"
-  | "ACTION_SUPPORT_RULE";
+  | "ACTION_SUPPORT_RULE"
+  | "ACTION_EFFECT_RULE";
+
+/**
+ * Governed Action classes with an approved deterministic rule (shared F4
+ * authority; DP-014 support path today, DP-015 effect path tomorrow).
+ * V1 carries exactly one member. Future classes require a new approved rule
+ * and registry entry; unknown strings never qualify.
+ */
+export type QualifiedActionClass = "DECISION_EVIDENCE_INVESTIGATION";
 
 /** Fixed tokens for qualification gaps that block justified action. */
 export type BlockingUnknown =
@@ -75,12 +84,16 @@ export interface StructuredActionFact {
 /**
  * A proposed action with the structured facts necessary for qualification.
  * `modelRiskLabel` rides along but is NEVER qualification evidence.
+ * `actionClass` carries an already-governed class token (assigned ONLY from
+ * structured governed state, never prose) so effect qualification can select
+ * the approved rule; generic candidates carry none.
  */
 export interface ActionCandidate {
   readonly action: string;
   readonly facts: readonly StructuredActionFact[];
   readonly factRefs: readonly string[];
   readonly modelRiskLabel?: string;
+  readonly actionClass?: QualifiedActionClass;
 }
 
 /** Bounded Action-facing projection of F6 calibrated state. */

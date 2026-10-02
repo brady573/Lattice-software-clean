@@ -95,13 +95,15 @@ function clearCal(): ActionCalibration {
 
 function lowSufficientFacts(): readonly StructuredActionFact[] {
   return [
-    fact({ source: "KNOWLEDGE_V36", consequence: "LOW", reversibility: "REVERSIBLE", support: "SUFFICIENT" }),
+    fact({ source: "KNOWLEDGE_V36", support: "SUFFICIENT" }),
+    fact({ source: "ACTION_EFFECT_RULE", consequence: "LOW", reversibility: "REVERSIBLE" }),
   ];
 }
 
 function highFacts(): readonly StructuredActionFact[] {
   return [
-    fact({ source: "KNOWLEDGE_V36", consequence: "HIGH", reversibility: "IRREVERSIBLE", support: "SUFFICIENT" }),
+    fact({ source: "KNOWLEDGE_V36", support: "SUFFICIENT" }),
+    fact({ source: "ACTION_EFFECT_RULE", consequence: "HIGH", reversibility: "IRREVERSIBLE" }),
     fact({ source: "INTENT_AUTHORITY", safeguardOrAuthorityEstablished: true }),
   ];
 }
@@ -123,7 +125,8 @@ function escalateCase(): ActionEngineInput {
     candidate: cand("Rewire the venue lighting rig."),
     calibration: clearCal(),
     qualifiedFacts: [
-      fact({ source: "INTENT_AUTHORITY", consequence: "LOW", reversibility: "REVERSIBLE", support: "SUFFICIENT", oversightRequired: true }),
+      fact({ source: "INTENT_AUTHORITY", support: "SUFFICIENT", oversightRequired: true }),
+      fact({ source: "ACTION_EFFECT_RULE", consequence: "LOW", reversibility: "REVERSIBLE" }),
     ],
   };
 }
@@ -133,7 +136,8 @@ function investigateCase(): ActionEngineInput {
     candidate: cand("Approve the refund for the duplicate charge."),
     calibration: clearCal(),
     qualifiedFacts: [
-      fact({ source: "KNOWLEDGE_V36", consequence: "LOW", reversibility: "REVERSIBLE", support: "INSUFFICIENT", infoStepAvailable: true }),
+      fact({ source: "KNOWLEDGE_V36", support: "INSUFFICIENT", infoStepAvailable: true }),
+      fact({ source: "ACTION_EFFECT_RULE", consequence: "LOW", reversibility: "REVERSIBLE" }),
     ],
   };
 }
@@ -143,14 +147,18 @@ function testCase(): ActionEngineInput {
     candidate: cand("Migrate the archive server overnight."),
     calibration: clearCal(),
     qualifiedFacts: [
-      fact({ source: "KNOWLEDGE_V36", consequence: "LOW", reversibility: "REVERSIBLE", support: "PARTIAL", diagnosticStepAvailable: true }),
+      fact({ source: "KNOWLEDGE_V36", support: "PARTIAL", diagnosticStepAvailable: true }),
+      fact({ source: "ACTION_EFFECT_RULE", reversibility: "REVERSIBLE" }),
     ],
   };
 }
 
 test("evaluate composes qualification to selection and echoes action plus reversibility", () => {
   const d = evaluate({ candidate: cand("Approve the refund."),
-    calibration: clearCal(), qualifiedFacts: [fact({ source: "KNOWLEDGE_V36", consequence: "LOW", reversibility: "REVERSIBLE", support: "SUFFICIENT" })] });
+    calibration: clearCal(), qualifiedFacts: [
+      fact({ source: "KNOWLEDGE_V36", support: "SUFFICIENT" }),
+      fact({ source: "ACTION_EFFECT_RULE", consequence: "LOW", reversibility: "REVERSIBLE" }),
+    ] });
   assert.equal(d.mode, "ACT");
   assert.equal(d.action, "Approve the refund.");
   assert.equal(d.reversibility, "REVERSIBLE");
@@ -195,4 +203,60 @@ test("evaluate output is frozen", () => {
   const d = evaluate(actCase());
   assert.ok(Object.isFrozen(d));
   assert.ok(Object.isFrozen(d.blockingUnknowns));
+});
+
+test("dp015_sufficient_unknown_effects_wait_or_investigate_never_act", () => {
+  const waiting = evaluate({
+    candidate: cand("Approve the refund."),
+    calibration: clearCal(),
+    qualifiedFacts: [fact({ source: "KNOWLEDGE_V36", support: "SUFFICIENT" })],
+  });
+  assert.equal(waiting.mode, "WAIT");
+  assert.match(waiting.reason, /ACTION_EFFECT_UNKNOWN/);
+  const investigating = evaluate({
+    candidate: cand("Approve the refund."),
+    calibration: clearCal(),
+    qualifiedFacts: [
+      fact({ source: "KNOWLEDGE_V36", support: "SUFFICIENT", infoStepAvailable: true }),
+    ],
+  });
+  assert.equal(investigating.mode, "INVESTIGATE");
+  assert.match(investigating.reason, /ACTION_EFFECT_UNKNOWN/);
+});
+
+test("dp015_effect_source_step_flags_cannot_move_the_mode", () => {
+  const smuggledInfo = {
+    source: "ACTION_EFFECT_RULE",
+    consequence: "LOW",
+    infoStepAvailable: true,
+  } as unknown as StructuredActionFact;
+  const smuggledDiagnostic = {
+    source: "ACTION_EFFECT_RULE",
+    diagnosticStepAvailable: true,
+  } as unknown as StructuredActionFact;
+  const smuggledOversight = {
+    source: "ACTION_EFFECT_RULE",
+    oversightRequired: true,
+  } as unknown as StructuredActionFact;
+  // SUFFICIENT + UNKNOWN reversibility would WAIT without an info step; a
+  // smuggled effect-source info step must not flip it to INVESTIGATE.
+  const base = {
+    candidate: cand("Approve the refund."),
+    calibration: clearCal(),
+    qualifiedFacts: [fact({ source: "KNOWLEDGE_V36", support: "SUFFICIENT" }), smuggledInfo],
+  };
+  assert.equal(evaluate(base).mode, "WAIT");
+  // Smuggled diagnostic/oversight steps on the effect source change nothing.
+  assert.equal(evaluate({ ...base, qualifiedFacts: [...base.qualifiedFacts, smuggledDiagnostic] }).mode, "WAIT");
+  assert.equal(evaluate({ ...base, qualifiedFacts: [...base.qualifiedFacts, smuggledOversight] }).mode, "WAIT");
+});
+
+test("dp015_governed_class_without_effect_rule_yields_unknown_effects", () => {
+  const d = evaluate({
+    candidate: { action: "Investigate the missing decision evidence before choosing.", facts: [], factRefs: [], actionClass: "DECISION_EVIDENCE_INVESTIGATION" },
+    calibration: clearCal(),
+    qualifiedFacts: [fact({ source: "ACTION_SUPPORT_RULE", support: "PARTIAL", infoStepAvailable: true })],
+  });
+  assert.equal(d.mode, "INVESTIGATE");
+  assert.equal(d.reversibility, "UNKNOWN");
 });

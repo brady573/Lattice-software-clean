@@ -128,6 +128,8 @@ test("reasons are fixed templates over categorical states: deterministic, no num
     sel({ support: "PARTIAL", reversibility: "REVERSIBLE", diagnostic: true, oversight: true }),
     sel({ blocker: true }),
     sel({ support: "SUFFICIENT", consequence: "LOW", cal: weakenAskAffectsAction() }),
+    sel({ support: "SUFFICIENT", consequence: "UNKNOWN", info: true }),
+    sel({ support: "SUFFICIENT", reversibility: "UNKNOWN" }),
   ];
   for (const input of inputs) {
     const first = selectMode(input);
@@ -137,4 +139,77 @@ test("reasons are fixed templates over categorical states: deterministic, no num
     assert.doesNotMatch(first.reason, /\d/);
     assert.doesNotMatch(first.reason, /authorization/i);
   }
+});
+
+// --- DP-015 unknown-effect veto (5a/5b/5c) ---
+
+test("dp015_sufficient_unknown_consequence_never_acts", () => {
+  const waiting = selectMode(sel({ support: "SUFFICIENT", consequence: "UNKNOWN", reversibility: "REVERSIBLE" }));
+  assert.equal(waiting.mode, "WAIT");
+  assert.match(waiting.reason, /ACTION_EFFECT_UNKNOWN/);
+  const investigating = selectMode(
+    sel({ support: "SUFFICIENT", consequence: "UNKNOWN", reversibility: "REVERSIBLE", info: true }),
+  );
+  assert.equal(investigating.mode, "INVESTIGATE");
+  assert.match(investigating.reason, /ACTION_EFFECT_UNKNOWN/);
+});
+
+test("dp015_sufficient_unknown_reversibility_never_acts", () => {
+  const waiting = selectMode(sel({ support: "SUFFICIENT", consequence: "LOW", reversibility: "UNKNOWN" }));
+  assert.equal(waiting.mode, "WAIT");
+  assert.match(waiting.reason, /ACTION_EFFECT_UNKNOWN/);
+  const investigating = selectMode(
+    sel({ support: "SUFFICIENT", consequence: "LOW", reversibility: "UNKNOWN", info: true }),
+  );
+  assert.equal(investigating.mode, "INVESTIGATE");
+  assert.match(investigating.reason, /ACTION_EFFECT_UNKNOWN/);
+});
+
+test("dp015_sufficient_both_unknown_never_acts", () => {
+  const waiting = selectMode(sel({ support: "SUFFICIENT", consequence: "UNKNOWN", reversibility: "UNKNOWN" }));
+  assert.equal(waiting.mode, "WAIT");
+  assert.match(waiting.reason, /ACTION_EFFECT_UNKNOWN/);
+  const investigating = selectMode(
+    sel({ support: "SUFFICIENT", consequence: "UNKNOWN", reversibility: "UNKNOWN", info: true }),
+  );
+  assert.equal(investigating.mode, "INVESTIGATE");
+  assert.match(investigating.reason, /ACTION_EFFECT_UNKNOWN/);
+});
+
+test("dp015_sufficient_known_effects_act", () => {
+  assert.equal(
+    selectMode(sel({ support: "SUFFICIENT", consequence: "LOW", reversibility: "REVERSIBLE" })).mode,
+    "ACT",
+  );
+  assert.equal(
+    selectMode(sel({ support: "SUFFICIENT", consequence: "MATERIAL", reversibility: "PARTIALLY_REVERSIBLE" })).mode,
+    "ACT",
+  );
+});
+
+test("dp015_high_or_irreversible_without_safeguard_vetoes_act", () => {
+  for (const opts of [
+    { consequence: "HIGH", reversibility: "REVERSIBLE" },
+    { consequence: "LOW", reversibility: "IRREVERSIBLE" },
+  ] as const) {
+    const waiting = selectMode(sel({ support: "SUFFICIENT", ...opts }));
+    assert.equal(waiting.mode, "WAIT");
+    const investigating = selectMode(sel({ support: "SUFFICIENT", ...opts, info: true }));
+    assert.equal(investigating.mode, "INVESTIGATE");
+    assert.equal(
+      selectMode(sel({ support: "SUFFICIENT", ...opts, safeguard: true })).mode,
+      "ACT",
+    );
+  }
+});
+
+test("dp015_partial_unknown_reversibility_never_tests", () => {
+  assert.equal(
+    selectMode(sel({ support: "PARTIAL", reversibility: "UNKNOWN", diagnostic: true })).mode,
+    "WAIT",
+  );
+  assert.equal(
+    selectMode(sel({ support: "PARTIAL", reversibility: "UNKNOWN", diagnostic: true, info: true })).mode,
+    "INVESTIGATE",
+  );
 });

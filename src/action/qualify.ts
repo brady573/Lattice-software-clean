@@ -1,5 +1,5 @@
 /**
- * F4 structured-facts-only qualification (DP-010/DP-011).
+ * F4 structured-facts-only qualification (DP-010/DP-011/DP-015).
  *
  * Classifies a candidate into categorical consequence / reversibility /
  * support states from governed structured facts ONLY. Never parses prose:
@@ -7,6 +7,12 @@
  * `modelRiskLabel` is never qualification evidence. Per dimension, two or
  * more distinct governed values conflict to UNKNOWN — never a silent
  * max/min pick. Pure, deterministic, dependency-free.
+ *
+ * DP-015 effect authority: consequence/reversibility classify ONLY from
+ * ACTION_EFFECT_RULE facts (the single lawful effect route). All other
+ * allowlisted sources are premises only for those dimensions and never
+ * classify them directly. Conversely, ACTION_EFFECT_RULE facts never
+ * establish support, blockers, safeguards, or step/oversight flags.
  */
 
 import type {
@@ -19,7 +25,7 @@ import type {
   StructuredActionFact,
 } from "./types.js";
 
-/** The fixed 7-member source allowlist. Anything else cannot qualify. */
+/** The fixed 8-member source allowlist. Anything else cannot qualify. */
 const PERMITTED_SOURCES: ReadonlySet<string> = new Set<string>([
   "CANDIDATE_PROPOSAL",
   "F6_CALIBRATED_SIGNAL",
@@ -28,6 +34,7 @@ const PERMITTED_SOURCES: ReadonlySet<string> = new Set<string>([
   "DECISION_ENGINE_RESULT",
   "CAPABILITY_EFFECT",
   "ACTION_SUPPORT_RULE",
+  "ACTION_EFFECT_RULE",
 ]);
 
 /** The fixed contract members per dimension. Anything else is corrupt input. */
@@ -101,24 +108,29 @@ function classifyDimension<T extends string>(values: readonly (T | undefined)[])
 /**
  * Structured-facts-only classification. Considers ONLY `candidate.facts +
  * qualifiedFacts` with allowlisted sources; ignores `modelRiskLabel` and
- * the action string entirely (beyond non-empty validation).
+ * the action string entirely (beyond non-empty validation). DP-015: effect
+ * dimensions read ONLY ACTION_EFFECT_RULE facts; support and flags read
+ * ONLY non-effect facts.
  */
 export function qualifyAction(input: QualifyActionInput): ActionQualification {
   requireAction(input.candidate.action);
   const facts = [...input.candidate.facts, ...input.qualifiedFacts].filter(isPermittedFact);
   requireGovernedDimensionValues(facts);
 
+  const effectFacts = facts.filter((fact) => fact.source === "ACTION_EFFECT_RULE");
+  const nonEffectFacts = facts.filter((fact) => fact.source !== "ACTION_EFFECT_RULE");
+
   const consequence: ConsequenceLevel = classifyDimension(
-    facts.map((fact) => fact.consequence),
+    effectFacts.map((fact) => fact.consequence),
   );
   const reversibility: ReversibilityStatus = classifyDimension(
-    facts.map((fact) => fact.reversibility),
+    effectFacts.map((fact) => fact.reversibility),
   );
   const support: ActionSupport = classifyDimension(
-    facts.map((fact) => fact.support),
+    nonEffectFacts.map((fact) => fact.support),
   );
-  const materialBlockerPresent = facts.some((fact) => fact.materialBlocker === true);
-  const safeguardOrAuthorityEstablished = facts.some(
+  const materialBlockerPresent = nonEffectFacts.some((fact) => fact.materialBlocker === true);
+  const safeguardOrAuthorityEstablished = nonEffectFacts.some(
     (fact) => fact.safeguardOrAuthorityEstablished === true,
   );
 

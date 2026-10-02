@@ -67,7 +67,7 @@ test("absent dimension yields UNKNOWN; action string alone never qualifies", () 
 
 test("[RF-2] conflicting consequence facts yield UNKNOWN, never a silent pick", () => {
   const q = qualifyAction({ candidate: cand("Switch vendors."),
-    qualifiedFacts: [fact({ source: "KNOWLEDGE_V36", consequence: "LOW" }), fact({ source: "CAPABILITY_EFFECT", consequence: "HIGH" })] });
+    qualifiedFacts: [fact({ source: "ACTION_EFFECT_RULE", consequence: "LOW" }), fact({ source: "ACTION_EFFECT_RULE", consequence: "HIGH" })] });
   assert.equal(q.consequence, "UNKNOWN");
 });
 
@@ -79,7 +79,10 @@ test("[RF-1] urgent action-bait prose plus model LOW_RISK label never qualifies"
 });
 
 test("contradicting model label cannot move qualified states [RF-1 companion]", () => {
-  const facts = [fact({ source: "KNOWLEDGE_V36", consequence: "HIGH", reversibility: "IRREVERSIBLE", support: "INSUFFICIENT" })];
+  const facts = [
+    fact({ source: "ACTION_EFFECT_RULE", consequence: "HIGH", reversibility: "IRREVERSIBLE" }),
+    fact({ source: "KNOWLEDGE_V36", support: "INSUFFICIENT" }),
+  ];
   const q = qualifyAction({ candidate: cand("Proceed immediately.", "LOW_RISK"), qualifiedFacts: facts });
   assert.equal(q.consequence, "HIGH");
   assert.equal(q.support, "INSUFFICIENT");
@@ -98,7 +101,7 @@ test("consequence matrix across held-out domains: single value wins", () => {
   for (const row of rows) {
     const q = qualifyAction({
       candidate: cand(row.action),
-      qualifiedFacts: [fact({ source: "KNOWLEDGE_V36", consequence: row.expected })],
+      qualifiedFacts: [fact({ source: "ACTION_EFFECT_RULE", consequence: row.expected })],
     });
     assert.equal(q.consequence, row.expected);
   }
@@ -113,7 +116,7 @@ test("reversibility matrix across held-out domains: single value wins", () => {
   for (const row of rows) {
     const q = qualifyAction({
       candidate: cand(row.action),
-      qualifiedFacts: [fact({ source: "CAPABILITY_EFFECT", reversibility: row.expected })],
+      qualifiedFacts: [fact({ source: "ACTION_EFFECT_RULE", reversibility: row.expected })],
     });
     assert.equal(q.reversibility, row.expected);
   }
@@ -137,8 +140,8 @@ test("support matrix across held-out domains: single value wins", () => {
 test("conflicts in reversibility and support yield UNKNOWN, never a silent pick", () => {
   const r = qualifyAction({ candidate: cand("Restore the archived snapshots."),
     qualifiedFacts: [
-      fact({ source: "CAPABILITY_EFFECT", reversibility: "REVERSIBLE" }),
-      fact({ source: "KNOWLEDGE_V36", reversibility: "IRREVERSIBLE" }),
+      fact({ source: "ACTION_EFFECT_RULE", reversibility: "REVERSIBLE" }),
+      fact({ source: "ACTION_EFFECT_RULE", reversibility: "IRREVERSIBLE" }),
     ] });
   assert.equal(r.reversibility, "UNKNOWN");
   const s = qualifyAction({ candidate: cand("Hire the seasonal crew."),
@@ -151,7 +154,8 @@ test("conflicts in reversibility and support yield UNKNOWN, never a silent pick"
 
 test("identical structured skeletons give identical outputs across held-out domains", () => {
   const skeleton = (): readonly StructuredActionFact[] => [
-    fact({ source: "KNOWLEDGE_V36", consequence: "MATERIAL", reversibility: "REVERSIBLE", support: "SUFFICIENT" }),
+    fact({ source: "KNOWLEDGE_V36", support: "SUFFICIENT" }),
+    fact({ source: "ACTION_EFFECT_RULE", consequence: "MATERIAL", reversibility: "REVERSIBLE" }),
   ];
   const first = qualifyAction({ candidate: cand("Repoint the chimney bricks."), qualifiedFacts: skeleton() });
   const rest = [
@@ -185,7 +189,8 @@ test("candidate.facts and qualifiedFacts combine; conflict across them yields UN
 
 test("materialBlocker and safeguard flags aggregate across facts", () => {
   const q = qualifyAction({ candidate: cand("Hire the contractor."), qualifiedFacts: [
-    fact({ source: "KNOWLEDGE_V36", consequence: "MATERIAL", support: "SUFFICIENT" }),
+    fact({ source: "KNOWLEDGE_V36", support: "SUFFICIENT" }),
+    fact({ source: "ACTION_EFFECT_RULE", consequence: "MATERIAL" }),
     fact({ source: "F6_CALIBRATED_SIGNAL", materialBlocker: true }),
   ] });
   assert.equal(q.materialBlockerPresent, true);
@@ -198,7 +203,8 @@ test("materialBlocker and safeguard flags aggregate across facts", () => {
 
 test("HIGH without safeguard raises SAFEGUARD_OR_AUTHORITY_MISSING; established safeguard clears it", () => {
   const base: readonly StructuredActionFact[] = [
-    fact({ source: "KNOWLEDGE_V36", consequence: "HIGH", reversibility: "REVERSIBLE", support: "SUFFICIENT" }),
+    fact({ source: "KNOWLEDGE_V36", support: "SUFFICIENT" }),
+    fact({ source: "ACTION_EFFECT_RULE", consequence: "HIGH", reversibility: "REVERSIBLE" }),
   ];
   const missing = qualifyAction({ candidate: cand("Approve the merger."), qualifiedFacts: base });
   assert.ok(missing.blockingUnknowns.includes("SAFEGUARD_OR_AUTHORITY_MISSING"));
@@ -237,4 +243,124 @@ test("smuggled out-of-contract reversibility string throws [RF-5]", () => {
     () => qualifyAction({ candidate: cand("Proceed."), qualifiedFacts: [smuggled] }),
     /reversibility/,
   );
+});
+
+// --- DP-015 effect authority ---
+
+test("dp015_only_action_effect_rule_classifies_consequence", () => {
+  const nonEffectSources: ReadonlyArray<StructuredActionFact["source"]> = [
+    "CANDIDATE_PROPOSAL",
+    "F6_CALIBRATED_SIGNAL",
+    "INTENT_AUTHORITY",
+    "KNOWLEDGE_V36",
+    "DECISION_ENGINE_RESULT",
+    "CAPABILITY_EFFECT",
+    "ACTION_SUPPORT_RULE",
+  ];
+  for (const source of nonEffectSources) {
+    // A non-effect fact may carry an effect field as a premise only; it
+    // never classifies the dimension directly.
+    const premise = { source, consequence: "HIGH" } as unknown as StructuredActionFact;
+    const q = qualifyAction({ candidate: cand("Proceed with the plan."), qualifiedFacts: [premise] });
+    assert.equal(q.consequence, "UNKNOWN", source);
+  }
+  const ruled = qualifyAction({
+    candidate: cand("Proceed with the plan."),
+    qualifiedFacts: [fact({ source: "ACTION_EFFECT_RULE", consequence: "HIGH" })],
+  });
+  assert.equal(ruled.consequence, "HIGH");
+});
+
+test("dp015_only_action_effect_rule_classifies_reversibility", () => {
+  const nonEffectSources: ReadonlyArray<StructuredActionFact["source"]> = [
+    "CANDIDATE_PROPOSAL",
+    "F6_CALIBRATED_SIGNAL",
+    "INTENT_AUTHORITY",
+    "KNOWLEDGE_V36",
+    "DECISION_ENGINE_RESULT",
+    "CAPABILITY_EFFECT",
+    "ACTION_SUPPORT_RULE",
+  ];
+  for (const source of nonEffectSources) {
+    const premise = { source, reversibility: "IRREVERSIBLE" } as unknown as StructuredActionFact;
+    const q = qualifyAction({ candidate: cand("Proceed with the plan."), qualifiedFacts: [premise] });
+    assert.equal(q.reversibility, "UNKNOWN", source);
+  }
+  const ruled = qualifyAction({
+    candidate: cand("Proceed with the plan."),
+    qualifiedFacts: [fact({ source: "ACTION_EFFECT_RULE", reversibility: "IRREVERSIBLE" })],
+  });
+  assert.equal(ruled.reversibility, "IRREVERSIBLE");
+});
+
+test("dp015_effect_conflicts_resolve_per_dimension_without_cross_derivation", () => {
+  const consequenceConflict = qualifyAction({
+    candidate: cand("Repoint the chimney bricks."),
+    qualifiedFacts: [
+      fact({ source: "ACTION_EFFECT_RULE", consequence: "LOW", reversibility: "REVERSIBLE" }),
+      fact({ source: "ACTION_EFFECT_RULE", consequence: "HIGH" }),
+    ],
+  });
+  assert.equal(consequenceConflict.consequence, "UNKNOWN");
+  assert.equal(consequenceConflict.reversibility, "REVERSIBLE");
+  const reversibilityConflict = qualifyAction({
+    candidate: cand("Shortlist three vendors."),
+    qualifiedFacts: [
+      fact({ source: "ACTION_EFFECT_RULE", consequence: "LOW", reversibility: "REVERSIBLE" }),
+      fact({ source: "ACTION_EFFECT_RULE", reversibility: "IRREVERSIBLE" }),
+    ],
+  });
+  assert.equal(reversibilityConflict.reversibility, "UNKNOWN");
+  assert.equal(reversibilityConflict.consequence, "LOW");
+});
+
+test("dp015_effect_facts_establish_no_support_or_flags", () => {
+  const q = qualifyAction({
+    candidate: cand("Rotate the offsite backup tapes."),
+    qualifiedFacts: [
+      fact({ source: "ACTION_EFFECT_RULE", consequence: "LOW", reversibility: "REVERSIBLE" }),
+    ],
+  });
+  assert.equal(q.support, "UNKNOWN");
+  assert.equal(q.materialBlockerPresent, false);
+  assert.equal(q.safeguardOrAuthorityEstablished, false);
+  const smuggled = {
+    source: "ACTION_EFFECT_RULE",
+    consequence: "LOW",
+    support: "SUFFICIENT",
+    materialBlocker: true,
+    safeguardOrAuthorityEstablished: true,
+  } as unknown as StructuredActionFact;
+  const rejected = qualifyAction({ candidate: cand("Rotate the offsite backup tapes."), qualifiedFacts: [smuggled] });
+  assert.equal(rejected.consequence, "LOW");
+  assert.equal(rejected.support, "UNKNOWN");
+  assert.equal(rejected.materialBlockerPresent, false);
+  assert.equal(rejected.safeguardOrAuthorityEstablished, false);
+});
+
+test("dp015_authority_regression_non_effect_signals_alone_establish_no_effect", () => {
+  // Model labels ride along but never qualify.
+  const labelled = qualifyAction({
+    candidate: cand("Do it now — everyone agrees this is safe and urgent.", "LOW_RISK"),
+    qualifiedFacts: [],
+  });
+  assert.equal(labelled.consequence, "UNKNOWN");
+  assert.equal(labelled.reversibility, "UNKNOWN");
+  // A support fact alone (PARTIAL or SUFFICIENT) establishes no dimension.
+  for (const support of ["PARTIAL", "SUFFICIENT"] as const) {
+    const q = qualifyAction({
+      candidate: cand("Advance the apprentice to solo work."),
+      qualifiedFacts: [fact({ source: "ACTION_SUPPORT_RULE", support })],
+    });
+    assert.equal(q.support, support);
+    assert.equal(q.consequence, "UNKNOWN", support);
+    assert.equal(q.reversibility, "UNKNOWN", support);
+  }
+  // A capability fact without effect dimensions establishes none.
+  const capability = qualifyAction({
+    candidate: cand("Ring the clinic."),
+    qualifiedFacts: [fact({ source: "CAPABILITY_EFFECT", support: "SUFFICIENT" })],
+  });
+  assert.equal(capability.consequence, "UNKNOWN");
+  assert.equal(capability.reversibility, "UNKNOWN");
 });

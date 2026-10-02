@@ -3,7 +3,7 @@
  *
  * The ONLY F6-touching surface. Reads a narrow structural projection of the
  * calibrated state — never the F6 implementation type, never a context bag —
- * and filters governed facts through the fixed 7-member source allowlist.
+ * and filters governed facts through the fixed 8-member source allowlist.
  * Pure, deterministic, dependency-free. No model call, no persistence.
  */
 
@@ -17,7 +17,7 @@ import type {
   StructuredActionFact,
 } from "./types.js";
 
-/** The fixed 7-member source allowlist. Anything else is dropped. */
+/** The fixed 8-member source allowlist. Anything else is dropped. */
 const PERMITTED_SOURCES: ReadonlySet<string> = new Set<string>([
   "CANDIDATE_PROPOSAL",
   "F6_CALIBRATED_SIGNAL",
@@ -26,6 +26,7 @@ const PERMITTED_SOURCES: ReadonlySet<string> = new Set<string>([
   "DECISION_ENGINE_RESULT",
   "CAPABILITY_EFFECT",
   "ACTION_SUPPORT_RULE",
+  "ACTION_EFFECT_RULE",
 ]);
 
 function requireAdjustedConfidence(value: number): number {
@@ -92,6 +93,10 @@ function factKey(fact: StructuredActionFact): string {
  * no dimension/flag set, dedupes identical facts, and emits one
  * `{ source: "F6_CALIBRATED_SIGNAL", materialBlocker: true }` fact IFF the
  * calibration resolution is WEAKEN_AND_ASK and material affects action.
+ * DP-015: ACTION_EFFECT_RULE facts cross the boundary with ONLY
+ * consequence/reversibility (unauthorized support/flag fields are rejected,
+ * never accepted); all other sources cross with their governed fields as
+ * premises for future effect rules.
  */
 export function collectPermittedActionFacts(input: {
   readonly calibration: ActionCalibration;
@@ -103,19 +108,25 @@ export function collectPermittedActionFacts(input: {
     if (fact === null || typeof fact !== "object") continue;
     const source: unknown = (fact as { source?: unknown }).source;
     if (typeof source !== "string" || !PERMITTED_SOURCES.has(source)) continue;
-    const typed: StructuredActionFact = {
-      source: source as GovernedFactSource,
-      ...(fact.consequence !== undefined ? { consequence: fact.consequence } : {}),
-      ...(fact.reversibility !== undefined ? { reversibility: fact.reversibility } : {}),
-      ...(fact.support !== undefined ? { support: fact.support } : {}),
-      ...(fact.materialBlocker === true ? { materialBlocker: true as const } : {}),
-      ...(fact.safeguardOrAuthorityEstablished === true
-        ? { safeguardOrAuthorityEstablished: true as const }
-        : {}),
-      ...(fact.diagnosticStepAvailable === true ? { diagnosticStepAvailable: true as const } : {}),
-      ...(fact.infoStepAvailable === true ? { infoStepAvailable: true as const } : {}),
-      ...(fact.oversightRequired === true ? { oversightRequired: true as const } : {}),
-    };
+    const typed: StructuredActionFact = source === "ACTION_EFFECT_RULE"
+      ? {
+        source: "ACTION_EFFECT_RULE" as const,
+        ...(fact.consequence !== undefined ? { consequence: fact.consequence } : {}),
+        ...(fact.reversibility !== undefined ? { reversibility: fact.reversibility } : {}),
+      }
+      : {
+        source: source as GovernedFactSource,
+        ...(fact.consequence !== undefined ? { consequence: fact.consequence } : {}),
+        ...(fact.reversibility !== undefined ? { reversibility: fact.reversibility } : {}),
+        ...(fact.support !== undefined ? { support: fact.support } : {}),
+        ...(fact.materialBlocker === true ? { materialBlocker: true as const } : {}),
+        ...(fact.safeguardOrAuthorityEstablished === true
+          ? { safeguardOrAuthorityEstablished: true as const }
+          : {}),
+        ...(fact.diagnosticStepAvailable === true ? { diagnosticStepAvailable: true as const } : {}),
+        ...(fact.infoStepAvailable === true ? { infoStepAvailable: true as const } : {}),
+        ...(fact.oversightRequired === true ? { oversightRequired: true as const } : {}),
+      };
     if (!hasSignal(typed)) continue;
     const key = factKey(typed);
     if (seen.has(key)) continue;
